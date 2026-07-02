@@ -157,3 +157,32 @@ The phase tag tells you when each function gets implemented.
 
 **Validation:** generate both ES and EN from the María José Castro data dict.
 Compare side-by-side with the reference PDF until pixel-accurate.
+
+**Reference PDF confirmed:** `/Users/oscarpauly/Downloads/Dimensionador Solar GRID ZERO - María José Castro NISE N_A - Google Sheets 1.pdf`
+Ask Oscar to place this in the project or share it at the start of the session.
+
+**Exact section order (top to bottom):**
+1. Header — "COTIZACIÓN" (navy, large) / "SOLAR" (green, underlined) + logo top-right
+2. Client info table — CLIENTE / UBICACIÓN / NISE / FECHA / SISTEMA (no header, plain rows)
+3. Intro paragraph — 2 lines of descriptive text (placeholder for Phase 1; AI-generated in Phase 4)
+4. **FACTURACIÓN MENSUAL PROMEDIO** — "Cálculos esperados" label; green header row;
+   columns: Mes | Consumo actual (kWh) | Factura actual | Generación esperada (kWh) |
+   Nuevo consumo (kWh) | Nueva factura | Ahorro — **one row only (Promedio)**
+5. **BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO** — green header; columns:
+   Ahorro primer año | Ahorro 25 años | TIR | ROI | Ahorro promedio mensual | Notas
+6. **DETALLES DE COSTOS** — columns: Ítem | Cantidad | Especificaciones | Total;
+   dash (—) for Cantidad when not applicable; bold Total row at bottom
+7. **DETALLES TÉCNICOS** — 4-column mini table:
+   Potencia instalada (kW) | Área de techo (m2) | Paneles solares | Inversores
+8. **RESUMEN** — 2-column mini table: Total | $/Wp
+9. **NOTAS ADICIONALES** — bullet list (·) for payment terms;
+   then 2-column table: Transferencia Local | Transferencia Internacional (both green headers)
+10. **DETALLES DE GARANTÍA** — columns: Detalle | Plazo | Condiciones;
+    panels have 2 rows (10yr product, 25yr power)
+11. **Más información** — full-width footer card: signature left | name/title/license center |
+    phone/email/website right
+12. Footer line — "Validez de la oferta: 15 días hábiles a partir de su entrega" (centered, italic)
+
+**Assets needed before Phase 1 can complete:**
+- `proposals/assets/logo_pauly_color.png` — top-right of header
+- `proposals/assets/firma_white.png` → run `tools/invert_signature.py` → produces `firma_dark.png`
