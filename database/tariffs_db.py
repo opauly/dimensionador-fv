@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CRUD for tariff tables. Phase 2 reads; Phase 7 admin writes."""
 from database.supabase_client import get_client
 

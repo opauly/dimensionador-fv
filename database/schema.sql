@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS tariff_types (
     access_charge_crc   numeric NOT NULL DEFAULT 0,
     bomberos_pct        numeric NOT NULL DEFAULT 0.0175,
     iva_threshold_kwh   int NOT NULL DEFAULT 280,
-    last_updated        timestamptz DEFAULT now()
+    last_updated        timestamptz DEFAULT now(),
+    UNIQUE (distributor_id, code)
 );
 
 CREATE TABLE IF NOT EXISTS tariff_tiers (

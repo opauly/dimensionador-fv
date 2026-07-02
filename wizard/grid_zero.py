@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Wizard steps 4–8 for Grid Zero proposals. Phase 2."""
 import streamlit as st
 

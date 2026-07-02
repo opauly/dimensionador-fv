@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Anthropic SDK wrapper — singleton client. Phase 4."""
 import os
 import anthropic

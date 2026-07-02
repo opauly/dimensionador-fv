@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CRUD for projects and all financial sub-tables. Phase 6."""
 from database.supabase_client import get_client
 

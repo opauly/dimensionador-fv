@@ -179,24 +179,40 @@ def seed():
         dist_id = result.data[0]["id"]
 
         for tariff in dist["tariffs"]:
-            # Upsert tariff type
-            tt_result = (
+            # Check if tariff type already exists, insert if not
+            existing = (
                 db.table("tariff_types")
-                .upsert(
+                .select("id")
+                .eq("distributor_id", dist_id)
+                .eq("code", tariff["code"])
+                .execute()
+            )
+            if existing.data:
+                tt_id = existing.data[0]["id"]
+                db.table("tariff_types").update(
                     {
-                        "distributor_id": dist_id,
-                        "code": tariff["code"],
-                        "name": tariff["name"],
-                        "sector": tariff["sector"],
                         "access_charge_crc": tariff["access_charge_crc"],
                         "bomberos_pct": 0.0175,
                         "iva_threshold_kwh": 280,
-                    },
-                    on_conflict="distributor_id,code",
+                    }
+                ).eq("id", tt_id).execute()
+            else:
+                tt_result = (
+                    db.table("tariff_types")
+                    .insert(
+                        {
+                            "distributor_id": dist_id,
+                            "code": tariff["code"],
+                            "name": tariff["name"],
+                            "sector": tariff["sector"],
+                            "access_charge_crc": tariff["access_charge_crc"],
+                            "bomberos_pct": 0.0175,
+                            "iva_threshold_kwh": 280,
+                        }
+                    )
+                    .execute()
                 )
-                .execute()
-            )
-            tt_id = tt_result.data[0]["id"]
+                tt_id = tt_result.data[0]["id"]
 
             # Delete existing tiers and re-insert (clean replace)
             db.table("tariff_tiers").delete().eq("tariff_type_id", tt_id).execute()

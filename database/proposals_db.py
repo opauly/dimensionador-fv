@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CRUD for proposals and proposal_versions. Phase 2."""
 from database.supabase_client import get_client
 

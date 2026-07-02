@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CRUD for equipment catalog tables. Phase 7 for admin UI; Phase 2 reads are earlier."""
 from database.supabase_client import get_client
 

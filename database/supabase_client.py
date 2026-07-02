@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 from supabase import create_client, Client
 from dotenv import load_dotenv

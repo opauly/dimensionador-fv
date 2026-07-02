@@ -1,3 +1,4 @@
+from __future__ import annotations
 """CRC and USD formatters used throughout the UI and PDF templates."""
 
 

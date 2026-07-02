@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 MPPT string design validator. Generates 3 scenarios (A/B/C) per inverter. Phase 2.
 """

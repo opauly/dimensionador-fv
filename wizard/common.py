@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Wizard steps 1–3 shared across all system types. Phase 2."""
 import streamlit as st
 

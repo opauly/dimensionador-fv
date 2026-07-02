@@ -1,3 +1,4 @@
+from __future__ import annotations
 """PVGIS REST API v5.2 integration with Supabase cache. Phase 2."""
 import requests
 from config import PVGIS_API_BASE
