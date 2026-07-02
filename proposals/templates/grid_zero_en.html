@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@page {
+  size: A4;
+  margin: 0.75cm 1.2cm 0.75cm 1.2cm;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 7.5pt;
+  color: #222;
+  margin: 0;
+  padding: 0;
+  line-height: 1.15;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4pt;
+}
+.header-left { flex: 1; }
+.title-cotizacion {
+  font-size: 22pt;
+  font-weight: bold;
+  color: #1E2D54;
+  line-height: 1;
+  margin-bottom: 1pt;
+}
+.title-solar {
+  font-size: 13pt;
+  font-weight: bold;
+  color: #4BAE6A;
+  display: inline-block;
+  border-bottom: 2.5pt solid #4BAE6A;
+  padding-bottom: 1pt;
+  line-height: 1.15;
+}
+.header-logo img {
+  height: 40pt;
+  display: block;
+}
+
+.client-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4pt;
+  font-size: 7.5pt;
+}
+.client-table td {
+  padding: 1.5pt 5pt;
+  border: 0.5pt solid #bbb;
+}
+.client-table .lbl {
+  font-weight: bold;
+  width: 20%;
+  background: #f2f2f2;
+  color: #444;
+}
+
+.intro {
+  font-size: 7.5pt;
+  margin-bottom: 4pt;
+  line-height: 1.3;
+}
+
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1pt;
+  margin-top: 0;
+}
+.section-title {
+  font-weight: bold;
+  font-size: 7.5pt;
+  color: #1E2D54;
+}
+.section-note {
+  font-size: 7pt;
+  color: #555;
+  font-style: italic;
+}
+
+.gt {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 3pt;
+  font-size: 7pt;
+}
+.gt th {
+  background: #4BAE6A;
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 3pt;
+  text-align: center;
+  vertical-align: middle;
+  border: 0.5pt solid #3d9a5c;
+  line-height: 1.1;
+}
+.gt td {
+  padding: 1.5pt 3pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+  vertical-align: middle;
+}
+.gt td.left  { text-align: left; }
+.gt td.right { text-align: right; }
+
+.cost-table { margin-bottom: 3pt; }
+.cost-table th.th-item  { width: 27%; text-align: left; }
+.cost-table th.th-qty   { width: 10%; }
+.cost-table th.th-specs { width: 43%; text-align: left; }
+.cost-table th.th-total { width: 20%; }
+.cost-table td.td-item  { text-align: left; }
+.cost-table td.td-specs { text-align: left; }
+.cost-table td.td-total { text-align: right; }
+.cost-total td {
+  font-weight: bold;
+  border-top: 1pt solid #888;
+  background: #f9f9f9;
+}
+
+.tech-wrap { margin-bottom: 3pt; }
+.tech-table {
+  width: 56%;
+  border-collapse: collapse;
+  font-size: 7pt;
+}
+.tech-table th {
+  background: #4BAE6A;
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 4pt;
+  text-align: center;
+  border: 0.5pt solid #3d9a5c;
+  line-height: 1.1;
+}
+.tech-table td {
+  padding: 1.5pt 4pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+}
+
+.summary-table {
+  width: 30%;
+  border-collapse: collapse;
+  font-size: 7pt;
+  margin-bottom: 3pt;
+}
+.summary-table th {
+  background: #4BAE6A;
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 4pt;
+  text-align: center;
+  border: 0.5pt solid #3d9a5c;
+}
+.summary-table td {
+  padding: 1.5pt 4pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+  font-weight: bold;
+}
+
+.notes-list {
+  list-style: none;
+  margin: 1pt 0 2pt 0;
+  padding: 0;
+  font-size: 7.5pt;
+}
+.notes-list li::before {
+  content: "·  ";
+  font-weight: bold;
+}
+.notes-list li {
+  margin-bottom: 0.5pt;
+}
+
+.bank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 6.5pt;
+  margin-bottom: 3pt;
+}
+.bank-table th {
+  background: #4BAE6A;
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 5pt;
+  text-align: center;
+  border: 0.5pt solid #3d9a5c;
+  width: 50%;
+}
+.bank-table td {
+  padding: 2.5pt 5pt;
+  border: 0.5pt solid #ccc;
+  vertical-align: top;
+  line-height: 1.35;
+  width: 50%;
+}
+
+.warranty-table {
+  width: 68%;
+  border-collapse: collapse;
+  font-size: 7pt;
+  margin-bottom: 3pt;
+}
+.warranty-table th {
+  background: #4BAE6A;
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 4pt;
+  text-align: center;
+  border: 0.5pt solid #3d9a5c;
+}
+.warranty-table td {
+  padding: 1.5pt 4pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+  vertical-align: middle;
+}
+.warranty-table td.wleft { text-align: left; }
+
+.footer-heading {
+  font-size: 7.5pt;
+  font-weight: bold;
+  color: #4BAE6A;
+  margin-bottom: 1pt;
+}
+.footer-card {
+  display: flex;
+  align-items: center;
+  border: 0.5pt solid #ccc;
+  padding: 3pt 7pt;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.footer-sig {
+  width: 20%;
+  text-align: center;
+}
+.footer-sig img {
+  height: 30pt;
+  display: block;
+  margin: 0 auto;
+}
+.footer-center {
+  width: 42%;
+  text-align: center;
+  font-size: 7.5pt;
+  padding: 0 5pt;
+}
+.footer-center .name {
+  font-weight: bold;
+  font-size: 8pt;
+  margin-bottom: 1pt;
+}
+.footer-right {
+  width: 38%;
+  font-size: 7.5pt;
+  padding-left: 5pt;
+  border-left: 0.5pt solid #ddd;
+}
+.footer-right p {
+  margin: 0.5pt 0;
+}
+.footer-right .contact-label {
+  font-weight: bold;
+  margin-right: 2pt;
+}
+
+.validity {
+  text-align: center;
+  font-style: italic;
+  font-size: 7.5pt;
+  color: #444;
+  margin-top: 3pt;
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <div class="title-cotizacion">QUOTATION</div>
+    <div class="title-solar">SOLAR</div>
+  </div>
+  <div class="header-logo">
+    {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}
+  </div>
+</div>
+
+<!-- CLIENT INFO -->
+<table class="client-table">
+  <tr><td class="lbl">CLIENT:</td><td>{{ client.name }}</td></tr>
+  <tr><td class="lbl">LOCATION:</td><td>{{ client.location }}</td></tr>
+  <tr><td class="lbl">NISE:</td><td>{{ client.nise }}</td></tr>
+  <tr><td class="lbl">DATE:</td><td>{{ date }}</td></tr>
+  <tr><td class="lbl">SYSTEM:</td><td>{{ system_type_label }}</td></tr>
+</table>
+
+<!-- INTRO PARAGRAPH -->
+<div class="intro">
+  {% for line in intro_lines %}
+  <p style="margin:0 0 2pt 0;">{{ line }}</p>
+  {% endfor %}
+</div>
+
+<!-- AVERAGE MONTHLY BILLING -->
+<div class="section-row">
+  <span class="section-title">AVERAGE MONTHLY BILLING</span>
+  <span class="section-note">Expected calculations</span>
+</div>
+<table class="gt">
+  <thead>
+    <tr>
+      <th style="width:10%;">Month</th>
+      <th style="width:15%;">Current<br>consumption (kWh)</th>
+      <th style="width:15%;">Current bill</th>
+      <th style="width:15%;">Expected<br>generation (kWh)</th>
+      <th style="width:15%;">New<br>consumption (kWh)</th>
+      <th style="width:15%;">New bill</th>
+      <th style="width:15%;">Savings</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Average</td>
+      <td>{{ billing_avg.consumption_kwh }}</td>
+      <td>{{ billing_avg.bill_crc }}</td>
+      <td>{{ billing_avg.generation_kwh }}</td>
+      <td>{{ billing_avg.new_consumption_kwh }}</td>
+      <td>{{ billing_avg.new_bill_crc }}</td>
+      <td>{{ billing_avg.savings_crc }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- SHORT / MEDIUM / LONG TERM BENEFITS -->
+<div class="section-row"><span class="section-title">SHORT / MEDIUM / LONG TERM BENEFITS</span></div>
+<table class="gt">
+  <thead>
+    <tr>
+      <th style="width:14%;">First year<br>savings</th>
+      <th style="width:14%;">25-year<br>savings</th>
+      <th style="width:11%;">Internal Rate<br>of Return<br>(IRR)</th>
+      <th style="width:10%;">Return on<br>Investment<br>(ROI)</th>
+      <th style="width:14%;">Average monthly<br>bill savings</th>
+      <th style="width:37%;">Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ benefits.savings_year1 }}</td>
+      <td>{{ benefits.savings_25yr }}</td>
+      <td>{{ benefits.irr }}</td>
+      <td>{{ benefits.roi }}</td>
+      <td>{{ benefits.avg_monthly_savings }}</td>
+      <td class="left" style="font-size:7pt;">{{ benefits.pct_savings }}&nbsp;&nbsp;{{ benefits.notes }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- COST DETAILS -->
+<div class="section-row"><span class="section-title">COST DETAILS</span></div>
+<table class="gt cost-table">
+  <thead>
+    <tr>
+      <th class="th-item">Item</th>
+      <th class="th-qty">Quantity</th>
+      <th class="th-specs">Specifications</th>
+      <th class="th-total">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in cost_items %}
+    <tr>
+      <td class="td-item">{{ item.item }}</td>
+      <td>{{ item.qty }}</td>
+      <td class="td-specs">{{ item.specs }}</td>
+      <td class="td-total">{{ item.total }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="cost-total">
+      <td class="td-item"><strong>Total</strong></td>
+      <td></td>
+      <td></td>
+      <td class="td-total"><strong>{{ total_usd }}</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- TECHNICAL DETAILS -->
+<div class="section-row"><span class="section-title">TECHNICAL DETAILS</span></div>
+<div class="tech-wrap">
+  <table class="tech-table">
+    <thead>
+      <tr>
+        <th>Installed<br>capacity (kW)</th>
+        <th>Roof area<br>(m2)</th>
+        <th>Solar<br>panels</th>
+        <th>Inverters</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ technical.system_kw }}</td>
+        <td>{{ technical.area_m2 }}</td>
+        <td>{{ technical.panel_count }}</td>
+        <td>{{ technical.inverter_count }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- SUMMARY -->
+<div class="section-row"><span class="section-title">SUMMARY</span></div>
+<table class="summary-table">
+  <thead>
+    <tr>
+      <th style="width:65%;">Total</th>
+      <th style="width:35%;">$/Wp</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ total_usd }}</td>
+      <td>{{ cost_per_wp }}</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ADDITIONAL NOTES -->
+<div class="section-row"><span class="section-title">ADDITIONAL NOTES</span></div>
+<ul class="notes-list">
+  {% for note in payment_notes %}
+  <li>{{ note }}</li>
+  {% endfor %}
+</ul>
+<table class="bank-table">
+  <thead>
+    <tr>
+      <th>Local Transfer</th>
+      <th>International Transfer</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        {% for line in bank_local_lines %}{{ line }}<br>{% endfor %}
+      </td>
+      <td>
+        {% for line in bank_intl_lines %}{{ line }}<br>{% endfor %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- WARRANTY DETAILS -->
+<div class="section-row"><span class="section-title">WARRANTY DETAILS</span></div>
+<table class="warranty-table">
+  <thead>
+    <tr>
+      <th style="width:25%;">Detail</th>
+      <th style="width:20%;">Term</th>
+      <th style="width:55%;">Conditions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="wleft" rowspan="2">Solar panels</td>
+      <td>10 years</td>
+      <td class="wleft">Against manufacturing defects</td>
+    </tr>
+    <tr>
+      <td>25 years</td>
+      <td class="wleft">Against output power defects</td>
+    </tr>
+    <tr>
+      <td class="wleft">Inverters</td>
+      <td>{{ warranty_inverter_years }}</td>
+      <td class="wleft">Against manufacturing defects</td>
+    </tr>
+    <tr>
+      <td class="wleft">Installation</td>
+      <td>3 years</td>
+      <td class="wleft">Against wiring and mounting defects</td>
+    </tr>
+    <tr>
+      <td class="wleft">Maintenance</td>
+      <td>Annual</td>
+      <td class="wleft">At least 1 per year (extra cost)</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- MORE INFORMATION -->
+<div class="footer-heading">More information</div>
+<div class="footer-card">
+  <div class="footer-sig">
+    {% if signature_b64 %}<img src="{{ signature_b64 }}" alt="Signature">{% endif %}
+  </div>
+  <div class="footer-center">
+    <div class="name">{{ company.contact_name }}</div>
+    <div>{{ company.contact_title }}</div>
+    <div>{{ company.license }}</div>
+  </div>
+  <div class="footer-right">
+    <p><span class="contact-label">Phone/WhatsApp:</span> {{ company.phone }}</p>
+    <p><span class="contact-label">Email:</span> {{ company.email }}</p>
+    <p><span class="contact-label">Website:</span> {{ company.website }}</p>
+  </div>
+</div>
+
+<!-- FOOTER LINE -->
+<div class="validity">Offer validity: {{ validity_days }} business days from its delivery</div>
+
+</body>
+</html>

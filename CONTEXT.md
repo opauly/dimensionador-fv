@@ -9,11 +9,11 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 0 — Foundation |
-| **Phase next** | Phase 1 — PDF Engine |
+| **Phase completed** | Phase 1 — PDF Engine |
+| **Phase next** | Phase 2 — Grid Zero Wizard |
 | **Branch** | main |
-| **Last commit** | `9354f1c` Phase 0 fixes: Python 3.9 compat + seed idempotency |
-| **Working tree** | Clean |
+| **Last commit** | see `git log` |
+| **Working tree** | Clean after Phase 1 commit |
 
 ---
 
@@ -115,8 +115,9 @@ The phase tag tells you when each function gets implemented.
 
 | Module | Phase | Notes |
 |---|---|---|
-| `proposals/generator.py` | 1 | PDF generation — next up |
-| `proposals/templates/` | 1 | Jinja2 HTML templates — next up |
+| `proposals/generator.py` | ✅ done | `generate_pdf()` + `upload_pdf()` implemented |
+| `proposals/templates/grid_zero_es.html` | ✅ done | Spanish — 1-page, pixel-accurate |
+| `proposals/templates/grid_zero_en.html` | ✅ done | English — 1-page, full translation |
 | `wizard/` | 2 | All wizard steps |
 | `calculations/tariffs.py` | 2 | Tiered bill calculator |
 | `calculations/sizing_grid_zero.py` | 2 | Grid Zero sizing |
@@ -134,55 +135,62 @@ The phase tag tells you when each function gets implemented.
 
 ---
 
-## Phase 1 starting instructions
+## Phase 1 — What was built
 
-**Goal:** Generate a pixel-perfect Grid Zero PDF from hardcoded data. No wizard yet.
+**Goal achieved:** pixel-accurate Grid Zero PDF from hardcoded data, both ES and EN, single page.
+
+**Key files:**
+- `proposals/templates/grid_zero_es.html` — Spanish Jinja2 template
+- `proposals/templates/grid_zero_en.html` — English Jinja2 template
+- `proposals/generator.py` — `generate_pdf(data, system_type, language) → bytes`
+  - `MARIA_JOSE_DATA` dict = hardcoded test data (all reference numbers)
+  - `_build_context()` formats all numbers and selects ES/EN strings
+  - `upload_pdf()` implemented (Supabase Storage)
+- `pages/02_new_proposal.py` — test buttons to generate ES/EN PDFs
+
+**PDF structure (12 sections, top to bottom):**
+1. Header — COTIZACIÓN + SOLAR (green underline) + logo
+2. Client info table (5 rows, grey label column)
+3. Intro paragraph (Phase 4 will AI-generate; placeholder for now)
+4. FACTURACIÓN MENSUAL PROMEDIO — "Cálculos esperados" label; 7-column table; Promedio row only
+5. BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO — 6-column table
+6. DETALLES DE COSTOS — 4-column; "–" for non-qty items; bold Total row
+7. DETALLES TÉCNICOS — 4-column mini table (56% width)
+8. RESUMEN — 2-column mini table (30% width)
+9. NOTAS ADICIONALES — 4 bullets + 2-column bank transfer table
+10. DETALLES DE GARANTÍA — 3-column; "Paneles solares" rowspan=2
+11. Más información — flex card: signature | name/title/license | phone/email/website
+12. Footer — "Validez de la oferta: 15 días hábiles…" (centered, italic)
+
+**CSS notes:** WeasyPrint 66 on macOS. Page margin 0.75cm top/bottom, 1.2cm sides.
+Font Arial 7.5pt body, 7pt tables, 6.5pt bank table. Line-height 1.15.
+Tighten all these if adding a new cost line item causes overflow.
+
+**Validation passed:** ES and EN both render as 1 page. All María José Castro numbers match.
+
+---
+
+## Phase 2 starting instructions
+
+**Goal:** Complete end-to-end Grid Zero wizard with manual data entry. First real proposals possible.
 
 **Do this before writing any code:**
-1. Read PHASES.md Phase 1 section in full
-2. Read REQUIREMENTS.md sections 1, 6, 12, and 13
-3. Ask Oscar for the reference PDF (María José Castro quotation) to match visually
+1. Read PHASES.md Phase 2 section in full
+2. Read REQUIREMENTS.md sections 2, 3, 7 (auto-save), and 8 (versioning UI)
 
-**Files to create/implement:**
-- `proposals/templates/grid_zero_es.html`
-- `proposals/templates/grid_zero_en.html`
-- `proposals/generator.py` — `generate_pdf()` and `upload_pdf()`
-- Add a test button to `pages/02_new_proposal.py` that generates a PDF from hardcoded data
+**Key files to implement (stubs already exist):**
+- `wizard/state.py` — auto-save logic, session state helpers
+- `wizard/common.py` — Steps 1–3 (system type, client, site)
+- `wizard/grid_zero.py` — Steps 4–8
+- `calculations/pvgis.py` — PVGIS API call + cache
+- `calculations/tariffs.py` — tiered bill calculator (IVA threshold 280 kWh, bomberos 1.75%)
+- `calculations/sizing_grid_zero.py` — system kW, panel count, monthly generation
+- `calculations/mppt.py` — 3-scenario string validator
+- `database/proposals_db.py` — CRUD for proposals + proposal_versions
 
-**Brand:**
-- Green: `#4BAE6A` (table headers, section underlines)
-- Navy: `#1E2D54` (sidebar, headings)
-- Logo: `proposals/assets/logo_pauly_color.png` (not yet present — ask Oscar)
-- Signature: run `tools/invert_signature.py` after Oscar places `firma_white.png`
+**Validation target:** run María José Castro numbers through the wizard and match:
+avg kWh 1,475 → generation 1,262 kWh → new consumption 521 → new bill ₡51,681 → savings ₡106,192
+→ Y1 savings $2,798 → 25yr $127,873 → IRR 22.92% → ROI 5.48 years → total $18,110
 
-**Validation:** generate both ES and EN from the María José Castro data dict.
-Compare side-by-side with the reference PDF until pixel-accurate.
-
-**Reference PDF confirmed:** `/Users/oscarpauly/Downloads/Dimensionador Solar GRID ZERO - María José Castro NISE N_A - Google Sheets 1.pdf`
-Ask Oscar to place this in the project or share it at the start of the session.
-
-**Exact section order (top to bottom):**
-1. Header — "COTIZACIÓN" (navy, large) / "SOLAR" (green, underlined) + logo top-right
-2. Client info table — CLIENTE / UBICACIÓN / NISE / FECHA / SISTEMA (no header, plain rows)
-3. Intro paragraph — 2 lines of descriptive text (placeholder for Phase 1; AI-generated in Phase 4)
-4. **FACTURACIÓN MENSUAL PROMEDIO** — "Cálculos esperados" label; green header row;
-   columns: Mes | Consumo actual (kWh) | Factura actual | Generación esperada (kWh) |
-   Nuevo consumo (kWh) | Nueva factura | Ahorro — **one row only (Promedio)**
-5. **BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO** — green header; columns:
-   Ahorro primer año | Ahorro 25 años | TIR | ROI | Ahorro promedio mensual | Notas
-6. **DETALLES DE COSTOS** — columns: Ítem | Cantidad | Especificaciones | Total;
-   dash (—) for Cantidad when not applicable; bold Total row at bottom
-7. **DETALLES TÉCNICOS** — 4-column mini table:
-   Potencia instalada (kW) | Área de techo (m2) | Paneles solares | Inversores
-8. **RESUMEN** — 2-column mini table: Total | $/Wp
-9. **NOTAS ADICIONALES** — bullet list (·) for payment terms;
-   then 2-column table: Transferencia Local | Transferencia Internacional (both green headers)
-10. **DETALLES DE GARANTÍA** — columns: Detalle | Plazo | Condiciones;
-    panels have 2 rows (10yr product, 25yr power)
-11. **Más información** — full-width footer card: signature left | name/title/license center |
-    phone/email/website right
-12. Footer line — "Validez de la oferta: 15 días hábiles a partir de su entrega" (centered, italic)
-
-**Assets needed before Phase 1 can complete:**
-- `proposals/assets/logo_pauly_color.png` — top-right of header
-- `proposals/assets/firma_white.png` → run `tools/invert_signature.py` → produces `firma_dark.png`
+**The generator is ready.** The wizard review step (Step 8) should call:
+`generate_pdf(wizard_data_dict, 'grid_zero', language)` and offer `st.download_button`.
