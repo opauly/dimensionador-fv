@@ -11,3 +11,4 @@ venv/
 proposals/assets/logo_pauly_color.png
 proposals/assets/firma_white.png
 proposals/assets/firma_dark.png
+.claude/
