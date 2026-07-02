@@ -17,7 +17,7 @@ def _b64(filename: str) -> str:
 
 def get_logo_b64() -> str:
     """Logo color PNG as base64 data URI string."""
-    data = _b64("logo_pauly_color.png")
+    data = _b64("Logo_color_v3.png")
     return f"data:image/png;base64,{data}" if data else ""
 
 
