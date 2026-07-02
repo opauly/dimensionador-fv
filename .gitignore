@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+proposals/assets/logo_pauly_color.png
+proposals/assets/firma_white.png
+proposals/assets/firma_dark.png
