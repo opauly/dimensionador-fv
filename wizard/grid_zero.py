@@ -811,3 +811,73 @@ def step8_review() -> None:
             except Exception as e:
                 st.error(f"Error generando PDF: {e}")
                 st.exception(e)
+
+    # ── Version locking ───────────────────────────────────────────────────────
+    st.divider()
+    version_id = st.session_state.get("wizard_version_id")
+
+    # Check DB in case this version was locked outside this session
+    is_locked = st.session_state.get("wizard_version_locked", False)
+    if not is_locked and version_id:
+        try:
+            from database.proposals_db import get_version as _get_v
+            _vrow = _get_v(version_id)
+            if _vrow and _vrow.get("locked"):
+                st.session_state["wizard_version_locked"] = True
+                is_locked = True
+        except Exception:
+            pass
+
+    if is_locked:
+        st.success("✅ Versión bloqueada. Esta copia es inmutable.")
+        lc1, lc2, lc3 = st.columns(3)
+        with lc1:
+            if st.button("📋 Nueva versión", key="w8_new_version"):
+                try:
+                    from database.proposals_db import create_version, get_version as _gv
+                    from wizard.state import load_draft, clear_wizard_state
+                    pid = st.session_state.get("wizard_proposal_id")
+                    full_v = _gv(version_id)
+                    data = full_v.get("data", {}) if full_v else {}
+                    new_v = create_version(pid, data)
+                    clear_wizard_state()
+                    st.session_state["wizard_proposal_id"] = pid
+                    st.session_state["wizard_version_id"] = new_v["id"]
+                    load_draft(new_v["id"])
+                    st.session_state["wizard_step"] = 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error creando nueva versión: {e}")
+        with lc2:
+            if st.button("📤 Marcar como enviada", key="w8_mark_sent"):
+                try:
+                    from database.proposals_db import mark_version_sent
+                    mark_version_sent(version_id)
+                    st.success("Marcada como enviada al cliente.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        with lc3:
+            if st.button("📋 Ir a cotizaciones", key="w8_go_proposals"):
+                st.switch_page("pages/01_proposals.py")
+
+    elif version_id:
+        st.markdown("#### Bloquear versión")
+        st.caption(
+            "Bloquear crea una copia inmutable. Cambios futuros requerirán crear una versión nueva."
+        )
+        version_note = st.text_input(
+            "Nota de versión (opcional)",
+            value="",
+            placeholder="Ej: Precio reducido — cliente pidió 2 paneles menos",
+            key="w8_version_note",
+        )
+        lk_col, _ = st.columns([2, 4])
+        with lk_col:
+            if st.button("🔒 Bloquear versión / Lock version", key="w8_lock"):
+                try:
+                    from database.proposals_db import lock_version as _lock_v
+                    _lock_v(version_id, version_note or None)
+                    st.session_state["wizard_version_locked"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error bloqueando versión: {e}")

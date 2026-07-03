@@ -98,12 +98,27 @@ def _autosave_if_possible() -> None:
 
 def main():
     # Header
+    is_resuming = bool(st.session_state.get("wizard_proposal_id"))
+    client_name = st.session_state.get("wizard_client", {}).get("name", "")
+    if is_resuming and client_name:
+        title = f"Cotización — {client_name}"
+    elif is_resuming:
+        title = "Editar cotización"
+    else:
+        title = "Nueva cotización"
+
     header_col, save_col = st.columns([5, 1])
     with header_col:
-        st.markdown(
-            '<p style="color:#1E2D54;font-size:1.4rem;font-weight:700;margin:0;">Nueva cotización</p>',
-            unsafe_allow_html=True,
-        )
+        back_col, title_col = st.columns([1, 6])
+        with back_col:
+            if is_resuming:
+                if st.button("← Cotizaciones", key="h_back_proposals"):
+                    st.switch_page("pages/01_proposals.py")
+        with title_col:
+            st.markdown(
+                f'<p style="color:#1E2D54;font-size:1.4rem;font-weight:700;margin:0;">{title}</p>',
+                unsafe_allow_html=True,
+            )
     with save_col:
         from wizard.state import show_save_indicator
         show_save_indicator()

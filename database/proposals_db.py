@@ -144,11 +144,14 @@ def upsert_version(version_id: str, data: dict, total_usd: float | None = None) 
     return version
 
 
-def lock_version(version_id: str) -> dict:
+def lock_version(version_id: str, version_note: str | None = None) -> dict:
+    payload: dict = {"locked": True, "locked_at": _now()}
+    if version_note:
+        payload["version_note"] = version_note
     result = (
         get_client()
         .table("proposal_versions")
-        .update({"locked": True, "locked_at": _now()})
+        .update(payload)
         .eq("id", version_id)
         .execute()
     )

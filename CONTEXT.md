@@ -9,8 +9,8 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 2 — Grid Zero Wizard |
-| **Phase next** | Phase 3 — Proposal Management |
+| **Phase completed** | Phase 3 — Proposal Management |
+| **Phase next** | Phase 4 — AI Features |
 | **Branch** | main |
 | **Last commit** | see `git log` |
 | **Working tree** | Phase 2 code committed |
@@ -200,18 +200,36 @@ Tighten all these if adding a new cost line item causes overflow.
 
 ---
 
-## Phase 3 starting instructions
+## Phase 3 — What was built
 
-**Goal:** Proposals list, version history, locking. The tool becomes a real workspace.
+**Goal achieved:** Proposals list, version history, locking. The tool is a real workspace.
 
-**Do this before writing any code:**
-1. Read PHASES.md Phase 3 section in full
-2. Read REQUIREMENTS.md sections 3 (versioning) and 8 (versioning UI)
+**Key files:**
+- `pages/01_proposals.py` — Full proposals list with status filter, per-proposal expanders showing version history, action buttons per version (Continuar / PDF / Nueva versión / Marcar enviada), status dropdown that updates DB
+- `database/proposals_db.py` — `lock_version(version_id, version_note=None)` updated to accept optional note
+- `wizard/grid_zero.py` Step 8 — Lock section added at bottom: version note input + "Bloquear versión" button; post-lock shows "Nueva versión" / "Marcar enviada" / "Ir a cotizaciones" buttons; DB check on entry for already-locked versions
+- `pages/02_new_proposal.py` — Dynamic title ("Editar cotización — [client name]" when resuming) + "← Cotizaciones" back button
+- `app.py` — Dashboard counts for drafts + sent proposals now live from DB; Phase 3 marked complete
+
+**Version lifecycle:**
+- Unlocked version: wizard navigates here via "Continuar" from proposals list
+- Locking: writes `locked=True` + `locked_at` + optional `version_note` to `proposal_versions`
+- Nueva versión: `create_version(proposal_id, existing_data)` copies data into a new unlocked row, wizard resets to step 1
+
+**Validation passed:**
+- Created proposal with 2 versions, locked v1 with note, created v2 from v1 data, locked v2, marked v2 as sent
+- Confirmed v1 total ($18,110) and note unchanged after v2 operations
+
+## Phase 4 starting instructions
+
+**Goal:** All AI-powered shortcuts operational.
 
 **Key files to implement:**
-- `pages/01_proposals.py` — Proposals list table, filter by status, click to open, version history panel
-- `database/proposals_db.py` — `lock_version()` and `mark_version_sent()` are already stubbed (Phase 3)
-- `wizard/grid_zero.py` Step 8 — Add "Bloquear versión" button after PDF download
-- `pages/02_new_proposal.py` — Add "Nueva versión" flow (loads existing version data, opens wizard at step 1)
+- `ai/bill_parser.py` — Upload bill PDF → Claude extracts month, kWh, ₡ amount
+- `ai/datasheet_parser.py` — Upload PDF → Claude extracts specs → pre-fills equipment form
+- `ai/proposal_writer.py` — Call Claude → returns 2–4 sentence intro paragraph (ES + EN)
+- `wizard/grid_zero.py` Step 5 — Add bill PDF upload + AI extraction UI
+- `wizard/grid_zero.py` Step 8 — Wire up AI intro paragraph generation + "Regenerar" button
+- `pages/05_admin.py` — Equipment catalog with datasheet upload + AI fill
 
-**Validation:** Create 3 versions of a proposal, lock v1, create v2, lock v2, verify v1 PDF path unchanged, mark v2 as sent.
+**Validation:** Upload a real CNFL or ICE bill PDF → verify extracted kWh matches actual bill; generate intro paragraph in both languages.

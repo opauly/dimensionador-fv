@@ -47,13 +47,34 @@ st.markdown('<p class="page-header">Panel de Control</p>', unsafe_allow_html=Tru
 st.markdown('<p class="page-sub">Herramienta de diseño solar — Pauly&Co</p>', unsafe_allow_html=True)
 st.divider()
 
+_drafts_count = "—"
+_sent_count = "—"
+try:
+    from database.proposals_db import list_proposals as _lp
+    _drafts_count = len(_lp(status="draft"))
+    _sent_count = len(_lp(status="active"))
+except Exception:
+    pass
+
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.markdown('<div class="card-green"><b>Borradores abiertos</b><br><span style="font-size:1.4rem">—</span></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card-green"><b>Borradores abiertos</b><br>'
+        f'<span style="font-size:1.4rem">{_drafts_count}</span></div>',
+        unsafe_allow_html=True,
+    )
 with col2:
-    st.markdown('<div class="card-green"><b>En espera de respuesta</b><br><span style="font-size:1.4rem">—</span></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card-green"><b>En espera de respuesta</b><br>'
+        f'<span style="font-size:1.4rem">{_sent_count}</span></div>',
+        unsafe_allow_html=True,
+    )
 with col3:
-    st.markdown('<div class="card-green"><b>Proyectos activos</b><br><span style="font-size:1.4rem">—</span></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="card-green"><b>Proyectos activos</b><br>'
+        '<span style="font-size:1.4rem">—</span></div>',
+        unsafe_allow_html=True,
+    )
 
 st.divider()
 
@@ -66,7 +87,7 @@ phases = [
     ("Fase 0 — Fundación",        "✅ Completa"),
     ("Fase 1 — Motor PDF",        "✅ Completa"),
     ("Fase 2 — Asistente Grid Zero", "✅ Completa"),
-    ("Fase 3 — Gestión de cotizaciones", "🔲 Pendiente"),
+    ("Fase 3 — Gestión de cotizaciones", "✅ Completa"),
     ("Fase 4 — Funciones AI",     "🔲 Pendiente"),
     ("Fase 5 — Off-Grid + Híbrido", "🔲 Pendiente"),
     ("Fase 6 — Módulo Proyectos", "🔲 Pendiente"),
