@@ -273,7 +273,7 @@ def step6_equipment() -> dict | None:
 
     # MPPT calculation
     avg_kwh = consumption.get("avg_kwh", 0)
-    pvgis_monthly = site.get("pvgis_data", {}).get("monthly_kwh_kwp", [])
+    pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
     avg_irradiance = sum(pvgis_monthly) / 12 if pvgis_monthly else 127.0
 
     target_kw = (0.85 * avg_kwh / avg_irradiance) if avg_irradiance > 0 else None
@@ -567,7 +567,7 @@ def step8_review() -> None:
     panel_count = chosen.get("total_panels", 0)
     system_kw = chosen.get("system_kw", 0.0)
 
-    pvgis_monthly = site.get("pvgis_data", {}).get("monthly_kwh_kwp", [])
+    pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
     avg_kwh = consumption.get("avg_kwh", 0)
     monthly_kwh = [m["kwh"] for m in consumption.get("months_data", [])] or [avg_kwh] * 12
 
