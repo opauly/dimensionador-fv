@@ -13,7 +13,7 @@
 | **Phase next** | Phase 4 — AI Features |
 | **Branch** | main |
 | **Last commit** | see `git log` |
-| **Working tree** | Phase 2 code committed |
+| **Working tree** | Clean — all Phase 3 + quote numbering committed |
 
 ---
 
@@ -156,7 +156,7 @@ The phase tag tells you when each function gets implemented.
 
 **PDF structure (12 sections, top to bottom):**
 1. Header — COTIZACIÓN + SOLAR (green underline) + logo
-2. Client info table (5 rows, grey label column)
+2. Client info table (6 rows when quote_number present: N° COTIZACIÓN first, then client fields)
 3. Intro paragraph (Phase 4 will AI-generate; placeholder for now)
 4. FACTURACIÓN MENSUAL PROMEDIO — "Cálculos esperados" label; 7-column table; Promedio row only
 5. BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO — 6-column table
@@ -219,6 +219,31 @@ Tighten all these if adding a new cost line item causes overflow.
 **Validation passed:**
 - Created proposal with 2 versions, locked v1 with note, created v2 from v1 data, locked v2, marked v2 as sent
 - Confirmed v1 total ($18,110) and note unchanged after v2 operations
+
+**Bug fixed (post-Phase 3):**
+- `wizard/grid_zero.py` step7_costs: `pd.NA != ""` raises ambiguous boolean when resuming a draft that saved `qty=None`. Fixed both `_row_total` and the updated_items loop to use `pd.isna()` first.
+
+---
+
+## Quote numbering (post-Phase 3)
+
+**Nomenclature:** `PC-YYYY-NNN` (v1) / `PC-YYYY-NNN-vN` (v2+)
+- `PC` = Pauly & Co, `YYYY` = year issued, `NNN` = 3-digit sequential per year
+- v1 has no suffix (clean base for invoices); subsequent versions append `-v2`, `-v3`, etc.
+
+**Key files:**
+- `database/proposals_db.py` — `_next_quote_number(year)` assigns next int at creation; `format_quote_number(quote_number, created_at, version_number)` formats the display string
+- `database/schema.sql` — `quote_number int` column on proposals
+- `database/migrations/001_add_quote_number.sql` — ALTER + back-fill UPDATE (run once in Supabase SQL Editor)
+- `tools/run_migration_001.py` — status checker; run with `python -m tools.run_migration_001`
+- `proposals/templates/grid_zero_{es,en}.html` — quote number as first row of client info table (`N° COTIZACIÓN:` / `QUOTE NO.:`)
+- `proposals/generator.py` — `quote_number` key passed into Jinja2 context
+- `wizard/grid_zero.py` step8 — fetches `proposal.quote_number` from DB, formats with version suffix, passes to `generate_pdf()`
+- `pages/01_proposals.py` — quote number shown in expander label and in each version row
+
+**Migration status:** ✅ Applied. Existing proposals back-filled (PC-2026-001, PC-2026-002).
+
+---
 
 ## Phase 4 starting instructions
 
