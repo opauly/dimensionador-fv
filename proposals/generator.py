@@ -176,6 +176,7 @@ def _build_context(data: dict, language: str) -> dict:
         "logo_b64":       get_logo_b64(),
         "signature_b64":  get_signature_b64(),
         "date":           data["date"],
+        "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],
         "system_type_label": data["system_type_label"],
         "intro_lines":    data["intro_lines"],

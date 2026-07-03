@@ -1,23 +1,52 @@
 from __future__ import annotations
-"""CRUD for proposals and proposal_versions. Phase 2."""
+"""CRUD for proposals and proposal_versions. Phase 2+3."""
 from datetime import datetime, timezone
 
 from database.supabase_client import get_client
+
+QUOTE_PREFIX = "PC"
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _next_quote_number(year: int) -> int:
+    """Return the next sequential quote number for the given year."""
+    db = get_client()
+    result = (
+        db.table("proposals")
+        .select("quote_number")
+        .gte("created_at", f"{year}-01-01")
+        .lt("created_at", f"{year + 1}-01-01")
+        .execute()
+    )
+    existing = [r["quote_number"] for r in (result.data or []) if r.get("quote_number")]
+    return (max(existing) + 1) if existing else 1
+
+
+def format_quote_number(quote_number: int | None, created_at: str, version_number: int = 1) -> str:
+    """Format: PC-2026-001 (v1) or PC-2026-001-v2 (v2+). Returns '—' if not yet assigned."""
+    if not quote_number:
+        return "—"
+    year = int((created_at or "2026")[:4])
+    base = f"{QUOTE_PREFIX}-{year}-{quote_number:03d}"
+    return base if version_number <= 1 else f"{base}-v{version_number}"
+
+
 def create_proposal(client_name: str, system_type: str, client_id: str | None = None) -> dict:
     """Create a proposal row + an initial unlocked version 1. Returns the version row."""
     db = get_client()
+
+    year = datetime.now(timezone.utc).year
+    quote_number = _next_quote_number(year)
 
     proposal_payload: dict = {
         "client_name": client_name,
         "system_type": system_type,
         "status": "draft",
         "current_version_number": 1,
+        "quote_number": quote_number,
     }
     if client_id:
         proposal_payload["client_id"] = client_id

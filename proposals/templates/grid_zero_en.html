@@ -292,6 +292,7 @@ body {
   <div class="header-left">
     <div class="title-cotizacion">QUOTATION</div>
     <div class="title-solar">SOLAR</div>
+    {% if quote_number %}<div style="font-size:8pt;font-weight:bold;color:#444;margin-top:3pt;">No. {{ quote_number }}</div>{% endif %}
   </div>
   <div class="header-logo">
     {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}
@@ -306,6 +307,7 @@ body {
   <tr><td class="lbl">DATE:</td><td>{{ date }}</td></tr>
   <tr><td class="lbl">SYSTEM:</td><td>{{ system_type_label }}</td></tr>
 </table>
+
 
 <!-- INTRO PARAGRAPH -->
 <div class="intro">

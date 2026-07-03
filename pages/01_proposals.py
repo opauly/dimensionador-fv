@@ -68,9 +68,9 @@ def _signed_url(pdf_path: str) -> str | None:
         return None
 
 
-def _render_version_row(v: dict, proposal_id: str) -> None:
+def _render_version_row(v: dict, proposal_id: str, proposal: dict) -> None:
     """Render one version row with status badges and action buttons."""
-    from database.proposals_db import mark_version_sent
+    from database.proposals_db import mark_version_sent, format_quote_number
 
     vid      = v["id"]
     vnum     = v["version_number"]
@@ -82,6 +82,7 @@ def _render_version_row(v: dict, proposal_id: str) -> None:
     vpdf     = v.get("pdf_path")
 
     vtotal_str = f"${vtotal:,.0f}" if vtotal else "—"
+    vquote = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), vnum)
 
     badges = []
     if vlocked:
@@ -93,7 +94,7 @@ def _render_version_row(v: dict, proposal_id: str) -> None:
     note_str = f" · _{vnote}_" if vnote else ""
 
     st.markdown(
-        f"**v{vnum}** &nbsp;·&nbsp; {vcreated} &nbsp;·&nbsp; {vtotal_str}"
+        f"**{vquote}** &nbsp;·&nbsp; {vcreated} &nbsp;·&nbsp; {vtotal_str}"
         f" &nbsp;·&nbsp; {' · '.join(badges)}{note_str}",
         unsafe_allow_html=True,
     )
@@ -197,10 +198,15 @@ def main() -> None:
         total_usd = cur_ver_embed.get("total_usd")
         total_str = f"${total_usd:,.0f}" if total_usd else "—"
 
+        # Quote number
+        from database.proposals_db import format_quote_number
+        quote_num = proposal.get("quote_number")
+        quote_str = format_quote_number(quote_num, proposal.get("created_at", ""), cur_vnum)
+
         status_label = STATUS_LABELS.get(status, status)
         expander_label = (
-            f"{client_name} — {sys_label} | v{cur_vnum} | {total_str} | "
-            f"{status_label} | {updated}"
+            f"{quote_str}  ·  {client_name} — {sys_label}  ·  {total_str}  ·  "
+            f"{status_label}  ·  {updated}"
         )
 
         with st.expander(expander_label, expanded=False):
@@ -243,7 +249,7 @@ def main() -> None:
 
             st.markdown("**Historial de versiones**")
             for v in reversed(versions):
-                _render_version_row(v, pid)
+                _render_version_row(v, pid, proposal)
 
 
 main()

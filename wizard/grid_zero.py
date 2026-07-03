@@ -725,8 +725,25 @@ def step8_review() -> None:
                     "total": float(li.get("total", 0)),
                 })
 
+            # Build quote number string for this version
+            _quote_num_str = ""
+            try:
+                from database.proposals_db import format_quote_number, get_proposal
+                proposal_id = st.session_state.get("wizard_proposal_id")
+                version_id_now = st.session_state.get("wizard_version_id")
+                if proposal_id:
+                    _prop = get_proposal(proposal_id)
+                    if _prop and _prop.get("quote_number"):
+                        _vnum = st.session_state.get("wizard_meta", {}).get("version_number", 1)
+                        _quote_num_str = format_quote_number(
+                            _prop["quote_number"], _prop.get("created_at", ""), _vnum
+                        )
+            except Exception:
+                pass
+
             pdf_data = {
                 "date": today,
+                "quote_number": _quote_num_str,
                 "client": {
                     "name": client.get("name", ""),
                     "location": client.get("location", f"{site.get('city', '')}, {site.get('province', '')}"),

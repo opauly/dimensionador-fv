@@ -303,6 +303,7 @@ body {
   <div class="header-left">
     <div class="title-cotizacion">COTIZACIÓN</div>
     <div class="title-solar">SOLAR</div>
+    {% if quote_number %}<div style="font-size:8pt;font-weight:bold;color:#444;margin-top:3pt;">N° {{ quote_number }}</div>{% endif %}
   </div>
   <div class="header-logo">
     {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}

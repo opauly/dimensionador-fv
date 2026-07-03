@@ -138,7 +138,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     system_type             text NOT NULL CHECK (system_type IN ('grid_zero', 'off_grid', 'hybrid')),
     status                  text NOT NULL DEFAULT 'draft'
                                 CHECK (status IN ('draft', 'active', 'won', 'lost', 'cancelled')),
-    current_version_number  int NOT NULL DEFAULT 1
+    current_version_number  int NOT NULL DEFAULT 1,
+    quote_number            int
 );
 
 CREATE TABLE IF NOT EXISTS proposal_versions (
