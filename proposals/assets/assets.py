@@ -22,6 +22,18 @@ def get_logo_b64() -> str:
 
 
 def get_signature_b64() -> str:
-    """Dark (inverted) signature PNG as base64 data URI string."""
+    """Dark signature PNG as base64 data URI string."""
     data = _b64("firma_dark.png")
+    return f"data:image/png;base64,{data}" if data else ""
+
+
+def get_signature_white_b64() -> str:
+    """White signature PNG as base64 data URI string (for dark backgrounds)."""
+    data = _b64("firma_white.png")
+    return f"data:image/png;base64,{data}" if data else ""
+
+
+def get_isotipo_white_b64() -> str:
+    """White isotipo PNG as base64 data URI string (for dark backgrounds)."""
+    data = _b64("Isotipo_white.png")
     return f"data:image/png;base64,{data}" if data else ""

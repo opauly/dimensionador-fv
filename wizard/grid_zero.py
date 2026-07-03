@@ -727,16 +727,18 @@ def step8_review() -> None:
 
             # Build quote number string for this version
             _quote_num_str = ""
+            _actual_vnum = 1
             try:
-                from database.proposals_db import format_quote_number, get_proposal
+                from database.proposals_db import format_quote_number, get_proposal, get_version as _gv
                 proposal_id = st.session_state.get("wizard_proposal_id")
                 version_id_now = st.session_state.get("wizard_version_id")
-                if proposal_id:
+                if proposal_id and version_id_now:
                     _prop = get_proposal(proposal_id)
+                    _ver = _gv(version_id_now)
                     if _prop and _prop.get("quote_number"):
-                        _vnum = st.session_state.get("wizard_meta", {}).get("version_number", 1)
+                        _actual_vnum = (_ver.get("version_number") or 1) if _ver else 1
                         _quote_num_str = format_quote_number(
-                            _prop["quote_number"], _prop.get("created_at", ""), _vnum
+                            _prop["quote_number"], _prop.get("created_at", ""), _actual_vnum
                         )
             except Exception:
                 pass
@@ -820,7 +822,7 @@ def step8_review() -> None:
                     try:
                         from proposals.generator import upload_pdf
                         from database.proposals_db import save_pdf_path
-                        path = upload_pdf(pdf_bytes, proposal_id, 1, client.get("name", "cliente"))
+                        path = upload_pdf(pdf_bytes, proposal_id, _actual_vnum, client.get("name", "cliente"))
                         save_pdf_path(version_id, path)
                     except Exception:
                         pass  # Upload failure doesn't block download

@@ -26,7 +26,8 @@ SYSTEM_TYPE_LABELS = {
 
 def _clear_wizard() -> None:
     keys = [k for k in list(st.session_state.keys())
-            if k.startswith("wizard_") or k.startswith("w")]
+            if k.startswith("wizard_")
+            or (len(k) > 2 and k[0] == "w" and k[1].isdigit() and k[2] == "_")]
     for k in keys:
         del st.session_state[k]
 

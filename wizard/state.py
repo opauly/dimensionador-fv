@@ -65,8 +65,9 @@ def autosave(proposal_id: str, version_id: str) -> None:
 
     st.session_state["save_status"] = "saving"
 
+    step = st.session_state.get("wizard_step", 1)
     data = {
-        "meta": st.session_state.get("wizard_meta", {}),
+        "meta": {**st.session_state.get("wizard_meta", {}), "step_reached": step},
         "client": st.session_state.get("wizard_client", {}),
         "site": st.session_state.get("wizard_site", {}),
         "utility": st.session_state.get("wizard_utility", {}),
@@ -75,9 +76,6 @@ def autosave(proposal_id: str, version_id: str) -> None:
         "costs": st.session_state.get("wizard_costs", {}),
         "proposal_text": st.session_state.get("wizard_proposal_text", ""),
     }
-
-    step = st.session_state.get("wizard_step", 1)
-    data["meta"]["step_reached"] = step
 
     total_usd = st.session_state.get("wizard_costs", {}).get("total_usd")
     upsert_version(version_id, data, total_usd)
@@ -141,7 +139,13 @@ def get_company_info() -> dict:
             if isinstance(stored, str):
                 import json
                 stored = json.loads(stored)
-            return {**_DEFAULT_COMPANY, **stored}
+            # Only override defaults with non-empty stored values so partial
+            # records in app_settings never blank out contact details.
+            merged = dict(_DEFAULT_COMPANY)
+            for k, v in stored.items():
+                if v is not None and v != "":
+                    merged[k] = v
+            return merged
     except Exception:
         pass
     return _DEFAULT_COMPANY

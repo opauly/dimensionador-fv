@@ -14,7 +14,7 @@ from datetime import date as dt
 import weasyprint
 from jinja2 import Environment, FileSystemLoader
 
-from proposals.assets.assets import get_logo_b64, get_signature_b64
+from proposals.assets.assets import get_logo_b64, get_signature_b64, get_signature_white_b64, get_isotipo_white_b64
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -49,9 +49,9 @@ MARIA_JOSE_DATA: dict = {
         (
             "Esta propuesta se basa en la facturación eléctrica mensual aproximada según el "
             "detalle de cargas de los planos eléctricos. Propone un sistema de energía solar "
-            "conectado a la red pero sin entrega de excedentes de energía (grid-zero)."
+            "conectado a la red pero sin entrega de excedentes de energía (grid-zero). "
+            "El diseño propuesto no incluye sistemas de respaldo de energía."
         ),
-        "El diseño propuesto no incluye sistemas de respaldo de energía.",
     ],
     "billing_avg": {
         "consumption_kwh": 1475.00,
@@ -173,8 +173,10 @@ def _build_context(data: dict, language: str) -> dict:
         })
 
     return {
-        "logo_b64":       get_logo_b64(),
-        "signature_b64":  get_signature_b64(),
+        "logo_b64":            get_logo_b64(),
+        "signature_b64":       get_signature_b64(),
+        "signature_white_b64": get_signature_white_b64(),
+        "isotipo_white_b64":   get_isotipo_white_b64(),
         "date":           data["date"],
         "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],
@@ -211,12 +213,12 @@ def _build_context(data: dict, language: str) -> dict:
         "bank_local_lines":  data.get("bank_local_lines"    if es else "bank_local_lines_en",  []),
         "bank_intl_lines":   data.get("bank_intl_lines"     if es else "bank_intl_lines_en",   []),
         "company": {
-            "contact_name":  co["contact_name"],
-            "contact_title": co["contact_title"] if es else co.get("contact_title_en", co["contact_title"]),
-            "license":       co["license"],
-            "phone":         co["phone"],
-            "email":         co["email"],
-            "website":       co["website"],
+            "contact_name":  co.get("contact_name", ""),
+            "contact_title": co.get("contact_title", "") if es else co.get("contact_title_en", co.get("contact_title", "")),
+            "license":       co.get("license", ""),
+            "phone":         co.get("phone", ""),
+            "email":         co.get("email", ""),
+            "website":       co.get("website", ""),
         },
         "validity_days": data.get("validity_days", 15),
     }

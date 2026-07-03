@@ -12,10 +12,10 @@
 
 body {
   font-family: Arial, Helvetica, sans-serif;
-  font-size: 7.5pt;
+  font-size: 7pt;
   color: #222;
   margin: 0;
-  padding: 0;
+  padding: 0 0 60pt 0;
   line-height: 1.15;
 }
 
@@ -53,7 +53,7 @@ body {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 4pt;
-  font-size: 7.5pt;
+  font-size: 7pt;
 }
 .client-table td {
   padding: 1.5pt 5pt;
@@ -68,7 +68,7 @@ body {
 
 /* ── INTRO PARAGRAPH ────────────────────────────────────────────────────── */
 .intro {
-  font-size: 7.5pt;
+  font-size: 7pt;
   margin-bottom: 4pt;
   line-height: 1.3;
 }
@@ -79,17 +79,12 @@ body {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 1pt;
-  margin-top: 0;
+  margin-top: 6pt;
 }
 .section-title {
   font-weight: bold;
-  font-size: 7.5pt;
-  color: #1E2D54;
-}
-.section-note {
   font-size: 7pt;
-  color: #555;
-  font-style: italic;
+  color: #1E2D54;
 }
 
 /* ── STANDARD GREEN TABLE ───────────────────────────────────────────────── */
@@ -97,7 +92,7 @@ body {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 3pt;
-  font-size: 7pt;
+  font-size: 6.5pt;
 }
 .gt th {
   background: #4BAE6A;
@@ -117,6 +112,23 @@ body {
 }
 .gt td.left  { text-align: left; }
 .gt td.right { text-align: right; }
+
+/* "Cálculos esperados" label row above billing columns */
+.calc-label-cell {
+  background: #fff;
+  border: none;
+  padding: 0;
+}
+.calc-label-text {
+  background: #fff;
+  color: #555;
+  font-weight: normal;
+  font-style: italic;
+  font-size: 6pt;
+  text-align: right;
+  border: none;
+  padding: 0 2pt 1pt 0;
+}
 
 /* ── COST TABLE ─────────────────────────────────────────────────────────── */
 .cost-table { margin-bottom: 3pt; }
@@ -138,7 +150,7 @@ body {
 .tech-table {
   width: 56%;
   border-collapse: collapse;
-  font-size: 7pt;
+  font-size: 6.5pt;
 }
 .tech-table th {
   background: #4BAE6A;
@@ -158,7 +170,7 @@ body {
 .summary-table {
   width: 30%;
   border-collapse: collapse;
-  font-size: 7pt;
+  font-size: 6.5pt;
   margin-bottom: 3pt;
 }
 .summary-table th {
@@ -181,7 +193,7 @@ body {
   list-style: none;
   margin: 1pt 0 2pt 0;
   padding: 0;
-  font-size: 7.5pt;
+  font-size: 6.5pt;
 }
 .notes-list li::before {
   content: "·  ";
@@ -195,7 +207,7 @@ body {
 .bank-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 6.5pt;
+  font-size: 6pt;
   margin-bottom: 3pt;
 }
 .bank-table th {
@@ -219,7 +231,7 @@ body {
 .warranty-table {
   width: 68%;
   border-collapse: collapse;
-  font-size: 7pt;
+  font-size: 6.5pt;
   margin-bottom: 3pt;
 }
 .warranty-table th {
@@ -238,9 +250,15 @@ body {
 }
 .warranty-table td.wleft { text-align: left; }
 
-/* ── FOOTER CARD ────────────────────────────────────────────────────────── */
+/* ── PINNED FOOTER ──────────────────────────────────────────────────────── */
+.footer-wrap {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
 .footer-heading {
-  font-size: 7.5pt;
+  font-size: 6pt;
   font-weight: bold;
   color: #4BAE6A;
   margin-bottom: 1pt;
@@ -248,36 +266,41 @@ body {
 .footer-card {
   display: flex;
   align-items: center;
-  border: 0.5pt solid #ccc;
-  padding: 3pt 7pt;
+  background: #1E2D54;
+  color: #fff;
+  padding: 4pt 7pt;
   page-break-inside: avoid;
   break-inside: avoid;
 }
 .footer-sig {
-  width: 20%;
+  width: 14%;
   text-align: center;
+  vertical-align: middle;
 }
 .footer-sig img {
-  height: 30pt;
-  display: block;
-  margin: 0 auto;
+  height: 28pt;
+  display: inline-block;
+  vertical-align: middle;
 }
 .footer-center {
-  width: 42%;
+  width: 38%;
   text-align: center;
-  font-size: 7.5pt;
+  font-size: 6pt;
+  color: #fff;
   padding: 0 5pt;
 }
 .footer-center .name {
   font-weight: bold;
-  font-size: 8pt;
+  font-size: 6.5pt;
+  color: #fff;
   margin-bottom: 1pt;
 }
 .footer-right {
-  width: 38%;
-  font-size: 7.5pt;
+  width: 36%;
+  font-size: 6pt;
+  color: #fff;
   padding-left: 5pt;
-  border-left: 0.5pt solid #ddd;
+  border-left: 0.5pt solid rgba(255,255,255,0.2);
 }
 .footer-right p {
   margin: 0.5pt 0;
@@ -285,14 +308,25 @@ body {
 .footer-right .contact-label {
   font-weight: bold;
   margin-right: 2pt;
+  color: #fff;
 }
-
+.footer-isotipo {
+  width: 12%;
+  text-align: center;
+  vertical-align: middle;
+}
+.footer-isotipo img {
+  height: 32pt;
+  display: inline-block;
+  vertical-align: middle;
+  opacity: 0.85;
+}
 .validity {
   text-align: center;
   font-style: italic;
-  font-size: 7.5pt;
-  color: #444;
-  margin-top: 3pt;
+  font-size: 6.5pt;
+  color: #555;
+  margin-top: 2pt;
 }
 </style>
 </head>
@@ -302,7 +336,7 @@ body {
 <div class="header">
   <div class="header-left">
     <div class="title-cotizacion">COTIZACIÓN</div>
-    <div class="title-solar">SOLAR</div>
+    <div class="title-solar">ENERGÍA SOLAR</div>
   </div>
   <div class="header-logo">
     {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}
@@ -329,10 +363,13 @@ body {
 <!-- ── FACTURACIÓN MENSUAL PROMEDIO ─────────────────────────────────────── -->
 <div class="section-row">
   <span class="section-title">FACTURACIÓN MENSUAL PROMEDIO</span>
-  <span class="section-note">Cálculos esperados</span>
 </div>
 <table class="gt">
   <thead>
+    <tr>
+      <th colspan="3" class="calc-label-text" style="text-align:center;">Escenario actual</th>
+      <th colspan="4" class="calc-label-text">Cálculos esperados</th>
+    </tr>
     <tr>
       <th style="width:10%;">Mes</th>
       <th style="width:15%;">Consumo<br>actual (kWh)</th>
@@ -361,12 +398,13 @@ body {
 <table class="gt">
   <thead>
     <tr>
-      <th style="width:14%;">Ahorro<br>durante el<br>primer año</th>
-      <th style="width:14%;">Ahorro en 25<br>años</th>
-      <th style="width:11%;">Tasa Interna<br>de Retorno<br>(TIR)</th>
-      <th style="width:10%;">Retorno de<br>Inversión<br>(ROI)</th>
-      <th style="width:14%;">Ahorro promedio en factura<br>mensual</th>
-      <th style="width:37%;">Notas</th>
+      <th style="width:12%;">Ahorro<br>durante el<br>primer año</th>
+      <th style="width:11%;">Ahorro en<br>25 años</th>
+      <th style="width:9%;">Tasa Interna<br>de Retorno<br>(TIR)</th>
+      <th style="width:8%;">Retorno de<br>Inversión<br>(ROI)</th>
+      <th style="width:9%;">Reducción<br>mensual<br>en factura</th>
+      <th style="width:11%;">Ahorro<br>promedio<br>mensual</th>
+      <th style="width:40%;">Notas</th>
     </tr>
   </thead>
   <tbody>
@@ -375,8 +413,9 @@ body {
       <td>{{ benefits.savings_25yr }}</td>
       <td>{{ benefits.irr }}</td>
       <td>{{ benefits.roi }}</td>
+      <td>{{ benefits.pct_savings }}</td>
       <td>{{ benefits.avg_monthly_savings }}</td>
-      <td class="left" style="font-size:7pt;">{{ benefits.pct_savings }}&nbsp;&nbsp;{{ benefits.notes }}</td>
+      <td class="left" style="font-size:6pt;">{{ benefits.notes }}</td>
     </tr>
   </tbody>
 </table>
@@ -514,26 +553,29 @@ body {
   </tbody>
 </table>
 
-<!-- ── MÁS INFORMACIÓN ───────────────────────────────────────────────────── -->
-<div class="footer-heading">Más información</div>
-<div class="footer-card">
-  <div class="footer-sig">
-    {% if signature_b64 %}<img src="{{ signature_b64 }}" alt="Firma">{% endif %}
+<!-- ── PIE DE PÁGINA FIJO ────────────────────────────────────────────────── -->
+<div class="footer-wrap">
+  <div class="footer-heading">Más información</div>
+  <div class="footer-card">
+    <div class="footer-sig">
+      {% if signature_white_b64 %}<img src="{{ signature_white_b64 }}" alt="Firma">{% endif %}
+    </div>
+    <div class="footer-center">
+      <div class="name">{{ company.contact_name }}</div>
+      <div>{{ company.contact_title }}</div>
+      <div>{{ company.license }}</div>
+    </div>
+    <div class="footer-right">
+      <p><span class="contact-label">Teléfono/WhatsApp:</span> {{ company.phone }}</p>
+      <p><span class="contact-label">Correo:</span> {{ company.email }}</p>
+      <p><span class="contact-label">Sitio web:</span> {{ company.website }}</p>
+    </div>
+    <div class="footer-isotipo">
+      {% if isotipo_white_b64 %}<img src="{{ isotipo_white_b64 }}" alt="Pauly &amp; Co.">{% endif %}
+    </div>
   </div>
-  <div class="footer-center">
-    <div class="name">{{ company.contact_name }}</div>
-    <div>{{ company.contact_title }}</div>
-    <div>{{ company.license }}</div>
-  </div>
-  <div class="footer-right">
-    <p><span class="contact-label">Phone/WhatsApp:</span> {{ company.phone }}</p>
-    <p><span class="contact-label">Email:</span> {{ company.email }}</p>
-    <p><span class="contact-label">Website:</span> {{ company.website }}</p>
-  </div>
+  <div class="validity">Validez de la oferta: {{ validity_days }} días hábiles a partir de su entrega</div>
 </div>
-
-<!-- ── FOOTER LINE ────────────────────────────────────────────────────────── -->
-<div class="validity">Validez de la oferta: {{ validity_days }} días hábiles a partir de su entrega</div>
 
 </body>
 </html>
