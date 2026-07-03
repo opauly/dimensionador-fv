@@ -292,7 +292,6 @@ body {
   <div class="header-left">
     <div class="title-cotizacion">QUOTATION</div>
     <div class="title-solar">SOLAR</div>
-    {% if quote_number %}<div style="font-size:8pt;font-weight:bold;color:#444;margin-top:3pt;">No. {{ quote_number }}</div>{% endif %}
   </div>
   <div class="header-logo">
     {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}
@@ -301,6 +300,7 @@ body {
 
 <!-- CLIENT INFO -->
 <table class="client-table">
+  {% if quote_number %}<tr><td class="lbl">QUOTE NO.:</td><td>{{ quote_number }}</td></tr>{% endif %}
   <tr><td class="lbl">CLIENT:</td><td>{{ client.name }}</td></tr>
   <tr><td class="lbl">LOCATION:</td><td>{{ client.location }}</td></tr>
   <tr><td class="lbl">NISE:</td><td>{{ client.nise }}</td></tr>
