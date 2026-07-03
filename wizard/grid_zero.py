@@ -470,7 +470,7 @@ def step7_costs() -> dict | None:
     def _row_total(row: pd.Series) -> float:
         qty_raw = row["Qty"]
         try:
-            qty = float(qty_raw) if qty_raw != "" and qty_raw is not None else 1.0
+            qty = 1.0 if pd.isna(qty_raw) or qty_raw == "" else float(qty_raw)
         except (ValueError, TypeError):
             qty = 1.0
         return round(qty * float(row["Costo unitario (USD)"] or 0), 2)
@@ -517,7 +517,7 @@ def step7_costs() -> dict | None:
                 updated_items.append({
                     "item": desc_es,
                     "item_en": row["Descripción (EN)"],
-                    "qty": row["Qty"] if row["Qty"] != "" else None,
+                    "qty": None if pd.isna(row["Qty"]) or row["Qty"] == "" else row["Qty"],
                     "unit_cost": float(row["Costo unitario (USD)"] or 0),
                     "total": float(row["Total (USD)"]),
                     "specs": row["Especificaciones"],
