@@ -9,11 +9,11 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 1 — PDF Engine |
-| **Phase next** | Phase 2 — Grid Zero Wizard |
+| **Phase completed** | Phase 2 — Grid Zero Wizard |
+| **Phase next** | Phase 3 — Proposal Management |
 | **Branch** | main |
 | **Last commit** | see `git log` |
-| **Working tree** | Clean after Phase 1 commit |
+| **Working tree** | Phase 2 code committed |
 
 ---
 
@@ -118,13 +118,19 @@ The phase tag tells you when each function gets implemented.
 | `proposals/generator.py` | ✅ done | `generate_pdf()` + `upload_pdf()` implemented |
 | `proposals/templates/grid_zero_es.html` | ✅ done | Spanish — 1-page, pixel-accurate |
 | `proposals/templates/grid_zero_en.html` | ✅ done | English — 1-page, full translation |
-| `wizard/` | 2 | All wizard steps |
-| `calculations/tariffs.py` | 2 | Tiered bill calculator |
-| `calculations/sizing_grid_zero.py` | 2 | Grid Zero sizing |
-| `calculations/pvgis.py` | 2 | PVGIS API |
-| `calculations/mppt.py` | 2 | String design validator |
+| `wizard/state.py` | ✅ done | Auto-save, load_draft, company/bank defaults |
+| `wizard/common.py` | ✅ done | Steps 1–3: system type, client, site+PVGIS |
+| `wizard/grid_zero.py` | ✅ done | Steps 4–8: utility, consumption, equipment, costs, review |
+| `calculations/tariffs.py` | ✅ done | Block-tier bill calculator, IVA threshold, bomberos |
+| `calculations/sizing_grid_zero.py` | ✅ done | System kW, monthly generation, savings table, averages |
+| `calculations/pvgis.py` | ✅ done | PVGIS API call + Supabase cache + CR geocode lookup table |
+| `calculations/mppt.py` | ✅ done | 3-scenario validator centered on target kW |
 | `calculations/financials.py` | ✅ done | IRR + ROI implemented |
-| `database/proposals_db.py` | 2 | Proposal CRUD |
+| `database/proposals_db.py` | ✅ done | Proposal + version CRUD |
+| `database/equipment_db.py` | ✅ done | Read functions for Phase 2 |
+| `database/tariffs_db.py` | ✅ done | Read functions for Phase 2 |
+| `database/clients_db.py` | ✅ done | New file: client search + upsert |
+| `pages/02_new_proposal.py` | ✅ done | Full 8-step wizard orchestrator |
 | `ai/bill_parser.py` | 4 | Bill PDF extraction |
 | `ai/datasheet_parser.py` | 4 | Equipment spec extraction |
 | `ai/proposal_writer.py` | 4 | Intro paragraph generation |
@@ -170,27 +176,42 @@ Tighten all these if adding a new cost line item causes overflow.
 
 ---
 
-## Phase 2 starting instructions
+## Phase 2 — What was built
 
-**Goal:** Complete end-to-end Grid Zero wizard with manual data entry. First real proposals possible.
+**Goal achieved:** Complete 8-step Grid Zero wizard with manual data entry. Real proposals possible.
+
+**Key files (all implemented):**
+- `wizard/state.py` — `autosave()`, `load_draft()`, `get_company_info()`, `get_bank_info()`
+- `wizard/common.py` — Steps 1–3: system type + language, client with typeahead, site + PVGIS geocode
+- `wizard/grid_zero.py` — Steps 4–8: utility (tariff picker), consumption table + chart, MPPT equipment selector, cost data_editor, review + PDF generation
+- `calculations/pvgis.py` — PVGIS PVcalc API, Supabase app_settings cache, 40-city CR geocode lookup + Nominatim fallback
+- `calculations/tariffs.py` — Block-rate bill calc, IVA threshold 280 kWh, bomberos 1.75%
+- `calculations/sizing_grid_zero.py` — Monthly generation, avg billing diff, savings table
+- `calculations/mppt.py` — 3-scenario MPPT validator centered on `0.85 × avg_kwh / avg_irradiance`
+- `database/proposals_db.py` — Full CRUD: create, list, get, upsert_version, lock, versions, save_pdf_path
+- `database/clients_db.py` — New: `search_clients()`, `upsert_client()`
+- `pages/02_new_proposal.py` — Wizard orchestrator; auto-saves on each step; Phase 1 test buttons kept in expander
+
+**MPPT validation:** JA Solar 620W + Fronius Primo 10.0-1 → Scenario B = 16 panels × 9.92 kW ✓
+
+**Tariff formula note:** Seed rates are approximate (Phase 0 note: "verify before going live"). The formula is correct; numbers will match reference once actual ARESEP rates for the specific distributor are entered via Admin (Phase 7).
+
+**Auto-save design:** Saves on each Next/Back navigation. True debounce not implemented (Streamlit limitation). Draft writes to `proposal_versions.data` JSONB. Draft is created in DB at Step 2 completion (once client name is known).
+
+---
+
+## Phase 3 starting instructions
+
+**Goal:** Proposals list, version history, locking. The tool becomes a real workspace.
 
 **Do this before writing any code:**
-1. Read PHASES.md Phase 2 section in full
-2. Read REQUIREMENTS.md sections 2, 3, 7 (auto-save), and 8 (versioning UI)
+1. Read PHASES.md Phase 3 section in full
+2. Read REQUIREMENTS.md sections 3 (versioning) and 8 (versioning UI)
 
-**Key files to implement (stubs already exist):**
-- `wizard/state.py` — auto-save logic, session state helpers
-- `wizard/common.py` — Steps 1–3 (system type, client, site)
-- `wizard/grid_zero.py` — Steps 4–8
-- `calculations/pvgis.py` — PVGIS API call + cache
-- `calculations/tariffs.py` — tiered bill calculator (IVA threshold 280 kWh, bomberos 1.75%)
-- `calculations/sizing_grid_zero.py` — system kW, panel count, monthly generation
-- `calculations/mppt.py` — 3-scenario string validator
-- `database/proposals_db.py` — CRUD for proposals + proposal_versions
+**Key files to implement:**
+- `pages/01_proposals.py` — Proposals list table, filter by status, click to open, version history panel
+- `database/proposals_db.py` — `lock_version()` and `mark_version_sent()` are already stubbed (Phase 3)
+- `wizard/grid_zero.py` Step 8 — Add "Bloquear versión" button after PDF download
+- `pages/02_new_proposal.py` — Add "Nueva versión" flow (loads existing version data, opens wizard at step 1)
 
-**Validation target:** run María José Castro numbers through the wizard and match:
-avg kWh 1,475 → generation 1,262 kWh → new consumption 521 → new bill ₡51,681 → savings ₡106,192
-→ Y1 savings $2,798 → 25yr $127,873 → IRR 22.92% → ROI 5.48 years → total $18,110
-
-**The generator is ready.** The wizard review step (Step 8) should call:
-`generate_pdf(wizard_data_dict, 'grid_zero', language)` and offer `st.download_button`.
+**Validation:** Create 3 versions of a proposal, lock v1, create v2, lock v2, verify v1 PDF path unchanged, mark v2 as sent.

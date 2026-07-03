@@ -64,8 +64,8 @@ st.divider()
 st.markdown("#### Estado del proyecto")
 phases = [
     ("Fase 0 — Fundación",        "✅ Completa"),
-    ("Fase 1 — Motor PDF",        "🔲 Pendiente"),
-    ("Fase 2 — Asistente Grid Zero", "🔲 Pendiente"),
+    ("Fase 1 — Motor PDF",        "✅ Completa"),
+    ("Fase 2 — Asistente Grid Zero", "✅ Completa"),
     ("Fase 3 — Gestión de cotizaciones", "🔲 Pendiente"),
     ("Fase 4 — Funciones AI",     "🔲 Pendiente"),
     ("Fase 5 — Off-Grid + Híbrido", "🔲 Pendiente"),
