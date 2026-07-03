@@ -1,4 +1,5 @@
 """Proposal wizard — Phase 2: full Grid Zero 8-step wizard."""
+from __future__ import annotations
 import streamlit as st
 from dotenv import load_dotenv
 
