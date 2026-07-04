@@ -91,6 +91,45 @@ def list_proposals(status: str | None = None) -> list[dict]:
     return result.data or []
 
 
+def list_proposals_by_client(client_id: str, client_name: str = "") -> list[dict]:
+    """Return proposals for a client by client_id, with client_name fallback."""
+    db = get_client()
+    _select = "id, quote_number, created_at, system_type, proposal_versions(id, version_number, total_usd, locked, sent_to_client)"
+
+    rows: list[dict] = []
+    seen: set[str] = set()
+
+    if client_id:
+        r = (
+            db.table("proposals")
+            .select(_select)
+            .eq("client_id", client_id)
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        for p in r.data or []:
+            if p["id"] not in seen:
+                rows.append(p)
+                seen.add(p["id"])
+
+    if client_name:
+        r2 = (
+            db.table("proposals")
+            .select(_select)
+            .ilike("client_name", client_name.strip())
+            .order("created_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        for p in r2.data or []:
+            if p["id"] not in seen:
+                rows.append(p)
+                seen.add(p["id"])
+
+    return rows
+
+
 def update_proposal_status(proposal_id: str, status: str) -> dict:
     result = (
         get_client()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 from config import BRAND_GREEN
+from wizard.state import autosave_if_possible as _autosave
 
 
 def step1_system_type() -> dict | None:
@@ -45,7 +46,12 @@ def step1_system_type() -> dict | None:
         language = lang_options[lang_label]
 
     st.divider()
-    _, _, col_next = st.columns([3, 1, 1])
+    col_back, _, col_next = st.columns([1, 3, 1])
+    with col_back:
+        if st.button("← Atrás", key="w1_back"):
+            st.session_state["wizard_step"] = 1
+            _autosave()
+            st.rerun()
     with col_next:
         if st.button("Siguiente →", key="w1_next", type="primary", disabled=(system_type != "grid_zero")):
             result = {"system_type": system_type, "language": language}
@@ -57,55 +63,150 @@ def step1_system_type() -> dict | None:
 
 def step2_client() -> dict | None:
     """
-    Client name, phone, email with typeahead autocomplete from clients table.
-    Returns client dict or None.
+    Client search with live filtering, auto-populate fields, previous proposals
+    dropdown, and Empresa field. Returns client dict or None.
     """
     st.markdown("### Paso 2 — Datos del cliente")
 
     current = st.session_state.get("wizard_client", {})
 
-    # Typeahead search
+    # Initialize form widget keys from saved state (only on first render;
+    # callbacks may overwrite these later without triggering the conflict error).
+    _defaults = {
+        "w2_name":     current.get("name", ""),
+        "w2_empresa":  current.get("empresa", ""),
+        "w2_phone":    current.get("phone", ""),
+        "w2_email":    current.get("email", ""),
+        "w2_location": current.get("location", ""),
+        "w2_nise":     current.get("nise", "N/A"),
+    }
+    for _k, _v in _defaults.items():
+        st.session_state.setdefault(_k, _v)
+
+    # Track which client is actively selected (persists across reruns)
+    active_client_id: str | None = (
+        st.session_state.get("_w2_selected_client_id") or current.get("client_id")
+    )
+
+    # ── Live client search ────────────────────────────────────────────────────
     search_query = st.text_input(
         "Buscar cliente existente",
         placeholder="Escribe el nombre para buscar…",
         key="w2_search",
+        on_change=lambda: None,  # triggers rerun on every change, not just Enter
     )
 
-    client_id: str | None = None
     if search_query and len(search_query) >= 2:
         try:
             from database.clients_db import search_clients
             matches = search_clients(search_query)
             if matches:
-                options = {f"{m['name']} — {m.get('phone', '')} {m.get('email', '')}".strip(" —"): m for m in matches}
-                sel = st.selectbox("Seleccionar cliente", ["— Nuevo cliente —"] + list(options.keys()), key="w2_match")
-                if sel != "— Nuevo cliente —":
-                    chosen = options[sel]
-                    client_id = chosen["id"]
-                    current = {
-                        "client_id": client_id,
-                        "name": chosen.get("name", ""),
-                        "phone": chosen.get("phone", ""),
-                        "email": chosen.get("email", ""),
-                    }
+                options = {
+                    f"{m['name']} — {m.get('phone', '')} {m.get('email', '')}".strip(" —"): m
+                    for m in matches
+                }
+                st.session_state["_w2_client_options"] = options
+
+                def _on_client_select() -> None:
+                    sel = st.session_state.get("w2_match")
+                    opts = st.session_state.get("_w2_client_options", {})
+                    if sel and sel != "— Nuevo cliente —" and sel in opts:
+                        c = opts[sel]
+                        st.session_state["w2_name"]     = c.get("name", "")
+                        st.session_state["w2_empresa"]  = c.get("empresa", "")
+                        st.session_state["w2_phone"]    = c.get("phone", "")
+                        st.session_state["w2_email"]    = c.get("email", "")
+                        st.session_state["w2_location"] = c.get("location", "")
+                        st.session_state["w2_nise"]     = c.get("nise", "N/A")
+                        st.session_state["_w2_selected_client_id"] = c["id"]
+                    else:
+                        st.session_state["_w2_selected_client_id"] = None
+
+                sel = st.selectbox(
+                    "Seleccionar cliente",
+                    ["— Nuevo cliente —"] + list(options.keys()),
+                    key="w2_match",
+                    on_change=_on_client_select,
+                )
+                if sel != "— Nuevo cliente —" and sel in options:
+                    active_client_id = options[sel]["id"]
+                    st.session_state["_w2_selected_client_id"] = active_client_id
+            else:
+                st.caption("No se encontraron clientes con ese nombre.")
         except Exception as e:
             st.caption(f"⚠ No se pudo buscar clientes: {e}")
+
+    # ── Previous proposals for selected client ────────────────────────────────
+    if active_client_id or st.session_state.get("w2_name"):
+        try:
+            from database.proposals_db import list_proposals_by_client, format_quote_number
+            prev = list_proposals_by_client(
+                client_id=active_client_id or "",
+                client_name=st.session_state.get("w2_name", ""),
+            )
+            version_opts: dict[str, dict] = {}
+            for p in prev:
+                for v in sorted(
+                    p.get("proposal_versions") or [],
+                    key=lambda x: x["version_number"],
+                ):
+                    qn = format_quote_number(
+                        p.get("quote_number"), p.get("created_at", ""), v["version_number"]
+                    )
+                    icons = (
+                        (" ✉️" if v.get("sent_to_client") else "")
+                        + (" 🔒" if v.get("locked") else "")
+                    )
+                    label = f"{qn} — {p.get('system_type', '')} — ${v.get('total_usd') or 0:,.0f}{icons}"
+                    version_opts[label] = {"proposal_id": p["id"], "version_id": v["id"]}
+
+            if version_opts:
+                st.session_state["_w2_version_opts"] = version_opts
+
+                def _on_prev_prop() -> None:
+                    sel_v = st.session_state.get("w2_prev_prop")
+                    vo = st.session_state.get("_w2_version_opts", {})
+                    if sel_v and sel_v != "— Nueva cotización —" and sel_v in vo:
+                        from wizard.state import load_draft
+                        ch = vo[sel_v]
+                        load_draft(ch["version_id"])
+                        st.session_state["wizard_proposal_id"] = ch["proposal_id"]
+                        st.session_state["wizard_version_id"]  = ch["version_id"]
+                        loaded = st.session_state.get("wizard_client", {})
+                        st.session_state["w2_name"]     = loaded.get("name", "")
+                        st.session_state["w2_empresa"]  = loaded.get("empresa", "")
+                        st.session_state["w2_phone"]    = loaded.get("phone", "")
+                        st.session_state["w2_email"]    = loaded.get("email", "")
+                        st.session_state["w2_location"] = loaded.get("location", "")
+                        st.session_state["w2_nise"]     = loaded.get("nise", "N/A")
+
+                st.selectbox(
+                    "Cotizaciones anteriores (opcional)",
+                    ["— Nueva cotización —"] + list(version_opts.keys()),
+                    key="w2_prev_prop",
+                    on_change=_on_prev_prop,
+                )
+        except Exception as e:
+            st.caption(f"⚠ Error cargando cotizaciones anteriores: {e}")
 
     st.divider()
 
     col1, col2 = st.columns(2)
     with col1:
-        name = st.text_input("Nombre completo *", value=current.get("name", ""), key="w2_name")
-        phone = st.text_input("Teléfono", value=current.get("phone", ""), key="w2_phone")
+        name     = st.text_input("Nombre completo *",   key="w2_name")
+        empresa  = st.text_input("Empresa (opcional)",  key="w2_empresa")
+        phone    = st.text_input("Teléfono",            key="w2_phone")
     with col2:
-        email = st.text_input("Correo electrónico", value=current.get("email", ""), key="w2_email")
+        email    = st.text_input("Correo electrónico",  key="w2_email")
         location = st.text_input(
             "Ubicación (ciudad, provincia)",
-            value=current.get("location", ""),
             placeholder="Ej: Atenas, Alajuela",
             key="w2_location",
         )
-        nise = st.text_input("NISE (número de cliente en distribuidora)", value=current.get("nise", "N/A"), key="w2_nise")
+        nise = st.text_input(
+            "NISE (número de cliente en distribuidora)",
+            key="w2_nise",
+        )
 
     if not name.strip():
         st.caption("* El nombre del cliente es requerido.")
@@ -113,20 +214,20 @@ def step2_client() -> dict | None:
     st.divider()
     col_back, _, col_next = st.columns([1, 3, 1])
     with col_back:
-        if st.button("← Atrás", key="w2_back"):
-            st.session_state["wizard_step"] = 1
-            st.rerun()
+        if st.button("← Cotizaciones", key="w2_back"):
+            st.switch_page("pages/01_proposals.py")
     with col_next:
         if st.button("Siguiente →", key="w2_next", type="primary", disabled=(not name.strip())):
             result = {
-                "name": name.strip(),
-                "phone": phone.strip(),
-                "email": email.strip(),
+                "name":     name.strip(),
+                "empresa":  empresa.strip(),
+                "phone":    phone.strip(),
+                "email":    email.strip(),
                 "location": location.strip(),
-                "nise": nise.strip() or "N/A",
+                "nise":     nise.strip() or "N/A",
             }
-            if client_id:
-                result["client_id"] = client_id
+            if active_client_id:
+                result["client_id"] = active_client_id
             st.session_state["wizard_client"] = result
             return result
 
@@ -201,6 +302,13 @@ def step3_site() -> dict | None:
                 if lat and lon:
                     try:
                         pvgis_data = fetch_irradiance(lat, lon)
+                        # Persist immediately so subsequent reruns don't lose the data
+                        st.session_state["wizard_site"] = {
+                            **st.session_state.get("wizard_site", {}),
+                            "lat": lat,
+                            "lon": lon,
+                            "pvgis_data": pvgis_data,
+                        }
                         st.success(f"Irradiancia obtenida para {lat:.3f}, {lon:.3f}")
                     except Exception as e:
                         st.error(f"Error PVGIS: {e}")
@@ -238,6 +346,7 @@ def step3_site() -> dict | None:
     with col_back:
         if st.button("← Atrás", key="w3_back"):
             st.session_state["wizard_step"] = 2
+            _autosave()
             st.rerun()
     with col_next:
         can_continue = pvgis_data is not None and lat is not None

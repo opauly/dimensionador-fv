@@ -3,6 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from wizard.state import autosave_if_possible as _autosave
+
 from config import BRAND_GREEN, BRAND_GREEN_LIGHT
 
 
@@ -37,7 +39,8 @@ def step4_utility() -> dict | None:
         selected_dist = dist_options[dist_label]
 
     with col2:
-        nise = st.text_input("NISE (número de cliente)", value=current.get("nise", "N/A"), key="w4_nise")
+        client_nise = st.session_state.get("wizard_client", {}).get("nise", "N/A")
+        nise = st.text_input("NISE (número de cliente)", value=current.get("nise", client_nise), key="w4_nise")
 
     # Load tariff types for selected distributor
     try:
@@ -74,6 +77,7 @@ def step4_utility() -> dict | None:
     with col_back:
         if st.button("← Atrás", key="w4_back"):
             st.session_state["wizard_step"] = 3
+            _autosave()
             st.rerun()
     with col_next:
         can_continue = selected_tariff is not None
@@ -86,6 +90,10 @@ def step4_utility() -> dict | None:
                 "tariff_type_id": selected_tariff["id"],
                 "tariff_code": selected_tariff["code"],
                 "tariff_name": selected_tariff["name"],
+                # Save tariff rate fields so step 5 can estimate bills without extra DB calls
+                "access_charge_crc":  selected_tariff.get("access_charge_crc", 0),
+                "bomberos_pct":       selected_tariff.get("bomberos_pct", 0.0175),
+                "iva_threshold_kwh":  selected_tariff.get("iva_threshold_kwh", 280),
             }
             st.session_state["wizard_utility"] = result
             return result
@@ -99,21 +107,292 @@ _MONTH_NAMES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
+_MONTH_ABBR_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+
+_SOURCE_LABELS = {"bill": "Factura eléctrica", "loads": "Cargas instaladas", "manual": "Ingreso manual"}
+
+_DEFAULT_LOADS = [
+    {"Descripción": "Refrigerador",        "W": 150,  "Und": 1, "h/día": 24, "días/mes": 30},
+    {"Descripción": "Iluminación general", "W": 200,  "Und": 1, "h/día": 6,  "días/mes": 30},
+    {"Descripción": "TV + entretenimiento","W": 150,  "Und": 1, "h/día": 5,  "días/mes": 30},
+    {"Descripción": "Aire acondicionado",  "W": 1200, "Und": 1, "h/día": 8,  "días/mes": 20},
+    {"Descripción": "Lavadora",            "W": 500,  "Und": 1, "h/día": 1,  "días/mes": 8},
+]
+
+
+def _render_bill_section() -> None:
+    """Bill PDF upload, Claude extraction, and apply-to-table action."""
+    st.markdown("**Subir factura eléctrica (ICE, CNFL, JASEC…)**")
+    st.caption("Sube una o más facturas en PDF. La IA extrae el historial de consumo automáticamente.")
+
+    uploaded_files = st.file_uploader(
+        "Seleccionar facturas en PDF",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="w5_bill_files",
+    )
+
+    if not uploaded_files:
+        st.session_state.pop("w5_bill_history", None)
+        st.session_state.pop("w5_bill_meta", None)
+        return
+
+    if st.button("🔍 Extraer historial de consumo", key="w5_bill_extract"):
+        with st.spinner("Analizando facturas…"):
+            from calculations.bill_parser import parse_bill_pdf
+            all_history = []
+            meta = {}
+            errors = []
+            for f in uploaded_files:
+                try:
+                    result = parse_bill_pdf(f.read())
+                    all_history.extend(result.get("history", []))
+                    meta = {"distributor": result.get("distributor", ""), "nise": result.get("nise", "")}
+                except Exception as e:
+                    errors.append(f"{f.name}: {e}")
+            if errors:
+                for err in errors:
+                    st.error(f"⚠ {err}")
+            if all_history:
+                # Auto-fill Factura (₡) from the tariff selected in Step 4
+                utility = st.session_state.get("wizard_utility", {})
+                tariff_id = utility.get("tariff_type_id")
+                if tariff_id:
+                    try:
+                        from database.tariffs_db import get_tariff_tiers
+                        from calculations.tariff_calculator import fill_bill_amounts
+                        tariff_info = {
+                            "access_charge_crc": utility.get("access_charge_crc", 0),
+                            "bomberos_pct":       utility.get("bomberos_pct", 0.0175),
+                            "iva_threshold_kwh":  utility.get("iva_threshold_kwh", 280),
+                            "tiers": get_tariff_tiers(tariff_id),
+                        }
+                        all_history = fill_bill_amounts(all_history, tariff_info)
+                    except Exception:
+                        pass  # fail silently — bill amounts stay as extracted
+                st.session_state["w5_bill_history"] = all_history
+                st.session_state["w5_bill_meta"] = meta
+
+    history = st.session_state.get("w5_bill_history", [])
+    meta = st.session_state.get("w5_bill_meta", {})
+
+    if history:
+        dist = meta.get("distributor", "—")
+        nise = meta.get("nise", "—")
+        st.success(f"Distribuidora: **{dist}** · NISE: **{nise}** · {len(history)} meses extraídos")
+
+        preview_df = pd.DataFrame(history).rename(
+            columns={"month": "Mes", "year": "Año", "kwh": "kWh", "bill_crc": "Factura (₡)"}
+        )
+        preview_df["Factura (₡)"] = preview_df["Factura (₡)"].fillna(0).astype(float)
+        st.dataframe(preview_df, hide_index=True, use_container_width=True, height=240)
+
+        # Overwrite warning
+        existing_meta = st.session_state.get("w5_applied_source_meta", {})
+        if existing_meta.get("source") and existing_meta["source"] != "bill":
+            st.warning(
+                f"⚠ La tabla tiene datos de **{existing_meta.get('label', _SOURCE_LABELS.get(existing_meta['source'], ''))}**. "
+                "Al aplicar se reemplazarán."
+            )
+
+        if st.button("✅ Aplicar al historial de 12 meses", key="w5_bill_apply", type="primary"):
+            with st.spinner("Estimando meses faltantes con IA…"):
+                from calculations.bill_parser import build_12_month_grid
+                utility = st.session_state.get("wizard_utility", {})
+                tariff_id = utility.get("tariff_type_id")
+                tariff_info = None
+                if tariff_id:
+                    try:
+                        from database.tariffs_db import get_tariff_tiers
+                        tariff_info = {
+                            "access_charge_crc": utility.get("access_charge_crc", 0),
+                            "bomberos_pct":       utility.get("bomberos_pct", 0.0175),
+                            "iva_threshold_kwh":  utility.get("iva_threshold_kwh", 280),
+                            "tiers": get_tariff_tiers(tariff_id),
+                        }
+                    except Exception:
+                        pass
+                site = st.session_state.get("wizard_site", {})
+                location = ", ".join(filter(None, [site.get("city"), site.get("province"), "Costa Rica"]))
+                grid = build_12_month_grid(history, location=location, tariff_info=tariff_info)
+            # Build source badge label from bill date range
+            months_with_data = [(h["month"], h["year"]) for h in history if float(h.get("kwh") or 0) > 0]
+            if months_with_data:
+                mn_m, mn_y = min(months_with_data, key=lambda x: (x[1], x[0]))
+                mx_m, mx_y = max(months_with_data, key=lambda x: (x[1], x[0]))
+                range_str = f"{_MONTH_ABBR_ES[mn_m-1]} {mn_y} – {_MONTH_ABBR_ES[mx_m-1]} {mx_y}"
+            else:
+                range_str = f"{len(history)} meses"
+            st.session_state["w5_applied_source_meta"] = {
+                "source": "bill",
+                "label": f"Factura {meta.get('distributor', '')} · {range_str}",
+            }
+            st.session_state["w5_applied_months"] = grid
+            st.session_state["w5_table_ver"] = st.session_state.get("w5_table_ver", 0) + 1
+            st.rerun()
+
+
+def _render_loads_section() -> None:
+    """Editable electrical loads table with tablero import and kWh/month estimator."""
+    st.markdown("**Cargas eléctricas instaladas**")
+
+    # ── Tablero import ────────────────────────────────────────────────────────
+    with st.expander("📋 Importar desde tablero eléctrico", expanded=False):
+        st.caption("Sube una imagen o PDF del tablero eléctrico. La IA extrae los circuitos y estima horas de uso.")
+        uploaded_tablero = st.file_uploader(
+            "Imagen (JPG/PNG) o PDF del tablero",
+            type=["jpg", "jpeg", "png", "pdf"],
+            key="w5_tablero_file",
+        )
+        if uploaded_tablero and st.button("⚡ Extraer cargas del tablero", key="w5_tablero_extract"):
+            with st.spinner("Analizando tablero con IA…"):
+                try:
+                    from calculations.tablero_parser import parse_tablero
+                    loads = parse_tablero(uploaded_tablero.read(), uploaded_tablero.type)
+                    st.session_state["w5_loads_data"] = loads
+                    st.session_state["w5_loads_ver"] = st.session_state.get("w5_loads_ver", 0) + 1
+                    st.success(f"{len(loads)} circuitos extraídos. Revisa y ajusta la tabla.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al analizar el tablero: {e}")
+
+    # ── Loads data editor ─────────────────────────────────────────────────────
+    st.caption("Edita los equipos instalados. El consumo estimado se aplica a los 12 meses.")
+    loads_ver = st.session_state.get("w5_loads_ver", 0)
+    base_loads = st.session_state.get("w5_loads_data", _DEFAULT_LOADS)
+
+    edited_loads = st.data_editor(
+        pd.DataFrame(base_loads),
+        column_config={
+            "Descripción": st.column_config.TextColumn("Descripción", width="medium"),
+            "W": st.column_config.NumberColumn("Potencia (W)", min_value=0, format="%.0f"),
+            "Und": st.column_config.NumberColumn("Cantidad", min_value=1, step=1, format="%d"),
+            "h/día": st.column_config.NumberColumn("Horas/día", min_value=0.0, max_value=24.0, format="%.1f"),
+            "días/mes": st.column_config.NumberColumn("Días/mes", min_value=0, max_value=31, step=1, format="%d"),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key=f"w5_loads_{loads_ver}",
+    )
+
+    total_kwh = 0.0
+    for _, row in edited_loads.iterrows():
+        w = float(row.get("W") or 0)
+        qty = float(row.get("Und") or 1)
+        h = float(row.get("h/día") or 0)
+        d = float(row.get("días/mes") or 0)
+        total_kwh += w * qty * h * d / 1000
+
+    # Overwrite warning (shown above metric/button when there is data from another source)
+    existing_meta = st.session_state.get("w5_applied_source_meta", {})
+    if total_kwh > 0 and existing_meta.get("source") and existing_meta["source"] != "loads":
+        st.warning(
+            f"⚠ La tabla tiene datos de **{existing_meta.get('label', _SOURCE_LABELS.get(existing_meta['source'], ''))}**. "
+            "Al aplicar se reemplazarán."
+        )
+
+    col_metric, col_btn = st.columns([2, 1])
+    with col_metric:
+        st.metric("Consumo nominal", f"{total_kwh:,.0f} kWh/mes")
+    with col_btn:
+        if total_kwh > 0 and st.button("Aplicar a 12 meses →", key="w5_loads_apply", type="primary"):
+            with st.spinner("Estimando variación estacional con IA…"):
+                from calculations.load_estimator import estimate_loads_12_months_ai
+                from calculations.tariff_calculator import estimate_bill_crc
+                loads_data = edited_loads.to_dict("records")
+                site = st.session_state.get("wizard_site", {})
+                location = ", ".join(filter(None, [site.get("city"), site.get("province"), "Costa Rica"]))
+                monthly_kwh = estimate_loads_12_months_ai(loads_data, location=location)
+                utility = st.session_state.get("wizard_utility", {})
+                tariff_id = utility.get("tariff_type_id")
+                tariff_info = None
+                if tariff_id:
+                    try:
+                        from database.tariffs_db import get_tariff_tiers
+                        tariff_info = {
+                            "access_charge_crc": utility.get("access_charge_crc", 0),
+                            "bomberos_pct":       utility.get("bomberos_pct", 0.0175),
+                            "iva_threshold_kwh":  utility.get("iva_threshold_kwh", 280),
+                            "tiers": get_tariff_tiers(tariff_id),
+                        }
+                    except Exception:
+                        pass
+                grid = [
+                    {
+                        "month": _MONTH_NAMES[i],
+                        "kwh": round(monthly_kwh[i], 1),
+                        "bill_crc": float(estimate_bill_crc(monthly_kwh[i], tariff_info)) if tariff_info and monthly_kwh[i] > 0 else 0.0,
+                    }
+                    for i in range(12)
+                ]
+            from_tablero = st.session_state.get("w5_loads_ver", 0) > 0
+            n = len(loads_data)
+            st.session_state["w5_applied_source_meta"] = {
+                "source": "loads",
+                "label": f"Tablero · {n} circuitos" if from_tablero else f"Cargas instaladas · {n} equipos",
+            }
+            st.session_state["w5_applied_months"] = grid
+            st.session_state["w5_table_ver"] = st.session_state.get("w5_table_ver", 0) + 1
+            st.rerun()
 
 
 def step5_consumption() -> dict | None:
-    """12-month kWh / bill table, manual entry. Returns consumption dict."""
+    """12-month kWh / bill table with three input modes. Returns consumption dict."""
     st.markdown("### Paso 5 — Historial de consumo eléctrico")
 
     current = st.session_state.get("wizard_consumption", {})
-    saved_months = current.get("months_data", [])
 
-    # Build default DataFrame
-    if saved_months and len(saved_months) == 12:
-        df_init = pd.DataFrame(saved_months)
-        # Ensure column names match
-        if "month" not in df_init.columns:
-            df_init["month"] = _MONTH_NAMES
+    # Restore applied months and source metadata from saved draft on first load
+    if "w5_applied_months" not in st.session_state:
+        saved = current.get("months_data", [])
+        st.session_state["w5_applied_months"] = saved if (saved and len(saved) == 12) else None
+    if "w5_applied_source_meta" not in st.session_state and current.get("source"):
+        saved_src = current["source"]
+        st.session_state["w5_applied_source_meta"] = {
+            "source": saved_src,
+            "label": _SOURCE_LABELS.get(saved_src, saved_src) + " (guardado)",
+        }
+
+    # ── Source selector ───────────────────────────────────────────────────────
+    SOURCE_OPTS = {
+        "📄 Subir factura (PDF)": "bill",
+        "⚡ Cargas instaladas": "loads",
+        "✍️ Manual": "manual",
+    }
+    saved_source = current.get("source", "manual")
+    source_label = st.radio(
+        "Fuente del historial de consumo",
+        list(SOURCE_OPTS.keys()),
+        index=list(SOURCE_OPTS.values()).index(
+            saved_source if saved_source in SOURCE_OPTS.values() else "manual"
+        ),
+        horizontal=True,
+        key="w5_source",
+    )
+    source = SOURCE_OPTS[source_label]
+
+    # ── Source helper section ─────────────────────────────────────────────────
+    if source == "bill":
+        _render_bill_section()
+    elif source == "loads":
+        _render_loads_section()
+
+    # ── 12-month editable table ───────────────────────────────────────────────
+    st.divider()
+    st.caption("Historial mensual — ajusta los valores si es necesario.")
+
+    src_meta = st.session_state.get("w5_applied_source_meta")
+    if src_meta and src_meta.get("label"):
+        st.markdown(
+            f'<span style="background:#f0f7f0;border:1px solid #4BAE6A;border-radius:4px;'
+            f'padding:2px 8px;font-size:0.75rem;color:#2d7a4f;">📊 Fuente: {src_meta["label"]}</span>',
+            unsafe_allow_html=True,
+        )
+
+    applied = st.session_state.get("w5_applied_months")
+    if applied and len(applied) == 12:
+        df_init = pd.DataFrame(applied)[["month", "kwh", "bill_crc"]]
     else:
         df_init = pd.DataFrame({
             "month": _MONTH_NAMES,
@@ -121,8 +400,7 @@ def step5_consumption() -> dict | None:
             "bill_crc": [0.0] * 12,
         })
 
-    st.caption("Ingresa el consumo mensual (kWh) y el monto de la factura (₡) de los últimos 12 meses.")
-
+    table_ver = st.session_state.get("w5_table_ver", 0)
     edited_df = st.data_editor(
         df_init,
         column_config={
@@ -132,26 +410,52 @@ def step5_consumption() -> dict | None:
         },
         use_container_width=True,
         hide_index=True,
-        key="w5_table",
+        key=f"w5_table_{table_ver}",
     )
 
     kwh_values = edited_df["kwh"].tolist()
     bill_values = edited_df["bill_crc"].tolist()
 
+    # ── Auto-recalculate Factura when kWh changes (any mode) ─────────────────
+    old_kwh = [round(v or 0) for v in df_init["kwh"].tolist()]
+    new_kwh = [round(v or 0) for v in kwh_values]
+    if old_kwh != new_kwh:
+        utility = st.session_state.get("wizard_utility", {})
+        tariff_id = utility.get("tariff_type_id")
+        if tariff_id:
+            try:
+                from database.tariffs_db import get_tariff_tiers
+                from calculations.tariff_calculator import estimate_bill_crc
+                tariff_info = {
+                    "access_charge_crc": utility.get("access_charge_crc", 0),
+                    "bomberos_pct":       utility.get("bomberos_pct", 0.0175),
+                    "iva_threshold_kwh":  utility.get("iva_threshold_kwh", 280),
+                    "tiers": get_tariff_tiers(tariff_id),
+                }
+                new_bills = [float(estimate_bill_crc(k, tariff_info)) for k in new_kwh]
+                st.session_state["w5_applied_months"] = [
+                    {"month": _MONTH_NAMES[i], "kwh": float(new_kwh[i]), "bill_crc": new_bills[i]}
+                    for i in range(12)
+                ]
+                # Update source badge: manual edits on top of another source get an "· editada" suffix
+                prev_meta = st.session_state.get("w5_applied_source_meta", {})
+                if source == "manual" or not prev_meta.get("source"):
+                    new_meta = {"source": "manual", "label": "Ingreso manual"}
+                else:
+                    base_label = prev_meta.get("label", _SOURCE_LABELS.get(prev_meta["source"], prev_meta["source"]))
+                    if not base_label.endswith("· editada"):
+                        base_label = base_label + " · editada"
+                    new_meta = {"source": prev_meta["source"], "label": base_label}
+                st.session_state["w5_applied_source_meta"] = new_meta
+                st.session_state["w5_table_ver"] = st.session_state.get("w5_table_ver", 0) + 1
+                st.rerun()
+            except Exception:
+                pass
+
     filled = [v for v in kwh_values if v and v > 0]
     avg_kwh = round(sum(filled) / len(filled), 2) if filled else 0.0
     filled_bills = [v for v in bill_values if v and v > 0]
     avg_bill = round(sum(filled_bills) / len(filled_bills)) if filled_bills else 0
-
-    # Interconnection permit cost
-    icpe_cost = st.number_input(
-        "Costo del permiso de interconexión (USD)",
-        value=float(current.get("interconnection_permit_usd", 1000.0)),
-        min_value=0.0,
-        step=100.0,
-        format="%.2f",
-        key="w5_icpe",
-    )
 
     if avg_kwh > 0:
         col1, col2 = st.columns(2)
@@ -163,7 +467,7 @@ def step5_consumption() -> dict | None:
         if len(filled) >= 3:
             import plotly.graph_objects as go
             fig = go.Figure(go.Bar(
-                x=_MONTH_NAMES[:len(kwh_values)],
+                x=_MONTH_NAMES,
                 y=kwh_values,
                 marker_color=BRAND_GREEN,
                 text=[f"{v:.0f}" if v else "" for v in kwh_values],
@@ -177,11 +481,22 @@ def step5_consumption() -> dict | None:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+    # ── Interconnection permit ────────────────────────────────────────────────
+    icpe_cost = st.number_input(
+        "Costo del permiso de interconexión (USD)",
+        value=float(current.get("interconnection_permit_usd", 1000.0)),
+        min_value=0.0,
+        step=100.0,
+        format="%.2f",
+        key="w5_icpe",
+    )
+
     st.divider()
     col_back, _, col_next = st.columns([1, 3, 1])
     with col_back:
         if st.button("← Atrás", key="w5_back"):
             st.session_state["wizard_step"] = 4
+            _autosave()
             st.rerun()
     with col_next:
         can_continue = avg_kwh > 0
@@ -191,7 +506,7 @@ def step5_consumption() -> dict | None:
                 for i in range(12)
             ]
             result = {
-                "source": "manual",
+                "source": source,
                 "months_data": months_data,
                 "avg_kwh": avg_kwh,
                 "avg_bill_crc": avg_bill,
@@ -344,6 +659,7 @@ def step6_equipment() -> dict | None:
     with col_back:
         if st.button("← Atrás", key="w6_back"):
             st.session_state["wizard_step"] = 5
+            _autosave()
             st.rerun()
     with col_next:
         can_continue = scenarios is not None and any(s["within_limits"] for s in scenarios)
@@ -504,6 +820,7 @@ def step7_costs() -> dict | None:
     with col_back:
         if st.button("← Atrás", key="w7_back"):
             st.session_state["wizard_step"] = 6
+            _autosave()
             st.rerun()
     with col_next:
         can_continue = total > 0
@@ -696,6 +1013,7 @@ def step8_review() -> None:
     with col_back:
         if st.button("← Atrás", key="w8_back"):
             st.session_state["wizard_step"] = 7
+            _autosave()
             st.rerun()
 
     with col_pdf:

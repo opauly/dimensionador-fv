@@ -10,8 +10,8 @@ st.set_page_config(page_title="Nueva cotización — Pauly&Co Solar", layout="wi
 from config import BRAND_GREEN, BRAND_NAVY, WIZARD_STEPS_GRID_ZERO
 
 STEP_LABELS = [
-    "Tipo y idioma",
     "Cliente",
+    "Tipo e idioma",
     "Sitio e irradiancia",
     "Distribuidora",
     "Consumo",
@@ -84,14 +84,8 @@ def _ensure_proposal_created() -> tuple[str, str]:
 
 
 def _autosave_if_possible() -> None:
-    p_id = st.session_state.get("wizard_proposal_id")
-    v_id = st.session_state.get("wizard_version_id")
-    if p_id and v_id:
-        try:
-            from wizard.state import autosave
-            autosave(p_id, v_id)
-        except Exception:
-            pass
+    from wizard.state import autosave_if_possible
+    autosave_if_possible()
 
 
 # ── Main ────────────────────────────────────────────────────────────────────
@@ -107,18 +101,15 @@ def main():
     else:
         title = "Nueva cotización"
 
-    header_col, save_col = st.columns([5, 1])
+    header_col, save_col = st.columns([6, 1])
     with header_col:
-        back_col, title_col = st.columns([1, 6])
-        with back_col:
-            if is_resuming:
-                if st.button("← Cotizaciones", key="h_back_proposals"):
-                    st.switch_page("pages/01_proposals.py")
-        with title_col:
-            st.markdown(
-                f'<p style="color:#1E2D54;font-size:1.4rem;font-weight:700;margin:0;">{title}</p>',
-                unsafe_allow_html=True,
-            )
+        if is_resuming:
+            if st.button("← Cotizaciones", key="h_back_proposals"):
+                st.switch_page("pages/01_proposals.py")
+        st.markdown(
+            f'<p style="color:#1E2D54;font-size:1.4rem;font-weight:700;margin:0;">{title}</p>',
+            unsafe_allow_html=True,
+        )
     with save_col:
         from wizard.state import show_save_indicator
         show_save_indicator()
@@ -131,73 +122,83 @@ def main():
 
     # Route to the correct step
     if current_step == 1:
-        from wizard.common import step1_system_type
-        result = step1_system_type()
-        if result is not None:
-            st.session_state["wizard_step"] = 2
-            st.rerun()
-
-    elif current_step == 2:
         from wizard.common import step2_client
         result = step2_client()
         if result is not None:
-            # Save client to DB (create or update)
             try:
                 from database.clients_db import upsert_client
                 upsert_client(
                     name=result["name"],
+                    empresa=result.get("empresa", ""),
                     phone=result.get("phone", ""),
                     email=result.get("email", ""),
                 )
             except Exception:
                 pass
-            # Create proposal row now that we have client name
+            st.session_state["wizard_step"] = 2
+            st.rerun()
+
+    elif current_step == 2:
+        from wizard.common import step1_system_type
+        result = step1_system_type()
+        if result is not None:
             try:
-                p_id, v_id = _ensure_proposal_created()
+                client = st.session_state.get("wizard_client", {})
+                p_id = st.session_state.get("wizard_proposal_id")
+                v_id = st.session_state.get("wizard_version_id")
+                if not (p_id and v_id):
+                    from database.proposals_db import create_proposal
+                    prop = create_proposal(
+                        client_name=client.get("name", "Sin nombre"),
+                        system_type=result.get("system_type", "grid_zero"),
+                        client_id=client.get("client_id"),
+                    )
+                    st.session_state["wizard_proposal_id"] = prop["proposal_id"]
+                    st.session_state["wizard_version_id"] = prop["id"]
+                st.session_state["wizard_step"] = 3
                 _autosave_if_possible()
-            except Exception:
-                pass
-            st.session_state["wizard_step"] = 3
+            except Exception as e:
+                st.error(f"No se pudo crear la cotización: {e}")
             st.rerun()
 
     elif current_step == 3:
         from wizard.common import step3_site
         result = step3_site()
         if result is not None:
-            _autosave_if_possible()
             st.session_state["wizard_step"] = 4
+            _autosave_if_possible()
             st.rerun()
 
     elif current_step == 4:
         from wizard.grid_zero import step4_utility
         result = step4_utility()
         if result is not None:
-            _autosave_if_possible()
             st.session_state["wizard_step"] = 5
+            _autosave_if_possible()
             st.rerun()
 
     elif current_step == 5:
         from wizard.grid_zero import step5_consumption
         result = step5_consumption()
         if result is not None:
-            _autosave_if_possible()
             st.session_state["wizard_step"] = 6
+            _autosave_if_possible()
             st.rerun()
 
     elif current_step == 6:
         from wizard.grid_zero import step6_equipment
         result = step6_equipment()
         if result is not None:
-            _autosave_if_possible()
             st.session_state["wizard_step"] = 7
+            _autosave_if_possible()
             st.rerun()
 
     elif current_step == 7:
         from wizard.grid_zero import step7_costs
         result = step7_costs()
         if result is not None:
-            _autosave_if_possible()
             st.session_state["wizard_step"] = 8
+            _autosave_if_possible()
             st.rerun()
 
     elif current_step == 8:

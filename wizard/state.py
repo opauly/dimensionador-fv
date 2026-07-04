@@ -103,6 +103,17 @@ def load_draft(version_id: str) -> None:
     st.session_state["wizard_step"] = step
 
 
+def autosave_if_possible() -> None:
+    """Autosave from any wizard step without needing the caller to hold IDs."""
+    p_id = st.session_state.get("wizard_proposal_id")
+    v_id = st.session_state.get("wizard_version_id")
+    if p_id and v_id:
+        try:
+            autosave(p_id, v_id)
+        except Exception:
+            pass
+
+
 def clear_wizard_state() -> None:
     """Remove all wizard_ keys from st.session_state (called after locking a version)."""
     keys_to_clear = [k for k in st.session_state if k.startswith("wizard_")]

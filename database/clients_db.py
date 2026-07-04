@@ -10,7 +10,7 @@ def search_clients(query: str, limit: int = 8) -> list[dict]:
     result = (
         get_client()
         .table("clients")
-        .select("id, name, phone, email")
+        .select("id, name, empresa, phone, email")
         .ilike("name", f"%{query}%")
         .limit(limit)
         .execute()
@@ -30,12 +30,18 @@ def get_client_by_id(client_id: str) -> dict | None:
     return result.data
 
 
-def upsert_client(name: str, phone: str = "", email: str = "", notes: str = "") -> dict:
+def upsert_client(
+    name: str,
+    empresa: str = "",
+    phone: str = "",
+    email: str = "",
+    notes: str = "",
+) -> dict:
     """Create or update client by name (case-insensitive match on name)."""
     db = get_client()
     existing = (
         db.table("clients")
-        .select("id, name, phone, email")
+        .select("id, name, empresa, phone, email")
         .ilike("name", name.strip())
         .limit(1)
         .execute()
@@ -43,6 +49,8 @@ def upsert_client(name: str, phone: str = "", email: str = "", notes: str = "") 
     if existing.data:
         row = existing.data[0]
         updates: dict = {}
+        if empresa and not row.get("empresa"):
+            updates["empresa"] = empresa
         if phone and not row.get("phone"):
             updates["phone"] = phone
         if email and not row.get("email"):
@@ -53,7 +61,7 @@ def upsert_client(name: str, phone: str = "", email: str = "", notes: str = "") 
 
     result = (
         db.table("clients")
-        .insert({"name": name.strip(), "phone": phone, "email": email, "notes": notes})
+        .insert({"name": name.strip(), "empresa": empresa, "phone": phone, "email": email, "notes": notes})
         .execute()
     )
     return result.data[0]

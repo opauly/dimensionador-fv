@@ -113,6 +113,9 @@ CREATE TABLE IF NOT EXISTS tariff_types (
     access_charge_crc   numeric NOT NULL DEFAULT 0,
     bomberos_pct        numeric NOT NULL DEFAULT 0.0175,
     iva_threshold_kwh   int NOT NULL DEFAULT 280,
+    -- Demand charges for commercial/industrial tariffs (0 = no demand component)
+    demand_rate_crc     numeric NOT NULL DEFAULT 0,
+    demand_threshold_kw int NOT NULL DEFAULT 0,
     last_updated        timestamptz DEFAULT now(),
     UNIQUE (distributor_id, code)
 );

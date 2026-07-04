@@ -1,11 +1,23 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.0
+# Pauly&Co Solar Design Tool — Final Requirements v3.1
 
-**Version:** 3.0  
-**Date:** 2026-07-02  
+**Version:** 3.1  
+**Date:** 2026-07-03  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3 → v3.1
+
+- Step 5 (Consumo) redesigned as a three-mode input: bill PDF upload, installed loads table, or manual entry
+- Bill parser: Claude AI extracts distributor, NISE, and month-by-month kWh history from ICE/CNFL PDFs
+- AI seasonal estimation: missing bill months and load-based months estimated via Claude Haiku with Costa Rica dry/rainy season context
+- Tablero import: upload electrical panel schedule image or PDF → AI extracts circuits with W, h/día, días/mes
+- Factura column auto-computed from actual DB tariff tiers for all months in all three modes
+- Factura auto-recalculates on any kWh edit in the 12-month table (not just manual mode)
+- Source badge on 12-month table showing which source last populated it (e.g. "ESPH · Nov 2022 – Abr 2023")
+- Overwrite warning when switching sources with existing table data
+- Zero-kWh bill months (new service) treated as missing data, not as 0 kWh known values
 
 ## Change log v2 → v3
 
@@ -725,6 +737,10 @@ This keeps the Projects module useful years after installation.
 | 9 | Financial projections | 5% escalation, `numpy_financial.irr()`, simple payback ROI. |
 | 10 | Assets | Logo_color_v3.png (top-right). firma_white.png inverted to dark via Pillow. Both base64-embedded in Jinja2 templates. |
 | 11 | Load estimation | Tablero upload → AI extract → 3 scenarios (conservative 40%/6h, optimal 55%/8h, maximum 75%/10h). Proposal notes estimate-based. |
+| 12 | Step 5 consumption modes | Three modes: (1) Upload PDF bill → AI extracts kWh history + estimates missing months seasonally; (2) Installed loads table → AI applies seasonal variation; (3) Manual entry. All modes compute Factura (₡) from DB tariff tiers. |
+| 13 | Tablero import | Inside "Cargas instaladas" expander. Image (JPEG/PNG) or PDF → Claude vision/document API extracts circuit list with W, Und, h/día, días/mes. Outputs to editable loads table. |
+| 14 | Source badge + overwrite warning | 12-month table shows a green pill badge indicating data origin. Switching to Aplicar when a different source is already loaded shows a st.warning. Editing kWh in any mode appends "· editada" to the badge. |
+| 15 | AI model split | `claude-haiku-4-5-20251001` for bill parsing, missing-month estimation, tablero extraction, and seasonal load estimation. Sonnet reserved for intro paragraph generation and future complex tasks. |
 
 ---
 
@@ -736,7 +752,7 @@ This keeps the Projects module useful years after installation.
 | Backend / DB | Supabase (PostgreSQL) | JSONB for wizard state, relational for ledgers |
 | File storage | Supabase Storage | PDFs, datasheets, bill scans |
 | PDF generation | WeasyPrint + Jinja2 | 4 HTML templates (2 types × 2 languages) |
-| AI | Anthropic Python SDK | `claude-sonnet-4-6` for all AI features |
+| AI | Anthropic Python SDK | `claude-haiku-4-5-20251001` for parsing/estimation; `claude-sonnet-4-6` for proposal writing |
 | Irradiance | PVGIS REST API v5.2 | Free, no key |
 | Exchange rates | exchangerate-api.com | Free tier, cached in Supabase |
 | Financial math | numpy-financial | `npf.irr()` |

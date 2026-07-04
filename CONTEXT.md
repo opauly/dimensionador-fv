@@ -9,11 +9,11 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 3 — Proposal Management |
-| **Phase next** | Phase 4 — AI Features |
+| **Phase completed** | Phase 4 — AI Features (Step 5 Consumo fully implemented) |
+| **Phase next** | Phase 5 — Off-Grid wizard |
 | **Branch** | main |
 | **Last commit** | see `git log` |
-| **Working tree** | Clean — all Phase 3 + quote numbering committed |
+| **Working tree** | Clean — all Phase 4 Step 5 enhancements committed |
 
 ---
 
@@ -131,11 +131,13 @@ The phase tag tells you when each function gets implemented.
 | `database/tariffs_db.py` | ✅ done | Read functions for Phase 2 |
 | `database/clients_db.py` | ✅ done | New file: client search + upsert |
 | `pages/02_new_proposal.py` | ✅ done | Full 8-step wizard orchestrator |
-| `ai/bill_parser.py` | 4 | Bill PDF extraction |
+| `calculations/bill_parser.py` | ✅ done | Bill PDF extraction + 12-month grid builder |
+| `calculations/tariff_calculator.py` | ✅ done | CR tariff formula: fixed + tiered + bomberos + IVA |
+| `calculations/tablero_parser.py` | ✅ done | Electrical panel schedule → loads list via Claude vision |
+| `calculations/load_estimator.py` | ✅ done | Seasonal load estimation; `DEFAULT_LOADS` seeded; `estimate_loads_12_months_ai()` |
 | `ai/datasheet_parser.py` | 4 | Equipment spec extraction |
 | `ai/proposal_writer.py` | 4 | Intro paragraph generation |
 | `calculations/sizing_off_grid.py` | 5 | Off-Grid sizing |
-| `calculations/load_estimator.py` | 5 | Tablero load estimation |
 | `database/projects_db.py` | 6 | Project financial CRUD |
 | `ai/tariff_updater.py` | 7 | CNFL PDF tariff refresh |
 
@@ -245,16 +247,81 @@ Tighten all these if adding a new cost line item causes overflow.
 
 ---
 
-## Phase 4 starting instructions
+## Phase 4 — What was built (Step 5 Consumo AI enhancements)
 
-**Goal:** All AI-powered shortcuts operational.
+**Goal achieved:** Step 5 is a full three-mode consumption input with AI assistance, seasonal estimation, and automatic Factura computation from actual DB tariff tiers.
+
+### New files
+
+**`calculations/bill_parser.py`**
+- `parse_bill_pdf(pdf_bytes) → dict` — sends PDF as base64 document block to Claude Haiku; returns `{distributor, nise, history: [{month, year, kwh, bill_crc}]}`
+- `build_12_month_grid(history, reference_year, location, tariff_info) → list[dict]` — only uses months with `kwh > 0` as known (zero = new service); calls `_estimate_missing_kwh()` for the rest; fills Factura via tariff_calculator
+- `_estimate_missing_kwh(known, missing_months, location)` — Claude Haiku with Costa Rica dry/rainy season context; falls back to simple average on API error
+- `MONTH_NAMES_ES` — module-level constant (not inside function) to avoid self-import errors
+
+**`calculations/tariff_calculator.py`**
+- `estimate_bill_crc(kwh, tariff_info) → float` — full CR formula: `fixed + tiered_energy + bomberos × (fixed + energy) + IVA (13% if kwh ≥ threshold)`
+- `fill_bill_amounts(history, tariff_info)` — fills null/0 bill_crc from tariff; preserves real PDF values
+- `tariff_info` dict shape: `{access_charge_crc, bomberos_pct, iva_threshold_kwh, tiers: [{from_kwh, to_kwh, rate_crc, is_fixed, sort_order}]}`
+
+**`calculations/tablero_parser.py`**
+- `parse_tablero(file_bytes, media_type) → list[dict]` — JPEG/PNG → image block; PDF → document block
+- Prompt instructs Claude to skip "Prevista" circuits, skip 0 VA, assign h/día and días/mes by load type (fridge 24/30, A/C 8/20, microwave 0.5/30, etc.)
+- Returns sanitized list: `[{Descripción, W, Und, h/día, días/mes}]`
+
+### Updated files
+
+**`calculations/load_estimator.py`** (previously a stub)
+- `DEFAULT_LOADS` — 5 typical CR household loads (fridge, lighting, TV, A/C, washer)
+- `kwh_from_loads(loads)` — sums `W × Und × h/día × días/mes / 1000`
+- `estimate_loads_12_months_ai(loads, location)` — sends loads table to Claude Haiku with seasonal context; returns `[Jan, ..., Dec]`; falls back to `[nominal] × 12`
+- `estimate_from_tablero(total_kva, demand_factor)` — 3-scenario estimator (unchanged structure)
+
+**`wizard/grid_zero.py` Step 5** — fully restructured
+- Three-mode radio: `Subir factura` / `Cargas instaladas` / `Manual`
+- `_render_bill_section()` — file uploader (multi-file) → extract button → preview table → overwrite warning → "Aplicar" button → `build_12_month_grid()` → stores `w5_applied_source_meta` with date range label
+- `_render_loads_section()` — tablero import expander (image/PDF) → `parse_tablero()` → editable loads table with versioned key (`w5_loads_{ver}`) → overwrite warning → "Aplicar a 12 meses →" → `estimate_loads_12_months_ai()` → Factura fill
+- `step5_consumption()`:
+  - Restores `w5_applied_months` and `w5_applied_source_meta` from saved draft on first load
+  - Source badge (green pill) above table: `📊 Fuente: {label}` — updates when source changes or edits happen
+  - Auto-recompute Factura on kWh change in **any** mode (not just manual): fetches `get_tariff_tiers(tariff_id)`, recomputes all 12 months, increments `w5_table_ver`, calls `st.rerun()`
+  - Edits on top of bill/loads source update badge to `"{label} · editada"`
+- Versioned data_editor key pattern: `key=f"w5_table_{table_ver}"` — incrementing forces fresh render with new data without losing unedited rows
+
+**`wizard/grid_zero.py` Step 4** — now saves tariff rate fields to `wizard_utility`:
+- `access_charge_crc`, `bomberos_pct`, `iva_threshold_kwh` passed from `selected_tariff` dict
+- Avoids extra DB calls in Step 5; only `get_tariff_tiers(tariff_id)` fetched when needed
+
+### Key bugs fixed
+
+| Bug | Fix |
+|---|---|
+| Zero-kWh months (new service) counted as known data | `build_12_month_grid`: only index months with `kwh > 0` |
+| Averaged months showed Factura = 0 | Pass `tariff_info` to `build_12_month_grid`; call `estimate_bill_crc` for all months |
+| Infinite loop in manual auto-recompute | Change-detect with `old_kwh == new_kwh`; second rerun sees matching `df_init` and skips |
+| Self-referential import in bill_parser | Move `MONTH_NAMES_ES` to module level before any function definitions |
+
+### Session state keys (Step 5)
+
+| Key | Purpose |
+|---|---|
+| `w5_applied_months` | `list[dict]` — 12 rows `{month, kwh, bill_crc}` currently in table |
+| `w5_table_ver` | `int` — incremented to force data_editor reset with new data |
+| `w5_applied_source_meta` | `{source: "bill"|"loads"|"manual", label: str}` — badge text |
+| `w5_bill_history` | raw history list from `parse_bill_pdf()` |
+| `w5_bill_meta` | `{distributor, nise}` from parsed bill |
+| `w5_loads_data` | current loads table rows (set from tablero import or default) |
+| `w5_loads_ver` | `int` — incremented when tablero import resets loads editor |
+
+---
+
+## Phase 5 starting instructions
+
+**Goal:** Off-Grid wizard (Steps 4–8 for off-grid system type).
 
 **Key files to implement:**
-- `ai/bill_parser.py` — Upload bill PDF → Claude extracts month, kWh, ₡ amount
-- `ai/datasheet_parser.py` — Upload PDF → Claude extracts specs → pre-fills equipment form
-- `ai/proposal_writer.py` — Call Claude → returns 2–4 sentence intro paragraph (ES + EN)
-- `wizard/grid_zero.py` Step 5 — Add bill PDF upload + AI extraction UI
-- `wizard/grid_zero.py` Step 8 — Wire up AI intro paragraph generation + "Regenerar" button
-- `pages/05_admin.py` — Equipment catalog with datasheet upload + AI fill
+- `calculations/sizing_off_grid.py` — battery sizing, days of autonomy, charge controller selection
+- `wizard/off_grid.py` — Steps 4–8 mirroring grid_zero.py structure
+- Step 5 in off_grid.py reuses `_render_bill_section`, `_render_loads_section` from grid_zero.py (or refactor to shared module)
 
-**Validation:** Upload a real CNFL or ICE bill PDF → verify extracted kWh matches actual bill; generate intro paragraph in both languages.
+**Validation target:** Jorge Ramírez off-grid system (see validation reference numbers above).
