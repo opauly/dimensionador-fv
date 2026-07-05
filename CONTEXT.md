@@ -9,11 +9,11 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 4 — AI Features (Step 5 Consumo fully implemented) |
+| **Phase completed** | Phase 4 — Full (Step 5 AI consumption + Step 6 equipment catalog, MPPT, zero-export savings) |
 | **Phase next** | Phase 5 — Off-Grid wizard |
 | **Branch** | main |
 | **Last commit** | see `git log` |
-| **Working tree** | Clean — all Phase 4 Step 5 enhancements committed |
+| **Working tree** | Clean |
 
 ---
 
@@ -124,10 +124,10 @@ The phase tag tells you when each function gets implemented.
 | `calculations/tariffs.py` | ✅ done | Block-tier bill calculator, IVA threshold, bomberos |
 | `calculations/sizing_grid_zero.py` | ✅ done | System kW, monthly generation, savings table, averages |
 | `calculations/pvgis.py` | ✅ done | PVGIS API call + Supabase cache + CR geocode lookup table |
-| `calculations/mppt.py` | ✅ done | 3-scenario validator centered on target kW |
+| `calculations/mppt.py` | ✅ done | Explores all valid (series × parallel) combos; A/B/C scenarios; manual `check_design()` |
 | `calculations/financials.py` | ✅ done | IRR + ROI implemented |
 | `database/proposals_db.py` | ✅ done | Proposal + version CRUD |
-| `database/equipment_db.py` | ✅ done | Read functions for Phase 2 |
+| `database/equipment_db.py` | ✅ done | Full CRUD: `upsert_panel`, `delete_panel`, `upsert_inverter`, `delete_inverter` |
 | `database/tariffs_db.py` | ✅ done | Read functions for Phase 2 |
 | `database/clients_db.py` | ✅ done | New file: client search + upsert |
 | `pages/02_new_proposal.py` | ✅ done | Full 8-step wizard orchestrator |
@@ -135,7 +135,7 @@ The phase tag tells you when each function gets implemented.
 | `calculations/tariff_calculator.py` | ✅ done | CR tariff formula: fixed + tiered + bomberos + IVA |
 | `calculations/tablero_parser.py` | ✅ done | Electrical panel schedule → loads list via Claude vision |
 | `calculations/load_estimator.py` | ✅ done | Seasonal load estimation; `DEFAULT_LOADS` seeded; `estimate_loads_12_months_ai()` |
-| `ai/datasheet_parser.py` | 4 | Equipment spec extraction |
+| `calculations/datasheet_parser.py` | ✅ done | AI panel + inverter spec extraction from PDF datasheets |
 | `ai/proposal_writer.py` | 4 | Intro paragraph generation |
 | `calculations/sizing_off_grid.py` | 5 | Off-Grid sizing |
 | `database/projects_db.py` | 6 | Project financial CRUD |
@@ -312,6 +312,92 @@ Tighten all these if adding a new cost line item causes overflow.
 | `w5_bill_meta` | `{distributor, nise}` from parsed bill |
 | `w5_loads_data` | current loads table rows (set from tablero import or default) |
 | `w5_loads_ver` | `int` — incremented when tablero import resets loads editor |
+
+---
+
+## Phase 4 — What was built (Step 6 Equipment + MPPT + Zero-Export Savings)
+
+**Goal achieved:** Step 6 is a complete equipment selection and string design tool with realistic zero-export savings projections. Admin page has a full equipment catalog with AI datasheet ingestion.
+
+### New files
+
+**`calculations/datasheet_parser.py`**
+- `parse_panel_datasheet(pdf_bytes) → list[dict]` — Claude Haiku document block; returns all power-class variants found in the PDF
+- `parse_inverter_datasheet(pdf_bytes) → list[dict]` — same for inverters; returns all kW variants
+- `_parse_list_response(response, label)` — JSON parse + list normalization; strips markdown fences
+- Panel fields extracted: brand, model, wp, voc, vmp, isc, imp, temp_coeff_pmax, width_m, height_m (in meters), warranty_product_yr, warranty_power_yr
+- Inverter fields extracted: brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt (per tracker), mppt_channels, phase, output_v, warranty_yr
+
+### Updated files
+
+**`calculations/mppt.py`** — complete rewrite
+- `_combo_metrics(ns, np_, panel, inverter) → dict` — shared helper; all metrics + violations list for any (series, parallel) pair
+- `_make_description(scenario, combo, b_total, inverter) → str` — one-liner explaining why the scenario was chosen; covers primary reason, string architecture, voltage position within MPPT window
+- `validate_string_design(panel, inverter, target_kw) → list[dict]` — explores ALL valid (ns, np_) combos; B = closest to target; A = largest with fewer panels; C = smallest with more panels; each result includes `description` field
+- `check_design(panel, inverter, panels_per_string, n_strings) → dict` — validates a specific pair for manual mode; returns full metrics dict with `scenario="M"`
+
+**`database/equipment_db.py`**
+- Added `upsert_panel(data)`, `delete_panel(panel_id)`, `upsert_inverter(data)`, `delete_inverter(inverter_id)`
+
+**`pages/05_admin.py`** — equipment catalog tab added
+- `_panel_form(existing, prefill)` / `_inverter_form(existing, prefill)` — st.form with all fields; submits to upsert
+- `_panels_section()` / `_inverters_section()` — datasheet upload expander → AI extract → variant selectbox (multi-model PDFs) → "Usar estos datos" → form pre-fill; card list with edit/delete (two-step confirm)
+- `_equipment_catalog()` — tabs for panels + inverters
+- Admin page now has 3 top-level tabs: Catálogo de equipos | Actualizar tarifas | Tarifas actuales
+
+**`wizard/grid_zero.py`** Step 6 — major redesign
+
+*Equipment spec cards:* one spec per line (Voc, Vmp, Isc, Imp, Área, Garantías each on own line)
+
+*Zero-export savings model (`_scenario_projection`):*
+- `daytime_kwh = avg_kwh × daytime_fraction` — consumption during solar hours
+- `self_consumed = min(gen, daytime_kwh)` — solar actually used on-site
+- `curtailed = max(0, gen − daytime_kwh)` — wasted solar (not exported)
+- `grid_kwh = avg_kwh − self_consumed` — always > 0 (nights always draw from grid)
+- `coverage = self_consumed / avg_kwh` — capped at daytime_fraction, never 100%
+- `self_consumption_pct = self_consumed / gen × 100` — how much of generation is used
+
+*AI daytime fraction (`_estimate_daytime_fraction_ai`):*
+- Calls Claude Haiku with loads profile (`w5_loads_data`) and city
+- Returns `(daytime_fraction, explanatory_note)`; falls back to 0.45
+- Cached in `w6_coverage_ai` session key
+- **Load-bearing for billing:** fraction determines `daytime_kwh` and thus `grid_kwh` and bill estimate
+- AI call runs first when "Calcular MPPT" is clicked; `target_kw = daytime_kwh / avg_irradiance` computed from fresh fraction before MPPT scenarios are generated
+
+*MPPT target for zero-export:* `target_kw = daytime_fraction × avg_kwh / avg_irradiance` — sizes to daytime consumption, not total, so scenarios span the saturation point and show meaningfully different bills
+
+*Projection cards:* each of the 3 scenario columns has a `○ / ● Escenario X — N paneles (Y kW)` selector button directly above the card; clicking selects that scenario and clears manual mode
+
+*Manual section layout:*
+- Input spinners (series, parallel)
+- Compact chips row (panels, kW, m², strings/MPPT, Voc, Vmp)
+- Two-column body: validation bars (Voc/Vmp/Corriente) left; projection card right
+- Selector button `○ / ● Usar configuración manual` above the card — mirrors auto scenario buttons
+- Card border: purple when active, grey when not
+
+*Unified selection UX:* clicking any auto scenario button sets `w6_selected_scenario` and clears `w6_use_manual`; clicking manual button sets `w6_use_manual = True`; no separate confirm/cancel button pair
+
+*Saturation warning:* shown when all scenarios have `curtailed > 0` (all above saturation point); shows optimal kW
+
+### Session state keys (Step 6)
+
+| Key | Purpose |
+|---|---|
+| `w6_scenarios` | `list[dict]` — computed MPPT scenarios (A/B/C) |
+| `w6_selected_scenario` | `"A"`, `"B"`, or `"C"` — active auto scenario |
+| `w6_use_manual` | `bool` — manual config is active selection |
+| `w6_equip_key` | `"{panel_id}_{inverter_id}"` — clears scenarios + selection on equipment change |
+| `w6_coverage_ai` | `{fraction: float, note: str}` — cached AI daytime fraction estimate |
+
+### Key decisions made
+
+| Decision | What was decided |
+|---|---|
+| Zero-export model | `grid_kwh = avg_kwh − min(gen, daytime_kwh)`; no net metering; curtailed solar is wasted |
+| MPPT target | Size to `daytime_fraction × avg_kwh`, not 85% of total consumption |
+| AI fraction timing | AI call runs before MPPT scenario generation so target_kw uses the real fraction |
+| Scenario cards | Selector button above each card (not a horizontal radio widget) for spatial alignment |
+| Manual UX | Symmetric ○/● button above card; no separate "Usar esta configuración" flow |
 
 ---
 

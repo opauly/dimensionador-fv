@@ -1,11 +1,26 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.1
+# Pauly&Co Solar Design Tool — Final Requirements v3.2
 
-**Version:** 3.1  
-**Date:** 2026-07-03  
+**Version:** 3.2  
+**Date:** 2026-07-05  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.1 → v3.2
+
+- Equipment catalog in Admin: upload panel/inverter datasheet PDF → AI (Claude Haiku) extracts all specs → editable form → save to DB. Supports multi-model datasheets (selectbox for variant).
+- Full CRUD for panels and inverters in Admin (add, edit, delete with two-step confirm).
+- MPPT algorithm rewritten: explores all valid (series × parallel) combos; picks A (below target), B (closest), C (above target) with genuinely different panel counts and bills.
+- Each MPPT scenario has a human-readable description explaining why it was generated and its string architecture.
+- Manual MPPT mode: live number inputs for panels-per-string and n_strings; immediate red/green validation rows for Voc, Vmp, current per MPPT; projection card updates on every change.
+- **Zero-export savings model** (Grid Zero does not inject to grid): `self_consumed = min(gen, avg_kwh × daytime_fraction)`; `grid_kwh = avg_kwh − self_consumed`; bill computed from `grid_kwh`; curtailed solar shown explicitly.
+- AI daytime fraction estimation: Claude Haiku analyzes installed loads profile and location to estimate what fraction of consumption occurs during solar hours (7am–5pm). Used as the key input to the savings model.
+- MPPT target sized to daytime consumption (`daytime_fraction × avg_kwh / avg_irradiance`) so scenarios span the saturation point and show differentiated bills.
+- Projection cards: selector button (○/●) directly above each card — auto and manual selections use identical interaction pattern.
+- Equipment spec cards: one spec per line (no multi-value concatenation).
+- Manual section layout: chips summary row + two-column body (validation bars left, projection card right).
+- Saturation warning when all scenarios exceed daytime consumption cap, with optimal kW shown.
 
 ## Change log v3 → v3.1
 
@@ -740,7 +755,12 @@ This keeps the Projects module useful years after installation.
 | 12 | Step 5 consumption modes | Three modes: (1) Upload PDF bill → AI extracts kWh history + estimates missing months seasonally; (2) Installed loads table → AI applies seasonal variation; (3) Manual entry. All modes compute Factura (₡) from DB tariff tiers. |
 | 13 | Tablero import | Inside "Cargas instaladas" expander. Image (JPEG/PNG) or PDF → Claude vision/document API extracts circuit list with W, Und, h/día, días/mes. Outputs to editable loads table. |
 | 14 | Source badge + overwrite warning | 12-month table shows a green pill badge indicating data origin. Switching to Aplicar when a different source is already loaded shows a st.warning. Editing kWh in any mode appends "· editada" to the badge. |
-| 15 | AI model split | `claude-haiku-4-5-20251001` for bill parsing, missing-month estimation, tablero extraction, and seasonal load estimation. Sonnet reserved for intro paragraph generation and future complex tasks. |
+| 15 | AI model split | `claude-haiku-4-5-20251001` for bill parsing, missing-month estimation, tablero extraction, seasonal load estimation, datasheet parsing, and daytime fraction estimation. Sonnet reserved for intro paragraph generation and future complex tasks. |
+| 16 | Zero-export energy model | Grid Zero does NOT export to the grid. Excess solar is curtailed. Bill = `estimate_bill_crc(grid_kwh)` where `grid_kwh = avg_kwh − min(gen, daytime_kwh)`. Net metering formula (`max(0, consumption − generation)`) is wrong for this system type. |
+| 17 | Daytime fraction AI call | Claude Haiku estimates `daytime_fraction` from the installed loads profile and city. This fraction is load-bearing for the savings model, not decorative. Cached in `w6_coverage_ai` per session. Default fallback = 0.45. |
+| 18 | MPPT target for zero-export | `target_kw = daytime_fraction × avg_kwh / avg_irradiance` — sizes to daytime consumption so auto scenarios span below/at/above the saturation point and produce differentiated bills. |
+| 19 | Scenario selection UX | Each scenario card (auto A/B/C and manual) has a `○/●` button directly above it. Clicking any button selects that option and deselects the others. No separate confirm/cancel flow. |
+| 20 | Datasheet parser location | `calculations/datasheet_parser.py` (not `ai/`), consistent with `bill_parser.py`, `tablero_parser.py`, and `load_estimator.py`. The `ai/` directory in the architecture diagram is aspirational; actual AI calls live in `calculations/`. |
 
 ---
 
