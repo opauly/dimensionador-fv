@@ -523,12 +523,119 @@ def step5_consumption() -> dict | None:
 
 # ── Step 6 — Equipment ────────────────────────────────────────────────────────
 
+def _mppt_param_row(label: str, value: str, ok: bool, limit_str: str) -> None:
+    color  = "#166534" if ok else "#991b1b"
+    bg     = "#f0fdf4" if ok else "#fef2f2"
+    border = "#86efac" if ok else "#fca5a5"
+    icon   = "✓" if ok else "✗"
+    # CSS grid gives stable 3-column alignment regardless of label length
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:44% 28% 28%;align-items:center;'
+        f'background:{bg};border:1px solid {border};border-radius:4px;'
+        f'padding:3px 10px;margin-bottom:3px;font-size:0.83rem;">'
+        f'<span style="color:{color};font-weight:600;">{icon}&nbsp;{label}</span>'
+        f'<span style="color:{color};text-align:center;">{value}</span>'
+        f'<span style="color:#6b7280;font-size:0.75rem;text-align:right;">{limit_str}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _estimate_daytime_fraction_ai(loads: list[dict], location: str) -> tuple[float, str]:
+    """
+    Call Claude Haiku to estimate the fraction of daily consumption that
+    occurs during solar-production hours (roughly 7 am – 5 pm).
+
+    Returns (daytime_fraction, explanatory_note).
+    Falls back to 0.45 if the AI call fails.
+    """
+    import os, json
+    try:
+        import anthropic
+        loads_text = json.dumps(loads, ensure_ascii=False) if loads else "No hay datos de cargas disponibles."
+        prompt = (
+            "Eres un ingeniero solar en Costa Rica. Analiza el perfil de cargas eléctricas de este proyecto "
+            f"y estima qué fracción del consumo total ocurre durante las horas de producción solar (7:00–17:00).\n\n"
+            f"Ubicación: {location}\n"
+            f"Cargas instaladas (JSON):\n{loads_text}\n\n"
+            "Considera: uso diurno de electrodomésticos, AC, bombas de agua, iluminación, etc. "
+            "Considera que la noche, la madrugada y días nublados también consumen energía de la red.\n\n"
+            "Responde SOLO con JSON (sin markdown):\n"
+            '{"daytime_fraction": 0.48, "note": "El perfil tiene uso significativo de AC y bomba de agua durante el día..."}'
+        )
+        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = resp.content[0].text.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            text = parts[1].lstrip("json").strip() if len(parts) > 1 else text
+        data = json.loads(text)
+        fraction = float(data.get("daytime_fraction") or 0.45)
+        fraction = max(0.1, min(0.9, fraction))
+        note = str(data.get("note") or "")
+        return fraction, note
+    except Exception:
+        return 0.45, ""
+
+
+def _scenario_projection(
+    system_kw: float,
+    avg_irradiance: float,
+    avg_kwh: float,
+    avg_bill_crc: float,
+    tariff_info: dict | None,
+    daytime_fraction: float = 0.45,
+) -> dict:
+    """
+    Zero-export model: no energy fed to grid; excess solar is curtailed.
+
+    Only the portion of generation that coincides with daytime consumption
+    can be used. Nighttime consumption is always sourced from the grid.
+
+      daytime_kwh   = avg_kwh × daytime_fraction   (consumption during solar hours)
+      self_consumed = min(gen, daytime_kwh)          (solar actually used on-site)
+      curtailed     = max(0, gen − daytime_kwh)      (solar that can't be absorbed)
+      grid_kwh      = avg_kwh − self_consumed        (still drawn from grid)
+      coverage      = self_consumed / avg_kwh         (always < 100 % due to nights)
+    """
+    from calculations.tariff_calculator import estimate_bill_crc as _est
+    gen = round(system_kw * avg_irradiance)
+
+    daytime_kwh   = avg_kwh * daytime_fraction
+    self_consumed = min(float(gen), daytime_kwh)
+    curtailed     = max(0, gen - int(daytime_kwh))       # wasted solar (curtailed)
+    grid_kwh      = max(0.0, avg_kwh - self_consumed)    # always > 0 because of nights
+
+    coverage = round(self_consumed / avg_kwh * 100, 1) if avg_kwh > 0 else 0.0
+    self_consumption_pct = round(self_consumed / gen * 100) if gen > 0 else 0
+
+    if tariff_info:
+        new_bill = _est(grid_kwh, tariff_info)
+        savings  = max(0, round(avg_bill_crc - new_bill))
+    else:
+        new_bill = None
+        savings  = None
+    return {
+        "gen": int(gen),
+        "grid_kwh": int(grid_kwh),
+        "coverage": coverage,
+        "curtailed": curtailed,
+        "new_bill": int(new_bill) if new_bill is not None else None,
+        "savings": savings,
+        "self_consumption_pct": self_consumption_pct,
+    }
+
+
 def step6_equipment() -> dict | None:
-    """Panel + inverter selection, MPPT validation, 3 scenarios."""
+    """Panel + inverter selection, MPPT validation, 3 auto scenarios + manual mode."""
     st.markdown("### Paso 6 — Equipos")
 
     from database.equipment_db import list_panels, list_inverters, list_monitoring_devices
-    from calculations.mppt import validate_string_design
+    from calculations.mppt import validate_string_design, check_design
 
     current = st.session_state.get("wizard_equipment", {})
     consumption = st.session_state.get("wizard_consumption", {})
@@ -550,106 +657,336 @@ def step6_equipment() -> dict | None:
     inverter_options = {f"{inv['brand']} {inv['model']} — {inv['kw']} kW": inv for inv in inverters}
     monitoring_options = {"— Sin monitoreo —": None} | {f"{m['brand']} {m['model']}": m for m in monitoring_devices}
 
-    # Default selections
-    current_panel_id = current.get("panel_id")
-    current_inverter_id = current.get("inverter_id")
-    current_monitoring_id = current.get("monitoring_id")
-
-    default_panel_idx = next((i for i, p in enumerate(panels) if p["id"] == current_panel_id), 0)
-    default_inv_idx = next((i for i, inv in enumerate(inverters) if inv["id"] == current_inverter_id), 0)
+    default_panel_idx = next((i for i, p in enumerate(panels) if p["id"] == current.get("panel_id")), 0)
+    default_inv_idx   = next((i for i, inv in enumerate(inverters) if inv["id"] == current.get("inverter_id")), 0)
 
     col1, col2 = st.columns(2)
     with col1:
-        panel_label = st.selectbox("Panel solar *", list(panel_options.keys()), index=default_panel_idx, key="w6_panel")
+        panel_label    = st.selectbox("Panel solar *", list(panel_options.keys()), index=default_panel_idx, key="w6_panel")
         selected_panel = panel_options[panel_label]
+        area_panel     = float(selected_panel.get("width_m") or 0) * float(selected_panel.get("height_m") or 0)
 
-        st.markdown(f"""
-        <div style="background:{BRAND_GREEN_LIGHT};border-radius:6px;padding:0.6rem 1rem;font-size:0.85rem;">
-        <b>{selected_panel['brand']} {selected_panel['model']}</b><br>
-        Voc: {selected_panel['voc']}V · Vmp: {selected_panel['vmp']}V<br>
-        Isc: {selected_panel['isc']}A · Imp: {selected_panel['imp']}A<br>
-        Área: {selected_panel.get('width_m', 0) * selected_panel.get('height_m', 0):.2f} m²<br>
-        Garantía: {selected_panel.get('warranty_product_yr', '—')} años producto / {selected_panel.get('warranty_power_yr', '—')} años potencia
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background:{BRAND_GREEN_LIGHT};border-radius:6px;padding:0.6rem 1rem;font-size:0.85rem;line-height:1.8;">'
+            f'<b>{selected_panel["brand"]} {selected_panel["model"]}</b><br>'
+            f'Voc: {selected_panel["voc"]} V<br>'
+            f'Vmp: {selected_panel["vmp"]} V<br>'
+            f'Isc: {selected_panel["isc"]} A<br>'
+            f'Imp: {selected_panel["imp"]} A<br>'
+            f'Área: {area_panel:.2f} m²<br>'
+            f'Garantía producto: {selected_panel.get("warranty_product_yr", "—")} años<br>'
+            f'Garantía potencia: {selected_panel.get("warranty_power_yr", "—")} años'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     with col2:
-        inv_label = st.selectbox("Inversor *", list(inverter_options.keys()), index=default_inv_idx, key="w6_inv")
+        inv_label        = st.selectbox("Inversor *", list(inverter_options.keys()), index=default_inv_idx, key="w6_inv")
         selected_inverter = inverter_options[inv_label]
 
-        st.markdown(f"""
-        <div style="background:{BRAND_GREEN_LIGHT};border-radius:6px;padding:0.6rem 1rem;font-size:0.85rem;">
-        <b>{selected_inverter['brand']} {selected_inverter['model']}</b><br>
-        Vmax: {selected_inverter.get('vmax', '—')}V · MPPT: {selected_inverter.get('vmin_mppt', '—')}–{selected_inverter.get('vmax_mppt', '—')}V<br>
-        Imax MPPT: {selected_inverter.get('imax_mppt', '—')}A · Canales: {selected_inverter.get('mppt_channels', '—')}<br>
-        Garantía: {selected_inverter.get('warranty_yr', '—')} años
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="background:{BRAND_GREEN_LIGHT};border-radius:6px;padding:0.6rem 1rem;font-size:0.85rem;line-height:1.8;">'
+            f'<b>{selected_inverter["brand"]} {selected_inverter["model"]}</b><br>'
+            f'Vmax: {selected_inverter.get("vmax", "—")} V<br>'
+            f'MPPT: {selected_inverter.get("vmin_mppt", "—")}–{selected_inverter.get("vmax_mppt", "—")} V<br>'
+            f'Imax MPPT: {selected_inverter.get("imax_mppt", "—")} A<br>'
+            f'Canales MPPT: {selected_inverter.get("mppt_channels", "—")}<br>'
+            f'Garantía: {selected_inverter.get("warranty_yr", "—")} años'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
-    # MPPT calculation
-    avg_kwh = consumption.get("avg_kwh", 0)
-    pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
+    # Clear manual selection when equipment changes
+    equip_key = f"{selected_panel['id']}_{selected_inverter['id']}"
+    if st.session_state.get("w6_equip_key") != equip_key:
+        st.session_state["w6_equip_key"] = equip_key
+        st.session_state.pop("w6_use_manual", None)
+        st.session_state.pop("w6_scenarios", None)
+        st.session_state.pop("w6_selected_scenario", None)
+
+    # ── Consumption + tariff context ──────────────────────────────────────────
+    avg_kwh        = consumption.get("avg_kwh", 0)
+    avg_bill_crc   = consumption.get("avg_bill_crc", 0)
+    pvgis_monthly  = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
     avg_irradiance = sum(pvgis_monthly) / 12 if pvgis_monthly else 127.0
 
-    target_kw = (0.85 * avg_kwh / avg_irradiance) if avg_irradiance > 0 else None
+    # Read AI coverage estimate early — it informs target_kw for MPPT sizing.
+    # Defaults to 0.45 until the AI call runs; after first "Calcular MPPT" the
+    # cached fraction is used so re-clicking recalculates with the real value.
+    coverage_ai      = st.session_state.get("w6_coverage_ai", {})
+    daytime_fraction = float(coverage_ai.get("fraction") or 0.45)
+    ai_note          = str(coverage_ai.get("note") or "")
+
+    # Zero-export target: size system to cover daytime consumption (not 100%),
+    # so scenarios span the useful range around the saturation point.
+    daytime_kwh = avg_kwh * daytime_fraction
+    target_kw   = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
+
+    utility = st.session_state.get("wizard_utility", {})
+    tariff_id = utility.get("tariff_type_id")
+    tariff_info: dict | None = None
+    if tariff_id:
+        try:
+            from database.tariffs_db import get_tariff_tiers
+            tariff_info = {
+                "access_charge_crc": utility.get("access_charge_crc", 0),
+                "bomberos_pct":      utility.get("bomberos_pct", 0.0175),
+                "iva_threshold_kwh": utility.get("iva_threshold_kwh", 280),
+                "tiers": get_tariff_tiers(tariff_id),
+            }
+        except Exception:
+            pass
+
+    # ── Auto MPPT scenarios ───────────────────────────────────────────────────
+
+    loads    = st.session_state.get("w5_loads_data", [])
+    location = site.get("city") or "Costa Rica"
 
     st.divider()
     if st.button("⚡ Calcular configuración MPPT", key="w6_calc_mppt"):
+        with st.spinner("Estimando autoconsumo con IA…"):
+            fraction, ai_note_new = _estimate_daytime_fraction_ai(loads, location)
+            st.session_state["w6_coverage_ai"] = {"fraction": fraction, "note": ai_note_new}
+            # Update locals so target_kw reflects the fresh AI fraction immediately
+            daytime_fraction = fraction
+            ai_note          = ai_note_new
+            daytime_kwh      = avg_kwh * daytime_fraction
+            target_kw        = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
         with st.spinner("Calculando escenarios de strings…"):
             scenarios = validate_string_design(selected_panel, selected_inverter, target_kw)
             st.session_state["w6_scenarios"] = scenarios
+            st.session_state.pop("w6_use_manual", None)
 
     scenarios = st.session_state.get("w6_scenarios", current.get("scenarios"))
-
-    selected_scenario_label = current.get("mppt_scenario", "B")
+    using_manual = st.session_state.get("w6_use_manual", False)
+    selected_scenario_label = st.session_state.get("w6_selected_scenario", current.get("mppt_scenario", "B"))
 
     if scenarios:
-        st.markdown("**Escenarios de diseño MPPT:**")
-
+        st.markdown("#### 🔁 Opción 1 — Configuración automática")
+        st.caption("El sistema calcula y propone tres configuraciones MPPT basadas en tu consumo y equipo seleccionado.")
         scenario_data = []
         for s in scenarios:
-            area = round(
-                s["total_panels"] * selected_panel.get("width_m", 1.134) * selected_panel.get("height_m", 2.278),
-                1,
-            )
             ok_icon = "✅" if s["within_limits"] else "⚠️"
             scenario_data.append({
-                "Escenario": f"Escenario {s['scenario']}",
-                "Paneles/string": s["panels_per_string"],
-                "Strings": s["strings"],
-                "Total paneles": s["total_panels"],
-                "Sistema (kW)": s["system_kw"],
-                "Área (m²)": area,
-                "Voc total (V)": s["voc_total"],
-                "Vmp total (V)": s["vmp_total"],
-                "Estado": ok_icon,
-                "Notas": s["notes"],
+                "Escenario":       f"Escenario {s['scenario']}",
+                "Paneles/string":  s["panels_per_string"],
+                "Strings":         s["strings"],
+                "Total paneles":   s["total_panels"],
+                "Sistema (kW)":    s["system_kw"],
+                "Área (m²)":       s.get("area_m2") or round(s["total_panels"] * area_panel, 1),
+                "Voc total (V)":   s["voc_total"],
+                "Vmp total (V)":   s["vmp_total"],
+                "Estado":          ok_icon,
+                "Notas":           s["notes"],
             })
-
         st.dataframe(pd.DataFrame(scenario_data), use_container_width=True, hide_index=True)
 
         valid_scenarios = [s for s in scenarios if s["within_limits"]]
         if not valid_scenarios:
             st.warning("Ningún escenario es válido con este par panel/inversor.")
         else:
-            scenario_opts = {f"Escenario {s['scenario']} — {s['total_panels']} paneles ({s['system_kw']} kW)": s["scenario"]
-                            for s in valid_scenarios}
-            default_sel_idx = next(
-                (i for i, v in enumerate(scenario_opts.values()) if v == selected_scenario_label),
-                min(1, len(valid_scenarios) - 1),
+            # ── Projection cards with inline selector ─────────────────────────
+            # Each column: [select button] + [card] — radio and card are aligned.
+            if not using_manual:
+                # Ensure selected_scenario_label is valid among valid scenarios
+                valid_labels = [s["scenario"] for s in valid_scenarios]
+                if selected_scenario_label not in valid_labels:
+                    selected_scenario_label = valid_labels[min(1, len(valid_labels) - 1)]
+
+            proj_cols = st.columns(len(scenarios))
+            for col, s in zip(proj_cols, scenarios):
+                is_sel   = (s["scenario"] == selected_scenario_label) and not using_manual
+                is_valid = s["within_limits"]
+                p = _scenario_projection(
+                    s["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc,
+                    tariff_info, daytime_fraction,
+                )
+                border = BRAND_GREEN if is_sel else "#d1d5db"
+                bg     = BRAND_GREEN_LIGHT if is_sel else "#f9fafb"
+                curtailed_line = (
+                    f'<span style="color:#92400e;">✂ Recorte solar: <b>{p["curtailed"]:,} kWh/mes</b></span><br>'
+                    if p["curtailed"] > 0 else
+                    f'<span style="color:#166534;font-size:0.75rem;">✓ Sin recorte solar</span><br>'
+                )
+                bill_line = (
+                    f'💳 Factura est.: <b>₡{p["new_bill"]:,}/mes</b><br>'
+                    if p["new_bill"] is not None else ""
+                )
+                savings_line = (
+                    f'<span style="color:#166534;">💰 Ahorro/mes: <b>₡{p["savings"]:,}</b></span><br>'
+                    if p["savings"] is not None else ""
+                )
+                desc = s.get("description", "")
+                ok_tag = "✅" if is_valid else "⚠️"
+                with col:
+                    # Selector button aligned above the card
+                    if is_valid:
+                        btn_label = f"{'●' if is_sel else '○'} Escenario {s['scenario']} — {s['total_panels']} paneles ({s['system_kw']} kW)"
+                        if st.button(btn_label, key=f"w6_sel_{s['scenario']}", use_container_width=True):
+                            st.session_state["w6_selected_scenario"] = s["scenario"]
+                            st.session_state["w6_use_manual"] = False
+                            st.rerun()
+                    elif not is_valid:
+                        st.markdown(
+                            f'<div style="font-size:0.8rem;color:#9ca3af;padding:0.3rem 0;">⚠️ Escenario {s["scenario"]} — fuera de límites</div>',
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown(
+                        f'<div style="border:2px solid {border};border-radius:8px;'
+                        f'padding:0.65rem 0.8rem;background:{bg};font-size:0.82rem;line-height:1.9;">'
+                        f'<div style="font-weight:700;font-size:0.88rem;color:#1E2D54;margin-bottom:0.2rem;">'
+                        f'Escenario {s["scenario"]} · {s["system_kw"]} kW</div>'
+                        f'<div style="font-size:0.72rem;color:#6b7280;margin-bottom:0.4rem;">{ok_tag} {desc}</div>'
+                        f'🔆 Generación: <b>{p["gen"]:,} kWh/mes</b><br>'
+                        f'📊 Cobertura: <b>{p["coverage"]}%</b><br>'
+                        f'🌙 Red (noches+nublados): <b>{p["grid_kwh"]:,} kWh/mes</b><br>'
+                        f'{curtailed_line}'
+                        f'{bill_line}'
+                        f'{savings_line}'
+                        f'<span style="color:#1d4ed8;">⚡ Autoconsumo: <b>{p["self_consumption_pct"]}%</b></span>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            st.markdown("&nbsp;", unsafe_allow_html=True)  # spacing after cards
+            # Warn if all scenarios exceed the daytime saturation point
+            all_saturated = all(
+                _scenario_projection(s["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction)["curtailed"] > 0
+                for s in scenarios
             )
-            sel_label = st.radio(
-                "Seleccionar escenario",
-                list(scenario_opts.keys()),
-                index=default_sel_idx,
-                key="w6_scenario_radio",
-                horizontal=True,
+            if all_saturated and len(scenarios) > 1:
+                optimal_kw = round(daytime_kwh / avg_irradiance, 2) if avg_irradiance > 0 else "—"
+                st.warning(
+                    f"⚠️ Los tres escenarios generan más que el consumo diurno estimado "
+                    f"({int(daytime_kwh):,} kWh/mes), por lo que la factura estimada es igual en todos. "
+                    f"Tamaño óptimo sin recorte para este perfil de cargas: **≈ {optimal_kw} kW**. "
+                    f"Recalcula MPPT para ver escenarios ajustados."
+                )
+            note_parts = []
+            if ai_note:
+                note_parts.append(f"🤖 <b>IA — Perfil de consumo:</b> {ai_note}")
+            note_parts.append(
+                "ℹ️ <b>Zero-export:</b> el excedente solar no se inyecta a la red — se descarta. "
+                "La cobertura está limitada por el consumo diurno estimado. "
+                "<b>Autoconsumo</b> = fracción de la generación que efectivamente desplaza consumo de la red."
             )
-            selected_scenario_label = scenario_opts[sel_label]
+            st.markdown(
+                " &nbsp;·&nbsp; ".join(
+                    f'<span style="font-size:0.73rem;color:#6b7280;">{p}</span>'
+                    for p in note_parts
+                ),
+                unsafe_allow_html=True,
+            )
     else:
         st.info("Haz clic en 'Calcular configuración MPPT' para ver los escenarios.")
 
-    # Monitoring (optional)
+    # ── Manual design ─────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("#### ⚙️ Opción 2 — Configuración manual")
+    st.caption("Ajusta los parámetros libremente y verifica los límites del inversor en tiempo real.")
+
+    b_scenario = next((s for s in (scenarios or []) if s["scenario"] == "B"), None)
+    default_series   = b_scenario["panels_per_string"] if b_scenario else 6
+    default_parallel = b_scenario["strings"]           if b_scenario else 2
+
+    mc1, mc2 = st.columns(2)
+    m_series   = mc1.number_input("Paneles en serie (por string)", min_value=1, max_value=50,
+                                   value=default_series, step=1, key="w6_m_series")
+    m_parallel = mc2.number_input("Strings en paralelo (total)",   min_value=1, max_value=50,
+                                   value=default_parallel, step=1, key="w6_m_parallel")
+
+    m = check_design(selected_panel, selected_inverter, m_series, m_parallel)
+
+    # Summary chips row
+    area_m2 = m.get("area_m2") or round(m["total_panels"] * area_panel, 1)
+    st.markdown(
+        f'<div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin:0.4rem 0 0.7rem;">'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'🔢 <b>{m["total_panels"]}</b> paneles</span>'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'⚡ <b>{m["system_kw"]} kW</b></span>'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'📐 <b>{area_m2} m²</b></span>'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'🔀 <b>{m["strings_per_mppt"]}</b> string/MPPT</span>'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'Voc <b>{m["voc_total"]} V</b></span>'
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
+        f'Vmp <b>{m["vmp_total"]} V</b></span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Two-column layout: validation bars left, projection card right
+    vmax      = float(selected_inverter.get("vmax") or 0)
+    vmin_mppt = float(selected_inverter.get("vmin_mppt") or 0)
+    vmax_mppt = float(selected_inverter.get("vmax_mppt") or 0)
+    imax_mppt = float(selected_inverter.get("imax_mppt") or 0)
+
+    left_col, right_col = st.columns([1, 1])
+
+    with left_col:
+        _mppt_param_row("Voc total",          f"{m['voc_total']} V",
+                        m["voc_total"] <= vmax,       f"≤ {vmax:.0f} V")
+        _mppt_param_row("Vmp total",          f"{m['vmp_total']} V",
+                        vmin_mppt <= m["vmp_total"] <= vmax_mppt, f"{vmin_mppt:.0f}–{vmax_mppt:.0f} V")
+        _mppt_param_row("Corriente por MPPT", f"{m['imp_per_mppt']} A",
+                        m["imp_per_mppt"] <= imax_mppt, f"≤ {imax_mppt:.0f} A")
+
+    with right_col:
+        # Selector button above the card — mirrors auto scenario buttons
+        can_select = m["within_limits"]
+        if can_select:
+            btn_label = f"{'●' if using_manual else '○'} Usar configuración manual — {m['total_panels']} paneles ({m['system_kw']} kW)"
+            if st.button(btn_label, key="w6_manual_on", use_container_width=True):
+                st.session_state["w6_use_manual"] = True
+                st.rerun()
+        else:
+            st.markdown(
+                '<div style="font-size:0.8rem;color:#9ca3af;padding:0.3rem 0;">'
+                '⚠️ Configuración manual — corrige los errores en rojo para poder seleccionarla</div>',
+                unsafe_allow_html=True,
+            )
+
+        if avg_kwh > 0:
+            mp = _scenario_projection(
+                m["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc,
+                tariff_info, daytime_fraction,
+            )
+            m_curtailed_line = (
+                f'<span style="color:#92400e;">✂ Recorte solar: <b>{mp["curtailed"]:,} kWh/mes</b></span><br>'
+                if mp["curtailed"] > 0 else
+                f'<span style="color:#166534;font-size:0.75rem;">✓ Sin recorte solar</span><br>'
+            )
+            m_bill_line    = f'💳 Factura est.: <b>₡{mp["new_bill"]:,}/mes</b><br>' if mp["new_bill"] is not None else ""
+            m_savings_line = (
+                f'<span style="color:#166534;">💰 Ahorro/mes: <b>₡{mp["savings"]:,}</b></span><br>'
+                if mp["savings"] is not None else ""
+            )
+            oversized_note = (
+                f'<div style="margin-top:0.4rem;font-size:0.72rem;color:#92400e;">'
+                f'⚠️ Solo el {mp["self_consumption_pct"]}% de la generación se usa — sistema sobredimensionado.</div>'
+                if mp["self_consumption_pct"] < 50 else ""
+            )
+            m_border = "#6366f1" if using_manual else "#d1d5db"
+            m_bg     = "#f5f3ff" if using_manual else "#f9fafb"
+            st.markdown(
+                f'<div style="border:2px solid {m_border};border-radius:8px;'
+                f'padding:0.65rem 0.8rem;background:{m_bg};font-size:0.82rem;line-height:1.9;">'
+                f'<div style="font-weight:700;font-size:0.88rem;color:#1E2D54;margin-bottom:0.3rem;">'
+                f'Proyección · {m["system_kw"]} kW</div>'
+                f'🔆 Generación: <b>{mp["gen"]:,} kWh/mes</b><br>'
+                f'📊 Cobertura: <b>{mp["coverage"]}%</b><br>'
+                f'🌙 Red (noches+nublados): <b>{mp["grid_kwh"]:,} kWh/mes</b><br>'
+                f'{m_curtailed_line}'
+                f'{m_bill_line}'
+                f'{m_savings_line}'
+                f'<span style="color:#1d4ed8;">⚡ Autoconsumo: <b>{mp["self_consumption_pct"]}%</b></span>'
+                f'{oversized_note}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── Monitoring + navigation ───────────────────────────────────────────────
     st.divider()
     mon_label = st.selectbox("Sistema de monitoreo (opcional)", list(monitoring_options.keys()), key="w6_mon")
     selected_monitoring = monitoring_options[mon_label]
@@ -661,26 +998,37 @@ def step6_equipment() -> dict | None:
             st.session_state["wizard_step"] = 5
             _autosave()
             st.rerun()
+
     with col_next:
-        can_continue = scenarios is not None and any(s["within_limits"] for s in scenarios)
+        can_continue = using_manual or (scenarios is not None and any(s["within_limits"] for s in scenarios))
         if st.button("Siguiente →", key="w6_next", type="primary", disabled=not can_continue):
-            chosen_scenario = next((s for s in scenarios if s["scenario"] == selected_scenario_label), scenarios[0])
+            if using_manual:
+                chosen_scenario = check_design(selected_panel, selected_inverter, m_series, m_parallel)
+                chosen_scenario["scenario"] = "M"
+                active_label = "M"
+            else:
+                chosen_scenario = next(
+                    (s for s in scenarios if s["scenario"] == selected_scenario_label),
+                    scenarios[0],
+                )
+                active_label = selected_scenario_label
+
             result = {
-                "panel_id": selected_panel["id"],
-                "panel": selected_panel,
-                "inverter_id": selected_inverter["id"],
-                "inverter": selected_inverter,
-                "mppt_scenario": selected_scenario_label,
+                "panel_id":        selected_panel["id"],
+                "panel":           selected_panel,
+                "inverter_id":     selected_inverter["id"],
+                "inverter":        selected_inverter,
+                "mppt_scenario":   active_label,
                 "chosen_scenario": chosen_scenario,
-                "scenarios": scenarios,
-                "monitoring_id": selected_monitoring["id"] if selected_monitoring else None,
-                "monitoring": selected_monitoring,
+                "scenarios":       scenarios or [],
+                "monitoring_id":   selected_monitoring["id"] if selected_monitoring else None,
+                "monitoring":      selected_monitoring,
             }
             st.session_state["wizard_equipment"] = result
             return result
 
-    if not scenarios:
-        st.caption("Calcula los escenarios MPPT antes de continuar.")
+    if not can_continue:
+        st.caption("Calcula los escenarios MPPT o configura un diseño manual válido para continuar.")
 
     return None
 

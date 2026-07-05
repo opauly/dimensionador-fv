@@ -29,7 +29,7 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.markdown("## ☀️ Pauly&Co")
+    st.markdown("##Pauly&Co")
     st.markdown("**Solar Design Tool**")
     st.divider()
     _db_ok = False

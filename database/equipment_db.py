@@ -27,11 +27,17 @@ def get_panel(panel_id: str) -> dict | None:
 
 
 def upsert_panel(data: dict) -> dict:
-    raise NotImplementedError("Phase 7")
+    """Insert or update a panel. Include 'id' to update an existing row."""
+    row = {k: v for k, v in data.items() if v is not None and k != "id"}
+    if data.get("id"):
+        result = get_client().table("panels").update(row).eq("id", data["id"]).execute()
+    else:
+        result = get_client().table("panels").insert(row).execute()
+    return result.data[0]
 
 
 def delete_panel(panel_id: str) -> None:
-    raise NotImplementedError("Phase 7")
+    get_client().table("panels").delete().eq("id", panel_id).execute()
 
 
 def list_inverters() -> list[dict]:
@@ -58,7 +64,17 @@ def get_inverter(inverter_id: str) -> dict | None:
 
 
 def upsert_inverter(data: dict) -> dict:
-    raise NotImplementedError("Phase 7")
+    """Insert or update an inverter. Include 'id' to update an existing row."""
+    row = {k: v for k, v in data.items() if v is not None and k != "id"}
+    if data.get("id"):
+        result = get_client().table("inverters").update(row).eq("id", data["id"]).execute()
+    else:
+        result = get_client().table("inverters").insert(row).execute()
+    return result.data[0]
+
+
+def delete_inverter(inverter_id: str) -> None:
+    get_client().table("inverters").delete().eq("id", inverter_id).execute()
 
 
 def list_batteries() -> list[dict]:
