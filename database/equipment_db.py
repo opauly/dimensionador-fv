@@ -102,3 +102,30 @@ def list_monitoring_devices() -> list[dict]:
         .execute()
     )
     return result.data or []
+
+
+# ── Service defaults ──────────────────────────────────────────────────────────
+
+def list_service_defaults() -> list[dict]:
+    result = (
+        get_client()
+        .table("service_defaults")
+        .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order")
+        .order("sort_order")
+        .execute()
+    )
+    return result.data or []
+
+
+def upsert_service_default(data: dict) -> dict:
+    """Insert or update a service default. Include 'id' to update an existing row."""
+    row = {k: v for k, v in data.items() if k != "id" and v is not None}
+    if data.get("id"):
+        result = get_client().table("service_defaults").update(row).eq("id", data["id"]).execute()
+    else:
+        result = get_client().table("service_defaults").insert(row).execute()
+    return result.data[0]
+
+
+def delete_service_default(service_id: str) -> None:
+    get_client().table("service_defaults").delete().eq("id", service_id).execute()

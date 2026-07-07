@@ -888,35 +888,6 @@ def step6_equipment() -> dict | None:
     default_series   = b_scenario["panels_per_string"] if b_scenario else 6
     default_parallel = b_scenario["strings"]           if b_scenario else 2
 
-    mc1, mc2 = st.columns(2)
-    m_series   = mc1.number_input("Paneles en serie (por string)", min_value=1, max_value=50,
-                                   value=default_series, step=1, key="w6_m_series")
-    m_parallel = mc2.number_input("Strings en paralelo (total)",   min_value=1, max_value=50,
-                                   value=default_parallel, step=1, key="w6_m_parallel")
-
-    m = check_design(selected_panel, selected_inverter, m_series, m_parallel)
-
-    # Summary chips row
-    area_m2 = m.get("area_m2") or round(m["total_panels"] * area_panel, 1)
-    st.markdown(
-        f'<div style="display:flex;gap:0.6rem;flex-wrap:wrap;margin:0.4rem 0 0.7rem;">'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'🔢 <b>{m["total_panels"]}</b> paneles</span>'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'⚡ <b>{m["system_kw"]} kW</b></span>'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'📐 <b>{area_m2} m²</b></span>'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'🔀 <b>{m["strings_per_mppt"]}</b> string/MPPT</span>'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'Voc <b>{m["voc_total"]} V</b></span>'
-        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 10px;font-size:0.82rem;">'
-        f'Vmp <b>{m["vmp_total"]} V</b></span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # Two-column layout: validation bars left, projection card right
     vmax      = float(selected_inverter.get("vmax") or 0)
     vmin_mppt = float(selected_inverter.get("vmin_mppt") or 0)
     vmax_mppt = float(selected_inverter.get("vmax_mppt") or 0)
@@ -925,6 +896,35 @@ def step6_equipment() -> dict | None:
     left_col, right_col = st.columns([1, 1])
 
     with left_col:
+        # Inputs
+        m_series   = st.number_input("Paneles en serie (por string)", min_value=1, max_value=50,
+                                     value=default_series, step=1, key="w6_m_series")
+        m_parallel = st.number_input("Strings en paralelo (total)",   min_value=1, max_value=50,
+                                     value=default_parallel, step=1, key="w6_m_parallel")
+
+        m = check_design(selected_panel, selected_inverter, m_series, m_parallel)
+
+        # Summary chips
+        area_m2 = m.get("area_m2") or round(m["total_panels"] * area_panel, 1)
+        st.markdown(
+            f'<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.4rem 0 0.7rem;">'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'🔢 <b>{m["total_panels"]}</b> paneles</span>'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'⚡ <b>{m["system_kw"]} kW</b></span>'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'📐 <b>{area_m2} m²</b></span>'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'🔀 <b>{m["strings_per_mppt"]}</b> str/MPPT</span>'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'Voc <b>{m["voc_total"]} V</b></span>'
+            f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;padding:2px 9px;font-size:0.8rem;">'
+            f'Vmp <b>{m["vmp_total"]} V</b></span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Validation bars
         _mppt_param_row("Voc total",          f"{m['voc_total']} V",
                         m["voc_total"] <= vmax,       f"≤ {vmax:.0f} V")
         _mppt_param_row("Vmp total",          f"{m['vmp_total']} V",
@@ -933,7 +933,7 @@ def step6_equipment() -> dict | None:
                         m["imp_per_mppt"] <= imax_mppt, f"≤ {imax_mppt:.0f} A")
 
     with right_col:
-        # Selector button above the card — mirrors auto scenario buttons
+        # Selector button — mirrors auto scenario buttons
         can_select = m["within_limits"]
         if can_select:
             btn_label = f"{'●' if using_manual else '○'} Usar configuración manual — {m['total_panels']} paneles ({m['system_kw']} kW)"
@@ -1035,34 +1035,107 @@ def step6_equipment() -> dict | None:
 
 # ── Step 7 — Costs ───────────────────────────────────────────────────────────
 
-_DEFAULT_LINE_ITEMS = [
-    {"item": "Paneles solares", "item_en": "Solar panels",
-     "qty": None, "unit_cost": 0.0, "specs": "", "specs_en": ""},
-    {"item": "Inversores", "item_en": "Inverters",
-     "qty": 1, "unit_cost": 0.0, "specs": "", "specs_en": ""},
+_IVA_OPTIONS = ["0%", "13%"]
+
+def _iva_str(pct: float) -> str:
+    return "13%" if float(pct or 0) >= 0.1 else "0%"
+
+def _iva_float(s: str) -> float:
+    return 0.13 if "13" in str(s or "") else 0.0
+
+# Fallback service list used when service_defaults table is unavailable
+_FALLBACK_SERVICES: list[dict] = [
     {"item": "Permiso de Interconexión", "item_en": "Interconnection Permit",
-     "qty": None, "unit_cost": 1000.0,
+     "unit_cost_usd": 1000.0, "iva_pct": 0.0,
      "specs": "Requerido por el Reglamento de Generación Distribuida",
-     "specs_en": "Required by the Distributed Generation Regulation"},
+     "specs_en": "Required by the Distributed Generation Regulation", "enabled": True},
     {"item": "Diseño Eléctrico y Administración", "item_en": "Electrical Design & Management",
-     "qty": None, "unit_cost": 0.0,
+     "unit_cost_usd": 0.0, "iva_pct": 0.13,
      "specs": "Estudios preliminares, diseño eléctrico, inspección del sitio y gestión",
-     "specs_en": "Preliminary studies, electrical design, site inspection and management"},
+     "specs_en": "Preliminary studies, electrical design, site inspection and management", "enabled": True},
     {"item": "Mano de obra", "item_en": "Labor",
-     "qty": None, "unit_cost": 0.0,
+     "unit_cost_usd": 0.0, "iva_pct": 0.13,
      "specs": "Instalación y costos relacionados con la obra",
-     "specs_en": "Installation and costs related to the project"},
+     "specs_en": "Installation and costs related to the project", "enabled": True},
     {"item": "Materiales eléctricos", "item_en": "Electrical materials",
-     "qty": None, "unit_cost": 0.0,
+     "unit_cost_usd": 0.0, "iva_pct": 0.13,
      "specs": "Materiales eléctricos y montaje solar",
-     "specs_en": "Electrical materials and solar mounting"},
-    {"item": "Sistema de monitoreo remoto", "item_en": "Remote monitoring system",
-     "qty": 1, "unit_cost": 0.0, "specs": "", "specs_en": ""},
+     "specs_en": "Electrical materials and solar mounting", "enabled": True},
+    {"item": "Transporte de equipo", "item_en": "Equipment transport",
+     "unit_cost_usd": 0.0, "iva_pct": 0.13,
+     "specs": "Transporte e instalación de equipo en sitio",
+     "specs_en": "Equipment transport and on-site delivery", "enabled": True},
 ]
 
 
+def _load_service_defaults() -> list[dict]:
+    """Return enabled service defaults from DB; fall back to _FALLBACK_SERVICES."""
+    try:
+        from database.equipment_db import list_service_defaults
+        rows = list_service_defaults()
+        if rows:
+            return [r for r in rows if r.get("enabled", True)]
+    except Exception:
+        pass
+    return _FALLBACK_SERVICES
+
+
+def _get_current_prices(panel: dict, inverter: dict, monitoring: dict | None) -> dict[str, float]:
+    """Fetch live prices from DB for equipment + service defaults.
+    Falls back to session-state values if DB call fails."""
+    prices: dict[str, float] = {}
+    try:
+        from database.equipment_db import get_panel, get_inverter
+        if panel and panel.get("id"):
+            fresh = get_panel(panel["id"])
+            prices["Paneles solares"] = round(float((fresh or panel).get("cost_usd") or 0), 2)
+        elif panel:
+            prices["Paneles solares"] = round(float(panel.get("cost_usd") or 0), 2)
+        if inverter and inverter.get("id"):
+            fresh = get_inverter(inverter["id"])
+            prices["Inversores"] = round(float((fresh or inverter).get("cost_usd") or 0), 2)
+        elif inverter:
+            prices["Inversores"] = round(float(inverter.get("cost_usd") or 0), 2)
+    except Exception:
+        if panel:
+            prices["Paneles solares"] = round(float(panel.get("cost_usd") or 0), 2)
+        if inverter:
+            prices["Inversores"] = round(float(inverter.get("cost_usd") or 0), 2)
+    if monitoring:
+        try:
+            from database.supabase_client import get_client
+            r = (get_client().table("monitoring_devices")
+                 .select("cost_usd").eq("id", monitoring["id"]).single().execute())
+            prices["Sistema de monitoreo remoto"] = round(float((r.data or {}).get("cost_usd") or 0), 2)
+        except Exception:
+            prices["Sistema de monitoreo remoto"] = round(float(monitoring.get("cost_usd") or 0), 2)
+    for svc in _load_service_defaults():
+        prices[svc["item"]] = round(float(svc.get("unit_cost_usd") or 0), 2)
+    return prices
+
+
+def _refresh_prices(
+    line_items: list[dict],
+    panel: dict,
+    inverter: dict,
+    monitoring: dict | None,
+) -> tuple[list[dict], int]:
+    """Return (updated_line_items, n_changed). Only unit_cost is touched; qty, IVA, etc. are preserved."""
+    price_map = _get_current_prices(panel, inverter, monitoring)
+    updated, changes = [], 0
+    for li in line_items:
+        new_li = dict(li)
+        if li.get("item") in price_map:
+            new_price = price_map[li["item"]]
+            if abs(new_price - float(li.get("unit_cost") or 0)) > 0.001:
+                new_li["unit_cost"] = new_price
+                changes += 1
+        updated.append(new_li)
+    return updated, changes
+
+
 def step7_costs() -> dict | None:
-    """Line items table, IVA toggle, totals. Returns costs dict."""
+    """Line items table with per-row IVA, totals. Returns costs dict."""
     st.markdown("### Paso 7 — Detalles de costos")
 
     current = st.session_state.get("wizard_costs", {})
@@ -1075,54 +1148,106 @@ def step7_costs() -> dict | None:
     chosen_scenario = equipment.get("chosen_scenario", {})
     panel_count = chosen_scenario.get("total_panels", 0)
 
-    # Build initial line items from equipment selection
     if current.get("line_items"):
         line_items = current["line_items"]
+        # Backfill iva_pct for items saved before per-row IVA was added
+        for li in line_items:
+            if "iva_pct" not in li:
+                li["iva_pct"] = 0.0
     else:
+        # Fetch live prices from DB (session-state equipment dicts may have stale cost_usd)
+        live_prices = _get_current_prices(panel, inverter, monitoring)
+
+        # Equipment items (IVA-exempt)
         line_items = []
-        for item in _DEFAULT_LINE_ITEMS:
-            row = dict(item)
-            if row["item"] == "Paneles solares" and panel:
-                row["qty"] = panel_count
-                row["specs"] = f"{panel.get('brand', '')} {panel.get('model', '')} {panel.get('wp', '')}W"
-                row["specs_en"] = row["specs"]
-                cost = panel.get("cost_usd") or 0.0
-                row["unit_cost"] = round(cost, 2)
-            elif row["item"] == "Inversores" and inverter:
-                row["qty"] = 1
-                row["specs"] = f"{inverter.get('brand', '')} {inverter.get('model', '')}"
-                row["specs_en"] = row["specs"]
-                row["unit_cost"] = round(inverter.get("cost_usd") or 0.0, 2)
-            elif row["item"] == "Sistema de monitoreo remoto":
-                if monitoring:
-                    row["specs"] = f"{monitoring.get('brand', '')} {monitoring.get('model', '')}"
-                    row["specs_en"] = row["specs"]
-                    row["unit_cost"] = round(monitoring.get("cost_usd") or 0.0, 2)
-                else:
-                    continue  # skip if no monitoring selected
-            elif row["item"] == "Permiso de Interconexión":
-                row["unit_cost"] = float(consumption.get("interconnection_permit_usd", 1000.0))
+        if panel:
+            line_items.append({
+                "item": "Paneles solares", "item_en": "Solar panels",
+                "qty": panel_count,
+                "unit_cost": live_prices.get("Paneles solares", 0.0),
+                "iva_pct": 0.0,
+                "specs": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
+                "specs_en": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
+            })
+        if inverter:
+            line_items.append({
+                "item": "Inversores", "item_en": "Inverters",
+                "qty": 1,
+                "unit_cost": live_prices.get("Inversores", 0.0),
+                "iva_pct": 0.0,
+                "specs": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
+                "specs_en": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
+            })
+
+        # Service items from DB (or fallback) — use live_prices for unit_cost
+        for svc in _load_service_defaults():
+            item_name = svc["item"]
+            row: dict = {
+                "item":      item_name,
+                "item_en":   svc.get("item_en", item_name),
+                "qty":       None,
+                "unit_cost": live_prices.get(item_name, float(svc.get("unit_cost_usd") or 0)),
+                "iva_pct":   float(svc.get("iva_pct") or 0),
+                "specs":     svc.get("specs", ""),
+                "specs_en":  svc.get("specs_en", svc.get("specs", "")),
+            }
+            if row["item"] == "Permiso de Interconexión":
+                row["unit_cost"] = float(consumption.get("interconnection_permit_usd") or row["unit_cost"])
             line_items.append(row)
 
-    # Editable table: item, qty, unit_cost, total (computed)
-    df = pd.DataFrame([{
-        "Descripción (ES)": r["item"],
-        "Descripción (EN)": r.get("item_en", r["item"]),
-        "Qty": r.get("qty") or "",
-        "Costo unitario (USD)": r["unit_cost"],
-        "Especificaciones": r.get("specs", ""),
-    } for r in line_items])
+        # Monitoring device (IVA-exempt equipment)
+        if monitoring:
+            line_items.append({
+                "item": "Sistema de monitoreo remoto", "item_en": "Remote monitoring system",
+                "qty": 1,
+                "unit_cost": live_prices.get("Sistema de monitoreo remoto", 0.0),
+                "iva_pct": 0.0,
+                "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
+                "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
+            })
 
-    st.caption("Edita cantidades y costos. Los totales se calculan automáticamente.")
+    # ── Refresh prices button ─────────────────────────────────────────────────
+    _, c_refresh = st.columns([6, 2])
+    if c_refresh.button(
+        "🔄 Refrescar precios",
+        key="w7_refresh_prices",
+        use_container_width=True,
+        help="Actualiza los precios unitarios con los valores actuales del catálogo. "
+             "No modifica cantidades, IVA ni filas personalizadas.",
+    ):
+        refreshed, n = _refresh_prices(line_items, panel, inverter, monitoring)
+        st.session_state["wizard_costs"] = {
+            **st.session_state.get("wizard_costs", {}),
+            "line_items": refreshed,
+        }
+        if n:
+            st.toast(f"✅ {n} precio(s) actualizado(s).", icon="✅")
+        else:
+            st.toast("Los precios ya están al día.", icon="ℹ️")
+        st.rerun()
+
+    df = pd.DataFrame([{
+        "Descripción (ES)":  r["item"],
+        "Descripción (EN)":  r.get("item_en", r["item"]),
+        "Qty":               float(r["qty"]) if r.get("qty") not in (None, "") else None,
+        "Precio unit. (USD)": float(r["unit_cost"] or 0),
+        "IVA":               _iva_str(r.get("iva_pct", 0)),
+        "Especificaciones":  r.get("specs", ""),
+    } for r in line_items])
 
     edited = st.data_editor(
         df,
         column_config={
-            "Descripción (ES)": st.column_config.TextColumn(width="medium"),
-            "Descripción (EN)": st.column_config.TextColumn(width="medium"),
-            "Qty": st.column_config.TextColumn(width="small"),
-            "Costo unitario (USD)": st.column_config.NumberColumn(min_value=0, format="$%.2f", width="small"),
-            "Especificaciones": st.column_config.TextColumn(width="large"),
+            "Descripción (ES)":   st.column_config.TextColumn(width="medium"),
+            "Descripción (EN)":   st.column_config.TextColumn(width="medium"),
+            "Qty":                st.column_config.NumberColumn(
+                                      min_value=0, step=1, format="%.0f", width="small"),
+            "Precio unit. (USD)": st.column_config.NumberColumn(
+                                      min_value=0, format="$%.2f", width="small"),
+            "IVA":                st.column_config.SelectboxColumn(
+                                      options=_IVA_OPTIONS, width="small", required=True,
+                                      help="IVA aplicable a este producto/servicio"),
+            "Especificaciones":   st.column_config.TextColumn(width="large"),
         },
         use_container_width=True,
         num_rows="dynamic",
@@ -1130,38 +1255,46 @@ def step7_costs() -> dict | None:
         key="w7_table",
     )
 
-    # Compute totals
-    def _row_total(row: pd.Series) -> float:
+    # Per-row totals
+    edited["IVA"] = edited["IVA"].fillna("0%")
+
+    def _row_subtotal(row: pd.Series) -> float:
         qty_raw = row["Qty"]
         try:
-            qty = 1.0 if pd.isna(qty_raw) or qty_raw == "" else float(qty_raw)
+            qty = 1.0 if pd.isna(qty_raw) or qty_raw is None else float(qty_raw)
         except (ValueError, TypeError):
             qty = 1.0
-        return round(qty * float(row["Costo unitario (USD)"] or 0), 2)
+        return round(qty * float(row["Precio unit. (USD)"] or 0), 2)
 
-    edited["Total (USD)"] = edited.apply(_row_total, axis=1)
-    subtotal = round(edited["Total (USD)"].sum(), 2)
+    row_subtotals = edited.apply(_row_subtotal, axis=1)
+    row_iva_pcts  = edited["IVA"].apply(_iva_float)
+    row_iva_amts  = (row_subtotals * row_iva_pcts).round(2)
 
-    iva_rate = st.radio("IVA", ["0% (exento)", "13%"], horizontal=True,
-                        index=0 if current.get("iva_rate", 0) == 0 else 1,
-                        key="w7_iva")
-    iva_pct = 0.0 if "0%" in iva_rate else 0.13
-    iva_amount = round(subtotal * iva_pct, 2)
-    total = round(subtotal + iva_amount, 2)
+    subtotal   = round(row_subtotals.sum(), 2)
+    iva_amount = round(row_iva_amts.sum(), 2)
+    total      = round(subtotal + iva_amount, 2)
 
     panel_wp_total = panel_count * panel.get("wp", 0)
     cost_per_wp = round(total / panel_wp_total, 3) if panel_wp_total else 0.0
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Subtotal", f"${subtotal:,.2f}")
-    with col2:
-        st.metric(f"IVA ({iva_rate})", f"${iva_amount:,.2f}")
-    with col3:
-        st.metric("TOTAL", f"${total:,.2f}")
-
-    if cost_per_wp:
-        st.caption(f"${cost_per_wp:.2f}/Wp")
+    # Invoice-footer totals
+    wp_line = f'<tr><td style="padding:4px 20px;font-size:0.78rem;color:#9ca3af;" colspan="2">${cost_per_wp:.2f}/Wp</td></tr>' if cost_per_wp else ""
+    st.markdown(
+        f'<div style="display:flex;justify-content:flex-end;margin-top:4px;">'
+        f'<table style="border-collapse:collapse;font-size:0.9rem;">'
+        f'<tr>'
+        f'<td style="padding:5px 20px;color:#6b7280;white-space:nowrap;">Subtotal (sin IVA)</td>'
+        f'<td style="padding:5px 20px;text-align:right;font-weight:500;white-space:nowrap;">${subtotal:,.2f}</td>'
+        f'</tr><tr>'
+        f'<td style="padding:5px 20px;color:#6b7280;">IVA</td>'
+        f'<td style="padding:5px 20px;text-align:right;font-weight:500;">${iva_amount:,.2f}</td>'
+        f'</tr><tr style="border-top:2px solid #e5e7eb;">'
+        f'<td style="padding:8px 20px;font-weight:700;font-size:1.05rem;">TOTAL</td>'
+        f'<td style="padding:8px 20px;text-align:right;font-weight:700;font-size:1.05rem;">${total:,.2f}</td>'
+        f'</tr>{wp_line}'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
 
     st.divider()
     col_back, _, col_next = st.columns([1, 3, 1])
@@ -1173,28 +1306,33 @@ def step7_costs() -> dict | None:
     with col_next:
         can_continue = total > 0
         if st.button("Siguiente →", key="w7_next", type="primary", disabled=not can_continue):
-            # Rebuild line_items from edited df
+            original_lookup = {r["item"]: r for r in line_items}
             updated_items = []
-            original_items_lookup = {r["item"]: r for r in line_items}
-            for _, row in edited.iterrows():
+            for (_, row), sub_t in zip(edited.iterrows(), row_subtotals):
                 desc_es = row["Descripción (ES)"]
-                original = original_items_lookup.get(desc_es, {})
+                original = original_lookup.get(desc_es, {})
+                qty_raw  = row["Qty"]
+                try:
+                    qty_parsed = None if pd.isna(qty_raw) or qty_raw is None else qty_raw
+                except (ValueError, TypeError):
+                    qty_parsed = None
+                iva_pct_val = _iva_float(row["IVA"])
                 updated_items.append({
-                    "item": desc_es,
-                    "item_en": row["Descripción (EN)"],
-                    "qty": None if pd.isna(row["Qty"]) or row["Qty"] == "" else row["Qty"],
-                    "unit_cost": float(row["Costo unitario (USD)"] or 0),
-                    "total": float(row["Total (USD)"]),
-                    "specs": row["Especificaciones"],
-                    "specs_en": original.get("specs_en", row["Especificaciones"]),
+                    "item":      desc_es,
+                    "item_en":   row["Descripción (EN)"],
+                    "qty":       qty_parsed,
+                    "unit_cost": float(row["Precio unit. (USD)"] or 0),
+                    "total":     float(sub_t),
+                    "iva_pct":   iva_pct_val,
+                    "specs":     row["Especificaciones"],
+                    "specs_en":  original.get("specs_en", row["Especificaciones"]),
                 })
             result = {
-                "line_items": updated_items,
-                "iva_rate": iva_pct,
-                "subtotal_usd": subtotal,
-                "iva_usd": iva_amount,
-                "total_usd": total,
-                "cost_per_wp": cost_per_wp,
+                "line_items":    updated_items,
+                "subtotal_usd":  subtotal,
+                "iva_usd":       iva_amount,
+                "total_usd":     total,
+                "cost_per_wp":   cost_per_wp,
             }
             st.session_state["wizard_costs"] = result
             return result
@@ -1295,42 +1433,89 @@ def step8_review() -> None:
     pct_savings = avg_billing.get("pct_savings", 0)
     area_m2 = round(panel_count * panel.get("width_m", 1.134) * panel.get("height_m", 2.278), 1)
 
-    # ── Summary cards ────────────────────────────────────────────────────────
-    st.markdown("#### Resumen técnico")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Sistema", f"{system_kw:.2f} kW")
-    with c2:
-        st.metric("Paneles", str(panel_count))
-    with c3:
-        st.metric("Área", f"{area_m2} m²")
-    with c4:
-        st.metric("$/Wp", f"${costs.get('cost_per_wp', 0):.2f}")
+    # ── Summary panel ─────────────────────────────────────────────────────────
+    def _kv(label: str, value: str, subtitle: str = "", accent: bool = False) -> str:
+        color = "#0d9488" if accent else "#1e293b"
+        sub = (f'<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px;'
+               f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">'
+               f'{subtitle}</div>') if subtitle else ""
+        return (
+            f'<div style="min-width:100px;">'
+            f'<div style="font-size:0.68rem;color:#9ca3af;text-transform:uppercase;'
+            f'letter-spacing:0.05em;margin-bottom:3px;">{label}</div>'
+            f'<div style="font-size:0.95rem;font-weight:600;color:{color};">{value}</div>'
+            f'{sub}</div>'
+        )
 
+    _hr  = '<div style="border-top:1px solid #e5e7eb;margin:14px 0;"></div>'
+    _row = 'display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start;'
+    _sec = ('font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;'
+            'letter-spacing:0.07em;margin-bottom:10px;')
+
+    panel_sub    = f"{panel.get('brand','')} {panel.get('model','')}".strip()
+    inverter_sub = f"{inverter.get('brand','')} {inverter.get('model','')}".strip()
+    inv_qty = next(
+        (int(float(li["qty"])) for li in costs.get("line_items", [])
+         if li.get("item") == "Inversores" and li.get("qty")), 1
+    )
+
+    html = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:20px 24px;">'
+
+    # ── Técnico ──────────────────────────────────────────────────────────────
+    html += f'<div style="{_sec}">Técnico</div>'
+    html += f'<div style="{_row}">'
+    html += _kv("Sistema", f"{system_kw:.2f} kW")
+    html += _kv("Paneles", str(panel_count), subtitle=panel_sub)
+    html += _kv("Inversores", str(inv_qty), subtitle=inverter_sub)
+    html += _kv("Área", f"{area_m2} m²")
+    html += '</div>'
+
+    # ── Costos del proyecto ───────────────────────────────────────────────────
+    html += _hr
+    html += f'<div style="{_sec}">Costos del proyecto</div>'
+    html += f'<div style="{_row}">'
+    html += _kv("$/Wp", f"${costs.get('cost_per_wp', 0):.2f}")
+    html += _kv("Subtotal", f"${costs.get('subtotal_usd', 0):,.2f}")
+    html += _kv("IVA", f"${costs.get('iva_usd', 0):,.2f}")
+    html += _kv("Total", f"${costs.get('total_usd', 0):,.2f}", accent=True)
+    html += '</div>'
+
+    # ── Facturación estimada ─────────────────────────────────────────────────
     if avg_billing:
-        st.markdown("#### Facturación estimada (promedio mensual)")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Consumo actual", f"{avg_billing.get('consumption_kwh', 0):,.0f} kWh")
-            st.metric("Factura actual", f"₡{avg_billing.get('bill_crc', 0):,.0f}")
-        with c2:
-            st.metric("Generación solar", f"{avg_billing.get('generation_kwh', 0):,.0f} kWh")
-            st.metric("Nueva factura", f"₡{avg_billing.get('new_bill_crc', 0):,.0f}")
-        with c3:
-            st.metric("Ahorro mensual", f"₡{avg_billing.get('savings_crc', 0):,.0f}")
-            st.metric("Reducción", f"{pct_savings:.1f}%")
+        html += _hr
+        html += f'<div style="{_sec}">Facturación estimada · promedio mensual</div>'
+        html += '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;">'
 
+        # Pre-solar (no highlight)
+        html += f'<div style="{_row}gap:28px;">'
+        html += _kv("Consumo actual", f"{avg_billing.get('consumption_kwh', 0):,.0f} kWh")
+        html += _kv("Factura actual", f"₡{avg_billing.get('bill_crc', 0):,.0f}")
+        html += '</div>'
+
+        # Solar impact (green box)
+        html += ('<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
+                 'padding:10px 16px;display:flex;gap:28px;flex-wrap:wrap;">')
+        html += _kv("Generación solar", f"{avg_billing.get('generation_kwh', 0):,.0f} kWh", accent=True)
+        html += _kv("Nueva factura", f"₡{avg_billing.get('new_bill_crc', 0):,.0f}", accent=True)
+        html += _kv("Ahorro mensual", f"₡{avg_billing.get('savings_crc', 0):,.0f}", accent=True)
+        html += _kv("Reducción", f"{pct_savings:.1f}%", accent=True)
+        html += '</div>'
+
+        html += '</div>'  # outer flex
+
+    # ── Proyección financiera ─────────────────────────────────────────────────
     if savings_year1_usd > 0:
-        st.markdown("#### Beneficios financieros")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("Ahorro año 1", f"${savings_year1_usd:,.0f}")
-        with c2:
-            st.metric("Ahorro 25 años", f"${savings_25yr_usd:,.0f}")
-        with c3:
-            st.metric("TIR", f"{irr_pct:.2f}%")
-        with c4:
-            st.metric("ROI", f"{roi_years:.2f} años")
+        html += _hr
+        html += f'<div style="{_sec}">Proyección financiera</div>'
+        html += f'<div style="{_row}">'
+        html += _kv("Ahorro año 1", f"${savings_year1_usd:,.0f}")
+        html += _kv("Ahorro 25 años", f"${savings_25yr_usd:,.0f}")
+        html += _kv("TIR", f"{irr_pct:.2f}%")
+        html += _kv("Payback", f"{roi_years:.1f} años")
+        html += '</div>'
+
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
     # ── Intro paragraph ───────────────────────────────────────────────────────
     st.divider()

@@ -231,8 +231,6 @@ def _tariff_updater() -> None:
 # ── current tariff viewer ─────────────────────────────────────────────────────
 
 def _current_tariffs() -> None:
-    st.markdown("### Tarifas vigentes en base de datos")
-
     try:
         from database.tariffs_db import list_distributors, list_tariff_types, get_tariff_tiers
         distributors = list_distributors()
@@ -244,40 +242,262 @@ def _current_tariffs() -> None:
         st.info("No hay distribuidoras registradas.")
         return
 
-    for dist in distributors:
-        tariff_types = list_tariff_types(dist["id"])
-        if not tariff_types:
-            continue
+    # Distributor selector pills
+    selected_abbrev = st.session_state.get("tariff_view_dist", distributors[0]["abbreviation"])
 
-        with st.expander(f"**{dist['abbreviation']}** — {dist['name']}", expanded=False):
-            for tt in tariff_types:
-                code = tt["code"]
-                label = "Residencial (T-RE)" if code == "T-RE" else "Comercial (T-CO)" if code == "T-CO" else code
-                st.markdown(f"##### {label}")
+    cols_per_row = 5
+    for i in range(0, len(distributors), cols_per_row):
+        batch = distributors[i : i + cols_per_row]
+        pill_cols = st.columns(cols_per_row)
+        for j, dist in enumerate(batch):
+            abbrev = dist["abbreviation"]
+            btn_type = "primary" if abbrev == selected_abbrev else "secondary"
+            if pill_cols[j].button(abbrev, key=f"tdist_{abbrev}", type=btn_type, use_container_width=True):
+                st.session_state["tariff_view_dist"] = abbrev
+                st.rerun()
 
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Cargo fijo mensual", _fmt_crc(tt["access_charge_crc"]))
-                col2.metric("Bomberos", f"{tt['bomberos_pct']*100:.2f}%")
-                last_upd = (tt.get("last_updated") or "")[:10] or "—"
-                if tt.get("demand_rate_crc"):
-                    col3.metric("Demanda", f"₡{tt['demand_rate_crc']:,.0f}/kW")
-                    col4.metric("Última actualización", last_upd)
-                else:
-                    col3.metric("Umbral IVA", f"{tt['iva_threshold_kwh']} kWh")
-                    col4.metric("Última actualización", last_upd)
+    st.divider()
 
-                tiers = get_tariff_tiers(tt["id"])
-                if tiers:
-                    import pandas as pd
-                    df = pd.DataFrame([
-                        {"Bloque": _tier_label(t), "Tarifa (CRC/kWh)": f"{t['rate_crc']:.4f}"}
-                        for t in tiers
-                    ])
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                st.divider()
+    # Selected distributor detail
+    selected_dist = next((d for d in distributors if d["abbreviation"] == selected_abbrev), None)
+    if not selected_dist:
+        return
+
+    st.markdown(f"#### {selected_dist['abbreviation']} — {selected_dist['name']}")
+
+    tariff_types = list_tariff_types(selected_dist["id"])
+    if not tariff_types:
+        st.info("No hay tarifas registradas para esta distribuidora.")
+        return
+
+    import pandas as pd
+    for tt in tariff_types:
+        code = tt["code"]
+        label = "Residencial (T-RE)" if code == "T-RE" else "Comercial (T-CO)" if code == "T-CO" else code
+        st.markdown(f"##### {label}")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Cargo fijo mensual", _fmt_crc(tt["access_charge_crc"]))
+        col2.metric("Bomberos", f"{tt['bomberos_pct']*100:.2f}%")
+        last_upd = (tt.get("last_updated") or "")[:10] or "—"
+        if tt.get("demand_rate_crc"):
+            col3.metric("Demanda", f"₡{tt['demand_rate_crc']:,.0f}/kW")
+            col4.metric("Última actualización", last_upd)
+        else:
+            col3.metric("Umbral IVA", f"{tt['iva_threshold_kwh']} kWh")
+            col4.metric("Última actualización", last_upd)
+
+        tiers = get_tariff_tiers(tt["id"])
+        if tiers:
+            df = pd.DataFrame([
+                {"Bloque": _tier_label(t), "Tarifa (CRC/kWh)": f"{t['rate_crc']:.4f}"}
+                for t in tiers
+            ])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        st.divider()
+
+
+# ── service defaults ─────────────────────────────────────────────────────────
+
+def _service_form(existing: dict | None = None) -> None:
+    src = existing or {}
+    is_edit = existing is not None
+
+    with st.form(key="service_form"):
+        st.markdown("#### " + ("Editar servicio" if is_edit else "Nuevo servicio"))
+        col1, col2 = st.columns(2)
+        with col1:
+            item    = st.text_input("Nombre (ES) *", value=src.get("item") or "")
+            item_en = st.text_input("Nombre (EN)", value=src.get("item_en") or "")
+            cost    = st.number_input("Precio default (USD)", value=float(src.get("unit_cost_usd") or 0), min_value=0.0, format="%.2f")
+        with col2:
+            iva_idx  = 1 if float(src.get("iva_pct") or 0) >= 0.1 else 0
+            iva      = st.selectbox("IVA", ["0%", "13%"], index=iva_idx)
+            enabled  = st.checkbox("Habilitado", value=bool(src.get("enabled", True)))
+            sort_ord = st.number_input("Orden", value=int(src.get("sort_order") or 0), min_value=0, step=10)
+
+        specs    = st.text_area("Descripción / Specs (ES)", value=src.get("specs") or "", height=60)
+        specs_en = st.text_area("Descripción / Specs (EN)", value=src.get("specs_en") or "", height=60)
+
+        col_save, col_cancel = st.columns([1, 4])
+        submitted = col_save.form_submit_button("💾 Guardar", type="primary")
+        cancelled = col_cancel.form_submit_button("Cancelar")
+
+    if cancelled:
+        st.session_state.pop("admin_edit_service", None)
+        st.session_state.pop("admin_svc_mode", None)
+        st.rerun()
+
+    if submitted:
+        if not str(item).strip():
+            st.error("El nombre es obligatorio.")
+            return
+        from database.equipment_db import upsert_service_default
+        payload: dict = {
+            "item":          str(item).strip(),
+            "item_en":       str(item_en).strip(),
+            "unit_cost_usd": float(cost),
+            "iva_pct":       0.13 if "13" in str(iva) else 0.0,
+            "enabled":       bool(enabled),
+            "specs":         str(specs).strip(),
+            "specs_en":      str(specs_en).strip(),
+            "sort_order":    int(sort_ord),
+        }
+        if is_edit and existing.get("id"):
+            payload["id"] = existing["id"]
+        try:
+            upsert_service_default(payload)
+            st.success("Servicio guardado." if not is_edit else "Servicio actualizado.")
+            st.session_state.pop("admin_edit_service", None)
+            st.session_state.pop("admin_svc_mode", None)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al guardar: {e}")
+
+
+def _services_section() -> None:
+    from database.equipment_db import list_service_defaults, upsert_service_default, delete_service_default
+
+    edit_svc = st.session_state.get("admin_edit_service")
+    mode     = st.session_state.get("admin_svc_mode")   # None | "add"
+
+    st.markdown("### Servicios y costos predeterminados")
+    st.caption(
+        "Define los servicios que aparecen por defecto en el Paso 7 de cada nueva propuesta. "
+        "Los costos y el IVA pueden ajustarse individualmente en cada propuesta."
+    )
+
+    # ── Action bar (hidden when add form is open — form has its own Cancelar) ──
+    if not edit_svc and mode != "add":
+        c_add, _ = st.columns([2, 8])
+        if c_add.button("➕ Agregar servicio", key="admin_svc_toggle_add"):
+            st.session_state["admin_svc_mode"] = "add"
+            st.rerun()
+
+    if mode == "add" and not edit_svc:
+        st.divider()
+        st.markdown("##### ➕ Nuevo servicio")
+        _service_form()
+        st.divider()
+
+    # ── Service list ──────────────────────────────────────────────────────────
+    try:
+        rows = list_service_defaults()
+    except Exception as e:
+        st.error(f"Error al cargar servicios: {e}")
+        return
+
+    if not rows:
+        st.info("No hay servicios configurados.")
+        return
+
+    # Header row
+    h1, h2, h3, h4, h5 = st.columns([3, 1.8, 1, 1, 1])
+    for hcol, label in zip([h1, h2, h3, h4, h5], ["Servicio", "Precio (USD)", "IVA", "Habilitado", "Acciones"]):
+        hcol.markdown(
+            f'<span style="font-size:0.78rem;font-weight:600;color:#6b7280;'
+            f'text-transform:uppercase;letter-spacing:0.04em;">{label}</span>',
+            unsafe_allow_html=True,
+        )
+    st.divider()
+
+    for r in rows:
+        c1, c2, c3, c4, c5 = st.columns([3, 1.8, 1, 1, 1])
+
+        c1.markdown(f"**{r['item']}**")
+        if r.get("item_en"):
+            c1.caption(r["item_en"])
+
+        c2.number_input(
+            "Precio", value=float(r.get("unit_cost_usd") or 0),
+            min_value=0.0, step=10.0, format="%.2f",
+            key=f"svc_price_{r['id']}", label_visibility="collapsed",
+        )
+
+        iva_idx = 1 if float(r.get("iva_pct") or 0) >= 0.1 else 0
+        c3.selectbox(
+            "IVA", ["0%", "13%"], index=iva_idx,
+            key=f"svc_iva_{r['id']}", label_visibility="collapsed",
+        )
+
+        c4.checkbox(
+            "", value=bool(r.get("enabled", True)),
+            key=f"svc_enabled_{r['id']}",
+        )
+
+        with c5:
+            ba, bb = st.columns(2)
+            if ba.button("✏️", key=f"esvc_{r['id']}", help="Editar"):
+                st.session_state["admin_edit_service"] = r
+                st.session_state["admin_svc_mode"] = None
+                st.rerun()
+            if bb.button("🗑️", key=f"dsvc_{r['id']}", help="Eliminar"):
+                st.session_state[f"confirm_del_svc_{r['id']}"] = True
+                st.rerun()
+
+        if st.session_state.get(f"confirm_del_svc_{r['id']}"):
+            st.warning(f"¿Eliminar **{r['item']}**? Esta acción no se puede deshacer.")
+            cy, cn, _ = st.columns([1, 1, 6])
+            if cy.button("Sí, eliminar", key=f"yes_del_svc_{r['id']}"):
+                delete_service_default(r["id"])
+                st.session_state.pop(f"confirm_del_svc_{r['id']}", None)
+                st.rerun()
+            if cn.button("Cancelar", key=f"no_del_svc_{r['id']}"):
+                st.session_state.pop(f"confirm_del_svc_{r['id']}", None)
+                st.rerun()
+
+        # Inline edit form — shown only below the item being edited
+        if edit_svc and edit_svc.get("id") == r["id"]:
+            st.markdown("##### ✏️ Editando servicio")
+            _service_form(existing=edit_svc)
+
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
+                    unsafe_allow_html=True)
+
+    st.markdown("")
+    if st.button("💾 Guardar cambios", key="admin_svc_save_inline", type="primary"):
+        saved = 0
+        for r in rows:
+            new_price   = float(st.session_state.get(f"svc_price_{r['id']}") or 0)
+            new_iva     = 0.13 if "13" in str(st.session_state.get(f"svc_iva_{r['id']}") or "") else 0.0
+            new_enabled = bool(st.session_state.get(f"svc_enabled_{r['id']}", True))
+
+            old_price   = float(r.get("unit_cost_usd") or 0)
+            old_iva     = float(r.get("iva_pct") or 0)
+            old_enabled = bool(r.get("enabled", True))
+
+            if abs(new_price - old_price) > 0.001 or abs(new_iva - old_iva) > 0.001 or new_enabled != old_enabled:
+                upsert_service_default({
+                    "id": r["id"], "item": r["item"],
+                    "unit_cost_usd": new_price,
+                    "iva_pct": new_iva,
+                    "enabled": new_enabled,
+                })
+                saved += 1
+
+        for r in rows:
+            st.session_state.pop(f"svc_price_{r['id']}", None)
+            st.session_state.pop(f"svc_iva_{r['id']}", None)
+            st.session_state.pop(f"svc_enabled_{r['id']}", None)
+
+        if saved:
+            st.success(f"✅ {saved} servicio(s) actualizado(s).")
+        else:
+            st.info("Sin cambios.")
+        st.rerun()
 
 
 # ── equipment catalog ─────────────────────────────────────────────────────────
+
+_INV_TYPE_LABELS = {
+    "string_inverter": "Inversor de string",
+    "microinverter":   "Microinversor",
+    "hybrid":          "Híbrido",
+}
+_PHASE_LABELS = {
+    "single": "Monofásico",
+    "three":  "Trifásico",
+}
 
 def _panel_form(existing: dict | None = None, prefill: dict | None = None) -> None:
     """Render add/edit form for a solar panel. existing=edit mode, prefill=from datasheet."""
@@ -317,6 +537,7 @@ def _panel_form(existing: dict | None = None, prefill: dict | None = None) -> No
     if cancelled:
         st.session_state.pop("admin_edit_panel", None)
         st.session_state.pop("admin_prefill_panel", None)
+        st.session_state.pop("admin_panel_mode", None)
         st.rerun()
 
     if submitted:
@@ -340,16 +561,50 @@ def _panel_form(existing: dict | None = None, prefill: dict | None = None) -> No
             st.success("Panel guardado." if not is_edit else "Panel actualizado.")
             st.session_state.pop("admin_edit_panel", None)
             st.session_state.pop("admin_prefill_panel", None)
+            st.session_state.pop("admin_panel_mode", None)
             st.rerun()
         except Exception as e:
             st.error(f"Error al guardar: {e}")
 
 
 def _panels_section() -> None:
-    from database.equipment_db import list_panels, delete_panel
+    from database.equipment_db import list_panels, delete_panel, upsert_panel
 
-    # ── Datasheet upload → AI fill ────────────────────────────────────────────
-    with st.expander("📄 Extraer especificaciones de datasheet (PDF)", expanded=False):
+    mode         = st.session_state.get("admin_panel_mode")   # None | "extract" | "add"
+    edit_panel   = st.session_state.get("admin_edit_panel")
+    prefill_panel= st.session_state.get("admin_prefill_panel")
+
+    # ── Action bar (hidden when add form is open — form has its own Cancelar) ──
+    if not edit_panel and not prefill_panel:
+        if mode == "extract":
+            c_ext, _ = st.columns([2, 7])
+            if c_ext.button("✕ Cerrar", key="admin_panel_toggle_extract"):
+                st.session_state["admin_panel_mode"] = None
+                st.session_state.pop("admin_panel_variants", None)
+                st.rerun()
+        elif mode is None:
+            c_ext, c_add, _ = st.columns([2, 2, 5])
+            if c_ext.button("📄 Extraer de datasheet", key="admin_panel_toggle_extract"):
+                st.session_state["admin_panel_mode"] = "extract"
+                st.rerun()
+            if c_add.button("➕ Agregar panel", key="admin_panel_toggle_add"):
+                st.session_state["admin_panel_mode"] = "add"
+                st.rerun()
+
+    # ── Active form (add/extract/prefill only — edit appears inline below item) ─
+    if prefill_panel:
+        st.divider()
+        st.markdown("##### ➕ Nuevo panel — datos del datasheet")
+        _panel_form(prefill=prefill_panel)
+        st.divider()
+    elif mode == "add":
+        st.divider()
+        st.markdown("##### ➕ Nuevo panel")
+        _panel_form()
+        st.divider()
+    elif mode == "extract":
+        st.divider()
+        st.markdown("##### 📄 Extraer especificaciones de datasheet")
         st.caption("Sube el datasheet del fabricante. La IA extrae las especificaciones técnicas.")
         pdf_file = st.file_uploader("Datasheet PDF", type=["pdf"], key="admin_panel_ds")
         if pdf_file:
@@ -363,37 +618,24 @@ def _panels_section() -> None:
                     except Exception as e:
                         st.error(f"Error al procesar el datasheet: {e}")
                         variants = None
-
             if variants:
                 if len(variants) > 1:
                     opts = [f"{v.get('brand','')} {v.get('model','')} — {v.get('wp','')}W" for v in variants]
-                    idx = st.selectbox("Selecciona el modelo a agregar", range(len(opts)), format_func=lambda i: opts[i], key="admin_panel_var_idx")
+                    idx = st.selectbox("Selecciona el modelo", range(len(opts)),
+                                       format_func=lambda i: opts[i], key="admin_panel_var_idx")
                     selected = variants[idx]
                 else:
                     selected = variants[0]
                     st.success(f"Extraído: {selected.get('brand')} {selected.get('model')} — {selected.get('wp')}W")
-
-                if st.button("Usar estos datos en el formulario", key="admin_panel_use"):
+                if st.button("Usar estos datos →", key="admin_panel_use", type="primary"):
                     st.session_state["admin_prefill_panel"] = selected
                     st.session_state.pop("admin_edit_panel", None)
                     st.session_state.pop("admin_panel_variants", None)
+                    st.session_state["admin_panel_mode"] = None
                     st.rerun()
-
-    st.divider()
-
-    # ── Add / Edit form ───────────────────────────────────────────────────────
-    edit_panel   = st.session_state.get("admin_edit_panel")
-    prefill_panel= st.session_state.get("admin_prefill_panel")
-
-    if edit_panel or prefill_panel:
-        _panel_form(existing=edit_panel, prefill=prefill_panel if not edit_panel else None)
         st.divider()
 
-    if not edit_panel and not prefill_panel:
-        with st.expander("➕ Agregar panel manualmente", expanded=False):
-            _panel_form()
-
-    # ── Existing panels ───────────────────────────────────────────────────────
+    # ── Panel list ────────────────────────────────────────────────────────────
     st.markdown("#### Paneles en catálogo")
     try:
         panels = list_panels()
@@ -405,41 +647,92 @@ def _panels_section() -> None:
         st.info("No hay paneles en el catálogo.")
         return
 
+    # Header row
+    h1, h2, h3, h4 = st.columns([2.5, 3, 1.5, 1])
+    for hcol, label in zip([h1, h2, h3, h4], ["Panel", "Eléctrico", "Precio (USD)", "Acciones"]):
+        hcol.markdown(
+            f'<span style="font-size:0.78rem;font-weight:600;color:#6b7280;'
+            f'text-transform:uppercase;letter-spacing:0.04em;">{label}</span>',
+            unsafe_allow_html=True,
+        )
+    st.divider()
+
     for p in panels:
         area = round((p.get("width_m") or 0) * (p.get("height_m") or 0), 2)
-        label = f"**{p['brand']} {p['model']}** — {p['wp']} Wp"
-        with st.expander(label, expanded=False):
-            c1, c2, c3 = st.columns(3)
-            c1.markdown(f"Voc **{p.get('voc','—')}V** · Vmp **{p.get('vmp','—')}V**")
-            c1.markdown(f"Isc **{p.get('isc','—')}A** · Imp **{p.get('imp','—')}A**")
-            c2.markdown(f"Área **{area} m²** ({p.get('width_m','—')} × {p.get('height_m','—')} m)")
-            c2.markdown(f"TC Pmax **{p.get('temp_coeff_pmax','—')}%/°C**")
-            c3.markdown(f"Garantía **{p.get('warranty_product_yr','—')}a** prod / **{p.get('warranty_power_yr','—')}a** potencia")
-            if p.get("cost_usd"):
-                c3.markdown(f"Costo **${p['cost_usd']:.2f}**")
-            if p.get("notes"):
-                st.caption(p["notes"])
+        c1, c2, c3, c4 = st.columns([2.5, 3, 1.5, 1])
 
-            btn1, btn2, _ = st.columns([1, 1, 5])
-            if btn1.button("✏️ Editar", key=f"ep_{p['id']}"):
+        c1.markdown(
+            f'<div style="line-height:1.8;">'
+            f'<strong>{p["brand"]} {p["model"]}</strong><br>'
+            f'<span style="background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:5px;'
+            f'padding:2px 10px;font-size:0.92rem;font-weight:700;color:#1e293b;">'
+            f'{p["wp"]} Wp</span><br>'
+            f'<span style="font-size:0.8rem;color:#6b7280;">{area} m²</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        c2.markdown(
+            f'<div style="font-size:0.82rem;color:#6b7280;line-height:1.8;">'
+            f'Voc {p.get("voc") or "—"} V<br>'
+            f'Vmp {p.get("vmp") or "—"} V<br>'
+            f'Isc {p.get("isc") or "—"} A<br>'
+            f'Imp {p.get("imp") or "—"} A'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        c3.number_input(
+            "Precio", value=float(p.get("cost_usd") or 0),
+            min_value=0.0, step=10.0, format="%.2f",
+            key=f"p_price_{p['id']}", label_visibility="collapsed",
+        )
+
+        with c4:
+            ba, bb = st.columns(2)
+            if ba.button("✏️", key=f"ep_{p['id']}", help="Editar"):
                 st.session_state["admin_edit_panel"] = p
                 st.session_state.pop("admin_prefill_panel", None)
+                st.session_state["admin_panel_mode"] = None
                 st.rerun()
             confirm_key = f"confirm_del_panel_{p['id']}"
-            if st.session_state.get(confirm_key):
-                st.warning(f"¿Eliminar **{p['brand']} {p['model']}**? Esta acción no se puede deshacer.")
-                c_yes, c_no, _ = st.columns([1, 1, 5])
-                if c_yes.button("Sí, eliminar", key=f"yes_del_panel_{p['id']}"):
-                    delete_panel(p["id"])
-                    st.session_state.pop(confirm_key, None)
-                    st.rerun()
-                if c_no.button("Cancelar", key=f"no_del_panel_{p['id']}"):
-                    st.session_state.pop(confirm_key, None)
-                    st.rerun()
-            else:
-                if btn2.button("🗑️", key=f"dp_{p['id']}", help="Eliminar panel"):
-                    st.session_state[confirm_key] = True
-                    st.rerun()
+            if bb.button("🗑️", key=f"dp_{p['id']}", help="Eliminar"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+
+        if st.session_state.get(f"confirm_del_panel_{p['id']}"):
+            st.warning(f"¿Eliminar **{p['brand']} {p['model']}**? Esta acción no se puede deshacer.")
+            cy, cn, _ = st.columns([1, 1, 6])
+            if cy.button("Sí, eliminar", key=f"yes_del_panel_{p['id']}"):
+                delete_panel(p["id"])
+                st.session_state.pop(f"confirm_del_panel_{p['id']}", None)
+                st.rerun()
+            if cn.button("Cancelar", key=f"no_del_panel_{p['id']}"):
+                st.session_state.pop(f"confirm_del_panel_{p['id']}", None)
+                st.rerun()
+
+        # Inline edit form — shown only below the item being edited
+        if edit_panel and edit_panel.get("id") == p["id"]:
+            st.markdown("##### ✏️ Editando panel")
+            _panel_form(existing=edit_panel)
+
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
+                    unsafe_allow_html=True)
+
+    st.markdown("")
+    if st.button("💾 Guardar precios de paneles", key="save_panel_prices"):
+        saved = 0
+        for p in panels:
+            new_price = float(st.session_state.get(f"p_price_{p['id']}") or 0)
+            if abs(new_price - float(p.get("cost_usd") or 0)) > 0.001:
+                upsert_panel({"id": p["id"], "cost_usd": new_price})
+                saved += 1
+            st.session_state.pop(f"p_price_{p['id']}", None)
+        if saved:
+            st.success(f"✅ {saved} precio(s) actualizado(s).")
+        else:
+            st.info("Sin cambios en los precios.")
+        st.rerun()
 
 
 def _inverter_form(existing: dict | None = None, prefill: dict | None = None) -> None:
@@ -453,10 +746,16 @@ def _inverter_form(existing: dict | None = None, prefill: dict | None = None) ->
             brand  = st.text_input("Marca *", value=src.get("brand") or "")
             model  = st.text_input("Modelo *", value=src.get("model") or "")
             kw     = st.number_input("Potencia (kW) *", value=float(src.get("kw") or 0), min_value=0.0, step=0.1, format="%.1f")
-            inv_type = st.selectbox("Tipo", ["string_inverter", "microinverter", "hybrid"],
-                                    index=["string_inverter", "microinverter", "hybrid"].index(src.get("type") or "string_inverter"))
-            phase  = st.selectbox("Fase", ["single", "three"],
-                                  index=["single", "three"].index(src.get("phase") or "single"))
+            inv_type = st.selectbox(
+                "Tipo", ["string_inverter", "microinverter", "hybrid"],
+                index=["string_inverter", "microinverter", "hybrid"].index(src.get("type") or "string_inverter"),
+                format_func=lambda x: _INV_TYPE_LABELS.get(x, x),
+            )
+            phase = st.selectbox(
+                "Fase", ["single", "three"],
+                index=["single", "three"].index(src.get("phase") or "single"),
+                format_func=lambda x: _PHASE_LABELS.get(x, x),
+            )
         with col2:
             vmax      = st.number_input("V máx entrada DC (V)", value=float(src.get("vmax") or 0), min_value=0.0, step=10.0)
             vmin_mppt = st.number_input("Vmin MPPT (V)", value=float(src.get("vmin_mppt") or 0), min_value=0.0)
@@ -481,6 +780,7 @@ def _inverter_form(existing: dict | None = None, prefill: dict | None = None) ->
     if cancelled:
         st.session_state.pop("admin_edit_inverter", None)
         st.session_state.pop("admin_prefill_inverter", None)
+        st.session_state.pop("admin_inv_mode", None)
         st.rerun()
 
     if submitted:
@@ -504,16 +804,50 @@ def _inverter_form(existing: dict | None = None, prefill: dict | None = None) ->
             st.success("Inversor guardado." if not is_edit else "Inversor actualizado.")
             st.session_state.pop("admin_edit_inverter", None)
             st.session_state.pop("admin_prefill_inverter", None)
+            st.session_state.pop("admin_inv_mode", None)
             st.rerun()
         except Exception as e:
             st.error(f"Error al guardar: {e}")
 
 
 def _inverters_section() -> None:
-    from database.equipment_db import list_inverters, delete_inverter
+    from database.equipment_db import list_inverters, delete_inverter, upsert_inverter
 
-    # ── Datasheet upload → AI fill ────────────────────────────────────────────
-    with st.expander("📄 Extraer especificaciones de datasheet (PDF)", expanded=False):
+    mode      = st.session_state.get("admin_inv_mode")   # None | "extract" | "add"
+    edit_inv  = st.session_state.get("admin_edit_inverter")
+    prefill_inv = st.session_state.get("admin_prefill_inverter")
+
+    # ── Action bar (hidden when add form is open — form has its own Cancelar) ──
+    if not edit_inv and not prefill_inv:
+        if mode == "extract":
+            c_ext, _ = st.columns([2, 7])
+            if c_ext.button("✕ Cerrar", key="admin_inv_toggle_extract"):
+                st.session_state["admin_inv_mode"] = None
+                st.session_state.pop("admin_inv_variants", None)
+                st.rerun()
+        elif mode is None:
+            c_ext, c_add, _ = st.columns([2, 2, 5])
+            if c_ext.button("📄 Extraer de datasheet", key="admin_inv_toggle_extract"):
+                st.session_state["admin_inv_mode"] = "extract"
+                st.rerun()
+            if c_add.button("➕ Agregar inversor", key="admin_inv_toggle_add"):
+                st.session_state["admin_inv_mode"] = "add"
+                st.rerun()
+
+    # ── Active form (add/extract/prefill only — edit appears inline below item) ─
+    if prefill_inv:
+        st.divider()
+        st.markdown("##### ➕ Nuevo inversor — datos del datasheet")
+        _inverter_form(prefill=prefill_inv)
+        st.divider()
+    elif mode == "add":
+        st.divider()
+        st.markdown("##### ➕ Nuevo inversor")
+        _inverter_form()
+        st.divider()
+    elif mode == "extract":
+        st.divider()
+        st.markdown("##### 📄 Extraer especificaciones de datasheet")
         st.caption("Sube el datasheet del fabricante. La IA extrae las especificaciones técnicas.")
         pdf_file = st.file_uploader("Datasheet PDF", type=["pdf"], key="admin_inv_ds")
         if pdf_file:
@@ -527,37 +861,24 @@ def _inverters_section() -> None:
                     except Exception as e:
                         st.error(f"Error al procesar el datasheet: {e}")
                         variants = None
-
             if variants:
                 if len(variants) > 1:
                     opts = [f"{v.get('brand','')} {v.get('model','')} — {v.get('kw','')} kW" for v in variants]
-                    idx = st.selectbox("Selecciona el modelo a agregar", range(len(opts)), format_func=lambda i: opts[i], key="admin_inv_var_idx")
+                    idx = st.selectbox("Selecciona el modelo", range(len(opts)),
+                                       format_func=lambda i: opts[i], key="admin_inv_var_idx")
                     selected = variants[idx]
                 else:
                     selected = variants[0]
                     st.success(f"Extraído: {selected.get('brand')} {selected.get('model')} — {selected.get('kw')} kW")
-
-                if st.button("Usar estos datos en el formulario", key="admin_inv_use"):
+                if st.button("Usar estos datos →", key="admin_inv_use", type="primary"):
                     st.session_state["admin_prefill_inverter"] = selected
                     st.session_state.pop("admin_edit_inverter", None)
                     st.session_state.pop("admin_inv_variants", None)
+                    st.session_state["admin_inv_mode"] = None
                     st.rerun()
-
-    st.divider()
-
-    # ── Add / Edit form ───────────────────────────────────────────────────────
-    edit_inv    = st.session_state.get("admin_edit_inverter")
-    prefill_inv = st.session_state.get("admin_prefill_inverter")
-
-    if edit_inv or prefill_inv:
-        _inverter_form(existing=edit_inv, prefill=prefill_inv if not edit_inv else None)
         st.divider()
 
-    if not edit_inv and not prefill_inv:
-        with st.expander("➕ Agregar inversor manualmente", expanded=False):
-            _inverter_form()
-
-    # ── Existing inverters ────────────────────────────────────────────────────
+    # ── Inverter list ─────────────────────────────────────────────────────────
     st.markdown("#### Inversores en catálogo")
     try:
         inverters = list_inverters()
@@ -569,40 +890,94 @@ def _inverters_section() -> None:
         st.info("No hay inversores en el catálogo.")
         return
 
-    for inv in inverters:
-        label = f"**{inv['brand']} {inv['model']}** — {inv['kw']} kW"
-        with st.expander(label, expanded=False):
-            c1, c2, c3 = st.columns(3)
-            c1.markdown(f"Vmax **{inv.get('vmax','—')}V** · MPPT **{inv.get('vmin_mppt','—')}–{inv.get('vmax_mppt','—')}V**")
-            c1.markdown(f"Imax MPPT **{inv.get('imax_mppt','—')}A** · Canales **{inv.get('mppt_channels','—')}**")
-            c2.markdown(f"Tipo **{inv.get('type','—')}** · Fase **{inv.get('phase','—')}**")
-            c2.markdown(f"Salida **{inv.get('output_v','—')}V AC**")
-            c3.markdown(f"Garantía **{inv.get('warranty_yr','—')} años**")
-            if inv.get("cost_usd"):
-                c3.markdown(f"Costo **${inv['cost_usd']:.2f}**")
-            if inv.get("notes"):
-                st.caption(inv["notes"])
+    # Header row
+    h1, h2, h3, h4 = st.columns([2.5, 3, 1.5, 1])
+    for hcol, label in zip([h1, h2, h3, h4], ["Inversor", "MPPT / Tensión", "Precio (USD)", "Acciones"]):
+        hcol.markdown(
+            f'<span style="font-size:0.78rem;font-weight:600;color:#6b7280;'
+            f'text-transform:uppercase;letter-spacing:0.04em;">{label}</span>',
+            unsafe_allow_html=True,
+        )
+    st.divider()
 
-            btn1, btn2, _ = st.columns([1, 1, 5])
-            if btn1.button("✏️ Editar", key=f"ei_{inv['id']}"):
+    for inv in inverters:
+        c1, c2, c3, c4 = st.columns([2.5, 3, 1.5, 1])
+
+        type_label  = _INV_TYPE_LABELS.get(inv.get("type") or "", inv.get("type") or "—")
+        phase_label = _PHASE_LABELS.get(inv.get("phase") or "", inv.get("phase") or "—")
+
+        c1.markdown(
+            f'<div style="line-height:1.8;">'
+            f'<strong>{inv["brand"]} {inv["model"]}</strong><br>'
+            f'<span style="background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:5px;'
+            f'padding:2px 10px;font-size:0.92rem;font-weight:700;color:#1e293b;">'
+            f'{inv["kw"]} kW</span><br>'
+            f'<span style="font-size:0.8rem;color:#6b7280;">{type_label} · {phase_label}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        c2.markdown(
+            f'<div style="font-size:0.82rem;color:#6b7280;line-height:1.8;">'
+            f'Vmax {inv.get("vmax") or "—"} V<br>'
+            f'MPPT {inv.get("vmin_mppt") or "—"}–{inv.get("vmax_mppt") or "—"} V<br>'
+            f'Imax MPPT {inv.get("imax_mppt") or "—"} A<br>'
+            f'{inv.get("mppt_channels") or "—"} canales'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        c3.number_input(
+            "Precio", value=float(inv.get("cost_usd") or 0),
+            min_value=0.0, step=50.0, format="%.2f",
+            key=f"inv_price_{inv['id']}", label_visibility="collapsed",
+        )
+
+        with c4:
+            ba, bb = st.columns(2)
+            if ba.button("✏️", key=f"ei_{inv['id']}", help="Editar"):
                 st.session_state["admin_edit_inverter"] = inv
                 st.session_state.pop("admin_prefill_inverter", None)
+                st.session_state["admin_inv_mode"] = None
                 st.rerun()
             confirm_key = f"confirm_del_inv_{inv['id']}"
-            if st.session_state.get(confirm_key):
-                st.warning(f"¿Eliminar **{inv['brand']} {inv['model']}**? Esta acción no se puede deshacer.")
-                c_yes, c_no, _ = st.columns([1, 1, 5])
-                if c_yes.button("Sí, eliminar", key=f"yes_del_inv_{inv['id']}"):
-                    delete_inverter(inv["id"])
-                    st.session_state.pop(confirm_key, None)
-                    st.rerun()
-                if c_no.button("Cancelar", key=f"no_del_inv_{inv['id']}"):
-                    st.session_state.pop(confirm_key, None)
-                    st.rerun()
-            else:
-                if btn2.button("🗑️", key=f"di_{inv['id']}", help="Eliminar inversor"):
-                    st.session_state[confirm_key] = True
-                    st.rerun()
+            if bb.button("🗑️", key=f"di_{inv['id']}", help="Eliminar"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+
+        if st.session_state.get(f"confirm_del_inv_{inv['id']}"):
+            st.warning(f"¿Eliminar **{inv['brand']} {inv['model']}**? Esta acción no se puede deshacer.")
+            cy, cn, _ = st.columns([1, 1, 6])
+            if cy.button("Sí, eliminar", key=f"yes_del_inv_{inv['id']}"):
+                delete_inverter(inv["id"])
+                st.session_state.pop(f"confirm_del_inv_{inv['id']}", None)
+                st.rerun()
+            if cn.button("Cancelar", key=f"no_del_inv_{inv['id']}"):
+                st.session_state.pop(f"confirm_del_inv_{inv['id']}", None)
+                st.rerun()
+
+        # Inline edit form — shown only below the item being edited
+        if edit_inv and edit_inv.get("id") == inv["id"]:
+            st.markdown("##### ✏️ Editando inversor")
+            _inverter_form(existing=edit_inv)
+
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
+                    unsafe_allow_html=True)
+
+    st.markdown("")
+    if st.button("💾 Guardar precios de inversores", key="save_inv_prices"):
+        saved = 0
+        for inv in inverters:
+            new_price = float(st.session_state.get(f"inv_price_{inv['id']}") or 0)
+            if abs(new_price - float(inv.get("cost_usd") or 0)) > 0.001:
+                upsert_inverter({"id": inv["id"], "cost_usd": new_price})
+                saved += 1
+            st.session_state.pop(f"inv_price_{inv['id']}", None)
+        if saved:
+            st.success(f"✅ {saved} precio(s) actualizado(s).")
+        else:
+            st.info("Sin cambios en los precios.")
+        st.rerun()
 
 
 def _equipment_catalog() -> None:
@@ -622,20 +997,24 @@ def main() -> None:
     )
     st.divider()
 
-    tab_equip, tab_tariff_update, tab_tariff_view = st.tabs([
+    tab_equip, tab_services, tab_aresep = st.tabs([
         "🔧 Catálogo de equipos",
-        "📤 Actualizar tarifas ARESEP",
-        "📋 Tarifas actuales",
+        "💲 Servicios",
+        "📊 Tarifas ARESEP",
     ])
 
     with tab_equip:
         _equipment_catalog()
 
-    with tab_tariff_update:
-        _tariff_updater()
+    with tab_services:
+        _services_section()
 
-    with tab_tariff_view:
-        _current_tariffs()
+    with tab_aresep:
+        sub_update, sub_view = st.tabs(["📤 Actualizar tarifas", "📋 Tarifas actuales"])
+        with sub_update:
+            _tariff_updater()
+        with sub_view:
+            _current_tariffs()
 
 
 main()
