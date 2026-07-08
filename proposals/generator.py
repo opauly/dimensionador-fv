@@ -224,6 +224,161 @@ def _build_context(data: dict, language: str) -> dict:
     }
 
 
+# ── wizard blob → data dict ──────────────────────────────────────────────────
+
+def build_from_wizard_blob(
+    blob: dict,
+    proposal: dict,
+    quote_str: str,
+    version_date: str | None = None,
+) -> dict:
+    """Convert a saved version JSONB blob into the data dict expected by generate_pdf()."""
+    from wizard.state import get_company_info, get_bank_info
+    from datetime import date as _dt
+
+    meta        = blob.get("meta", {})
+    client_data = blob.get("client", {})
+    site        = blob.get("site", {})
+    utility     = blob.get("utility", {})
+    consumption = blob.get("consumption", {})
+    equipment   = blob.get("equipment", {})
+    costs       = blob.get("costs", {})
+
+    language    = meta.get("language", "es")
+    panel       = equipment.get("panel", {})
+    inverter    = equipment.get("inverter", {})
+    chosen      = equipment.get("chosen_scenario", {})
+    panel_count = int(chosen.get("total_panels") or 0)
+    system_kw   = float(chosen.get("system_kw") or 0)
+
+    # ── Cost items ────────────────────────────────────────────────────────────
+    inv_qty    = 1
+    cost_items = []
+    for li in costs.get("line_items", []):
+        qty     = li.get("qty")
+        unit    = float(li.get("unit_cost_usd") or 0)
+        iva_pct = float(li.get("iva_pct") or 0)
+        total   = round((float(qty) if qty is not None else 1) * unit * (1 + iva_pct), 2)
+        if li.get("item") == "Inversores" and qty:
+            inv_qty = int(float(qty))
+        cost_items.append({
+            "item":     li.get("item", ""),
+            "item_en":  li.get("item_en") or li.get("item", ""),
+            "qty":      qty,
+            "specs":    li.get("specs", ""),
+            "specs_en": li.get("specs_en") or li.get("specs", ""),
+            "total":    total,
+        })
+
+    total_usd   = float(costs.get("total_usd") or 0)
+    cost_per_wp = round(total_usd / (system_kw * 1000), 2) if system_kw else 0.0
+    area_m2     = round(panel_count * float(panel.get("width_m") or 1.134) * float(panel.get("height_m") or 2.278), 1)
+
+    # ── Billing / financials (best-effort recompute) ──────────────────────────
+    billing_avg = {
+        "consumption_kwh": 0.0, "bill_crc": 0.0,
+        "generation_kwh": 0.0, "new_consumption_kwh": 0.0,
+        "new_bill_crc": 0.0, "savings_crc": 0.0,
+    }
+    benefits = {
+        "savings_year1_usd": 0.0, "savings_25yr_usd": 0.0,
+        "irr_pct": 0.0, "roi_years": 0.0,
+        "avg_monthly_savings_usd": 0.0, "pct_savings": 0.0,
+    }
+    try:
+        from calculations.sizing_grid_zero import size_system, compute_avg_billing
+        from calculations.financials import calculate_irr, calculate_roi, calculate_25yr_savings
+        from database.tariffs_db import get_tariff_tiers, list_tariff_types
+        from utils.currency import get_exchange_rate
+
+        xr             = get_exchange_rate()
+        avg_kwh        = float(consumption.get("avg_kwh") or 0)
+        pvgis_monthly  = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
+        monthly_kwh    = [m["kwh"] for m in consumption.get("months_data", [])] or [avg_kwh] * 12
+        tariff_type_id = utility.get("tariff_type_id")
+
+        if pvgis_monthly and tariff_type_id and avg_kwh and panel_count:
+            tiers       = get_tariff_tiers(tariff_type_id)
+            tt_list     = list_tariff_types(utility.get("distributor_id", ""))
+            tariff_type = next((t for t in tt_list if t["id"] == tariff_type_id), {})
+
+            sizing = size_system(avg_kwh, pvgis_monthly, float(panel.get("wp") or 620), panel_count)
+            avg_b  = compute_avg_billing(monthly_kwh, sizing["monthly_generation"], tariff_type, tiers, xr)
+
+            sc = float(avg_b.get("savings_crc") or 0)
+            billing_avg = {
+                "consumption_kwh":     float(avg_b["consumption_kwh"]),
+                "bill_crc":            float(avg_b["bill_crc"]),
+                "generation_kwh":      float(sizing["avg_generation_kwh"]),
+                "new_consumption_kwh": float(avg_b["new_consumption_kwh"]),
+                "new_bill_crc":        float(avg_b["new_bill_crc"]),
+                "savings_crc":         sc,
+            }
+
+            yr1_usd = round(sc * 12 / xr, 2) if xr else 0.0
+            tc      = total_usd * xr
+            benefits = {
+                "savings_year1_usd":     yr1_usd,
+                "savings_25yr_usd":      round(calculate_25yr_savings(sc * 12) / xr, 2) if xr else 0.0,
+                "irr_pct":               calculate_irr(tc, sc * 12) if sc and tc else 0.0,
+                "roi_years":             calculate_roi(tc, sc * 12) if sc and tc else 0.0,
+                "avg_monthly_savings_usd": round(yr1_usd / 12, 2),
+                "pct_savings":           float(avg_b.get("pct_savings") or 0),
+            }
+    except Exception:
+        pass
+
+    company = get_company_info()
+    bank    = get_bank_info()
+    inv_warranty = inverter.get("warranty_yr", 5)
+    sys_labels   = {"grid_zero": "Grid Zero", "off_grid": "Off-Grid", "hybrid": "Híbrido"}
+
+    return {
+        "date":              version_date or _dt.today().strftime("%d/%m/%Y"),
+        "quote_number":      quote_str,
+        "client": {
+            "name":     client_data.get("name") or proposal.get("client_name", ""),
+            "location": client_data.get("address") or site.get("address") or "",
+            "nise":     client_data.get("nise") or "N/A",
+        },
+        "system_type_label": sys_labels.get(proposal.get("system_type", "grid_zero"), "Grid Zero"),
+        "intro_lines":       [blob.get("proposal_text", "")] if blob.get("proposal_text") else [],
+        "billing_avg":       billing_avg,
+        "benefits":          benefits,
+        "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica nacional",
+        "benefits_notes_en": "Excess energy delivered to the national grid is not considered",
+        "cost_items":        cost_items,
+        "total_usd":         total_usd,
+        "technical": {
+            "system_kw":      system_kw,
+            "area_m2":        area_m2,
+            "panel_count":    panel_count,
+            "inverter_count": inv_qty,
+        },
+        "cost_per_wp":               cost_per_wp,
+        "warranty_inverter_years":   f"{inv_warranty} años",
+        "warranty_inverter_years_en": f"{inv_warranty} years",
+        "payment_notes_es": [
+            "Solicitamos un pago inicial del 70% por adelantado y el 30% restante contra entrega del proyecto",
+            "Duración estimada: 21 días después del pago inicial",
+            "Se entrega factura electrónica por el monto total",
+            "Los pagos se realizan mediante transferencia bancaria a la siguiente cuenta:",
+        ],
+        "payment_notes_en": [
+            "We request an initial payment of 70% in advance and the remaining 30% upon project delivery",
+            "Estimated duration: 21 days after initial payment",
+            "An electronic invoice is provided for the full amount",
+            "Payments are made via bank transfer to the following account:",
+        ],
+        "bank_local_lines":    bank["bank_local_lines"],
+        "bank_intl_lines":     bank["bank_intl_lines"],
+        "bank_local_lines_en": bank["bank_local_lines_en"],
+        "bank_intl_lines_en":  bank["bank_intl_lines_en"],
+        "company":       company,
+        "validity_days": 15,
+    }
+
+
 # ── public API ───────────────────────────────────────────────────────────────
 
 def generate_pdf(data: dict, system_type: str, language: str) -> bytes:

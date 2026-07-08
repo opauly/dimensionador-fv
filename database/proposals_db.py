@@ -239,14 +239,18 @@ def list_versions(proposal_id: str) -> list[dict]:
 
 
 def mark_version_sent(version_id: str) -> dict:
+    db = get_client()
     result = (
-        get_client()
-        .table("proposal_versions")
+        db.table("proposal_versions")
         .update({"sent_to_client": True})
         .eq("id", version_id)
         .execute()
     )
-    return result.data[0]
+    version = result.data[0]
+    db.table("proposals").update({"status": "active", "updated_at": _now()}).eq(
+        "id", version["proposal_id"]
+    ).execute()
+    return version
 
 
 def save_pdf_path(version_id: str, pdf_path: str) -> None:
