@@ -2,8 +2,21 @@
 
 **Builder:** Oscar Pauly (solo)  
 **Stack:** Streamlit · Supabase · WeasyPrint/Jinja2 · Anthropic SDK · numpy-financial  
-**Reference:** Requirements v3.0  
-**Goal:** Real proposals in production as fast as possible
+**Reference:** Requirements v3.2  
+**Goal:** Real proposals in production as fast as possible  
+**Last updated:** 2026-07-09
+
+| Phase | Status |
+|---|---|
+| 0 — Foundation | ✅ Complete |
+| 1 — PDF Engine | ✅ Complete |
+| 2 — Grid Zero Wizard | ✅ Complete |
+| 3 — Proposal Management | ✅ Complete + UX polish (directed flow, per-version PDF) |
+| 4 — AI Features | ✅ Complete (bill parser, tablero, datasheet, load estimator, daytime fraction) |
+| 5 — Off-Grid + Hybrid | ⬜ Not started |
+| 6 — Projects Module | ⬜ Not started |
+| 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅; cost templates, settings pending) |
+| 8 — QA + Handoff | ⬜ Not started |
 
 ---
 

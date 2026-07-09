@@ -9,11 +9,12 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 4 — Full (Step 5 AI consumption + Step 6 equipment catalog, MPPT, zero-export savings) |
+| **Phase completed** | Phase 4 full + Phase 3 UX polish (Cotizaciones directed-flow, per-version PDF) + Phase 7 partial (Admin equipment catalog, ARESEP tariff xlsx parser) |
 | **Phase next** | Phase 5 — Off-Grid wizard |
 | **Branch** | main |
 | **Last commit** | see `git log` |
 | **Working tree** | Clean |
+| **GitHub remote** | `https://github.com/opauly/dimensionador-fv` (added 2026-07-09) |
 
 ---
 
@@ -55,6 +56,9 @@ files at once and `git show` to hang. **Workarounds:**
 - Stage files one at a time or in small batches (5–10 files per `git add` call)
 - Use `timeout 90 git commit` — commits take ~20–30s (macOS scanning new objects)
 - `git log --oneline` is always fast; `git show --stat` hangs — avoid it
+
+**GitHub remote:** Added 2026-07-09. `origin` points to `https://github.com/opauly/dimensionador-fv.git`.
+Push with `git push` (tracking branch already configured for `main`).
 
 ---
 
@@ -115,7 +119,7 @@ The phase tag tells you when each function gets implemented.
 
 | Module | Phase | Notes |
 |---|---|---|
-| `proposals/generator.py` | ✅ done | `generate_pdf()` + `upload_pdf()` implemented |
+| `proposals/generator.py` | ✅ done | `generate_pdf()` + `upload_pdf()` implemented; `build_from_wizard_blob()` accepts optional `version_date` (DD/MM/YYYY) for historical PDF dates |
 | `proposals/templates/grid_zero_es.html` | ✅ done | Spanish — 1-page, pixel-accurate |
 | `proposals/templates/grid_zero_en.html` | ✅ done | English — 1-page, full translation |
 | `wizard/state.py` | ✅ done | Auto-save, load_draft, company/bank defaults |
@@ -126,10 +130,11 @@ The phase tag tells you when each function gets implemented.
 | `calculations/pvgis.py` | ✅ done | PVGIS API call + Supabase cache + CR geocode lookup table |
 | `calculations/mppt.py` | ✅ done | Explores all valid (series × parallel) combos; A/B/C scenarios; manual `check_design()` |
 | `calculations/financials.py` | ✅ done | IRR + ROI implemented |
-| `database/proposals_db.py` | ✅ done | Proposal + version CRUD |
+| `database/proposals_db.py` | ✅ done | Proposal + version CRUD; `mark_version_sent()` now also sets `proposals.status = "active"` |
 | `database/equipment_db.py` | ✅ done | Full CRUD: `upsert_panel`, `delete_panel`, `upsert_inverter`, `delete_inverter` |
 | `database/tariffs_db.py` | ✅ done | Read functions for Phase 2 |
 | `database/clients_db.py` | ✅ done | New file: client search + upsert |
+| `pages/01_proposals.py` | ✅ done | Proposals list + directed status flow + per-version PDF buttons (see Phase 3 UX polish below) |
 | `pages/02_new_proposal.py` | ✅ done | Full 8-step wizard orchestrator |
 | `calculations/bill_parser.py` | ✅ done | Bill PDF extraction + 12-month grid builder |
 | `calculations/tariff_calculator.py` | ✅ done | CR tariff formula: fixed + tiered + bomberos + IVA |
@@ -398,6 +403,42 @@ Tighten all these if adding a new cost line item causes overflow.
 | AI fraction timing | AI call runs before MPPT scenario generation so target_kw uses the real fraction |
 | Scenario cards | Selector button above each card (not a horizontal radio widget) for spatial alignment |
 | Manual UX | Symmetric ○/● button above card; no separate "Usar esta configuración" flow |
+
+---
+
+## Cotizaciones UX polish (post-Phase 4, completed 2026-07-09)
+
+**Goal achieved:** `pages/01_proposals.py` redesigned to be production-ready.
+
+### Key changes
+
+**Status flow — directed transitions:**
+- Replaced free-form `st.selectbox` dropdown with `st.pills` using `STATUS_TRANSITIONS` dict
+- Directed flow: `draft → active`, `active → won/lost/cancelled/draft`, `lost/cancelled → draft`. `won` is a terminal state.
+- Pills appear in the t_col (title column) of the detail panel; visually distinct from the action buttons
+
+**Per-version PDF:**
+- `build_from_wizard_blob()` in `generator.py` accepts `version_date=locked_at[:10]` formatted as DD/MM/YYYY — so historical PDFs show the correct date
+- Each version row has its own Generar / ⬇ PDF control (not just the current version)
+- "Generar PDF" removed from detail panel header (redundant with per-version controls)
+
+**Version row PDF controls:**
+- `st.pills(["📄 Generar"])` — compact pill widget, visually different from primary action buttons
+- `<a class="vrow-pill-btn">⬇ PDF</a>` — HTML anchor styled as an outlined pill matching `st.pills` appearance; direct download without Streamlit round-trip
+- On hover: border and text go green (`#4BAE6A`)
+
+**Detail panel header simplified:**
+- Layout: `[title + flow pills] | divider | [Continuar] [Nueva versión]` (removed PDF column)
+- Subtitle line "Creado · Total · vN" removed (redundant with version rows below)
+- `margin-bottom: 8px` on title div adds breathing room before flow pills
+
+**Theme:**
+- `.streamlit/config.toml` added with `primaryColor = "#4BAE6A"` — primary buttons (✏️ Continuar, 📋 Nueva versión, ➕ Nueva) are green
+
+### CSS constants in `pages/01_proposals.py`
+
+- `div[data-testid="stPills"] button[aria-selected="true"]` → black (for status flow pills and filter pills)
+- `a.vrow-pill-btn` → outlined pill shape (`border-radius: 20px`, transparent background, `#31333f` text, green border/text on hover)
 
 ---
 

@@ -1,11 +1,20 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.2
+# Pauly&Co Solar Design Tool — Final Requirements v3.3
 
-**Version:** 3.2  
-**Date:** 2026-07-05  
+**Version:** 3.3  
+**Date:** 2026-07-09  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.2 → v3.3
+
+- **Proposal status flow:** Status changes use directed `st.pills` transitions instead of a free-form dropdown. Valid paths: `draft → active → won/lost/cancelled`, `lost/cancelled → draft`. `won` is terminal. Prevents invalid state changes and makes the workflow explicit.
+- **Per-version PDF generation:** Each version row in the Cotizaciones detail panel has its own Generar / ⬇ PDF control. PDFs generated from a locked version use the version's `locked_at` date, not today's date. The redundant "Generar PDF" button in the detail panel header is removed.
+- **Version row controls as pills:** Generate (pre-PDF) and Download (post-PDF) controls in each version row render as compact `st.pills` / pill-styled HTML anchors — visually distinct from the primary action buttons (Continuar, Nueva versión).
+- **Theme:** `.streamlit/config.toml` sets `primaryColor = "#4BAE6A"` so primary Streamlit buttons use the Pauly&Co green.
+- **`mark_version_sent` side effect:** When a version is marked as sent to client, the parent proposal's status automatically advances to `active` (Enviada). No separate manual status update needed.
+- **GitHub:** Source code hosted at `https://github.com/opauly/dimensionador-fv`.
 
 ## Change log v3.1 → v3.2
 
