@@ -1,0 +1,346 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; }
+  .page {
+    width: 680px;
+    background: #fff;
+    padding: 32px 36px 28px;
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #1FAE6E;
+    padding-bottom: 14px;
+    margin-bottom: 24px;
+  }
+  .logo-area { display: flex; flex-direction: column; gap: 4px; }
+  .brand { font-size: 11px; font-weight: 500; color: #1FAE6E; letter-spacing: 0.08em; text-transform: uppercase; }
+  .site { font-size: 15px; font-weight: 500; color: #111; }
+  .period { font-size: 11px; color: #888; margin-top: 2px; }
+  .report-label { font-size: 11px; color: #888; text-align: right; }
+  .report-label strong { display: block; font-size: 13px; color: #111; font-weight: 500; }
+
+  /* Score row */
+  .score-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: #F7F9F8;
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-card.accent { background: #EEF9F4; }
+  .stat-card.warn { background: #FEF7EC; }
+  .stat-card.neutral { background: #F7F9F8; }
+  .stat-label {
+    font-size: 9.5px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .stat-value {
+    font-size: 22px;
+    font-weight: 600;
+    color: #111;
+    line-height: 1;
+  }
+  .stat-value.green { color: #1FAE6E; }
+  .stat-value.amber { color: #D4860F; }
+  .stat-sub {
+    font-size: 10px;
+    color: #999;
+  }
+  .stat-badge {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: #D9F2E6;
+    color: #0F7D4A;
+    width: fit-content;
+  }
+  .stat-badge.warn { background: #FDEFC5; color: #9A6200; }
+
+  /* Narrative */
+  .narrative {
+    border-left: 3px solid #1FAE6E;
+    padding: 10px 14px;
+    margin-bottom: 20px;
+    background: #F7FBF9;
+    border-radius: 0 8px 8px 0;
+    font-size: 11px;
+    color: #333;
+    line-height: 1.6;
+    font-style: italic;
+  }
+
+  /* Section label */
+  .section-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #aaa;
+    margin-bottom: 8px;
+    margin-top: 18px;
+  }
+
+  /* Energy flow SVG row */
+  .energy-row {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+
+  /* Daily bars */
+  .daily-bars {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+    height: 68px;
+    margin-bottom: 6px;
+  }
+  .day-col { display: flex; flex-direction: column; align-items: center; gap: 3px; flex: 1; }
+  .bar-wrap { display: flex; gap: 2px; align-items: flex-end; height: 56px; }
+  .bar { border-radius: 3px 3px 0 0; width: 8px; }
+  .bar.pv { background: #1FAE6E; }
+  .bar.load { background: #C8DDD5; }
+  .day-label { font-size: 8.5px; color: #aaa; }
+
+  .bar-legend {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 9.5px; color: #777; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+
+  /* Two column section */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 4px; }
+  .info-block { background: #F7F9F8; border-radius: 10px; padding: 12px 14px; }
+  .info-block-title { font-size: 10px; font-weight: 600; color: #555; margin-bottom: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .info-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 0.5px solid #E8EDEA; font-size: 10.5px; }
+  .info-row:last-child { border-bottom: none; }
+  .info-key { color: #888; }
+  .info-val { font-weight: 500; color: #222; }
+  .info-val.good { color: #1FAE6E; }
+  .info-val.warn { color: #D4860F; }
+
+  .footer {
+    margin-top: 22px;
+    padding-top: 10px;
+    border-top: 0.5px solid #E5EAE7;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .footer-brand { font-size: 9px; color: #bbb; }
+  .footer-page { font-size: 9px; color: #ccc; }
+
+  /* Donut area */
+  .donut-row {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .donut-labels { display: flex; flex-direction: column; gap: 7px; flex: 1; }
+  .donut-label-row { display: flex; justify-content: space-between; font-size: 10px; }
+  .donut-label-key { display: flex; align-items: center; gap: 6px; color: #777; }
+  .donut-label-key::before { content: ''; width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .donut-label-key.solar::before { background: #1FAE6E; }
+  .donut-label-key.grid::before { background: #C8DDD5; }
+  .donut-label-key.battery::before { background: #4A9FD4; }
+  .donut-label-val { font-weight: 500; color: #222; font-size: 10px; }
+</style>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="logo-area">
+      <span class="brand">Pauly y Compañía</span>
+      <span class="site">Vista Atenas LP M3</span>
+      <span class="period">Jun 30 – Jul 6, 2026</span>
+    </div>
+    <div class="report-label">
+      <span>Weekly energy report</span>
+      <strong>Reporte semanal de energía</strong>
+    </div>
+  </div>
+
+  <!-- KPI CARDS -->
+  <div class="score-row">
+    <div class="stat-card accent">
+      <div class="stat-label">Health score</div>
+      <div class="stat-value green">87<span style="font-size:13px; color:#888;">/100</span></div>
+      <div class="stat-badge">Good / Bueno</div>
+    </div>
+    <div class="stat-card neutral">
+      <div class="stat-label">Solar generated</div>
+      <div class="stat-value">34.2<span style="font-size:12px; font-weight:400; color:#888;"> kWh</span></div>
+      <div class="stat-sub">Best day: Mon 7.1 kWh</div>
+    </div>
+    <div class="stat-card neutral">
+      <div class="stat-label">Grid independence</div>
+      <div class="stat-value green">78<span style="font-size:13px;">%</span></div>
+      <div class="stat-sub">5 of 7 days self-sufficient</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">Grid outages</div>
+      <div class="stat-value amber">2</div>
+      <div class="stat-badge warn">47 min total</div>
+    </div>
+  </div>
+
+  <!-- AI NARRATIVE -->
+  <div class="narrative">
+    "This was a solid week for your solar system. You generated 34.2 kWh from the sun, covering 78% of your energy needs without touching the grid. The battery reached a full charge on 5 of 7 days. Two brief grid outages occurred on Tuesday and Thursday — your batteries kept the home running throughout both without any interruption to your loads."
+  </div>
+
+  <!-- DAILY SOLAR SECTION -->
+  <div class="section-label">Daily solar vs. consumption</div>
+  <div class="daily-bars">
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:46px"></div>
+        <div class="bar load" style="height:38px"></div>
+      </div>
+      <div class="day-label">Mon</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:38px"></div>
+        <div class="bar load" style="height:42px"></div>
+      </div>
+      <div class="day-label">Tue</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:52px"></div>
+        <div class="bar load" style="height:36px"></div>
+      </div>
+      <div class="day-label">Wed</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:29px"></div>
+        <div class="bar load" style="height:40px"></div>
+      </div>
+      <div class="day-label">Thu</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:44px"></div>
+        <div class="bar load" style="height:34px"></div>
+      </div>
+      <div class="day-label">Fri</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:50px"></div>
+        <div class="bar load" style="height:35px"></div>
+      </div>
+      <div class="day-label">Sat</div>
+    </div>
+    <div class="day-col">
+      <div class="bar-wrap">
+        <div class="bar pv" style="height:40px"></div>
+        <div class="bar load" style="height:37px"></div>
+      </div>
+      <div class="day-label">Sun</div>
+    </div>
+  </div>
+  <div class="bar-legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#1FAE6E;"></div> Solar PV</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#C8DDD5;"></div> Consumption</div>
+  </div>
+
+  <!-- ENERGY MIX + BATTERY -->
+  <div class="section-label">Weekly energy mix &amp; battery</div>
+  <div class="two-col">
+
+    <!-- Donut: energy source -->
+    <div class="info-block">
+      <div class="info-block-title">Where your energy came from</div>
+      <div class="donut-row">
+        <svg width="72" height="72" viewBox="0 0 72 72">
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#E8EDEA" stroke-width="12"/>
+          <!-- Solar: 78% = 174.6deg, starts at -90deg -->
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#1FAE6E" stroke-width="12"
+            stroke-dasharray="137.5 176.7" stroke-dashoffset="44.2" stroke-linecap="butt"/>
+          <!-- Battery: 10% = 36deg -->
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#4A9FD4" stroke-width="12"
+            stroke-dasharray="17.6 176.7" stroke-dashoffset="-93.3" stroke-linecap="butt"/>
+          <!-- Grid: 12% = remainder -->
+          <circle cx="36" cy="36" r="28" fill="none" stroke="#C8DDD5" stroke-width="12"
+            stroke-dasharray="21.2 176.7" stroke-dashoffset="-111.0" stroke-linecap="butt"/>
+          <text x="36" y="38" text-anchor="middle" font-size="12" font-weight="600" fill="#111">78%</text>
+          <text x="36" y="48" text-anchor="middle" font-size="8" fill="#888">solar</text>
+        </svg>
+        <div class="donut-labels">
+          <div class="donut-label-row">
+            <span class="donut-label-key solar">Solar</span>
+            <span class="donut-label-val">78% · 34.2 kWh</span>
+          </div>
+          <div class="donut-label-row">
+            <span class="donut-label-key battery">Battery</span>
+            <span class="donut-label-val">10% · 4.4 kWh</span>
+          </div>
+          <div class="donut-label-row">
+            <span class="donut-label-key grid">Grid</span>
+            <span class="donut-label-val">12% · 5.3 kWh</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Battery health -->
+    <div class="info-block">
+      <div class="info-block-title">Battery health</div>
+      <div class="info-row"><span class="info-key">Full charge reached</span><span class="info-val good">5 / 7 days</span></div>
+      <div class="info-row"><span class="info-key">Lowest SOC</span><span class="info-val">41%</span></div>
+      <div class="info-row"><span class="info-key">Avg temperature</span><span class="info-val">28.4 °C</span></div>
+      <div class="info-row"><span class="info-key">Weekly cycles</span><span class="info-val">0.62</span></div>
+      <div class="info-row"><span class="info-key">Voltage range</span><span class="info-val">48.2 – 54.4 V</span></div>
+    </div>
+  </div>
+
+  <!-- GRID + EVENTS -->
+  <div class="section-label" style="margin-top:14px;">Grid quality &amp; events</div>
+  <div class="two-col">
+    <div class="info-block">
+      <div class="info-block-title">Grid quality</div>
+      <div class="info-row"><span class="info-key">Frequency range</span><span class="info-val">59.7 – 60.3 Hz</span></div>
+      <div class="info-row"><span class="info-key">Voltage L1</span><span class="info-val">116 – 124 V</span></div>
+      <div class="info-row"><span class="info-key">Voltage L2</span><span class="info-val">117 – 123 V</span></div>
+      <div class="info-row"><span class="info-key">Days with grid data</span><span class="info-val">7 / 7</span></div>
+    </div>
+    <div class="info-block">
+      <div class="info-block-title">Events this week</div>
+      <div class="info-row"><span class="info-key">Grid outages</span><span class="info-val warn">2 (47 min)</span></div>
+      <div class="info-row"><span class="info-key">Alarm episodes</span><span class="info-val">1</span></div>
+      <div class="info-row"><span class="info-key">Longest outage</span><span class="info-val warn">34 min (Tue)</span></div>
+      <div class="info-row"><span class="info-key">System protected by battery</span><span class="info-val good">Yes</span></div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <span class="footer-brand">Monitoring powered by Pauly y Compañía · proyectos@paulyco.com</span>
+    <span class="footer-page">Page 1 of 1</span>
+  </div>
+
+</div>

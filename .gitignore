@@ -14,3 +14,6 @@ proposals/assets/firma_dark.png
 .claude/
 exports/
 aresep/*.xlsx
+secrets.json
+.vscode/
+*.swp

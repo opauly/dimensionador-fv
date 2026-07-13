@@ -1,0 +1,3691 @@
+[
+    {
+        "id": "9f2c0289aa37986e",
+        "type": "tab",
+        "label": "Victron Analyzer",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "866309b24ff9630d",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Grid Lost",
+        "func": "// Guard: if config not loaded yet, drop message silently\nconst _config = flow.get('config');\nconst _appUrl = _config ? _config.appScriptUrl : '';\n\nlet gridLost = 0;\n\nif (typeof msg.payload === \"object\") {\n    if (msg.payload.value !== undefined) {\n        gridLost = Number(msg.payload.value);\n    } else if (msg.payload.statusCode !== undefined) {\n        gridLost = Number(msg.payload.statusCode);\n    } else {\n        return null;\n    }\n} else {\n    gridLost = Number(msg.payload);\n}\n\n// ── State in flow context — survives re-deploys (node context does not) ─────\nconst glState   = flow.get('gridLostState') || {};\nlet previous    = glState.previous;    // undefined on first boot / first deploy\nlet outageStart = glState.outageStart; // epoch ms, null when grid is up\n\nfunction gridLabel(value) {\n    if (value === 0) return \"OK\";\n    if (value === 1) return \"WARNING\";\n    if (value === 2) return \"ALARM\";\n    return \"UNKNOWN_\" + value;\n}\n\nnode.status({\n    fill:  gridLost === 0 ? \"green\" : \"red\",\n    shape: \"dot\",\n    text:  \"GridLost: \" + gridLabel(gridLost)\n});\n\n// Atomic save helper — always writes both fields together\nfunction saveState(prev, start) {\n    flow.set('gridLostState', { previous: prev, outageStart: start });\n}\n\n// ── First message after boot or re-deploy ────────────────────────────────────\nif (previous === undefined) {\n    saveState(gridLost, null);\n\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:            \"GridLost\",\n        site:             _config ? _config.site : \"\",\n        timestamp:        new Date().toISOString(),\n        source:           \"GRID_LOST\",\n        event:            \"INITIAL_STATE\",\n        previous_state:   \"\",\n        new_state:        gridLabel(gridLost),\n        duration_minutes: \"\",\n        grid_lost_status: gridLost\n    };\n\n    msg.url = _appUrl;\n    if (!_appUrl) { return null; }\n    return msg;\n}\n\n// ── Grid just went down ───────────────────────────────────────────────────────\nif (previous === 0 && gridLost >= 1) {\n    const start = Date.now();\n    saveState(gridLost, start);\n\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:            \"GridLost\",\n        site:             _config ? _config.site : \"\",\n        timestamp:        new Date(start).toISOString(),\n        source:           \"GRID_LOST\",\n        event:            \"GRID_LOST_STARTED\",\n        previous_state:   gridLabel(previous),\n        new_state:        gridLabel(gridLost),\n        duration_minutes: \"\",\n        grid_lost_status: gridLost\n    };\n\n    msg.url = _appUrl;\n    if (!_appUrl) { return null; }\n    return msg;\n}\n\n// ── Grid just restored ────────────────────────────────────────────────────────\nif (previous >= 1 && gridLost === 0) {\n    const end             = Date.now();\n    const durationMs      = outageStart ? end - outageStart : 0;\n    const durationMinutes = Math.round(durationMs / 60000);\n\n    const daily = flow.get(\"outageDaily\") || { count: 0, minutes: 0 };\n    daily.count   += 1;\n    daily.minutes += durationMinutes;\n    flow.set(\"outageDaily\", daily);\n\n    saveState(gridLost, null);\n\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:            \"GridLost\",\n        site:             _config ? _config.site : \"\",\n        timestamp:        new Date(end).toISOString(),\n        source:           \"GRID_LOST\",\n        event:            \"GRID_RESTORED\",\n        previous_state:   gridLabel(previous),\n        new_state:        gridLabel(gridLost),\n        duration_minutes: durationMinutes,\n        grid_lost_status: gridLost\n    };\n\n    msg.url = _appUrl;\n    if (!_appUrl) { return null; }\n    return msg;\n}\n\n// ── No transition — just persist current state ────────────────────────────────\nsaveState(gridLost, outageStart);\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 840,
+        "y": 440,
+        "wires": [
+            [
+                "785aed4278c6d0f0",
+                "5d7e26e46d05246c"
+            ]
+        ]
+    },
+    {
+        "id": "e370a72545df067b",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Alarms/GridLost",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Alarms/GridLost",
+            "type": "enum",
+            "name": "GridLost",
+            "enum": {
+                "0": "Ok",
+                "1": "Warning",
+                "2": "Alarm"
+            }
+        },
+        "name": "Grid Lost Status",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 580,
+        "y": 440,
+        "wires": [
+            [
+                "866309b24ff9630d"
+            ]
+        ]
+    },
+    {
+        "id": "de1fbd6a09601429",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Ac/ActiveIn/Source",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Ac/ActiveIn/Source",
+            "type": "enum",
+            "name": "AC-Input",
+            "enum": {
+                "0": "Not available",
+                "1": "Grid",
+                "2": "Generator",
+                "3": "Shore",
+                "240": "Inverting"
+            }
+        },
+        "name": "AC Input Source",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 580,
+        "y": 520,
+        "wires": [
+            [
+                "af60ee57c9cbf79b"
+            ]
+        ]
+    },
+    {
+        "id": "af60ee57c9cbf79b",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "AC Input",
+        "func": "// Guard: if config not loaded yet, drop message silently\nconst _config = flow.get('config');\nconst _appUrl = _config ? _config.appScriptUrl : '';\n\nlet state;\n\nif (typeof msg.payload === \"object\" && msg.payload.value !== undefined) {\n    state = Number(msg.payload.value);\n} else {\n    state = Number(msg.payload);\n}\n\n// ── State in flow context — survives re-deploys (node context does not) ─────\nconst acState  = flow.get('acInputState') || {};\nlet previous   = acState.previous;   // undefined on first boot / first deploy\nlet stateStart = acState.stateStart; // epoch ms of when current state began\n\nfunction label(value) {\n    if (value === 0)   return \"NOT_AVAILABLE\";\n    if (value === 1)   return \"GRID\";\n    if (value === 2)   return \"GENERATOR\";\n    if (value === 3)   return \"SHORE\";\n    if (value === 240) return \"INVERTING\";\n    return \"UNKNOWN_\" + value;\n}\n\nnode.status({\n    fill:  \"green\",\n    shape: \"dot\",\n    text:  \"Current: \" + label(state)\n});\n\n// Atomic save helper\nfunction saveState(prev, start) {\n    flow.set('acInputState', { previous: prev, stateStart: start });\n}\n\n// ── First message after boot or re-deploy ────────────────────────────────────\nif (previous === undefined) {\n    saveState(state, Date.now());\n\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:            \"ACInput\",\n        site:             _config ? _config.site : \"\",\n        timestamp:        new Date().toISOString(),\n        source:           \"AC_INPUT\",\n        event:            \"INITIAL_STATE\",\n        previous_state:   \"\",\n        new_state:        label(state),\n        duration_minutes: \"\",\n        grid_lost_status: \"\"\n    };\n\n    msg.url = _appUrl;\n    if (!_appUrl) { return null; }\n    return msg;\n}\n\n// ── State changed ─────────────────────────────────────────────────────────────\nif (state !== previous) {\n    const now        = Date.now();\n    const durationMs = stateStart ? now - stateStart : 0;\n\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:            \"ACInput\",\n        site:             _config ? _config.site : \"\",\n        timestamp:        new Date(now).toISOString(),\n        source:           \"AC_INPUT\",\n        event:            \"AC_INPUT_STATE_CHANGED\",\n        previous_state:   label(previous),\n        new_state:        label(state),\n        duration_minutes: Math.round(durationMs / 60000),\n        grid_lost_status: \"\"\n    };\n\n    saveState(state, now);\n\n    msg.url = _appUrl;\n    if (!_appUrl) { return null; }\n    return msg;\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 840,
+        "y": 520,
+        "wires": [
+            [
+                "785aed4278c6d0f0",
+                "c78af37220769ed8"
+            ]
+        ]
+    },
+    {
+        "id": "785aed4278c6d0f0",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "POST to App Script",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "cfd548fb82154206",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [
+            {
+                "keyType": "Content-Type",
+                "keyValue": "",
+                "valueType": "other",
+                "valueValue": "application/json"
+            }
+        ],
+        "x": 1940,
+        "y": 940,
+        "wires": [
+            [
+                "327d62b4446853e9",
+                "7e405eb485295bc4"
+            ]
+        ]
+    },
+    {
+        "id": "f26782cde19c30c3",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Grid",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "1",
+        "payloadType": "num",
+        "x": 610,
+        "y": 580,
+        "wires": [
+            [
+                "af60ee57c9cbf79b"
+            ]
+        ]
+    },
+    {
+        "id": "49d7525544b0895d",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Grid Lost",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "1",
+        "payloadType": "num",
+        "x": 620,
+        "y": 380,
+        "wires": [
+            [
+                "866309b24ff9630d"
+            ]
+        ]
+    },
+    {
+        "id": "1c5ce9d2bdf9c476",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Grid Restored",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "0",
+        "payloadType": "num",
+        "x": 630,
+        "y": 320,
+        "wires": [
+            [
+                "866309b24ff9630d"
+            ]
+        ]
+    },
+    {
+        "id": "172ccf98d7c86bcb",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Solar/Batteries",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "240",
+        "payloadType": "num",
+        "x": 640,
+        "y": 640,
+        "wires": [
+            [
+                "af60ee57c9cbf79b"
+            ]
+        ]
+    },
+    {
+        "id": "5e6292da928710dd",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Energy Data",
+        "func": "let topic = msg.topic;\nlet value = Number(msg.payload);\n\nconst config = flow.get('config') || {};\nconst maxGapMinutes = config.maxIntegrationGapMinutes || 5;\n\nconst defaults = {\n    lastTime: Date.now(),\n    pv_kWh:0, grid_kWh:0, load_kWh:0,\n    battery_charge_kWh:0, battery_discharge_kWh:0,\n    pv_power:0, grid_l1:0, grid_l2:0, load_l1:0, load_l2:0,\n    battery_power:0, ac_out_l1:0, ac_out_l2:0,\n    min_soc:null, max_soc:null, soc_sum:0, soc_count:0,\n    battery_voltage:null, battery_current:null, battery_temperature:null,\n    min_voltage:null, max_voltage:null,\n    min_temperature:null, max_temperature:null, temp_sum:0, temp_count:0,\n    pv_yield_today_sc0:null, pv_yield_today_sc1:null,\n    mppt_state_sc0:null, mppt_state_sc1:null,\n    battery_reached_float: false,\n    grid_frequency:null, grid_voltage_l1:null, grid_voltage_l2:null,\n    min_grid_freq:null, max_grid_freq:null,\n    min_grid_v_l1:null, max_grid_v_l1:null,\n    min_grid_v_l2:null, max_grid_v_l2:null,\n    vebus_state:null,\n    sc0_t0_voltage:null, sc0_t0_power:null, sc0_t0_yield_today:null,\n    sc0_t1_voltage:null, sc0_t1_power:null, sc0_t1_yield_today:null,\n    sc0_t2_voltage:null, sc0_t2_power:null, sc0_t2_yield_today:null,\n    sc0_t3_voltage:null, sc0_t3_power:null, sc0_t3_yield_today:null,\n    sc1_t0_voltage:null, sc1_t0_power:null, sc1_t0_yield_today:null,\n    sc1_t1_voltage:null, sc1_t1_power:null, sc1_t1_yield_today:null,\n    sc1_t2_voltage:null, sc1_t2_power:null, sc1_t2_yield_today:null,\n    sc1_t3_voltage:null, sc1_t3_power:null, sc1_t3_yield_today:null,\n};\n\n// Detect context wipe — stored energyData is missing or empty\nconst storedEd = flow.get('energyData');\nconst wasReset = !storedEd || storedEd.soc_count === undefined;\n\nlet data = Object.assign({}, defaults, storedEd || {});\n\nlet now = Date.now();\nlet dtHours = (now - data.lastTime) / 3600000;\nif (dtHours < 0 || dtHours > (maxGapMinutes / 60)) dtHours = 0;\n\ndata.pv_kWh   += Math.max(0, data.pv_power) * dtHours / 1000;\ndata.grid_kWh += Math.max(0, (data.grid_l1||0) + (data.grid_l2||0)) * dtHours / 1000;\ndata.load_kWh += Math.max(0, (data.load_l1||0) + (data.load_l2||0)) * dtHours / 1000;\nif (data.battery_power > 0) data.battery_charge_kWh    += data.battery_power * dtHours / 1000;\nif (data.battery_power < 0) data.battery_discharge_kWh += Math.abs(data.battery_power) * dtHours / 1000;\n\ndata[topic] = value;\n\nif (topic === \"soc\") {\n    if (data.min_soc === null || value < data.min_soc) data.min_soc = value;\n    if (data.max_soc === null || value > data.max_soc) data.max_soc = value;\n    data.soc_sum += value; data.soc_count += 1;\n}\nif (topic === \"battery_voltage\") {\n    if (data.min_voltage === null || value < data.min_voltage) data.min_voltage = value;\n    if (data.max_voltage === null || value > data.max_voltage) data.max_voltage = value;\n}\nif (topic === \"battery_temperature\") {\n    if (data.min_temperature === null || value < data.min_temperature) data.min_temperature = value;\n    if (data.max_temperature === null || value > data.max_temperature) data.max_temperature = value;\n    data.temp_sum += value; data.temp_count += 1;\n}\nif (topic === \"vebus_state\" && value === 5) {\n    data.battery_reached_float = true;\n}\nif (topic === \"grid_frequency\" && value > 0) {\n    if (data.min_grid_freq === null || value < data.min_grid_freq) data.min_grid_freq = value;\n    if (data.max_grid_freq === null || value > data.max_grid_freq) data.max_grid_freq = value;\n}\nif (topic === \"grid_voltage_l1\" && value > 0) {\n    if (data.min_grid_v_l1 === null || value < data.min_grid_v_l1) data.min_grid_v_l1 = value;\n    if (data.max_grid_v_l1 === null || value > data.max_grid_v_l1) data.max_grid_v_l1 = value;\n}\nif (topic === \"grid_voltage_l2\" && value > 0) {\n    if (data.min_grid_v_l2 === null || value < data.min_grid_v_l2) data.min_grid_v_l2 = value;\n    if (data.max_grid_v_l2 === null || value > data.max_grid_v_l2) data.max_grid_v_l2 = value;\n}\n\n// ── Persist peak PV yield to flow context on every positive MPPT message ──\n// MPPT resets Yield Today to 0 at sunset — this ensures lastPvYield always\n// holds the true daily peak regardless of whether a manual inject ran\nif (topic === \"pv_yield_today_sc0\" && value > 0) {\n    const ly = flow.get('lastPvYield') || {};\n    flow.set('lastPvYield', { sc0: value, sc1: ly.sc1 || null });\n}\nif (topic === \"pv_yield_today_sc1\" && value > 0) {\n    const ly = flow.get('lastPvYield') || {};\n    flow.set('lastPvYield', { sc0: ly.sc0 || null, sc1: value });\n}\n\ndata.lastTime = now;\nflow.set('energyData', data);\n\nlet avgSoc = data.soc_count > 0 ? data.soc_sum / data.soc_count : 0;\nnode.status({\n    fill: \"green\", shape: \"dot\",\n    text: \"PV \" + data.pv_kWh.toFixed(2) +\n          \" | Load \" + data.load_kWh.toFixed(2) +\n          \" | SOC avg \" + avgSoc.toFixed(1) +\n          \" | Batt \" + (data.battery_voltage != null ? data.battery_voltage.toFixed(2) : \"--\") + \"V\" +\n          \" | F:\" + (data.battery_reached_float?\"1\":\"0\") +\n          \" | L2:\" + (data.min_grid_v_l2 != null ? data.min_grid_v_l2.toFixed(1) : \"--\")\n});\n\n// Output 1: normal (null — no downstream)\n// Output 2: log to Supabase if context wipe detected\nif (wasReset) {\n    return [null, {\n        logEvent: 'ACCUMULATOR_RESET',\n        logLevel: 'warn',\n        logData: {\n            trigger_topic: topic,\n            trigger_value: value,\n            timestamp: new Date().toISOString()\n        }\n    }];\n}\nreturn [null, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1070,
+        "y": 940,
+        "wires": [
+            [
+                "9377f263797426ee"
+            ],
+            [
+                "1aea3c5ede7fd85d"
+            ]
+        ]
+    },
+    {
+        "id": "8c113ec3602934c6",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Daily Summary",
+        "func": "const config = flow.get(\"config\") || {};\nconst utcOffsetMs = (config.utcOffsetHours || -6) * 60 * 60 * 1000;\n\nlet ed = flow.get(\"energyData\") || {};\nlet outage = flow.get(\"outageDaily\") || { count:0, minutes:0 };\n\nlet now = new Date();\nlet localTime = new Date(now.getTime() + utcOffsetMs);\nlet summaryDate = localTime.toISOString().slice(0, 10);\n\nlet testing = msg.testing === true;\n\nconst avgSoc  = ed.soc_count  > 0 ? Number((ed.soc_sum  / ed.soc_count).toFixed(1))  : \"\";\nconst avgTemp = ed.temp_count > 0 ? Number((ed.temp_sum / ed.temp_count).toFixed(1)) : null;\n\n// ── PV yield: use accumulator if positive, else fall back to lastPvYield\n// MPPT resets Yield Today to 0 at sunset, before the 23:55 AUTO inject\nconst lastYield = flow.get('lastPvYield') || {};\nconst yieldSc0 = (ed.pv_yield_today_sc0 > 0) ? ed.pv_yield_today_sc0 : (lastYield.sc0 || null);\nconst yieldSc1 = (ed.pv_yield_today_sc1 > 0) ? ed.pv_yield_today_sc1 : (lastYield.sc1 || null);\n\nmsg.url     = config.appScriptUrl || '';\nmsg.headers = { \"Content-Type\": \"application/json\" };\n\nmsg.payload = {\n    sheet: \"DailySummary\",\n    site:  config.site || '',\n    reportLanguage: config.reportLanguage || 'en',\n    date:  summaryDate,\n\n    // ── Energy (2dp) ─────────────────────────────────────────────\n    pv_kWh:                Number((ed.pv_kWh                || 0).toFixed(2)),\n    grid_kWh:              Number((ed.grid_kWh              || 0).toFixed(2)),\n    load_kWh:              Number((ed.load_kWh              || 0).toFixed(2)),\n    battery_charge_kWh:    Number((ed.battery_charge_kWh    || 0).toFixed(2)),\n    battery_discharge_kWh: Number((ed.battery_discharge_kWh || 0).toFixed(2)),\n\n    // ── SOC (1dp) ────────────────────────────────────────────────\n    min_soc: ed.min_soc == null ? \"\" : Number(ed.min_soc.toFixed(1)),\n    max_soc: ed.max_soc == null ? \"\" : Number(ed.max_soc.toFixed(1)),\n    avg_soc: avgSoc,\n\n    // ── Outages ──────────────────────────────────────────────────\n    outage_count:   outage.count   || 0,\n    outage_minutes: Number((outage.minutes || 0).toFixed(1)),\n\n    // ── Battery health ───────────────────────────────────────────\n    min_voltage:     ed.min_voltage     != null ? Number(ed.min_voltage.toFixed(2))     : null,\n    max_voltage:     ed.max_voltage     != null ? Number(ed.max_voltage.toFixed(2))     : null,\n    min_temperature: ed.min_temperature != null ? Number(ed.min_temperature.toFixed(1)) : null,\n    max_temperature: ed.max_temperature != null ? Number(ed.max_temperature.toFixed(1)) : null,\n    avg_temperature: avgTemp,\n\n    // ── PV / MPPT ────────────────────────────────────────────────\n    pv_yield_kwh_sc0:  yieldSc0 != null ? Number(yieldSc0.toFixed(3)) : null,\n    pv_yield_kwh_sc1:  yieldSc1 != null ? Number(yieldSc1.toFixed(3)) : null,\n    pv_yield_kwh_mppt: (yieldSc0 || 0) + (yieldSc1 || 0) > 0\n                        ? Number(((yieldSc0 || 0) + (yieldSc1 || 0)).toFixed(3))\n                        : null,\n    battery_reached_float: ed.battery_reached_float || (ed.max_soc != null && ed.max_soc >= 100) || false,\n\n    // ── Grid quality ─────────────────────────────────────────────\n    min_grid_freq: ed.min_grid_freq != null ? Number(ed.min_grid_freq.toFixed(2)) : null,\n    max_grid_freq: ed.max_grid_freq != null ? Number(ed.max_grid_freq.toFixed(2)) : null,\n    min_grid_v_l1: ed.min_grid_v_l1 != null ? Number(ed.min_grid_v_l1.toFixed(1)) : null,\n    max_grid_v_l1: ed.max_grid_v_l1 != null ? Number(ed.max_grid_v_l1.toFixed(1)) : null,\n    min_grid_v_l2: ed.min_grid_v_l2 != null ? Number(ed.min_grid_v_l2.toFixed(1)) : null,\n    max_grid_v_l2: ed.max_grid_v_l2 != null ? Number(ed.max_grid_v_l2.toFixed(1)) : null,\n\n    // ── Grid data availability flag ───────────────────────────────\n    grid_data_available: (ed.max_grid_v_l1 != null && ed.max_grid_v_l1 > 0),\n\n    // ── Specs ────────────────────────────────────────────────────\n    battery_usable_kwh: config.batteryUsableKWh || null,\n    pv_kwp:             config.pvKwp            || null,\n    health_thresholds:  config.healthThresholds  || null,\n    latitude:           config.latitude          || null,\n    longitude:          config.longitude         || null\n};\n\nif (testing) msg.payload.event = \"TEST_DAILY_SUMMARY\";\n\nmsg.livePowerSnapshot = {\n    pv_power:           ed.pv_power      || 0,\n    grid_l1:            ed.grid_l1       || 0,\n    grid_l2:            ed.grid_l2       || 0,\n    load_l1:            ed.load_l1       || 0,\n    load_l2:            ed.load_l2       || 0,\n    battery_power:      ed.battery_power || 0,\n    ac_out_l1:          ed.ac_out_l1     || 0,\n    ac_out_l2:          ed.ac_out_l2     || 0,\n    pv_yield_today_sc0: yieldSc0,\n    pv_yield_today_sc1: yieldSc1\n};\n\nmsg.testing  = testing;\nmsg._isDailySummary = true;\n\n// Persist peak yield — only overwrite if positive\n// so post-sunset zero reset from MPPT does not erase the day's value\nflow.set('lastPvYield', {\n    sc0: (ed.pv_yield_today_sc0 > 0) ? ed.pv_yield_today_sc0 : (lastYield.sc0 || null),\n    sc1: (ed.pv_yield_today_sc1 > 0) ? ed.pv_yield_today_sc1 : (lastYield.sc1 || null)\n});\n\nnode.status({ fill:\"blue\", shape:\"ring\",\n    text: \"Prepared \" + summaryDate + (testing ? \" [TEST]\" : \"\") });\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1000,
+        "y": 100,
+        "wires": [
+            [
+                "785aed4278c6d0f0",
+                "7671cdf960597417",
+                "931650405895aa8c"
+            ]
+        ]
+    },
+    {
+        "id": "7ae99cfb3a2ad3c2",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Auto Daily Inject",
+        "props": [],
+        "repeat": "",
+        "crontab": "55 23 * * *",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "x": 650,
+        "y": 100,
+        "wires": [
+            [
+                "8c113ec3602934c6"
+            ]
+        ]
+    },
+    {
+        "id": "302a0164c539582a",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Ac/Grid/L1/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Ac/Grid/L1/Power",
+            "type": "float",
+            "name": "Grid L1 (W)"
+        },
+        "name": "Grid L1 Power",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 590,
+        "y": 820,
+        "wires": [
+            [
+                "5d2d040f3e49c755"
+            ]
+        ]
+    },
+    {
+        "id": "3853c0235ce9e4b5",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Ac/Grid/L2/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Ac/Grid/L2/Power",
+            "type": "float",
+            "name": "Grid L2 (W)"
+        },
+        "name": "Grid L2 Power",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 590,
+        "y": 880,
+        "wires": [
+            [
+                "11c5c6b147f2d772"
+            ]
+        ]
+    },
+    {
+        "id": "7ea6b6af56bf8536",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Ac/Consumption/L1/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Ac/Consumption/L1/Power",
+            "type": "float",
+            "name": "AC Consumption L1 (W)"
+        },
+        "name": "AC Consumption L1",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 570,
+        "y": 940,
+        "wires": [
+            [
+                "958f824a9b5c52b6"
+            ]
+        ]
+    },
+    {
+        "id": "e7aa6fd14addef8e",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Ac/Consumption/L2/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Ac/Consumption/L2/Power",
+            "type": "float",
+            "name": "AC Consumption L2 (W)"
+        },
+        "name": "AC Consumption L2",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 570,
+        "y": 1000,
+        "wires": [
+            [
+                "60f67e26fe979e71"
+            ]
+        ]
+    },
+    {
+        "id": "0e301f3c2bd75490",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Dc/Battery/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Dc/Battery/Power",
+            "type": "float",
+            "name": "Battery Power (W)"
+        },
+        "name": "Battery Power",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 590,
+        "y": 1060,
+        "wires": [
+            [
+                "342e2287f5558b1d"
+            ]
+        ]
+    },
+    {
+        "id": "cf2e904705a0440d",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Dc/Battery/Soc",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Dc/Battery/Soc",
+            "type": "float",
+            "name": "Battery State of Charge (%)"
+        },
+        "name": "Battery SOC",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 590,
+        "y": 1120,
+        "wires": [
+            [
+                "46659bfbbb7d27cb"
+            ]
+        ]
+    },
+    {
+        "id": "885dbaf04a28691e",
+        "type": "victron-input-system",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.system/0",
+        "path": "/Dc/Pv/Power",
+        "serviceObj": {
+            "service": "com.victronenergy.system/0",
+            "name": "Venus system",
+            "communityTag": "system"
+        },
+        "pathObj": {
+            "path": "/Dc/Pv/Power",
+            "type": "float",
+            "name": "MPPTs - power (W)"
+        },
+        "name": "PV Power",
+        "onlyChanges": false,
+        "roundValues": "no",
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 600,
+        "y": 760,
+        "wires": [
+            [
+                "3d89c67c6615a1e8"
+            ]
+        ]
+    },
+    {
+        "id": "9377f263797426ee",
+        "type": "debug",
+        "z": "9f2c0289aa37986e",
+        "name": "Debug: EnergyData",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1290,
+        "y": 940,
+        "wires": []
+    },
+    {
+        "id": "3d89c67c6615a1e8",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "pv_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 760,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "5d2d040f3e49c755",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "grid_l1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 820,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "11c5c6b147f2d772",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "grid_l2",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 880,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "958f824a9b5c52b6",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "load_l1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 940,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "60f67e26fe979e71",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "load_l2",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1000,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "342e2287f5558b1d",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "battery_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1060,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "46659bfbbb7d27cb",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "soc",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1120,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "1b43f368d4e22692",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "AlarmEvents",
+        "func": "let alarmValue;\n\nif (typeof msg.payload === \"object\") {\n    if (msg.payload.value !== undefined) {\n        alarmValue = Number(msg.payload.value);\n    } else if (msg.payload.statusCode !== undefined) {\n        alarmValue = Number(msg.payload.statusCode);\n    } else {\n        return null;\n    }\n} else {\n    alarmValue = Number(msg.payload);\n}\n\nconst config   = flow.get(\"config\") || {};\nconst alarmKey = msg.topic || \"unknown_alarm\";\n\n// ── State in flow context — survives re-deploys (node context does not) ─────\n// All alarm baselines live under a single 'alarmState' object keyed by alarm type.\nconst alarmState = flow.get('alarmState') || {};\nconst previous   = alarmState[alarmKey]; // undefined on first boot / first deploy\n\nfunction alarmNameFromTopic(topic) {\n    if (topic === \"low_battery\")      return \"Low Battery Alarm\";\n    if (topic === \"high_temperature\") return \"High Temperature Alarm\";\n    if (topic === \"overload\")         return \"Overload Alarm\";\n    if (topic === \"charger_alarm\")    return \"Charger Alarm\";\n    if (topic === \"vebus_error\")      return \"VE.Bus Error\";\n    if (topic === \"battery_alarm\")    return \"Battery Alarm\";\n    return topic;\n}\n\nfunction statusLabel(v)   { return v === 0 ? \"OK\" : v === 1 ? \"WARNING\" : v === 2 ? \"ALARM\" : \"UNKNOWN_\" + v; }\nfunction severityLabel(v) { return v === 0 ? \"CLEARED\" : v === 1 ? \"WARNING\" : v === 2 ? \"ALARM\" : \"UNKNOWN\"; }\n\nconst alarmName = alarmNameFromTopic(alarmKey);\n\nnode.status({\n    fill:  alarmValue === 0 ? \"green\" : alarmValue === 1 ? \"yellow\" : \"red\",\n    shape: \"dot\",\n    text:  alarmName + \": \" + statusLabel(alarmValue)\n});\n\n// Skip first reading — just record baseline, don't fire an event\nif (previous === undefined) {\n    alarmState[alarmKey] = alarmValue;\n    flow.set('alarmState', alarmState);\n    return null;\n}\n\n// Only fire on state change\nif (alarmValue !== previous) {\n    msg.headers = { \"Content-Type\": \"application/json\" };\n    msg.payload = {\n        sheet:     \"AlarmEvents\",\n        site:      config.site   || \"\",\n        timestamp: new Date().toISOString(),\n        source:    alarmKey,\n        alarm:     alarmName,\n        status:    statusLabel(alarmValue),\n        severity:  severityLabel(alarmValue)\n    };\n    alarmState[alarmKey] = alarmValue;\n    flow.set('alarmState', alarmState);\n    msg.url = config.appScriptUrl || \"\";\n    return msg;\n}\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1090,
+        "y": 3700,
+        "wires": [
+            [
+                "785aed4278c6d0f0",
+                "85d7d86878c55013"
+            ]
+        ]
+    },
+    {
+        "id": "89e6765fabcde033",
+        "type": "victron-input-battery",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.battery/512",
+        "path": "/Alarms/HighTemperature",
+        "serviceObj": {
+            "service": "com.victronenergy.battery/512",
+            "name": "Pylontech battery",
+            "communityTag": "battery"
+        },
+        "pathObj": {
+            "path": "/Alarms/HighTemperature",
+            "type": "enum",
+            "name": "High battery temperature alarm",
+            "enum": {
+                "0": "No alarm",
+                "2": "Alarm"
+            }
+        },
+        "name": "High Temperature Alarm",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 570,
+        "y": 3700,
+        "wires": [
+            [
+                "0a82582cfe941265"
+            ]
+        ]
+    },
+    {
+        "id": "d14358545daa2536",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/ErrorCode",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/ErrorCode",
+            "type": "enum",
+            "name": "Error code",
+            "enum": {
+                "0": "No error",
+                "1": "#1 - Battery temperature too high",
+                "2": "#2 - Battery voltage too high",
+                "3": "#3 - Battery temperature sensor miswired (+)",
+                "4": "#4 - Battery temperature sensor miswired (-)",
+                "5": "#5 - Battery temperature sensor disconnected",
+                "6": "#6 - Battery voltage sense miswired (+)",
+                "7": "#7 - Battery voltage sense miswired (-)",
+                "8": "#8 - Battery voltage sense disconnected",
+                "9": "#9 - Battery voltage wire losses too high",
+                "10": "#10 - Battery voltage too low",
+                "11": "#11 - Battery ripple voltage on terminals too high",
+                "12": "#12 - Battery low state of charge",
+                "13": "#13 - Battery mid-point voltage issue",
+                "14": "#14 - Battery temperature too low",
+                "17": "#17 - Charger temperature too high",
+                "18": "#18 - Charger over-current",
+                "19": "#19 - Charger current polarity reversed",
+                "20": "#20 - Max Bulk-time exceeded",
+                "21": "#21 - Charger current sensor issue",
+                "22": "#22 - Temperature sensor miswired",
+                "23": "#23 - Charger temperature sensor disconnected",
+                "24": "#24 - Charger internal fan not detected",
+                "25": "#25 - Charger internal fan over-current",
+                "26": "#26 - Charger terminal overheated",
+                "27": "#27 - Charger short circuit",
+                "28": "#28 - Charger issue with power stage",
+                "29": "#29 - Over-charge protection",
+                "31": "#31 - Input voltage out of range",
+                "32": "#32 - Input voltage too low",
+                "33": "#33 - Input voltage too high",
+                "34": "#34 - PV over current",
+                "35": "#35 - Input excessive power",
+                "36": "#36 - Input polarity issue",
+                "37": "#37 - Input voltage absent (mains removed, fuse blown?)",
+                "38": "#38 - Input shutdown due to battery over-voltage",
+                "39": "#39 - Input shutdown due to battery over-voltage",
+                "40": "#40 - Internal failure (PV Input failed to shutdown)",
+                "41": "#41 - Inverter shutdown (panel isolation resistance too low)",
+                "42": "#42 - Inverter shutdown (ground current too high: >30mA)",
+                "43": "#43 - Inverter shutdown (voltage over ground relay too high)",
+                "50": "#50 - Inverter overload (iit protection)",
+                "51": "#51 - Inverter temperature too high",
+                "52": "#52 - Inverter excessive current",
+                "53": "#53 - Inverter dc level (internal dc rail voltage)",
+                "54": "#54 - Inverter ac level (output voltage not ok)",
+                "55": "#55 - Inverter dc fail (dc on output)",
+                "56": "#56 - Inverter ac fail (shape wrong)*/",
+                "57": "#57 - Inverter ac on output (inverter only)",
+                "58": "#58 - Inverter bridge fault (hardware signal)",
+                "59": "#59 - ACIN1 relay test fault",
+                "60": "#60 - ACIN2 relay test fault",
+                "65": "#65 - Device disappeared during parallel operation (broken cable?)",
+                "66": "#66 - Incompatible device encountered for parallel operation (e.g. old firmware/different settings)",
+                "67": "#67 - No BMS",
+                "68": "#68 - Network misconfigured",
+                "113": "#113 - Non-volatile storage write error",
+                "114": "#114 - CPU temperature to high",
+                "115": "#115 - CAN/SCI communication lost (when critical)",
+                "116": "#116 - Calibration data lost",
+                "117": "#117 - Incompatible firmware encountered",
+                "118": "#118 - Incompatible hardware encountered",
+                "119": "#119 - Settings data lost",
+                "120": "#120 - Reference voltage failure",
+                "121": "#121 - Tester fail",
+                "122": "#122 - Non-volatile history data invalid/corrupted",
+                "200": "#200 - Internal error",
+                "201": "#201 - Internal error",
+                "203": "#203 - Internal error",
+                "205": "#205 - Internal error",
+                "212": "#212 - Internal error",
+                "215": "#215 - Internal error"
+            }
+        },
+        "name": "Charger Alarm",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 610,
+        "y": 3760,
+        "wires": [
+            [
+                "12469a806eb01bc6"
+            ]
+        ]
+    },
+    {
+        "id": "93c55ece387ecf19",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Alarms/Overload",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Alarms/Overload",
+            "type": "enum",
+            "name": "Overload alarm",
+            "enum": {
+                "0": "Ok",
+                "1": "Warning",
+                "2": "Alarm"
+            }
+        },
+        "name": "Overload Alarm",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 600,
+        "y": 3820,
+        "wires": [
+            [
+                "e7345d2cfb623905"
+            ]
+        ]
+    },
+    {
+        "id": "8172e1f5b1054ad0",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Alarms/LowBattery",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Alarms/LowBattery",
+            "type": "enum",
+            "name": "Low battery alarm",
+            "enum": {
+                "0": "Ok",
+                "1": "Warning",
+                "2": "Alarm"
+            }
+        },
+        "name": "Low Battery Alarm 2",
+        "onlyChanges": true,
+        "roundValues": "no",
+        "rateLimit": 0,
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "true",
+        "outputFalse": "false",
+        "debounce": "2000",
+        "x": 590,
+        "y": 3640,
+        "wires": [
+            [
+                "922fac71dc5b2e51"
+            ]
+        ]
+    },
+    {
+        "id": "922fac71dc5b2e51",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "low_battery",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 3640,
+        "wires": [
+            [
+                "1b43f368d4e22692"
+            ]
+        ]
+    },
+    {
+        "id": "0a82582cfe941265",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "high_temperature",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 3700,
+        "wires": [
+            [
+                "1b43f368d4e22692"
+            ]
+        ]
+    },
+    {
+        "id": "12469a806eb01bc6",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "charger_alarm",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 3760,
+        "wires": [
+            [
+                "1b43f368d4e22692"
+            ]
+        ]
+    },
+    {
+        "id": "e7345d2cfb623905",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "overload",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 800,
+        "y": 3820,
+        "wires": [
+            [
+                "1b43f368d4e22692"
+            ]
+        ]
+    },
+    {
+        "id": "7671cdf960597417",
+        "type": "debug",
+        "z": "9f2c0289aa37986e",
+        "name": "Debug: Daily Summary",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1330,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "a9d36eecc034e209",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Manual Daily Inject",
+        "props": [
+            {
+                "p": "testing",
+                "v": "true",
+                "vt": "bool"
+            },
+            {
+                "p": "_isManual",
+                "v": "true",
+                "vt": "bool"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "x": 650,
+        "y": 160,
+        "wires": [
+            [
+                "8c113ec3602934c6"
+            ]
+        ]
+    },
+    {
+        "id": "9ce94fbfd571916b",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Init Config",
+        "props": [],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "x": 150,
+        "y": 60,
+        "wires": [
+            [
+                "5c2993d47fbfb27f"
+            ]
+        ]
+    },
+    {
+        "id": "5c2993d47fbfb27f",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Project Config",
+        "func": "// ╔══════════════════════════════════════════════════════════╗\n// ║           PROJECT CONFIGURATION — EDIT THIS NODE         ║\n// ║  All project-specific parameters are defined here.       ║\n// ║  No other node should contain hardcoded project values.  ║\n// ╚══════════════════════════════════════════════════════════╝\n\nconst config = {\n\n    // ── IDENTITY ──────────────────────────────────────────────\n    site:   \"Vista Atenas LP M3\",      // display name (Sheets, Drive, reports)\n    reportLanguage: \"en\",                // \"en\" or \"es\" — weekly report language\n    siteId: \"vista-atenas-lp-m3\",      // slug — must match sites.site_id in Supabase\n\n    // ── GOOGLE APPS SCRIPT ────────────────────────────────────\n    appScriptUrl: \"https://script.google.com/macros/s/AKfycbww6PjJRTZ4gqrSA_CxS5eLBmN6QtUsEWzaT8kP2whv1i87vkG6u4TzqgW-xVstLYvUZw/exec\",\n\n    // ── SUPABASE ──────────────────────────────────────────────\n    // Project URL from Settings → API\n    //supabaseUrl: \"https://rrcxunmcrsopcozodctm.supabase.co/rest/v1\",\n    supabaseUrl: \"https://qqorjwnlawhlmrmxxgdb.supabase.co/rest/v1\",\n    // anon public key from Settings → API\n    supabaseAnonKey: env.get('SUPABASE_ANON_KEY'),\n\n    // ── SYSTEM SPECS ──────────────────────────────────────────\n    batteryUsableKWh: 41.04,\n    pvKwp: 19.36,\n    latitude: 9.969576,\n    longitude: -84.405197,\n\n    // ── TIMEZONE ──────────────────────────────────────────────\n    timezone: \"America/Costa_Rica\",\n    utcOffsetHours: -6,\n\n    // ── DAILY SUMMARY TRIGGER ─────────────────────────────────\n    // \"Auto Daily Inject\" fires at local 23:55 (all days checked).\n    // Cerbo interprets crontab in local system time.\n    dailySummaryLocalTime: \"23:55\",\n\n    // ── ENERGY INTEGRATION ────────────────────────────────────\n    maxIntegrationGapMinutes: 30,\n\n    // ── MPPT CONTROLLERS ──────────────────────────────────────────\n    // One entry per physical MPPT controller on site.\n    // instance: matches Victron service instance (0, 1, 2...)\n    // trackers: up to 4 per controller; active:false = unused input\n    // name: string label matching electrical plans and site tags\n    mpptControllers: [\n        {\n            instance: 0,\n            name: \"MPPT 450/200 HQ2507WTYA7\",\n            trackers: [\n                { index: 0, name: \"S1\", active: true  },\n                { index: 1, name: \"S2\", active: true  },\n                { index: 2, name: \"S3\", active: true  },\n                { index: 3, name: \"N/A\", active: false }\n            ]\n        },\n        {\n            instance: 1,\n            name: \"MPPT 450/200 HQ2507GFD9W\",\n            trackers: [\n                { index: 0, name: \"S4\", active: true  },\n                { index: 1, name: \"S5\", active: true  },\n                { index: 2, name: \"S6\", active: true  },\n                { index: 3, name: \"N/A\", active: false }\n            ]\n        }\n    ],\n\n    // ── HEALTH SCORE THRESHOLDS ───────────────────────────────\n    // Sent to App Script + Supabase trigger uses DB defaults.\n    // To override Supabase thresholds, use compute_daily_health() RPC directly.\n    healthThresholds: {\n        socLowAlarm:       20,\n        socLowWarning:     30,\n        socLowWatch:       40,\n        outageMinLong:    120,\n        outageMinMid:      30,\n        outageCountHigh:    5,\n        gridDepHigh:       50,\n        gridDepMid:        20,\n        batteryCyclesHigh: 1.5,\n        batteryCyclesMid:  1.0\n    }\n};\n\nflow.set(\"config\", config);\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: \"Config loaded: \" + config.site\n});\n\nnode.log(\"Project config initialised for site: \" + config.site);\nreturn null;",
+        "outputs": 0,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "ce4d3c701c2f6994",
+        "type": "comment",
+        "z": "9f2c0289aa37986e",
+        "name": "⚙ START HERE — Project Config",
+        "info": "Edit the 'Project Config' function node to set all project-specific parameters.\n\nThe 'Auto Daily Inject' crontab is interpreted in the Cerbo GX local system time.\nIf the Cerbo timezone = site timezone (recommended), set the crontab to the desired\nlocal time directly:\n  e.g. fire at 23:55 local → crontab '55 23 * * *'\n\nIf the Cerbo is in UTC, convert manually:\n  UTC cron hour = (local_hour + |utcOffsetHours|) % 24\n  CR UTC-6 → (23 + 6) % 24 = 5 → '55 5 * * *'",
+        "x": 200,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "327d62b4446853e9",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Handle HTTP Response",
+        "func": "const config     = flow.get('config') || {};\nconst testing    = msg.testing === true;\nconst statusCode = msg.statusCode || 0;\nconst body       = typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload || '');\nconst success    = statusCode > 0;\nconst liveSnap   = msg.livePowerSnapshot || {};\nconst isManual   = msg._isManual === true;\nconst isDailySummary = msg._isDailySummary === true;\n\n// Build log message for every HTTP response\nconst logMsg = {\n    logEvent: 'HTTP_RESPONSE',\n    logLevel: success ? 'info' : 'error',\n    logData: {\n        statusCode:    statusCode,\n        testing:       testing,\n        isManual:      isManual,\n        isDailySummary: isDailySummary,\n        willReset:     (success && !testing && !isManual && isDailySummary),\n        timestamp:     new Date().toISOString()\n    }\n};\n\nif (success && !testing && !isManual && isDailySummary) {\n    flow.set('energyData', {\n        lastTime: Date.now(),\n        pv_kWh:0, grid_kWh:0, load_kWh:0,\n        battery_charge_kWh:0, battery_discharge_kWh:0,\n        pv_power:      liveSnap.pv_power      || 0,\n        grid_l1:       liveSnap.grid_l1       || 0,\n        grid_l2:       liveSnap.grid_l2       || 0,\n        load_l1:       liveSnap.load_l1       || 0,\n        load_l2:       liveSnap.load_l2       || 0,\n        battery_power: liveSnap.battery_power || 0,\n        ac_out_l1:     liveSnap.ac_out_l1     || 0,\n        ac_out_l2:     liveSnap.ac_out_l2     || 0,\n        min_soc:null, max_soc:null, soc_sum:0, soc_count:0,\n        battery_voltage:null, battery_current:null, battery_temperature:null,\n        min_voltage:null, max_voltage:null,\n        min_temperature:null, max_temperature:null, temp_sum:0, temp_count:0,\n        pv_yield_today_sc0: (flow.get('lastPvYield') || {}).sc0 || null,\n        pv_yield_today_sc1: (flow.get('lastPvYield') || {}).sc1 || null,\n        mppt_state_sc0:null, mppt_state_sc1:null,\n        battery_reached_float: false,\n        grid_frequency:null, grid_voltage_l1:null, grid_voltage_l2:null,\n        min_grid_freq:null, max_grid_freq:null,\n        min_grid_v_l1:null, max_grid_v_l1:null,\n        min_grid_v_l2:null, max_grid_v_l2:null,\n        vebus_state:null,\n        sc0_t0_voltage:null, sc0_t0_power:null, sc0_t0_yield_today:null,\n        sc0_t1_voltage:null, sc0_t1_power:null, sc0_t1_yield_today:null,\n        sc0_t2_voltage:null, sc0_t2_power:null, sc0_t2_yield_today:null,\n        sc0_t3_voltage:null, sc0_t3_power:null, sc0_t3_yield_today:null,\n        sc1_t0_voltage:null, sc1_t0_power:null, sc1_t0_yield_today:null,\n        sc1_t1_voltage:null, sc1_t1_power:null, sc1_t1_yield_today:null,\n        sc1_t2_voltage:null, sc1_t2_power:null, sc1_t2_yield_today:null,\n        sc1_t3_voltage:null, sc1_t3_power:null, sc1_t3_yield_today:null,\n    });\n    flow.set('outageDaily', { count:0, minutes:0 });\n    node.status({ fill:'green', shape:'dot', text:'✓ Confirmed + counters reset' });\n    node.log('Daily summary confirmed. Counters reset.');\n} else if (success && !testing && isManual) {\n    node.status({ fill:'blue', shape:'ring', text:'✓ Manual snapshot — no reset' });\n} else if (success && !testing && !isManual && !isDailySummary) {\n    node.status({ fill:'green', shape:'ring', text:'✓ Event posted — no reset' });\n} else if (!success && !testing) {\n    node.error('POST failed — no response received. Status: ' + statusCode);\n    node.status({ fill:'red', shape:'dot', text:'✗ No response (connection failure)' });\n} else if (testing) {\n    node.status({ fill:'yellow', shape:'ring', text:'TEST — no reset' });\n}\n\nreturn logMsg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2210,
+        "y": 940,
+        "wires": [
+            [
+                "1aea3c5ede7fd85d"
+            ]
+        ]
+    },
+    {
+        "id": "962bab228fc16e99",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase Response",
+        "func": "const statusCode = msg.statusCode || 0;\nconst body       = typeof msg.payload === 'string' ? msg.payload : JSON.stringify(msg.payload || '');\nconst table      = msg._supaTable || 'unknown';\n\n// Supabase returns 201 Created on successful INSERT with Prefer: return=minimal\nif (statusCode === 201 || statusCode === 200) {\n    node.status({ fill: 'green', shape: 'dot', text: '✓ ' + table + ' inserted' });\n    node.log('Supabase INSERT ok: ' + table);\n} else {\n    node.error('Supabase INSERT failed [' + table + '] HTTP ' + statusCode + ': ' + body.slice(0, 200));\n    node.status({ fill: 'red', shape: 'dot', text: '✗ ' + table + ' failed (' + statusCode + ')' });\n}\nreturn null;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2500,
+        "y": 620,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "931650405895aa8c",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Prep: energy_daily",
+        "func": "const config  = flow.get('config') || {};\nconst testing = msg.testing === true;\nconst dumpType = testing ? 'TEST' : (msg._isManual ? 'MANUAL' : 'AUTO');\nconst p = msg.payload || {};\n\nmsg.url     = config.supabaseUrl + '/energy_daily';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id:               config.siteId,\n    date:                  p.date,\n    dump_type:             dumpType,\n    pv_kwh:                p.pv_kWh,\n    grid_kwh:              p.grid_kWh,\n    load_kwh:              p.load_kWh,\n    battery_charge_kwh:    p.battery_charge_kWh,\n    battery_discharge_kwh: p.battery_discharge_kWh,\n    min_soc:               p.min_soc === '' ? null : p.min_soc,\n    max_soc:               p.max_soc === '' ? null : p.max_soc,\n    avg_soc:               p.avg_soc === '' ? null : p.avg_soc,\n    outage_count:          p.outage_count,\n    outage_minutes:        p.outage_minutes,\n    min_voltage:           p.min_voltage     || null,\n    max_voltage:           p.max_voltage     || null,\n    min_temperature:       p.min_temperature || null,\n    max_temperature:       p.max_temperature || null,\n    avg_temperature:       p.avg_temperature || null,\n    pv_yield_kwh_sc0:      p.pv_yield_kwh_sc0      || null,\n    pv_yield_kwh_sc1:      p.pv_yield_kwh_sc1      || null,\n    pv_yield_kwh_mppt:     p.pv_yield_kwh_mppt     || null,\n    battery_reached_float: p.battery_reached_float || false,\n    min_grid_freq:         p.min_grid_freq  || null,\n    max_grid_freq:         p.max_grid_freq  || null,\n    min_grid_v_l1:         p.min_grid_v_l1  || null,\n    max_grid_v_l1:         p.max_grid_v_l1  || null,\n    min_grid_v_l2:         p.min_grid_v_l2  || null,\n    max_grid_v_l2:         p.max_grid_v_l2  || null,\n    grid_data_available:   p.grid_data_available !== undefined ? p.grid_data_available : true,\n    pv_kwp_snapshot:       config.pvKwp,\n    battery_kwh_snapshot:  config.batteryUsableKWh\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1910,
+        "y": 500,
+        "wires": [
+            [
+                "8df4fd7a5db530c1"
+            ]
+        ]
+    },
+    {
+        "id": "8df4fd7a5db530c1",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase: energy_daily",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 2170,
+        "y": 500,
+        "wires": [
+            [
+                "962bab228fc16e99"
+            ]
+        ]
+    },
+    {
+        "id": "5d7e26e46d05246c",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Prep: grid_events",
+        "func": "const config = flow.get('config') || {};\nconst p = msg.payload || {};\n\nmsg.url     = config.supabaseUrl + '/grid_events';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id:          config.siteId,\n    event:            p.event,\n    previous_state:   p.previous_state || null,\n    new_state:        p.new_state || null,\n    timestamp:        p.timestamp || new Date().toISOString(),\n    duration_minutes: p.duration_minutes || null\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1910,
+        "y": 560,
+        "wires": [
+            [
+                "3c1cfbfccd7a1566"
+            ]
+        ]
+    },
+    {
+        "id": "3c1cfbfccd7a1566",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase: grid_events",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 2180,
+        "y": 560,
+        "wires": [
+            [
+                "962bab228fc16e99"
+            ]
+        ]
+    },
+    {
+        "id": "c78af37220769ed8",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Prep: ac_input_events",
+        "func": "const config = flow.get('config') || {};\nconst p = msg.payload || {};\n\nmsg.url     = config.supabaseUrl + '/ac_input_events';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id:          config.siteId,\n    event:            p.event,\n    source:           p.source || null,\n    previous_state:   p.previous_state || null,\n    new_state:        p.new_state || null,\n    timestamp:        p.timestamp || new Date().toISOString(),\n    duration_minutes: p.duration_minutes || null\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1900,
+        "y": 620,
+        "wires": [
+            [
+                "497200a4c6da6b0c"
+            ]
+        ]
+    },
+    {
+        "id": "497200a4c6da6b0c",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase: ac_input_events",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 2180,
+        "y": 620,
+        "wires": [
+            [
+                "962bab228fc16e99"
+            ]
+        ]
+    },
+    {
+        "id": "85d7d86878c55013",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Prep: alarm_events",
+        "func": "const config = flow.get('config') || {};\nconst p = msg.payload || {};\n\nmsg.url     = config.supabaseUrl + '/alarm_events';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id:   config.siteId   || null,\n    alarm:     p.alarm         || null,\n    severity:  p.severity      || null,\n    source:    p.source        || null,\n    timestamp: p.timestamp     || new Date().toISOString()\n};\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1910,
+        "y": 680,
+        "wires": [
+            [
+                "669418e7873672f9"
+            ]
+        ]
+    },
+    {
+        "id": "669418e7873672f9",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase: alarm_events",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 2190,
+        "y": 680,
+        "wires": [
+            [
+                "962bab228fc16e99"
+            ]
+        ]
+    },
+    {
+        "id": "75ba73d0a257dc3e",
+        "type": "victron-input-battery",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.battery/512",
+        "path": "/Dc/0/Voltage",
+        "serviceObj": {
+            "service": "com.victronenergy.battery/512",
+            "name": "Pylontech battery",
+            "communityTag": "battery"
+        },
+        "pathObj": {
+            "path": "/Dc/0/Voltage",
+            "type": "float",
+            "name": "Battery voltage (V)"
+        },
+        "name": "Battery Voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 560,
+        "y": 1260,
+        "wires": [
+            [
+                "c007a1fd2ec213f6"
+            ]
+        ]
+    },
+    {
+        "id": "c007a1fd2ec213f6",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "battery_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1260,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "bad94858ba5b0ea8",
+        "type": "victron-input-battery",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.battery/512",
+        "path": "/Dc/0/Current",
+        "serviceObj": {
+            "service": "com.victronenergy.battery/512",
+            "name": "Pylontech battery",
+            "communityTag": "battery"
+        },
+        "pathObj": {
+            "path": "/Dc/0/Current",
+            "type": "float",
+            "name": "Battery current (A)"
+        },
+        "name": "Battery Current",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 560,
+        "y": 1310,
+        "wires": [
+            [
+                "b8bbcb501bd54ce3"
+            ]
+        ]
+    },
+    {
+        "id": "b8bbcb501bd54ce3",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "battery_current",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1310,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "d19ea8ab5bb4bfe5",
+        "type": "victron-input-battery",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.battery/512",
+        "path": "/Dc/0/Temperature",
+        "serviceObj": {
+            "service": "com.victronenergy.battery/512",
+            "name": "Pylontech battery",
+            "communityTag": "battery"
+        },
+        "pathObj": {
+            "path": "/Dc/0/Temperature",
+            "type": "float",
+            "name": "Battery temperature (°C)"
+        },
+        "name": "Battery Temperature",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 560,
+        "y": 1360,
+        "wires": [
+            [
+                "d3ced510442001f9"
+            ]
+        ]
+    },
+    {
+        "id": "d3ced510442001f9",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "battery_temperature",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1360,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "07edb4fb263bdfb1",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/History/Daily/0/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Yield",
+            "type": "float",
+            "name": "Yield today (kWh)"
+        },
+        "name": "PV Yield Today SC0",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 1420,
+        "wires": [
+            [
+                "32db9b2b8450249c"
+            ]
+        ]
+    },
+    {
+        "id": "32db9b2b8450249c",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "pv_yield_today_sc0",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1420,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "1cdbd5c7d9e5c0dc",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/State",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/State",
+            "type": "enum",
+            "name": "VE.Bus state",
+            "enum": {
+                "0": "Off",
+                "1": "Low Power",
+                "2": "Fault",
+                "3": "Bulk",
+                "4": "Absorption",
+                "5": "Float",
+                "6": "Storage",
+                "7": "Equalize",
+                "8": "Passthru",
+                "9": "Inverting",
+                "10": "Power assist",
+                "11": "Power supply",
+                "252": "External control"
+            }
+        },
+        "name": "VE.Bus State",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1540,
+        "wires": [
+            [
+                "4f8f2e07ba0d69d7"
+            ]
+        ]
+    },
+    {
+        "id": "4f8f2e07ba0d69d7",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "vebus_state",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1540,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "0d7faef02e621841",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Ac/Out/L1/P",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Ac/Out/L1/P",
+            "type": "float",
+            "name": "Output power phase L1 (W)"
+        },
+        "name": "AC Output L1",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1590,
+        "wires": [
+            [
+                "84a0914520852478"
+            ]
+        ]
+    },
+    {
+        "id": "84a0914520852478",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "ac_out_l1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1590,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "81235171453b9221",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Ac/Out/L2/P",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Ac/Out/L2/P",
+            "type": "float",
+            "name": "Output power phase L2 (W)"
+        },
+        "name": "AC Output L2",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1640,
+        "wires": [
+            [
+                "18ee48fbac3cb0fc"
+            ]
+        ]
+    },
+    {
+        "id": "18ee48fbac3cb0fc",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "ac_out_l2",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1640,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "63849638d1a2e3c5",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Ac/ActiveIn/L1/F",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Ac/ActiveIn/L1/F",
+            "type": "float",
+            "name": "Input frequency phase 1 (Hz)"
+        },
+        "name": "Grid Frequency",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1690,
+        "wires": [
+            [
+                "31f1f2d2cfe5b29f"
+            ]
+        ]
+    },
+    {
+        "id": "31f1f2d2cfe5b29f",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "grid_frequency",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1690,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "eab46e5fee16c61c",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Ac/ActiveIn/L1/V",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Ac/ActiveIn/L1/V",
+            "type": "float",
+            "name": "Input voltage phase 1 (VAC)"
+        },
+        "name": "Grid Voltage L1",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1740,
+        "wires": [
+            [
+                "78e87f0f4654a0d7"
+            ]
+        ]
+    },
+    {
+        "id": "78e87f0f4654a0d7",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "grid_voltage_l1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1740,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "387e12d420a38db9",
+        "type": "victron-input-vebus",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.vebus/274",
+        "path": "/Ac/ActiveIn/L2/V",
+        "serviceObj": {
+            "service": "com.victronenergy.vebus/274",
+            "name": "Quattro 48/10000/140-2x100 120V",
+            "communityTag": "vebus"
+        },
+        "pathObj": {
+            "path": "/Ac/ActiveIn/L2/V",
+            "type": "float",
+            "name": "Input voltage phase 2 (VAC)"
+        },
+        "name": "Grid Voltage L2",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1790,
+        "wires": [
+            [
+                "30c6f925be0da4dd"
+            ]
+        ]
+    },
+    {
+        "id": "30c6f925be0da4dd",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "grid_voltage_l2",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1790,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "097e9f3943bfca9e",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/3/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/3/V",
+            "type": "float",
+            "name": "Tracker 4 voltage"
+        },
+        "name": "MPPT1 T0(S1) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1890,
+        "wires": [
+            [
+                "75ded639018febf4"
+            ]
+        ]
+    },
+    {
+        "id": "75ded639018febf4",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t0_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1890,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "bd7e91befcae9293",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/3/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/3/P",
+            "type": "float",
+            "name": "Tracker 4 power"
+        },
+        "name": "MPPT1 T0(S1) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 1950,
+        "wires": [
+            [
+                "0e77eeda4c0b8c94"
+            ]
+        ]
+    },
+    {
+        "id": "0e77eeda4c0b8c94",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t0_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 1950,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "8638f0cfd38a3800",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/History/Daily/0/Pv/3/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/3/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 3 (kWh)"
+        },
+        "name": "MPPT1 T0(S1) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 540,
+        "y": 2010,
+        "wires": [
+            [
+                "0fe72666655d44a9"
+            ]
+        ]
+    },
+    {
+        "id": "0fe72666655d44a9",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t0_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2010,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "4abaab98fc9fbcea",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/2/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/2/V",
+            "type": "float",
+            "name": "Tracker 3 voltage"
+        },
+        "name": "MPPT1 T1(S2) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2070,
+        "wires": [
+            [
+                "4efb937676d62bc5"
+            ]
+        ]
+    },
+    {
+        "id": "4efb937676d62bc5",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t1_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2070,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "d9a17f85fd191cef",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/2/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/2/P",
+            "type": "float",
+            "name": "Tracker 3 power"
+        },
+        "name": "MPPT1 T1(S2) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2130,
+        "wires": [
+            [
+                "6ce837953bff8a3a"
+            ]
+        ]
+    },
+    {
+        "id": "6ce837953bff8a3a",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t1_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2130,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "57afa66e16db469c",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/History/Daily/0/Pv/2/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/2/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 2 (kWh)"
+        },
+        "name": "MPPT1 T1(S2) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 540,
+        "y": 2190,
+        "wires": [
+            [
+                "0233686dc117c93b"
+            ]
+        ]
+    },
+    {
+        "id": "0233686dc117c93b",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t1_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 2190,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "cf24641b843e3443",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/1/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/1/V",
+            "type": "float",
+            "name": "Tracker 2 voltage"
+        },
+        "name": "MPPT1 T2(S3) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2250,
+        "wires": [
+            [
+                "6548e97c348286e0"
+            ]
+        ]
+    },
+    {
+        "id": "6548e97c348286e0",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t2_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2250,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "cecd488f063a1f96",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/1/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/1/P",
+            "type": "float",
+            "name": "Tracker 2 power"
+        },
+        "name": "MPPT1 T2(S3) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2310,
+        "wires": [
+            [
+                "6f04dd2d7de22251"
+            ]
+        ]
+    },
+    {
+        "id": "6f04dd2d7de22251",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t2_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2310,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "11beea71a0f4d04b",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/History/Daily/0/Pv/1/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/1/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 1 (kWh)"
+        },
+        "name": "MPPT1 T2(S3) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 540,
+        "y": 2370,
+        "wires": [
+            [
+                "347dea57d9344561"
+            ]
+        ]
+    },
+    {
+        "id": "347dea57d9344561",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t2_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 2370,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "920d07cfe248ee02",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/0/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/0/V",
+            "type": "float",
+            "name": "Tracker 1 voltage"
+        },
+        "name": "MPPT1 T3(N/A) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2430,
+        "wires": [
+            [
+                "74e1f76338d32ccf"
+            ]
+        ]
+    },
+    {
+        "id": "74e1f76338d32ccf",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t3_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2430,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "e609e8bf986e6659",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/Pv/0/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/0/P",
+            "type": "float",
+            "name": "Tracker 1 power"
+        },
+        "name": "MPPT1 T3(N/A) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2490,
+        "wires": [
+            [
+                "97afdb4d3eecd9da"
+            ]
+        ]
+    },
+    {
+        "id": "97afdb4d3eecd9da",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t3_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2490,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "0824c510ffbe6aef",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/0",
+        "path": "/History/Daily/0/Pv/0/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/0",
+            "name": "MPPT 450/200 HQ2507WTYA7",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/0/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 0 (kWh)"
+        },
+        "name": "MPPT1 T3(N/A) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2550,
+        "wires": [
+            [
+                "13decaa4fb528dd8"
+            ]
+        ]
+    },
+    {
+        "id": "13decaa4fb528dd8",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc0_t3_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2550,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "baca3b365da54792",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/3/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/3/V",
+            "type": "float",
+            "name": "Tracker 4 voltage"
+        },
+        "name": "MPPT2 T0(S4) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2610,
+        "wires": [
+            [
+                "2675472ed0c09f2e"
+            ]
+        ]
+    },
+    {
+        "id": "2675472ed0c09f2e",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t0_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2609.9999999999995,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "5e22f8d3b1f16bce",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/3/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/3/P",
+            "type": "float",
+            "name": "Tracker 4 power"
+        },
+        "name": "MPPT2 T0(S4) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2670,
+        "wires": [
+            [
+                "6882d9ad34df2043"
+            ]
+        ]
+    },
+    {
+        "id": "6882d9ad34df2043",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t0_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2670,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "1b1186def6b20ea7",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/History/Daily/0/Pv/3/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/3/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 3 (kWh)"
+        },
+        "name": "MPPT2 T0(S4) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 540,
+        "y": 2730,
+        "wires": [
+            [
+                "cf288809f8f09990"
+            ]
+        ]
+    },
+    {
+        "id": "cf288809f8f09990",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t0_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 760,
+        "y": 2729.9999999999995,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "403ea26669ddecb5",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/2/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/2/V",
+            "type": "float",
+            "name": "Tracker 3 voltage"
+        },
+        "name": "MPPT2 T1(S5) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2790,
+        "wires": [
+            [
+                "0565129438ba9440"
+            ]
+        ]
+    },
+    {
+        "id": "0565129438ba9440",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t1_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2789.999999999999,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "6cd007ceda5459fa",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/2/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/2/P",
+            "type": "float",
+            "name": "Tracker 3 power"
+        },
+        "name": "MPPT2 T1(S5) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 2850,
+        "wires": [
+            [
+                "0f90f2e8c80f0d3d"
+            ]
+        ]
+    },
+    {
+        "id": "0f90f2e8c80f0d3d",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t1_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 770,
+        "y": 2850,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "fe3d0c7498518d2d",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/History/Daily/0/Pv/2/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/2/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 2 (kWh)"
+        },
+        "name": "MPPT2 T1(S5) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 560,
+        "y": 2910,
+        "wires": [
+            [
+                "093192a9cb31b429"
+            ]
+        ]
+    },
+    {
+        "id": "093192a9cb31b429",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t1_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 2910,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "dba7ffeae2d7c00a",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/1/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/1/V",
+            "type": "float",
+            "name": "Tracker 2 voltage"
+        },
+        "name": "MPPT2 T2(S6) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 2970,
+        "wires": [
+            [
+                "1cf7aed1ee02579a"
+            ]
+        ]
+    },
+    {
+        "id": "1cf7aed1ee02579a",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t2_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 790,
+        "y": 2970,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "b790d80938277b34",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/1/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/1/P",
+            "type": "float",
+            "name": "Tracker 2 power"
+        },
+        "name": "MPPT2 T2(S6) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 3030,
+        "wires": [
+            [
+                "f4ea7f555263d240"
+            ]
+        ]
+    },
+    {
+        "id": "f4ea7f555263d240",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t2_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 790,
+        "y": 3030,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "32796638f7739978",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/History/Daily/0/Pv/1/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/1/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 1 (kWh)"
+        },
+        "name": "MPPT2 T2(S6) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 560,
+        "y": 3090,
+        "wires": [
+            [
+                "7e75d473827ee214"
+            ]
+        ]
+    },
+    {
+        "id": "7e75d473827ee214",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t2_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 3090,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "fa9ee8ecf2baa4a5",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/0/V",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/0/V",
+            "type": "float",
+            "name": "Tracker 1 voltage"
+        },
+        "name": "MPPT2 T3(N/A) voltage",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 3150,
+        "wires": [
+            [
+                "449098657763bad7"
+            ]
+        ]
+    },
+    {
+        "id": "449098657763bad7",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t3_voltage",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 790,
+        "y": 3150,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "826c8054cf6ff673",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/Pv/0/P",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/Pv/0/P",
+            "type": "float",
+            "name": "Tracker 1 power"
+        },
+        "name": "MPPT2 T3(N/A) power",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 3210,
+        "wires": [
+            [
+                "f069e308a1d5ceae"
+            ]
+        ]
+    },
+    {
+        "id": "f069e308a1d5ceae",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t3_power",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 790,
+        "y": 3210,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "6fa880670d303a13",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/History/Daily/0/Pv/0/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Pv/0/Yield",
+            "type": "float",
+            "name": "Yield today for tracker 0 (kWh)"
+        },
+        "name": "MPPT2 T3(N/A) yield_today",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 550,
+        "y": 3270,
+        "wires": [
+            [
+                "48ac44a7ca93e467"
+            ]
+        ]
+    },
+    {
+        "id": "48ac44a7ca93e467",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "sc1_t3_yield_today",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 790,
+        "y": 3270,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "60196d0e79cea584",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "MPPT Snapshot (15 min)",
+        "props": [],
+        "repeat": "900",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 30,
+        "topic": "",
+        "x": 570,
+        "y": 3360,
+        "wires": [
+            [
+                "deb4e0a1c0a6441b"
+            ]
+        ]
+    },
+    {
+        "id": "deb4e0a1c0a6441b",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Build MPPT Snapshot",
+        "func": "const config = flow.get('config') || {};\nconst ed     = flow.get('energyData') || {};\nconst ctrl   = config.mpptControllers || [];\n\nconst controllers = ctrl.map(c => {\n    const trackers = c.trackers\n        .filter(t => t.active)\n        .map(t => {\n            const prefix = 'sc' + c.instance + '_t' + t.index + '_';\n            return {\n                index:          t.index,\n                name:           t.name,\n                voltage_v:      ed[prefix + 'voltage']     || null,\n                power_w:        ed[prefix + 'power']       || null,\n                yield_today_kwh:ed[prefix + 'yield_today'] || null\n            };\n        });\n\n    // Voltage spread — max minus min across active trackers\n    const voltages = trackers\n        .map(t => t.voltage_v)\n        .filter(v => v !== null && v > 0);\n\n    const voltageSpread = voltages.length > 1\n        ? Number((Math.max(...voltages) - Math.min(...voltages)).toFixed(2))\n        : null;\n\n    return {\n        instance:       c.instance,\n        name:           c.name,\n        charger_state:  ed['mppt_state_sc' + c.instance]    || null,\n        pv_power_w:     ed['pv_power']                         || null,\n        yield_today_kwh:ed['pv_yield_today_sc' + c.instance]   || null,\n        voltage_spread: voltageSpread,\n        trackers:       trackers\n    };\n});\n\nmsg.url     = config.supabaseUrl + '/mppt_snapshots';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id:   config.siteId,\n    timestamp: new Date().toISOString(),\n    data:      { controllers }\n};\n\nnode.status({\n    fill: 'blue', shape: 'dot',\n    text: controllers.length + ' controllers snapshotted'\n});\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 820,
+        "y": 3360,
+        "wires": [
+            [
+                "8acef73aa91a14a6"
+            ]
+        ]
+    },
+    {
+        "id": "8acef73aa91a14a6",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "Supabase: mppt_snapshots",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 1060,
+        "y": 3360,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "b16895204ea32c74",
+        "type": "victron-input-solarcharger",
+        "z": "9f2c0289aa37986e",
+        "service": "com.victronenergy.solarcharger/1",
+        "path": "/History/Daily/0/Yield",
+        "serviceObj": {
+            "service": "com.victronenergy.solarcharger/1",
+            "name": "MPPT 450/200 HQ2507GFD9W",
+            "communityTag": "solarcharger"
+        },
+        "pathObj": {
+            "path": "/History/Daily/0/Yield",
+            "type": "float",
+            "name": "Yield today (kWh)"
+        },
+        "name": "PV Yield Today SC1",
+        "onlyChanges": false,
+        "rateLimit": "0.2",
+        "outputs": 1,
+        "conditionalMode": false,
+        "outputTrue": "",
+        "outputFalse": "",
+        "debounce": "",
+        "x": 570,
+        "y": 1480,
+        "wires": [
+            [
+                "797ffb60c8939270"
+            ]
+        ]
+    },
+    {
+        "id": "797ffb60c8939270",
+        "type": "change",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "pv_yield_today_sc1",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 780,
+        "y": 1480,
+        "wires": [
+            [
+                "5e6292da928710dd"
+            ]
+        ]
+    },
+    {
+        "id": "7e405eb485295bc4",
+        "type": "debug",
+        "z": "9f2c0289aa37986e",
+        "name": "POST to AS Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2210,
+        "y": 1040,
+        "wires": []
+    },
+    {
+        "id": "6031cdd6823dbcae",
+        "type": "catch",
+        "z": "9f2c0289aa37986e",
+        "name": "Flow Error Catch",
+        "scope": null,
+        "uncaught": false,
+        "x": 2340,
+        "y": 1200,
+        "wires": [
+            [
+                "d09785eae51b1c13",
+                "254c6ce57dd08d91"
+            ]
+        ]
+    },
+    {
+        "id": "d09785eae51b1c13",
+        "type": "debug",
+        "z": "9f2c0289aa37986e",
+        "name": "Error Logger",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 2610,
+        "y": 1200,
+        "wires": []
+    },
+    {
+        "id": "254c6ce57dd08d91",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Error Logger",
+        "func": "// ── Option 1: Write to Venus OS system log (readable via SSH) ────────────────\n// journalctl -u node-red -f   OR   cat /var/log/node-red.log\nconst errorMsg  = (msg.error && msg.error.message) ? msg.error.message : String(msg.error || 'unknown error');\nconst errorNode = (msg.error && msg.error.source)  ? msg.error.source.name || msg.error.source.id : 'unknown node';\nnode.log('[FLOW ERROR] node=\"' + errorNode + '\" error=\"' + errorMsg + '\"');\n\n// ── Option 2: Write to flow context for Daily Summary pickup ─────────────────\n// Keeps a rolling log of the last 10 errors seen today.\n// Cleared on successful daily reset alongside energyData.\nconst errors = flow.get('flowErrors') || [];\nerrors.push({\n    time:    new Date().toISOString(),\n    node:    errorNode,\n    message: errorMsg\n});\n\n// Cap at 10 entries — oldest fall off\nif (errors.length > 10) errors.splice(0, errors.length - 10);\n\nflow.set('flowErrors', errors);\n\n// Update node status so it's visible on the canvas\nnode.status({\n    fill:  'red',\n    shape: 'dot',\n    text:  errorNode + ': ' + errorMsg.slice(0, 50)\n});\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2610,
+        "y": 1140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "63054d61f9c4d66f",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "POST: flow_log",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 2400,
+        "y": 1320,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1aea3c5ede7fd85d",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Log to Supabase",
+        "func": "const config = flow.get('config') || {};\n\nmsg.url = config.supabaseUrl + '/flow_logs';\nmsg.headers = {\n    'Content-Type':  'application/json',\n    'Content-Profile': 'monitoring',\n    'apikey':        config.supabaseAnonKey,\n    'Authorization': 'Bearer ' + config.supabaseAnonKey,\n    'Prefer':        'return=minimal'\n};\nmsg.payload = {\n    site_id: config.siteId,\n    ts:      new Date().toISOString(),\n    event:   msg.logEvent || 'unknown',\n    level:   msg.logLevel || 'info',\n    data:    msg.logData  || null\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2190,
+        "y": 1320,
+        "wires": [
+            [
+                "63054d61f9c4d66f"
+            ]
+        ]
+    },
+    {
+        "id": "cfd548fb82154206",
+        "type": "tls-config",
+        "name": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "",
+        "verifyservercert": true,
+        "alpnprotocol": ""
+    },
+    {
+        "id": "73e349c1be78c3ab",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@victronenergy/node-red-contrib-victron": "1.6.64"
+        }
+    }
+]

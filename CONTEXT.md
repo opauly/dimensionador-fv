@@ -48,6 +48,31 @@ type hints (Python 3.10+ syntax) work at runtime on 3.9.
 
 ---
 
+## Victron Monitor integration (added 2026-07-13)
+
+`victron-monitor/` at the repo root is a separate product (Victron fleet telemetry via
+Node-RED + Google Apps Script) that was migrated in from a standalone repo
+(`opauly/victron-monitor`) to share this project's Supabase instance and consolidate
+infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/README.md).
+
+- Lives in its own Postgres schema, **`monitoring`**, alongside this tool's `public` schema
+  in the same Supabase project — not a separate project/database.
+- Schema source of truth: [`database/migrations/004_add_monitoring_schema.sql`](database/migrations/004_add_monitoring_schema.sql).
+  `victron-monitor/sql/schema.sql` is a portable reference copy kept manually in sync.
+- No RLS on `monitoring` tables (same pattern as `public`) — access via schema-level
+  `GRANT`s to `anon`/`authenticated`/`service_role`, since Supabase doesn't auto-grant
+  non-`public` schemas the way it does `public`.
+- `monitoring` must stay checked under Settings → API → Data API → Exposed schemas.
+  PostgREST requests need a `Content-Profile`/`Accept-Profile: monitoring` header —
+  it doesn't route by URL path.
+- Node-RED (running on physical Cerbo GX field hardware) writes with the shared
+  project's **anon** key, deliberately not `service_role`, to limit blast radius if the
+  device or flow file is ever exposed.
+- Live/current versions: `node-red/victron_monitor_v1p6.json` and
+  `apps-script/Victron_Events_App_Script_v1p6.js`.
+
+---
+
 ## Git behavior on this machine
 
 `git-lfs` is configured globally but not installed. This causes `git add` on multiple
