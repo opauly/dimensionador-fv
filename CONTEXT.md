@@ -68,8 +68,22 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
 - Node-RED (running on physical Cerbo GX field hardware) writes with the shared
   project's **anon** key, deliberately not `service_role`, to limit blast radius if the
   device or flow file is ever exposed.
-- Live/current versions: `node-red/victron_monitor_v1p6.json` and
+- **The anon key is NOT hardcoded in the flow.** It's stored as a Node-RED Global
+  Environment Variable (User Settings → Environment) with type `credential`, which
+  Node-RED encrypts at rest and excludes from flow exports. The `Project Config`
+  function node reads it via `env.get('SUPABASE_ANON_KEY')`. This was a deliberate fix
+  after an earlier commit briefly had the literal key in `node-red/victron_monitor_v1p6.json`
+  (caught before push by the auto-mode credential-leak classifier, never reached GitHub —
+  fixed by amending before the first successful push). Do not reintroduce a literal key
+  into any node's function source.
+- Live/current versions: `node-red/victron_monitor_v1p7.json` and
   `apps-script/Victron_Events_App_Script_v1p6.js`.
+- Old standalone repo `opauly/victron-monitor` is **archived** (2026-07-13) — this repo
+  is now the single source of truth for Victron Monitor.
+- **Known gap:** no RLS on `monitoring` — one shared `anon` key can read/write/delete
+  all sites' data. Fine for the current internally-owned sites; must be fixed (per-site
+  RLS + per-device JWT provisioning) before onboarding paying external customers.
+  Planned in PHASES.md as a future phase.
 
 ---
 

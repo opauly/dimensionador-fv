@@ -2,9 +2,9 @@
 
 **Builder:** Oscar Pauly (solo)  
 **Stack:** Streamlit · Supabase · WeasyPrint/Jinja2 · Anthropic SDK · numpy-financial  
-**Reference:** Requirements v3.2  
+**Reference:** Requirements v3.4  
 **Goal:** Real proposals in production as fast as possible  
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-13
 
 | Phase | Status |
 |---|---|
@@ -17,6 +17,7 @@
 | 6 — Projects Module | ⬜ Not started |
 | 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅; cost templates, settings pending) |
 | 8 — QA + Handoff | ⬜ Not started |
+| 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
 
 ---
 
@@ -424,6 +425,43 @@ The PDF template is the hardest thing to get right visually, and it's the thing 
 
 ---
 
+## Phase 9 — Victron Monitor Multi-Tenant Hardening (3–5 days, separate product)
+
+**Goal:** Victron Monitor is safe to sell as a paid subscription to external customers, not just run internally across your own sites.
+
+This phase belongs to `victron-monitor/`, not the solar proposal tool — it has no dependency on Phases 0–8 and can be done whenever the subscription business is ready to onboard its first external (non-Pauly&Co-owned) site. See [`victron-monitor/README.md`](victron-monitor/README.md) and [`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for current architecture.
+
+### Why this phase exists
+
+As of v3.4, every site in `monitoring.sites` is reachable by **one shared Supabase `anon` key** with schema-wide `GRANT ALL` and no RLS. A single compromised or physically-stolen Cerbo GX device currently exposes every other customer's telemetry, not just its own, and there's no way to revoke one customer's access without rotating the key for the entire fleet. That's an acceptable trust model for a handful of internally-owned sites; it's disqualifying once someone else's business data is on the other end of that key.
+
+### Tasks
+
+**Row-Level Security**
+- Enable RLS on all `monitoring` tables (`sites`, `energy_daily`, `daily_health`, `alarm_events`, `grid_events`, `ac_input_events`, `mppt_snapshots`, `flow_logs`)
+- Policy pattern: `site_id = (auth.jwt() ->> 'site_id')` for both read and write, scoped per table
+- Decide whether `fleet_summary` (the cross-site view) needs a separate internal-only role that bypasses per-site RLS for Pauly&Co's own dashboard use
+
+**Per-device JWT provisioning**
+- Small provisioning script (could live in `victron-monitor/tools/` or as an Admin-area action in this Streamlit app) that, given a `site_id`, mints a signed Supabase-compatible JWT with a `site_id` claim, using the project's `service_role` key server-side — the device never sees `service_role`
+- Decide token lifetime / rotation policy (long-lived vs. periodic refresh) — Cerbo devices are not always online, so refresh flows need to tolerate extended offline periods
+- Store the minted JWT the same way `SUPABASE_ANON_KEY` is stored today: Node-RED Global Environment Variable, type `credential`, referenced via `env.get()` — never hardcoded in the flow
+
+**Onboarding flow update**
+- Update `victron-monitor/docs/onboarding.md`: Step 1 becomes "insert site row + mint device JWT" instead of just "insert site row"
+- New site's `Project Config` node references the per-device credential var, not the shared one
+
+**Key rotation / revocation**
+- Document how to revoke a single site's access (e.g., a `revoked` flag checked by an RLS policy, or short-lived JWTs with a refresh endpoint that checks a revocation list) without affecting other customers
+- Runbook for "customer cancels subscription" and "device reported stolen"
+
+**Validation**
+- Two test sites, two different device JWTs — confirm site A's JWT cannot read or write site B's rows (via curl, same technique used to debug the schema-exposure issue in this repo's history)
+- Revoke one site's JWT — confirm that site's writes start failing while the other site is unaffected
+- Confirm `fleet_summary` (or its replacement) still works for internal fleet-wide visibility without exposing cross-site access to device credentials
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -437,9 +475,11 @@ The PDF template is the hardest thing to get right visually, and it's the thing 
 | 6 | Projects module | 5–6 | Week 9–10 |
 | 7 | Admin + polish | 3–4 | Week 11 |
 | 8 | QA + handoff | 2–3 | Week 11–12 |
+| 9 | Victron Monitor multi-tenant hardening | 3–5 | Whenever needed — independent of 0–8 |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
-**Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)
+**Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
+**Victron Monitor sellable to external customers:** End of Phase 9, triggered by business need (first external customer), not by calendar time
 
 These are part-time estimates assuming 2–3 focused hours per day alongside client work. If you have a full week free, Phase 0+1 can be done in 3 days.
 
@@ -468,6 +508,8 @@ Phase 7 + 8 (admin + QA) ← always last
 ```
 
 Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Grid proposal urgent before the AI features are done, do Phase 5 first.
+
+**Phase 9 is off this critical path entirely.** It belongs to Victron Monitor, a separate product sharing this repo and Supabase project — not a step in the solar tool's proposal/projects/admin roadmap. Trigger it by business need (onboarding the first external Victron Monitor customer), not by sequence.
 
 ---
 

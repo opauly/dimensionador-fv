@@ -1,11 +1,17 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.3
+# Pauly&Co Solar Design Tool — Final Requirements v3.4
 
-**Version:** 3.3  
-**Date:** 2026-07-09  
+**Version:** 3.4  
+**Date:** 2026-07-13  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.3 → v3.4
+
+- **Victron Monitor migrated into this repo** (`victron-monitor/` at repo root), sharing this project's Supabase instance instead of running as a standalone product — see Section 4.5.
+- Old standalone repo (`opauly/victron-monitor`) archived on GitHub; this repo is now the single source of truth for both products.
+- No functional changes to the solar wizard/proposal/projects tool itself in this version — this is an infrastructure consolidation only.
 
 ## Change log v3.2 → v3.3
 
@@ -308,6 +314,15 @@ solar-tool/
     ├── logo_pauly_color.png
     └── firma_oscar_dark.png
 ```
+
+### 4.5 Shared project — Victron Monitor integration (added v3.4)
+
+This Supabase project also hosts **Victron Monitor**, a separate product (Victron Energy fleet telemetry via Node-RED + Google Apps Script), living at `victron-monitor/` in this repo. It is not part of the solar proposal/projects tool's functional scope described in this document — it's documented here only because it shares the database.
+
+- Isolated in its own Postgres schema, **`monitoring`**, alongside this tool's `public` schema — same project, same billing, separate tables and separate concerns.
+- Uses the project's `anon` key (not `service_role`), scoped via schema-level `GRANT`s rather than RLS — deliberately lower-privilege than this tool's own backend access, since the key lives on physical field hardware (Victron Cerbo GX devices) rather than a server.
+- Full details, schema, and onboarding: [`victron-monitor/README.md`](victron-monitor/README.md).
+- **Known gap, planned for a future phase (see PHASES.md):** the `monitoring` schema currently has no Row-Level Security — one shared `anon` key has read/write/delete on all sites' data. This is acceptable for the current handful of internally-owned sites but must be replaced with per-site RLS + per-device JWT provisioning before Victron Monitor is sold as a paid subscription to external customers.
 
 ---
 
