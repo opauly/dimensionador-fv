@@ -394,7 +394,7 @@ function countAlarmsForDate(site, date) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// LOGO — Pauly y Compañía, embedded as base64 (no external dependency)
+// LOGO — Pauly & Co., embedded as base64 (no external dependency)
 // ─────────────────────────────────────────────────────────────────
 const LOGO_BASE64 = "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";
 
@@ -485,7 +485,11 @@ const TRANSLATIONS = {
     emailIntro:          "Here is your weekly energy report for",
     emailKeyStats:       "Key stats this week",
     emailAttached:       "The full report is attached as a PDF.",
-    poweredBy:           "Monitoring powered by Pauly y Compañía",
+    emailLblUsed:        "Energy you used",
+    emailLblOwnEnergy:   "Powered by your own energy",
+    emailLblBatteryFull: "Days battery fully charged",
+    emailSavingsSoon:    "Coming soon",
+    poweredBy:           "Monitoring powered by Pauly &amp; Co.",
     pageOf:              "Page"
   },
   es: {
@@ -571,7 +575,11 @@ const TRANSLATIONS = {
     emailIntro:          "Aquí está su reporte semanal de energía para",
     emailKeyStats:       "Datos clave de esta semana",
     emailAttached:       "El reporte completo está adjunto en PDF.",
-    poweredBy:           "Monitoreo impulsado por Pauly y Compañía",
+    emailLblUsed:        "Energía que usó",
+    emailLblOwnEnergy:   "Energía propia utilizada",
+    emailLblBatteryFull: "Días con batería llena",
+    emailSavingsSoon:    "Próximamente",
+    poweredBy:           "Monitoreo impulsado por Pauly &amp; Co.",
     pageOf:              "Página"
   }
 };
@@ -964,7 +972,8 @@ function weeklyReport() {
     const emailHtml = buildEmailHtml({
       t: t, lang: lang, site: site, startStr: startStr, endStr: endStr,
       avgHealth: avgHealth, healthStatus: healthStatus, totals: totals,
-      gridIndependencePct: gridIndependencePct, batteryCycles: batteryCycles
+      gridIndependencePct: gridIndependencePct, batteryCycles: batteryCycles,
+      narrative: narrative, days: dailyGrouped.length
     });
 
     MailApp.sendEmail({
@@ -1138,7 +1147,9 @@ function buildReportHtml(d) {
   // ── Info blocks as SVG ────────────────────────────────────────────
   // Each block: bgcolor rect + title + rows of label/value pairs
   const IW = (PW - GAP) / 2, IPAD = 11, ROW_H = 20, TITLE_Y = 22;
-  const SUB_MAX_CHARS = Math.floor((IW - 2*IPAD) / 3.4); // font-size 6.5 word-wrap width
+  // Word-wrap width for font-size 6.5 subtitles. ~3.1px/char matches the real rendered
+  // width of lowercase-heavy text, so lines fill the box before wrapping (3.4 wrapped early).
+  const SUB_MAX_CHARS = Math.floor((IW - 2*IPAD) / 3.1);
 
   // Word-wraps text to fit maxChars per line (SVG <text> doesn't wrap on its own).
   function wrapSvgLines(text, maxChars) {
@@ -1226,8 +1237,12 @@ function buildReportHtml(d) {
   // ── Row 1: energy mix + battery — single SVG for correct alignment ──
   // Donut at left, legend text beside it, battery block at right column.
   // All in one SVG so columns align perfectly.
-  const ROW1_H = Math.max(BATT_H, 100);
-  const DX = 8, DY = (ROW1_H - 72) / 2; // donut centered vertically
+  // Energy-mix subtitle can wrap to 2 lines; start the donut below it (with a gap) instead
+  // of centering it in the whole block, so it never crowds the description.
+  const emSubLines = wrapSvgLines(t.subEnergyMix, Math.floor((IW - 2*IPAD) / 3.4));
+  const emHeadH = 16 + emSubLines.length * 9 + 12; // title + subtitle lines + gap before donut
+  const ROW1_H = Math.max(BATT_H, emHeadH + 72 + 8);
+  const DX = 8, DY = Math.max(emHeadH, (ROW1_H - 72) / 2); // below the header, centered if room
   const LX = DX + 80; // legend text x start
   const battX = IW + GAP;
 
@@ -1236,7 +1251,9 @@ function buildReportHtml(d) {
     "<rect x='0' y='0' width='" + IW.toFixed(1) + "' height='" + ROW1_H + "' rx='8' fill='#F7F9F8'/>" +
     // Title
     "<text x='" + IPAD + "' y='16' font-size='8' font-weight='700' fill='#777'>" + t.energyMix.toUpperCase() + "</text>" +
-    wrapSvgLines(t.subEnergyMix, SUB_MAX_CHARS).map(function(line, li) {
+    // This subtitle renders at font-size 7 (not 6.5), so it needs a wider px/char (~3.4)
+    // than SUB_MAX_CHARS — reusing that here would let a line overflow the box.
+    emSubLines.map(function(line, li) {
       return "<text x='" + IPAD + "' y='" + (16+(li+1)*9) + "' font-size='7' fill='#bbb'>" + line + "</text>";
     }).join("") +
     // Donut
@@ -1294,7 +1311,7 @@ function buildReportHtml(d) {
 
     "<div class='hdr'>" +
       "<div class='hdr-l'>" +
-        "<div class='brand'>Pauly y Compa&#x00F1;&#x00ED;a</div>" +
+        "<div class='brand'>Pauly &amp; Co.</div>" +
         "<div class='site'>" + d.site + "</div>" +
         "<div class='period'>" + t.dateRange + ": " + d.startStr + " &#8212; " + d.endStr + "</div>" +
       "</div>" +
@@ -1321,7 +1338,7 @@ function buildReportHtml(d) {
     // ── PAGE 2 — Battery, Performance, Weather, Trends ─────────────
     "<div style='page-break-before:always; padding-top:20px;'>" +
       "<div style='border-bottom:2px solid #1FAE6E; padding-bottom:10px; margin-bottom:18px; display:table; width:100%;'>" +
-        "<span style='display:table-cell; font-size:9.5px; font-weight:600; color:#1FAE6E; letter-spacing:0.08em; text-transform:uppercase;'>Pauly y Compa&#x00F1;&#x00ED;a</span>" +
+        "<span style='display:table-cell; font-size:9.5px; font-weight:600; color:#1FAE6E; letter-spacing:0.08em; text-transform:uppercase;'>Pauly &amp; Co.</span>" +
         "<span style='display:table-cell; text-align:right; font-size:10px; color:#999;'>" + d.site + " &middot; " + d.startStr + " &#8212; " + d.endStr + "</span>" +
       "</div>" +
 
@@ -1395,7 +1412,7 @@ function buildReportHtml(d) {
       const BW4 = 15, BAR4GAP = 3; // bar width + gap within a week's pair
       const sub4Lines = wrapSvgLines(t.sub4Week, Math.floor((FW - 22) / 3.2));
       const HDR4 = 16 + sub4Lines.length * 10;
-      const chartTop4 = HDR4 + 6;          // y of the top (max) gridline
+      const chartTop4 = HDR4 + 14;         // y of top gridline — gap below the description
       const baseline4 = chartTop4 + BM4;
       const dateY = baseline4 + 16;
       const trendY = baseline4 + 30;       // arrow row, with a gap below the date labels
@@ -1453,7 +1470,7 @@ function buildReportHtml(d) {
     // Supabase-backed tariff calculation (dimensionador-fv) is wired in.
     (function() {
       const W = PW, PADX = 11;
-      const subLines = wrapSvgLines(t.subSavings, Math.floor((W - 2*PADX) / 3.4));
+      const subLines = wrapSvgLines(t.subSavings, Math.floor((W - 2*PADX) / 3.1));
       const sepY = 14 + subLines.length * 9 + 8;
       const rowY = sepY + 16;
       const H = rowY + 4;
@@ -1488,16 +1505,48 @@ function buildEmailHtml(d) {
   const badgeBg    = d.avgHealth >= 90 ? "#D9F2E6" : d.avgHealth >= 80 ? "#DCEEF8" : d.avgHealth >= 70 ? "#FDEFC5" : "#FAD9D9";
   const badgeText  = d.avgHealth >= 90 ? "#0F7D4A" : d.avgHealth >= 80 ? "#1A5F88" : d.avgHealth >= 70 ? "#9A6200" : "#8A1F1F";
 
+  // Feel-good takeaway line: produced more than used, or how much of usage was covered.
+  const surplus = d.totals.load > 0 ? Math.round((d.totals.pv - d.totals.load) / d.totals.load * 100) : null;
+  let surplusLine = "";
+  if (surplus !== null) {
+    if (surplus >= 0) {
+      surplusLine = d.lang === "es"
+        ? "Produjo " + surplus + "% m&#225;s energ&#237;a de la que su hogar consumi&#243; esta semana."
+        : "You produced " + surplus + "% more energy than your home used this week.";
+    } else {
+      const coverage = Math.round(d.totals.pv / d.totals.load * 100);
+      surplusLine = d.lang === "es"
+        ? "Sus paneles cubrieron el " + coverage + "% de lo que su hogar consumi&#243; esta semana."
+        : "Your panels covered " + coverage + "% of what your home used this week.";
+    }
+  }
+  // Plain-language highlight: 1-2 sentences from the weekly summary. Prefer sentences after
+  // the first (battery/weather context) so it complements the surplus line above rather than
+  // repeating it; fall back to the opening sentences for short narratives.
+  let highlight = "";
+  if (d.narrative) {
+    const firstPara = d.narrative.split("\n").filter(function(p) { return p.trim(); })[0] || "";
+    // Split on sentence terminators followed by whitespace (a sentinel avoids breaking on
+    // decimals like "408.1", which a naive [.!?] split would mangle).
+    const SENT = String.fromCharCode(1);
+    const sentences = firstPara.replace(/([.!?])\s+/g, "$1" + SENT).split(SENT).filter(function(s) { return s.trim(); });
+    highlight = (sentences.slice(1, 3).join(" ").trim() || sentences.slice(0, 2).join(" ").trim() || firstPara).trim();
+  }
+  const daysFull = (d.totals.daysFullCharge != null && d.days) ? (d.totals.daysFullCharge + " / " + d.days + " " + t.days) : "—";
+
   // Email-safe: table layout only, no data: URIs, no flexbox, no background-color on divs.
   // Logo: text-based fallback since Gmail strips data: URIs.
   return "<!DOCTYPE html><html><body style='font-family: Arial, sans-serif; color: #1A2B3C; max-width: 560px; margin: 0 auto; padding: 0;'>" +
 
     // Header — brand name as styled text (logo data: URIs stripped by Gmail)
     "<table width='100%' cellpadding='0' cellspacing='0' style='border-bottom: 3px solid #1FAE6E; padding-bottom: 12px; margin-bottom: 20px;'><tr>" +
-      "<td style='font-size: 11px; font-weight: 700; color: #1FAE6E; letter-spacing: 0.08em; text-transform: uppercase;'>Pauly y Compa&#x00F1;&#x00ED;a</td>" +
+      "<td style='font-size: 11px; font-weight: 700; color: #1FAE6E; letter-spacing: 0.08em; text-transform: uppercase;'>Pauly &amp; Co.</td>" +
     "</tr></table>" +
 
-    "<p style='font-size: 14px; margin: 0 0 16px 0;'>" + t.emailIntro + " <strong>" + d.site + "</strong> (" + d.startStr + " &#8211; " + d.endStr + ").</p>" +
+    "<p style='font-size: 14px; margin: 0 0 12px 0;'>" + t.emailIntro + " <strong>" + d.site + "</strong> (" + d.startStr + " &#8211; " + d.endStr + ").</p>" +
+
+    // Feel-good takeaway headline
+    (surplusLine ? "<p style='font-size: 15px; font-weight: 700; color: #1FAE6E; margin: 0 0 18px 0;'>" + surplusLine + "</p>" : "") +
 
     // Health score card — table layout, no flex, no background-color on div
     "<table width='100%' cellpadding='0' cellspacing='0' style='margin-bottom: 20px;'><tr>" +
@@ -1514,14 +1563,31 @@ function buildEmailHtml(d) {
       "</td>" +
     "</tr></table>" +
 
+    // Plain-language highlight from the weekly summary — the "story" without opening the PDF
+    (highlight ? "<table width='100%' cellpadding='0' cellspacing='0' style='margin-bottom: 20px;'><tr>" +
+      "<td bgcolor='#F7FBF9' style='padding: 12px 16px; border-radius: 8px; border-left: 3px solid #1FAE6E;'>" +
+        "<span style='font-size: 12px; color: #3A4B5C; font-style: italic; line-height: 1.55;'>" + highlight + "</span>" +
+      "</td>" +
+    "</tr></table>" : "") +
+
     // Key stats
     "<p style='font-size: 12px; font-weight: 600; color: #14253B; margin: 0 0 8px 0;'>" + t.emailKeyStats + "</p>" +
     "<table width='100%' cellpadding='0' cellspacing='0' style='font-size: 12px; border-collapse: collapse;'>" +
       "<tr><td style='padding: 5px 0; color: #5A6B7C; border-bottom: 1px solid #F0F3F5;'>" + t.pvGenerated + "</td><td style='text-align: right; font-weight: 600; border-bottom: 1px solid #F0F3F5;'>" + d.totals.pv.toFixed(1) + " " + t.kwh + "</td></tr>" +
-      "<tr><td style='padding: 5px 0; color: #5A6B7C; border-bottom: 1px solid #F0F3F5;'>" + t.totalConsumption + "</td><td style='text-align: right; font-weight: 600; border-bottom: 1px solid #F0F3F5;'>" + d.totals.load.toFixed(1) + " " + t.kwh + "</td></tr>" +
-      "<tr><td style='padding: 5px 0; color: #5A6B7C; border-bottom: 1px solid #F0F3F5;'>" + t.gridIndependence + "</td><td style='text-align: right; font-weight: 600; border-bottom: 1px solid #F0F3F5;'>" + d.gridIndependencePct + "%</td></tr>" +
-      "<tr><td style='padding: 5px 0; color: #5A6B7C;'>" + t.batteryCycles + "</td><td style='text-align: right; font-weight: 600;'>" + d.batteryCycles + " " + t.cycles + "</td></tr>" +
+      "<tr><td style='padding: 5px 0; color: #5A6B7C; border-bottom: 1px solid #F0F3F5;'>" + t.emailLblUsed + "</td><td style='text-align: right; font-weight: 600; border-bottom: 1px solid #F0F3F5;'>" + d.totals.load.toFixed(1) + " " + t.kwh + "</td></tr>" +
+      "<tr><td style='padding: 5px 0; color: #5A6B7C; border-bottom: 1px solid #F0F3F5;'>" + t.emailLblOwnEnergy + "</td><td style='text-align: right; font-weight: 600; border-bottom: 1px solid #F0F3F5;'>" + d.gridIndependencePct + "%</td></tr>" +
+      "<tr><td style='padding: 5px 0; color: #5A6B7C;'>" + t.emailLblBatteryFull + "</td><td style='text-align: right; font-weight: 600;'>" + daysFull + "</td></tr>" +
     "</table>" +
+
+    // Estimated savings — placeholder until the Supabase-backed tariff calc is wired in
+    "<table width='100%' cellpadding='0' cellspacing='0' style='margin-top: 16px;'><tr>" +
+      "<td bgcolor='#F7F9F8' style='padding: 12px 16px; border-radius: 8px;'>" +
+        "<table width='100%' cellpadding='0' cellspacing='0'><tr>" +
+          "<td style='font-size: 12px; font-weight: 600; color: #5A6B7C;'>" + t.tariffSavings + "</td>" +
+          "<td style='text-align: right; font-size: 12px; font-weight: 600; color: #B0B8BF;'>" + t.emailSavingsSoon + "</td>" +
+        "</tr></table>" +
+      "</td>" +
+    "</tr></table>" +
 
     "<p style='font-size: 11px; color: #5A6B7C; margin-top: 20px;'>" + t.emailAttached + "</p>" +
 
