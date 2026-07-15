@@ -1062,17 +1062,17 @@ function buildReportHtml(d) {
 
   // ── KPI cards as one wide SVG ─────────────────────────────────────
   // Each card: rect background + text elements. No HTML backgrounds needed.
-  const PW = 530, GAP = 8, CW = (PW - GAP*3) / 4, CH = 96, PAD = 11;
+  const PW = 530, GAP = 8, CW = (PW - GAP*3) / 4, CH = 80, PAD = 11;
   // Build each KPI card manually for precise text placement
   // Using tspan for inline mixed-size text within one <text> element
   function kpiRect(x, bg) {
     return "<rect x='" + x + "' y='0' width='" + CW.toFixed(1) + "' height='" + CH + "' rx='8' fill='" + bg + "'/>";
   }
   function kpiLabel(x, label) {
-    return "<text x='" + (x+PAD) + "' y='19' font-size='7' font-weight='600' fill='#999'>" + label + "</text>";
+    return "<text x='" + (x+PAD) + "' y='17' font-size='7' font-weight='600' fill='#999'>" + label + "</text>";
   }
   function kpiValue(x, val, unit, color) {
-    return "<text x='" + (x+PAD) + "' y='48' font-size='22' font-weight='700' fill='" + color + "'>" + val +
+    return "<text x='" + (x+PAD) + "' y='43' font-size='21' font-weight='700' fill='" + color + "'>" + val +
            "<tspan font-size='11' font-weight='400' fill='#999'>" + unit + "</tspan></text>";
   }
   function kpiWow(x, pct, positiveIsGood) {
@@ -1080,15 +1080,15 @@ function buildReportHtml(d) {
     const good = positiveIsGood ? pct >= 0 : pct <= 0;
     const col  = good ? "#1FAE6E" : "#D4860F";
     const sign = pct >= 0 ? "+" : "";
-    return "<text x='" + (x+PAD) + "' y='63' font-size='8' fill='" + col + "'>" + sign + pct + "% " + t.wowTrendLabel + "</text>";
+    return "<text x='" + (x+PAD) + "' y='57' font-size='8' fill='" + col + "'>" + sign + pct + "% " + t.wowTrendLabel + "</text>";
   }
   function kpiSub(x, txt, color) {
-    return "<text x='" + (x+PAD) + "' y='76' font-size='8' fill='" + (color||"#aaa") + "'>" + txt + "</text>";
+    return "<text x='" + (x+PAD) + "' y='70' font-size='8' fill='" + (color||"#aaa") + "'>" + txt + "</text>";
   }
   function kpiBadge(x, txt, bg, fg) {
     const bw = Math.min(txt.length * 6 + 14, CW - PAD*2);
-    return "<rect x='" + (x+PAD) + "' y='64' width='" + bw.toFixed(0) + "' height='16' rx='8' fill='" + bg + "'/>" +
-           "<text x='" + (x+PAD+7) + "' y='76' font-size='8.5' font-weight='600' fill='" + fg + "'>" + txt + "</text>";
+    return "<rect x='" + (x+PAD) + "' y='58' width='" + bw.toFixed(0) + "' height='15' rx='7.5' fill='" + bg + "'/>" +
+           "<text x='" + (x+PAD+7) + "' y='69' font-size='8.5' font-weight='600' fill='" + fg + "'>" + txt + "</text>";
   }
 
   const outageSubStr = d.totals.outageCount > 0 ? d.totals.outageMinutes + " " + t.minutes : (d.lang === "es" ? "Sin cortes" : "No outages");
@@ -1447,6 +1447,25 @@ function buildReportHtml(d) {
       // Caption explaining what the ▲▼ percentages mean, so the customer doesn't have to guess.
       fc += "<text x='11' y='" + noteY + "' font-size='7' fill='#bbb'>" + t.trendNote + "</text>";
       return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + FW + " " + BOXH + "' xmlns='http://www.w3.org/2000/svg'>" + fc + "</svg></div>";
+    })() +
+
+    // Estimated tariff savings — full-width placeholder below the 4-week trend, until the
+    // Supabase-backed tariff calculation (dimensionador-fv) is wired in.
+    (function() {
+      const W = PW, PADX = 11;
+      const subLines = wrapSvgLines(t.subSavings, Math.floor((W - 2*PADX) / 3.4));
+      const sepY = 14 + subLines.length * 9 + 8;
+      const rowY = sepY + 16;
+      const H = rowY + 4;
+      let s = "<rect x='0' y='0' width='" + W + "' height='" + H + "' rx='8' fill='#F7F9F8'/>";
+      s += "<text x='" + PADX + "' y='14' font-size='8' font-weight='700' fill='#777'>" + t.tariffSavings.toUpperCase() + "</text>";
+      subLines.forEach(function(line, li) {
+        s += "<text x='" + PADX + "' y='" + (14+(li+1)*9) + "' font-size='6.5' fill='#bbb'>" + line + "</text>";
+      });
+      s += "<line x1='" + PADX + "' y1='" + sepY + "' x2='" + (W-PADX) + "' y2='" + sepY + "' stroke='#E8EDEA' stroke-width='0.5'/>";
+      s += "<text x='" + PADX + "' y='" + rowY + "' font-size='9.5' fill='#999'>" + t.tariffComingSoon + "</text>";
+      s += "<text x='" + (W-PADX) + "' y='" + rowY + "' text-anchor='end' font-size='9.5' font-weight='600' fill='#bbb'>&#8212; soon</text>";
+      return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + W + " " + H + "' xmlns='http://www.w3.org/2000/svg'>" + s + "</svg></div>";
     })() +
 
     "</div>" +   // close page-2 div
