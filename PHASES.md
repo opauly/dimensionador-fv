@@ -462,6 +462,19 @@ As of v3.4, every site in `monitoring.sites` is reachable by **one shared Supaba
 
 ---
 
+## Future — Victron weekly-report tariff savings (separate product, not scheduled)
+
+**Goal:** the Victron weekly PDF + email show an **estimated savings** figure for the customer, instead of the current "coming soon" placeholder.
+
+Belongs to `victron-monitor/`, not the solar tool's roadmap. Cross-product: the report reuses this repo's tariff data/formula. Full plan and prerequisites in [`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13).
+
+- Port `estimate_bill_crc` (`calculations/tariff_calculator.py`) to JS inside the Apps Script; read tariffs live from the shared Supabase `public` tables via PostgREST.
+- Define each site's electric company (`distributor` + `tariff_code`) via the Node-RED Project Config payload.
+- Savings ≈ `(weekly load − weekly grid import) × effective ₡/kWh`.
+- **Blocked on:** Supabase creds in Apps Script Script Properties, anon `SELECT` on the public tariff tables, and tariffs seeded for the relevant distributors.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |

@@ -84,6 +84,26 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
   all sites' data. Fine for the current internally-owned sites; must be fixed (per-site
   RLS + per-device JWT provisioning) before onboarding paying external customers.
   Planned in PHASES.md as a future phase.
+- **Planned — weekly-report tariff savings (not built yet):** the weekly PDF + email
+  will show an **estimated savings** figure. Agreed approach:
+  - Port the CR bill formula (`calculations/tariff_calculator.py` → `estimate_bill_crc`)
+    to JS **inside the Apps Script** — the formula shape is duplicated, but the *rates*
+    stay single-sourced in Supabase and are what actually change.
+  - Read tariffs **live from the shared Supabase `public` tables** (`distributors` →
+    `tariff_types` → `tariff_tiers`, mirroring `database/tariffs_db.py::get_tariff_info`)
+    via PostgREST + `UrlFetchApp`. `public` is PostgREST's default profile, so no
+    `Content-Profile` header (unlike the `monitoring` writes).
+  - Define each site's **electric company** via the Node-RED Project Config payload
+    (`distributor` abbreviation + `tariff_code`), landing in the `DailySummary` sheet and
+    read like `pv_kwp` — matching the existing "site config comes from Node-RED" pattern.
+  - Savings model (kept deliberately simple): `(weekly load − weekly grid import) ×
+    effective ₡/kWh`, where the effective rate = `estimate_bill_crc(monthly-equivalent
+    kWh) / kWh`.
+  - **Prerequisites before it can activate:** `SUPABASE_URL` + `SUPABASE_ANON_KEY` added
+    to the Apps Script Script Properties (the anon key currently lives only in Node-RED);
+    anon `SELECT` access to the public tariff tables; tariffs seeded for the relevant
+    distributors. Until then a "coming soon" placeholder ships in both the PDF (below the
+    4-week trend) and the email.
 
 ---
 
