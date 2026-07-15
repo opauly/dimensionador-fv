@@ -450,6 +450,7 @@ const TRANSLATIONS = {
     energyMix:           "Where your energy came from",
     sectionEvents:       "Events this week",
     sectionDaily:        "Daily solar vs. consumption",
+    subDaily:            "Compares daily solar production against household consumption for each day this week.",
     batteryProtected:    "System protected by battery",
     longestOutage:       "Longest outage",
     avgTemp:             "Avg temperature",
@@ -480,6 +481,7 @@ const TRANSLATIONS = {
     sub4Week:            "Compares solar production across the past 4 weeks to help spot seasonal trends.",
     subSavings:          "Estimated electricity cost avoided this week by using solar instead of buying from the grid.",
     fourWeekChart:       "4-week solar trend",
+    trendNote:           "▲▼ = change in that week's solar production vs. the previous week (mostly driven by weather).",
     emailIntro:          "Here is your weekly energy report for",
     emailKeyStats:       "Key stats this week",
     emailAttached:       "The full report is attached as a PDF.",
@@ -534,6 +536,7 @@ const TRANSLATIONS = {
     energyMix:           "De dónde vino tu energía",
     sectionEvents:       "Eventos de la semana",
     sectionDaily:        "Solar diario vs. consumo",
+    subDaily:            "Compara la producción solar diaria con el consumo del hogar para cada día de esta semana.",
     batteryProtected:    "Sistema protegido por batería",
     longestOutage:       "Corte más largo",
     avgTemp:             "Temperatura promedio",
@@ -564,6 +567,7 @@ const TRANSLATIONS = {
     sub4Week:            "Compara la producción solar de las últimas 4 semanas para identificar tendencias estacionales.",
     subSavings:          "Estimado del costo eléctrico evitado esta semana al usar energía solar en vez de comprarla a la red.",
     fourWeekChart:       "Tendencia solar 4 semanas",
+    trendNote:           "▲▼ = cambio en la producción solar de esa semana respecto a la anterior (depende sobre todo del clima).",
     emailIntro:          "Aquí está su reporte semanal de energía para",
     emailKeyStats:       "Datos clave de esta semana",
     emailAttached:       "El reporte completo está adjunto en PDF.",
@@ -999,26 +1003,51 @@ function buildReportHtml(d) {
     return 'stroke-dasharray="' + len.toFixed(1) + ' ' + C.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"';
   }
 
+  // Shared Solar/Consumption legend, right-aligned to end at `rightX`. Matches the SOC
+  // chart's legend styling exactly: font-size 7, fill #aaa, 7x7 swatch at y=6, text at y=13.
+  function twoBarLegend(rightX, consLabel, consColor) {
+    const CW = 3.7; // approx char width at font-size 7
+    const SWATCH = 7, TXTGAP = 3, ITEMGAP = 12;
+    const solarW = 5 * CW, consW = consLabel.length * CW;
+    const total = SWATCH + TXTGAP + solarW + ITEMGAP + SWATCH + TXTGAP + consW;
+    let x = rightX - total, s = "";
+    s += "<rect x='" + x.toFixed(1) + "' y='6' width='7' height='7' rx='1' fill='#1FAE6E'/>";
+    s += "<text x='" + (x+SWATCH+TXTGAP).toFixed(1) + "' y='13' font-size='7' fill='#aaa'>Solar</text>";
+    x += SWATCH + TXTGAP + solarW + ITEMGAP;
+    s += "<rect x='" + x.toFixed(1) + "' y='6' width='7' height='7' rx='1' fill='" + consColor + "'/>";
+    s += "<text x='" + (x+SWATCH+TXTGAP).toFixed(1) + "' y='13' font-size='7' fill='#aaa'>" + consLabel + "</text>";
+    return s;
+  }
+
   // ── Bar chart SVG ─────────────────────────────────────────────────
-  const BAR_H_MAX = 78, BAR_W = 10, BAR_GAP = 3, SVG_W = 520, SVG_H = 106;
-  const BAR_LPAD = 34;
+  // Title + description live INSIDE the SVG (like every other block) so they render
+  // at the same scale/font as the other block descriptions, not as mismatched HTML.
+  const BAR_H_MAX = 78, BAR_W = 10, BAR_GAP = 3, SVG_W = 520;
+  const BAR_LPAD = 46; // room for "80 kWh"-style y-axis labels
+  const barSubLines = wrapSvgLines(t.subDaily, Math.floor((SVG_W - 22) / 3.2));
+  const BAR_HDR_H = 16 + barSubLines.length * 10; // title + wrapped description
+  const chartTopY = BAR_HDR_H + 6;                // y of the top (max) gridline
+  const baseYbar = chartTopY + BAR_H_MAX;
+  const SVG_H = baseYbar + 18;                     // + day-label row
   const n = d.dailyGrouped.length, slotW = (SVG_W - BAR_LPAD) / Math.max(n, 1);
   const allVals = [];
   d.dailyGrouped.forEach(function(r) { allVals.push(Number(r.pv_kWh||0)); allVals.push(Number(r.load_kWh||0)); });
   const maxVal = Math.max.apply(null, allVals.length ? allVals : [1]) || 1;
   const yMax = Math.ceil(maxVal / 10) * 10 || 10;
-  const baseYbar = SVG_H - 18;
   function barH(v) { return Math.max(1, Math.round((Number(v)||0) / yMax * BAR_H_MAX)); }
   const dayAbbr = d.lang === "es"
     ? ["Dom","Lun","Mar","Mi\u00e9","Jue","Vie","S\u00e1b"]
     : ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  let svgRects = "";
+  let svgRects = "<text x='11' y='12' font-size='8' font-weight='700' fill='#777'>" + t.sectionDaily.toUpperCase() + "</text>";
+  barSubLines.forEach(function(line, li) {
+    svgRects += "<text x='11' y='" + (12+(li+1)*10) + "' font-size='7' fill='#bbb'>" + line + "</text>";
+  });
+  svgRects += twoBarLegend(SVG_W - 20, d.lang==="es"?"Consumo":"Consumption", "#C8DDD5");
   [0, Math.round(yMax/2), yMax].forEach(function(val) {
     const gy = baseYbar - Math.round(val/yMax*BAR_H_MAX);
     svgRects += "<line x1='" + BAR_LPAD + "' y1='" + gy + "' x2='" + SVG_W + "' y2='" + gy + "' stroke='#EAEDEB' stroke-width='0.5'/>";
-    svgRects += "<text x='" + (BAR_LPAD-3) + "' y='" + (gy+3) + "' text-anchor='end' font-size='7' fill='#bbb'>" + val + "</text>";
+    svgRects += "<text x='" + (BAR_LPAD-3) + "' y='" + (gy+3) + "' text-anchor='end' font-size='7' fill='#bbb'>" + val + " kWh</text>";
   });
-  svgRects += "<text x='" + (BAR_LPAD-3) + "' y='8' text-anchor='end' font-size='6.5' fill='#ccc'>kWh</text>";
   d.dailyGrouped.forEach(function(r, i) {
     const cx = BAR_LPAD + slotW*i+slotW/2, pvH = barH(r.pv_kWh), loadH = barH(r.load_kWh);
     const pvX = cx-BAR_W-BAR_GAP/2, loadX = cx+BAR_GAP/2;
@@ -1027,7 +1056,9 @@ function buildReportHtml(d) {
       "<rect x='" + loadX.toFixed(1) + "' y='" + (baseYbar-loadH).toFixed(1) + "' width='" + BAR_W + "' height='" + loadH + "' fill='#C8DDD5' rx='1'/>" +
       "<text x='" + cx.toFixed(1) + "' y='" + (SVG_H-4) + "' text-anchor='middle' font-size='8' fill='#aaa'>" + dayAbbr[new Date(r.date+"T12:00:00").getDay()] + "</text>";
   });
-  const barSvg = "<svg width='100%' height='" + SVG_H + "' viewBox='0 0 " + SVG_W + " " + SVG_H + "' preserveAspectRatio='xMidYMax meet' xmlns='http://www.w3.org/2000/svg'>" + svgRects + "</svg>";
+  // No fixed height / preserveAspectRatio — like the SOC chart, this lets the SVG fill
+  // the full container width (height derived from the viewBox) instead of letterboxing.
+  const barSvg = "<svg width='100%' viewBox='0 0 " + SVG_W + " " + SVG_H + "' xmlns='http://www.w3.org/2000/svg'>" + svgRects + "</svg>";
 
   // ── KPI cards as one wide SVG ─────────────────────────────────────
   // Each card: rect background + text elements. No HTML backgrounds needed.
@@ -1107,17 +1138,46 @@ function buildReportHtml(d) {
   // ── Info blocks as SVG ────────────────────────────────────────────
   // Each block: bgcolor rect + title + rows of label/value pairs
   const IW = (PW - GAP) / 2, IPAD = 11, ROW_H = 20, TITLE_Y = 22;
+  const SUB_MAX_CHARS = Math.floor((IW - 2*IPAD) / 3.4); // font-size 6.5 word-wrap width
+
+  // Word-wraps text to fit maxChars per line (SVG <text> doesn't wrap on its own).
+  function wrapSvgLines(text, maxChars) {
+    if (!text) return [];
+    const words = String(text).split(" ");
+    const lines = [];
+    let cur = "";
+    words.forEach(function(w) {
+      const t2 = cur ? cur + " " + w : w;
+      if (t2.length > maxChars && cur) { lines.push(cur); cur = w; } else { cur = t2; }
+    });
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  // Y-offset (from block top) where the first row starts, given a wrapped subtitle.
+  // Shared by infoBlockSvg and measureInfoBlock so height and layout never drift apart.
+  function infoBlockFirstRowY(subtitle) {
+    const subLines = subtitle ? wrapSvgLines(subtitle, SUB_MAX_CHARS) : [];
+    return 14 + subLines.length * 9 + 8 + 12; // title + subtitle lines + sep gap + row gap
+  }
+
+  // Total block height needed for a given row/subtitle combo — single source of truth
+  // for both the SVG renderer below and the callers that size sibling blocks.
+  function measureInfoBlock(rows, subtitle) {
+    return infoBlockFirstRowY(subtitle) + (rows.length - 1) * ROW_H + 16; // + bottom padding
+  }
 
   function infoBlockSvg(x, y, bg, title, rows, totalH, subtitle) {
-    const clipId = "c" + Math.round(x) + "_" + Math.round(y);
-    let out = "<clipPath id='" + clipId + "'><rect x='" + x.toFixed(1) + "' y='" + y + "' width='" + (IW-IPAD) + "' height='" + totalH + "'/></clipPath>";
-    out += "<rect x='" + x.toFixed(1) + "' y='" + y + "' width='" + IW.toFixed(1) + "' height='" + totalH + "' rx='8' fill='" + bg + "'/>";
+    const subLines = subtitle ? wrapSvgLines(subtitle, SUB_MAX_CHARS) : [];
+    let out = "<rect x='" + x.toFixed(1) + "' y='" + y + "' width='" + IW.toFixed(1) + "' height='" + totalH + "' rx='8' fill='" + bg + "'/>";
     out += "<text x='" + (x+IPAD) + "' y='" + (y+14) + "' font-size='8' font-weight='700' fill='#777'>" + title.toUpperCase() + "</text>";
-    const subOff = subtitle ? 14 : 0;
-    if (subtitle) out += "<text x='" + (x+IPAD) + "' y='" + (y+26) + "' font-size='6.5' fill='#bbb' clip-path='url(#" + clipId + ")'>" + subtitle + "</text>";
-    out += "<line x1='" + (x+IPAD) + "' y1='" + (y+30+subOff) + "' x2='" + (x+IW-IPAD) + "' y2='" + (y+30+subOff) + "' stroke='#E8EDEA' stroke-width='0.5'/>";
+    subLines.forEach(function(line, li) {
+      out += "<text x='" + (x+IPAD) + "' y='" + (y+14+(li+1)*9) + "' font-size='6.5' fill='#bbb'>" + line + "</text>";
+    });
+    const firstRowY = y + infoBlockFirstRowY(subtitle);
+    out += "<line x1='" + (x+IPAD) + "' y1='" + (firstRowY-12) + "' x2='" + (x+IW-IPAD) + "' y2='" + (firstRowY-12) + "' stroke='#E8EDEA' stroke-width='0.5'/>";
     rows.forEach(function(row, i) {
-      const ry = y + 34 + subOff + i * ROW_H;
+      const ry = firstRowY + i * ROW_H;
       out += "<text x='" + (x+IPAD) + "' y='" + ry + "' font-size='9.5' fill='#999'>" + row.label + "</text>";
       out += "<text x='" + (x+IW-IPAD) + "' y='" + ry + "' font-size='9.5' font-weight='600' fill='" + (row.valueColor||"#222") + "' text-anchor='end'>" + row.value + "</text>";
       if (i < rows.length - 1) {
@@ -1152,12 +1212,9 @@ function buildReportHtml(d) {
     {label: t.alarmEpisodes, value: String(d.alarmEpisodesTotal)}
   ];
 
-  const SUB_H = 14; // subtitle line height
-  const BLOCK_TOP = 44; // space above first row (title+subtitle+separator+gap)
-  const BLOCK_BOT = 12; // bottom padding
-  const BATT_H   = BLOCK_TOP + SUB_H + battRows.length * ROW_H + BLOCK_BOT;
-  const GRID_H   = BLOCK_TOP + SUB_H + gridRows.length * ROW_H + BLOCK_BOT;
-  const EVENTS_H = BLOCK_TOP + SUB_H + eventsRows.length * ROW_H + BLOCK_BOT;
+  const BATT_H   = measureInfoBlock(battRows, t.subBattery);
+  const GRID_H   = measureInfoBlock(gridRows, t.subGrid);
+  const EVENTS_H = measureInfoBlock(eventsRows, t.subEvents);
   const ROW2_H = Math.max(GRID_H, EVENTS_H);
 
   // Row 2 info SVG: grid + events
@@ -1179,7 +1236,9 @@ function buildReportHtml(d) {
     "<rect x='0' y='0' width='" + IW.toFixed(1) + "' height='" + ROW1_H + "' rx='8' fill='#F7F9F8'/>" +
     // Title
     "<text x='" + IPAD + "' y='16' font-size='8' font-weight='700' fill='#777'>" + t.energyMix.toUpperCase() + "</text>" +
-    "<text x='" + IPAD + "' y='26' font-size='7' fill='#bbb'>" + t.subEnergyMix + "</text>" +
+    wrapSvgLines(t.subEnergyMix, SUB_MAX_CHARS).map(function(line, li) {
+      return "<text x='" + IPAD + "' y='" + (16+(li+1)*9) + "' font-size='7' fill='#bbb'>" + line + "</text>";
+    }).join("") +
     // Donut
     "<g transform='translate(" + DX + "," + DY.toFixed(0) + ")'>" +
       "<circle cx='36' cy='36' r='28' fill='none' stroke='#E8EDEA' stroke-width='11'/>" +
@@ -1250,14 +1309,8 @@ function buildReportHtml(d) {
     // Narrative — border-left renders, background won't but that's acceptable
     "<div class='narr' style='margin-top:14px;'>" + narrativeHtml + "</div>" +
 
-    "<div class='slbl'>" + t.sectionDaily + "</div>" +
-    barSvg +
-    "<svg width='200' height='14' viewBox='0 0 200 14' xmlns='http://www.w3.org/2000/svg' style='margin-top:6px; margin-bottom:14px; display:block;'>" +
-      "<rect x='0' y='3' width='8' height='8' rx='2' fill='#1FAE6E'/>" +
-      "<text x='12' y='11' font-size='9' fill='#888'>Solar PV</text>" +
-      "<rect x='70' y='3' width='8' height='8' rx='2' fill='#C8DDD5'/>" +
-      "<text x='82' y='11' font-size='9' fill='#888'>" + (d.lang==="es"?"Consumo":"Consumption") + "</text>" +
-    "</svg>" +
+    // Legend now lives inside barSvg (top-right), matching the SOC chart.
+    "<div style='margin-top:14px; margin-bottom:12px;'>" + barSvg + "</div>" +
 
     // Row 1: energy mix + battery — single SVG
     row1Svg +
@@ -1274,7 +1327,7 @@ function buildReportHtml(d) {
 
     // SOC timeline mini-chart
     (function() {
-      const SH = 160, SW = PW, SPAD = 30, SPH = 112, SPY = 26;
+      const SH = 168, SW = PW, SPAD = 30, SPH = 112, SPY = 34;
       function sY(p) { return SPY + SPH - (p/100*SPH); }
       let sc = "<rect x='0' y='0' width='" + SW + "' height='" + SH + "' rx='8' fill='#F7F9F8'/>";
       sc += "<text x='" + IPAD + "' y='12' font-size='8' font-weight='700' fill='#777'>" + t.socTimeline.toUpperCase() + "</text>";sc += "<text x='" + IPAD + "' y='22' font-size='7' fill='#bbb'>" + t.subSocChart + "</text>";sc += "<rect x='" + (SW-SPAD-95) + "' y='6' width='7' height='7' rx='1' fill='#1FAE6E' fill-opacity='0.3'/>";sc += "<text x='" + (SW-SPAD-86) + "' y='13' font-size='7' fill='#aaa'>Max SOC (band)</text>";sc += "<circle cx='" + (SW-SPAD-22) + "' cy='10' r='3' fill='#1FAE6E'/>";sc += "<text x='" + (SW-SPAD-17) + "' y='13' font-size='7' fill='#aaa'>Min SOC</text>";
@@ -1325,69 +1378,75 @@ function buildReportHtml(d) {
         {label: t.weatherRainDays,  value: d.weather.rainyDays + " days (>5mm)"},
         {label: t.weatherCloudCover, value: d.weather.avgCloudPct + "%"}
       ] : [{label: t.weatherUnavailable, value: ""}];
-      const PH3 = BLOCK_TOP + SUB_H + perfRows.length * ROW_H + BLOCK_BOT;
-      const WH3 = BLOCK_TOP + SUB_H + wRows.length * ROW_H + BLOCK_BOT;
+      const PH3 = measureInfoBlock(perfRows, t.subSolarPerf);
+      const WH3 = measureInfoBlock(wRows, t.subWeather);
       const R3H = Math.max(PH3, WH3);
       const r3c = infoBlockSvg(0, 0, "#F7F9F8", t.solarPerformance, perfRows, R3H, t.subSolarPerf) +
                   infoBlockSvg(IW+GAP, 0, d.weather?"#EEF9F4":"#F7F9F8", t.weatherTitle, wRows, R3H, t.subWeather);
       return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + PW + " " + R3H + "' xmlns='http://www.w3.org/2000/svg'>" + r3c + "</svg></div>";
     })() +
 
-    // 4-week solar trend + tariff placeholder
+    // 4-week solar trend — full width (mirrors the daily chart, which renders reliably)
     (function() {
-      const FH = 108, BW4S = 9, BM4 = 58, PD4 = 22, BASE4 = 24, BAR4GAP = 2;
-      const W4LPAD = 28; // left padding for y-axis
+      const FW = PW;               // full page width
+      const F_LPAD = 46;           // y-axis label room ("850 kWh")
+      const F_RPAD = IPAD;
+      const BM4 = 60;              // max bar height
+      const BW4 = 15, BAR4GAP = 3; // bar width + gap within a week's pair
+      const sub4Lines = wrapSvgLines(t.sub4Week, Math.floor((FW - 22) / 3.2));
+      const HDR4 = 16 + sub4Lines.length * 10;
+      const chartTop4 = HDR4 + 6;          // y of the top (max) gridline
+      const baseline4 = chartTop4 + BM4;
+      const dateY = baseline4 + 16;
+      const trendY = baseline4 + 30;       // arrow row, with a gap below the date labels
+      const noteY = trendY + 16;           // caption explaining the arrows
+      const BOXH = noteY + 6;
       const allW4 = d.weekBuckets.reduce(function(a,b){return a.concat([b.pv,b.load||0]);}, []);
       const maxW4 = Math.max.apply(null, allW4.filter(function(v){return v>0;})) || 1;
       const yMax4 = Math.ceil(maxW4/50)*50 || 100; // round to nearest 50 kWh
-      const sl4 = (IW - W4LPAD - PD4) / Math.max(d.weekBuckets.length-1, 1);
-      // Pre-compute bar heights so arrows can reference them
-      const barMeta = d.weekBuckets.map(function(b) {
-        const bh4 = Math.max(b.pv>0?2:0, Math.round(b.pv/maxW4*BM4));
-        return { bh: bh4, by: FH - BASE4 - bh4 };
+      const nW = d.weekBuckets.length;
+      const slotW = (FW - F_LPAD - F_RPAD) / Math.max(nW, 1);
+      function cxOf(i) { return F_LPAD + slotW*(i+0.5); }
+      function bh4(v) { return Math.max(v>0?2:0, Math.round(v/yMax4*BM4)); }
+      let fc = "<rect x='0' y='0' width='" + FW + "' height='" + BOXH + "' rx='8' fill='#F7F9F8'/>";
+      fc += "<text x='11' y='12' font-size='8' font-weight='700' fill='#777'>" + t.fourWeekChart.toUpperCase() + "</text>";
+      sub4Lines.forEach(function(line, li) {
+        fc += "<text x='11' y='" + (12+(li+1)*10) + "' font-size='7' fill='#bbb'>" + line + "</text>";
       });
-      let fc = "<rect x='0' y='0' width='" + IW.toFixed(1) + "' height='" + FH + "' rx='8' fill='#F7F9F8'/>";
-      fc += "<text x='" + IPAD + "' y='12' font-size='8' font-weight='700' fill='#777'>" + t.fourWeekChart.toUpperCase() + "</text>";
-      fc += "<text x='" + IPAD + "' y='22' font-size='7' fill='#bbb'>" + t.sub4Week + "</text>";
-      // Y-axis gridlines
+      // Legend, top-right — shared style with the SOC and daily charts
+      fc += twoBarLegend(FW - 20, d.lang==="es"?"Consumo":"Consumption", "#E0E8E4");
+      // Gridlines — units on every line
       [0, Math.round(yMax4/2), yMax4].forEach(function(val) {
-        const gy4 = FH - BASE4 - Math.round(val/yMax4*BM4);
-        fc += "<line x1='" + W4LPAD + "' y1='" + gy4 + "' x2='" + (IW-IPAD) + "' y2='" + gy4 + "' stroke='#E8EDEA' stroke-width='0.5'/>";
-        fc += "<text x='" + (W4LPAD-2) + "' y='" + (gy4+3) + "' text-anchor='end' font-size='6.5' fill='#ccc'>" + val + "</text>";
+        const gy4 = baseline4 - Math.round(val/yMax4*BM4);
+        fc += "<line x1='" + F_LPAD + "' y1='" + gy4 + "' x2='" + (FW-F_RPAD) + "' y2='" + gy4 + "' stroke='#E8EDEA' stroke-width='0.5'/>";
+        fc += "<text x='" + (F_LPAD-3) + "' y='" + (gy4+3) + "' text-anchor='end' font-size='7' fill='#bbb'>" + val + " kWh</text>";
       });
-      fc += "<text x='" + (W4LPAD-2) + "' y='30' text-anchor='end' font-size='6' fill='#ccc'>kWh</text>";
-      fc += "<rect x='" + (IW-IPAD-90) + "' y='6' width='7' height='7' rx='1' fill='#1FAE6E'/>";
-      fc += "<text x='" + (IW-IPAD-81) + "' y='13' font-size='7' fill='#888'>Solar</text>";
-      fc += "<rect x='" + (IW-IPAD-48) + "' y='6' width='7' height='7' rx='1' fill='#E0E8E4'/>";
-      fc += "<text x='" + (IW-IPAD-39) + "' y='13' font-size='7' fill='#888'>" + (d.lang==="es"?"Consumo":"Consumption") + "</text>";
       d.weekBuckets.forEach(function(b, i) {
-        const pvBh = barMeta[i].bh, pvBy = barMeta[i].by;
-        const ldBh = Math.max(b.load>0?2:0, Math.round((b.load||0)/maxW4*BM4)); const ldBy = FH-BASE4-ldBh;
-        const cx4 = W4LPAD + PD4 + i*sl4; const pvBx = cx4 - BW4S - BAR4GAP/2, ldBx = cx4 + BAR4GAP/2;
-        const cur = (i === d.weekBuckets.length-1);
-        fc += "<rect x='" + pvBx.toFixed(1) + "' y='" + pvBy + "' width='" + BW4S + "' height='" + pvBh + "' rx='2' fill='" + (cur?"#1FAE6E":"#C8DDD5") + "'/>";
-        fc += "<rect x='" + ldBx.toFixed(1) + "' y='" + ldBy + "' width='" + BW4S + "' height='" + ldBh + "' rx='2' fill='#E0E8E4'/>"; 
-        fc += "<text x='" + cx4.toFixed(1) + "' y='" + (FH-8) + "' text-anchor='middle' font-size='7' fill='#aaa'>" + b.label + "</text>";
-        // kWh label: above bar, or skip if bar is 0
-        if (b.pv > 0) fc += "<text x='" + (pvBx+BW4S/2).toFixed(1) + "' y='" + (pvBy-3) + "' text-anchor='middle' font-size='7' fill='" + (cur?"#1FAE6E":"#aaa") + "'>" + b.pv + "</text>";
-        // Trend arrow between consecutive non-zero bars, placed ABOVE the shorter bar
+        const cx = cxOf(i);
+        const pvBh = bh4(b.pv), pvBy = baseline4 - pvBh;
+        const ldBh = bh4(b.load||0), ldBy = baseline4 - ldBh;
+        const pvBx = cx - BW4 - BAR4GAP/2, ldBx = cx + BAR4GAP/2;
+        const cur = (i === nW-1);
+        fc += "<rect x='" + pvBx.toFixed(1) + "' y='" + pvBy + "' width='" + BW4 + "' height='" + pvBh + "' rx='2' fill='" + (cur?"#1FAE6E":"#C8DDD5") + "'/>";
+        fc += "<rect x='" + ldBx.toFixed(1) + "' y='" + ldBy + "' width='" + BW4 + "' height='" + ldBh + "' rx='2' fill='#E0E8E4'/>";
+        fc += "<text x='" + cx.toFixed(1) + "' y='" + dateY + "' text-anchor='middle' font-size='8' fill='#aaa'>" + b.label + "</text>";
+        if (b.pv > 0) fc += "<text x='" + (pvBx+BW4/2).toFixed(1) + "' y='" + (pvBy-3) + "' text-anchor='middle' font-size='7.5' fill='" + (cur?"#1FAE6E":"#aaa") + "'>" + b.pv + "</text>";
+        // %-change vs the previous week, anchored under THIS week's bar (the week it
+        // describes) so it lines up with a specific bar instead of floating between two.
         if (i > 0 && d.weekBuckets[i-1].pv > 0 && b.pv > 0) {
-          const prevCx4b = PD4 + (i-1)*sl4;
-          const arrowX = (prevCx4b + cx4) / 2;
           const pctChg = Math.round((b.pv - d.weekBuckets[i-1].pv) / d.weekBuckets[i-1].pv * 100);
-          const arrowUp = pctChg >= 0;
-          const arrowCol = arrowUp ? "#1FAE6E" : "#D4860F";
-          // Place arrow above the LOWER of the two bars (so it's always visible)
-          // Place arrow above the shorter (current week) bar top
-          const shorterTopY = Math.max(barMeta[i-1].by, barMeta[i].by);
-          const arrowY = Math.max(30, shorterTopY - 18);
-          fc += "<text x='" + arrowX.toFixed(1) + "' y='" + arrowY + "' text-anchor='middle' font-size='9' fill='" + arrowCol + "'>" + (arrowUp?"▲":"▼") + "</text>";
-          fc += "<text x='" + arrowX.toFixed(1) + "' y='" + (arrowY+10) + "' text-anchor='middle' font-size='6.5' fill='" + arrowCol + "'>" + (arrowUp?"+":"") + pctChg + "%</text>";
+          const up = pctChg >= 0;
+          // Anchored under the SOLAR bar (not the week center) so it's clear the change
+          // is about solar production only, not the consumption bar beside it.
+          const scx = pvBx + BW4/2;
+          // Neutral color — a week-to-week change in solar is weather, not good/bad. The
+          // ▲/▼ glyph carries direction; color must not imply the customer did something wrong.
+          fc += "<text x='" + scx.toFixed(1) + "' y='" + trendY + "' text-anchor='middle' font-size='7.5' fill='#777'>" + (up?"▲ ":"▼ ") + (up?"+":"") + pctChg + "%</text>";
         }
       });
-      const tc = infoBlockSvg(IW+GAP, 0, "#F7F9F8", t.tariffSavings,
-        [{label: t.tariffComingSoon, value: "— soon", valueColor: "#bbb"}], FH, t.subSavings);
-      return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + PW + " " + FH + "' xmlns='http://www.w3.org/2000/svg'>" + fc + tc + "</svg></div>";
+      // Caption explaining what the ▲▼ percentages mean, so the customer doesn't have to guess.
+      fc += "<text x='11' y='" + noteY + "' font-size='7' fill='#bbb'>" + t.trendNote + "</text>";
+      return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + FW + " " + BOXH + "' xmlns='http://www.w3.org/2000/svg'>" + fc + "</svg></div>";
     })() +
 
     "</div>" +   // close page-2 div
