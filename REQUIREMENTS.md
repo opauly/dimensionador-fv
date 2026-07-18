@@ -1,11 +1,18 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.4
+# Pauly&Co Solar Design Tool — Final Requirements v3.5
 
-**Version:** 3.4  
-**Date:** 2026-07-13  
+**Version:** 3.5  
+**Date:** 2026-07-17  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.4 → v3.5
+
+- **Clients vs. Prospects (new — see Section 4.6):** the wizard no longer writes new client-step entries directly to `clients`. A name with no search match creates a **prospect** instead; a prospect is only promoted to a client (moved, not copied) when a proposal referencing them is marked **won**. Existing-client selection via search is unchanged. Fixes a pre-existing bug where the wizard's "Empresa" field silently failed to save (the column never existed on `clients`).
+- **Admin → Clientes tab (new):** browse/add/edit clients, plus a read-only Prospectos view. Adding a client here is an intentional, direct write — bypasses the prospect stage on purpose. Includes a checkbox linker connecting `monitoring.sites` (Victron Monitor) to a `clients` row, which is what the Victron weekly report's client email routing uses (Section 4.5).
+- **Victron Monitor (Section 4.5, expanded):** per-site config (specs, health thresholds, Apps Script URL) is now fully DB-driven — Node-RED fetches it from `monitoring.sites` at startup instead of hardcoding it per device. `daily_health` is computed automatically in Postgres. The weekly PDF/email report was migrated off Google Sheets onto Supabase as its data source (Sheets remains as a write-only backup) — this surfaced and fixed two real bugs in the old Sheets-based report (inflated totals from incomplete TEST-row filtering; a battery-cycles calculation that silently divided by 1 instead of real battery capacity). See [ARCHITECTURE.md](ARCHITECTURE.md) for the full system diagram.
+- New **`system_type`** column on `monitoring.sites` (`grid_zero` | `off_grid` | `hybrid`, same vocabulary as `proposals.system_type`) — placeholder for future conditional report sections; no behavioral change yet, everything today is `hybrid`.
 
 ## Change log v3.3 → v3.4
 
@@ -315,14 +322,29 @@ solar-tool/
     └── firma_oscar_dark.png
 ```
 
-### 4.5 Shared project — Victron Monitor integration (added v3.4)
+### 4.5 Shared project — Victron Monitor integration (added v3.4, expanded v3.5)
 
-This Supabase project also hosts **Victron Monitor**, a separate product (Victron Energy fleet telemetry via Node-RED + Google Apps Script), living at `victron-monitor/` in this repo. It is not part of the solar proposal/projects tool's functional scope described in this document — it's documented here only because it shares the database.
+This Supabase project also hosts **Victron Monitor**, a separate product (Victron Energy fleet telemetry via Node-RED + Google Apps Script), living at `victron-monitor/` in this repo. It is not part of the solar proposal/projects tool's functional scope described in this document — it's documented here only because it shares the database. Full system diagram: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 - Isolated in its own Postgres schema, **`monitoring`**, alongside this tool's `public` schema — same project, same billing, separate tables and separate concerns.
-- Uses the project's `anon` key (not `service_role`), scoped via schema-level `GRANT`s rather than RLS — deliberately lower-privilege than this tool's own backend access, since the key lives on physical field hardware (Victron Cerbo GX devices) rather than a server.
+- Uses the project's `anon` key (not `service_role`), scoped via schema-level `GRANT`s rather than RLS — deliberately lower-privilege than this tool's own backend access, since the key lives on physical field hardware (Victron Cerbo GX devices) rather than a server. Same principle applied to Google Apps Script's Script Properties.
+- **Fully DB-driven config (as of v3.5):** site specs (PV kWp, battery kWh, coordinates), health-score thresholds, timezone, and the Apps Script URL all live on `monitoring.sites` and are fetched by Node-RED at startup — onboarding a new site is a database insert, not a flow edit. `daily_health` is computed automatically by a Postgres trigger (`compute_daily_health()`), reading each site's own thresholds.
+- **Weekly report reads from Supabase, not Google Sheets** (as of v3.5) — Sheets remains a write-only backup. The migration surfaced two real bugs in the old Sheets-based report (both fixed by moving off it): incomplete TEST/MANUAL row filtering inflated weekly totals, and a battery-cycles calculation silently divided by 1 instead of real battery capacity when a per-row Sheets field was blank.
+- **Client email routing:** `monitoring.sites.client_id` links a site to a `public.clients` row (Section 4.6). The weekly report email goes to that client's address via a narrow `SECURITY DEFINER` RPC (`get_report_email`) — the `anon` key never gets direct read access to the `clients` table itself.
 - Full details, schema, and onboarding: [`victron-monitor/README.md`](victron-monitor/README.md).
 - **Known gap, planned for a future phase (see PHASES.md):** the `monitoring` schema currently has no Row-Level Security — one shared `anon` key has read/write/delete on all sites' data. This is acceptable for the current handful of internally-owned sites but must be replaced with per-site RLS + per-device JWT provisioning before Victron Monitor is sold as a paid subscription to external customers.
+
+---
+
+### 4.6 Clients vs. Prospects (added v3.5)
+
+A **client** is someone who has bought a project. Someone who's only been quoted is a **prospect** — kept in a separate table so the client list doesn't fill up with people who never converted.
+
+- Wizard Step 2 (client search/entry): searching still only queries `clients` (an existing customer wanting another project). Typing a name with **no search match** creates a row in `prospects`, not `clients`.
+- A proposal references exactly one of `client_id` / `prospect_id` on `proposals` (enforced by a `CHECK` constraint) — never both.
+- **Promotion is automatic**, not manual: marking a proposal **won** (`pages/01_proposals.py`) calls `promote_prospect_to_client()`, an atomic Postgres function that copies the prospect into `clients`, repoints every proposal that referenced them, and deletes the prospect row. This is a **move**, not a copy — a promoted prospect no longer exists as a prospect.
+- Admin → Clientes → "Nuevo cliente" writes directly to `clients` — an intentional, on-purpose add, bypassing the prospect stage (e.g. adding a known customer who didn't come through a quote).
+- Both tables share the same shape: `name`, `empresa`, `phone`, `email`, `notes`.
 
 ---
 

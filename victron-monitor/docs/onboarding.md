@@ -19,7 +19,7 @@ onboarding is primarily a database insert, not a flow edit.
 INSERT INTO monitoring.sites
   (site_id, display_name, owner, location, country, latitude, longitude,
    pv_kwp, battery_usable_kwh, timezone, utc_offset_hours, commissioned_at,
-   report_language, app_script_url)
+   report_language, app_script_url, system_type)
 VALUES (
     'your-site-id',            -- slug, no spaces, e.g. 'client-name-m1'
     'Your Site Display Name',
@@ -34,7 +34,8 @@ VALUES (
     -6,                        -- UTC offset hours
     '2025-10-04',              -- commissioned date
     'en',                      -- 'en' or 'es'
-    'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec'  -- this site's Apps Script web app
+    'https://script.google.com/macros/s/YOUR_DEPLOYMENT_ID/exec',  -- this site's Apps Script web app
+    'hybrid'                   -- 'grid_zero' | 'off_grid' | 'hybrid'
 );
 ```
 
@@ -55,7 +56,7 @@ No new Supabase project is needed — every site lives in the same `monitoring` 
 ## Step 2 — Node-RED: import the flow
 
 1. Open Node-RED on the Cerbo GX (`http://<cerbo-ip>:1880`)
-2. Hamburger menu → Import → paste contents of `node-red/victron_monitor_v1p7.json`
+2. Hamburger menu → Import → paste contents of `node-red/victron_monitor_v1p8.json`
 3. Deploy — **Full** (only on first import)
 
 ---

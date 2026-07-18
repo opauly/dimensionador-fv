@@ -34,7 +34,12 @@ def format_quote_number(quote_number: int | None, created_at: str, version_numbe
     return base if version_number <= 1 else f"{base}-v{version_number}"
 
 
-def create_proposal(client_name: str, system_type: str, client_id: str | None = None) -> dict:
+def create_proposal(
+    client_name: str,
+    system_type: str,
+    client_id: str | None = None,
+    prospect_id: str | None = None,
+) -> dict:
     """Create a proposal row + an initial unlocked version 1. Returns the version row."""
     db = get_client()
 
@@ -50,6 +55,8 @@ def create_proposal(client_name: str, system_type: str, client_id: str | None = 
     }
     if client_id:
         proposal_payload["client_id"] = client_id
+    if prospect_id:
+        proposal_payload["prospect_id"] = prospect_id
 
     proposal = db.table("proposals").insert(proposal_payload).execute().data[0]
     proposal_id = proposal["id"]

@@ -7,7 +7,7 @@ This repository hosts two products built by **Pauly y Compañía**, sharing one 
 | **Solar Design Tool** | Wizard-driven solar proposal generator (Grid Zero, Off-Grid, Hybrid) with PDF output, proposal versioning, and project financial tracking | repo root — see below |
 | **Victron Monitor** | Fleet monitoring for deployed Victron Energy systems via Node-RED + Google Apps Script, with weekly AI-narrated reports | [`victron-monitor/`](victron-monitor/README.md) |
 
-They're separate products with independent roadmaps, isolated by Postgres schema (`public` vs `monitoring`) in the same Supabase project — see [CONTEXT.md](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for why they're consolidated.
+They're separate products with independent roadmaps, isolated by Postgres schema (`public` vs `monitoring`) in the same Supabase project — see [CONTEXT.md](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for why they're consolidated, and **[ARCHITECTURE.md](ARCHITECTURE.md)** for how everything is wired together, including the full Supabase schema map.
 
 ---
 

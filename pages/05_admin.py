@@ -487,6 +487,191 @@ def _services_section() -> None:
         st.rerun()
 
 
+# ── clients / prospects ────────────────────────────────────────────────────────
+
+def _client_form(existing: dict | None = None) -> None:
+    src = existing or {}
+    is_edit = existing is not None
+
+    with st.form(key="client_form"):
+        st.markdown("#### " + ("Editar cliente" if is_edit else "Nuevo cliente"))
+        st.caption(
+            "Agregar un cliente aquí es una acción intencional — este registro entra "
+            "directamente a la lista de Clientes, no a Prospectos."
+        )
+        col1, col2 = st.columns(2)
+        with col1:
+            name    = st.text_input("Nombre *", value=src.get("name") or "")
+            empresa = st.text_input("Empresa", value=src.get("empresa") or "")
+        with col2:
+            phone = st.text_input("Teléfono", value=src.get("phone") or "")
+            email = st.text_input("Email", value=src.get("email") or "")
+        notes = st.text_area("Notas", value=src.get("notes") or "", height=60)
+
+        col_save, col_cancel = st.columns([1, 4])
+        submitted = col_save.form_submit_button("💾 Guardar", type="primary")
+        cancelled = col_cancel.form_submit_button("Cancelar")
+
+    if cancelled:
+        st.session_state.pop("admin_edit_client", None)
+        st.session_state.pop("admin_client_mode", None)
+        st.rerun()
+
+    if submitted:
+        if not str(name).strip():
+            st.error("El nombre es obligatorio.")
+            return
+        try:
+            if is_edit and src.get("id"):
+                from database.clients_db import update_client
+                update_client(
+                    client_id=src["id"], name=name, empresa=empresa,
+                    phone=phone, email=email, notes=notes,
+                )
+                st.success("Cliente actualizado.")
+            else:
+                from database.clients_db import upsert_client
+                upsert_client(name=name, empresa=empresa, phone=phone, email=email, notes=notes)
+                st.success("Cliente agregado.")
+            st.session_state.pop("admin_edit_client", None)
+            st.session_state.pop("admin_client_mode", None)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al guardar: {e}")
+
+
+def _client_sites_linker(client: dict) -> None:
+    """Checkbox list linking monitoring.sites to this client."""
+    from database.monitoring_sites_db import list_monitoring_sites, set_site_client
+
+    try:
+        sites = list_monitoring_sites()
+    except Exception as e:
+        st.caption(f"⚠ No se pudieron cargar los sitios de monitoreo: {e}")
+        return
+
+    if not sites:
+        st.caption("No hay sitios registrados en Victron Monitor.")
+        return
+
+    st.markdown("###### 🔗 Sitios de Victron Monitor vinculados")
+    for s in sites:
+        linked = s.get("client_id") == client["id"]
+        checked = st.checkbox(
+            s.get("display_name") or s["site_id"],
+            value=linked,
+            key=f"site_link_{client['id']}_{s['site_id']}",
+        )
+        if checked != linked:
+            new_client_id = client["id"] if checked else None
+            try:
+                set_site_client(s["site_id"], new_client_id)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al vincular {s['site_id']}: {e}")
+
+
+def _clients_section() -> None:
+    from database.clients_db import list_all_clients
+
+    edit_client = st.session_state.get("admin_edit_client")
+    mode        = st.session_state.get("admin_client_mode")   # None | "add"
+
+    st.markdown("### Clientes")
+    st.caption(
+        "Personas o empresas que han comprado un proyecto. Los interesados que aún "
+        "no compran aparecen en la pestaña Prospectos y se mueven aquí automáticamente "
+        "cuando una propuesta se marca como Ganada."
+    )
+
+    if not edit_client and mode != "add":
+        c_add, _ = st.columns([2, 8])
+        if c_add.button("➕ Nuevo cliente", key="admin_client_toggle_add"):
+            st.session_state["admin_client_mode"] = "add"
+            st.rerun()
+
+    if mode == "add" and not edit_client:
+        st.divider()
+        _client_form()
+        st.divider()
+
+    try:
+        rows = list_all_clients()
+    except Exception as e:
+        st.error(f"Error al cargar clientes: {e}")
+        return
+
+    if not rows:
+        st.info("No hay clientes todavía.")
+        return
+
+    for r in rows:
+        c1, c2, c3 = st.columns([3, 3, 1.4])
+        c1.markdown(f"**{r['name']}**" + (f" — {r['empresa']}" if r.get("empresa") else ""))
+        c2.caption(" · ".join(filter(None, [r.get("phone"), r.get("email")])) or "—")
+        with c3:
+            b1, b2 = st.columns(2)
+            if b1.button("✏️", key=f"eclient_{r['id']}", help="Editar"):
+                st.session_state["admin_edit_client"] = r
+                st.session_state["admin_client_mode"] = None
+                st.rerun()
+            if b2.button("🗑️", key=f"dclient_{r['id']}", help="Eliminar"):
+                st.session_state[f"confirm_del_client_{r['id']}"] = True
+                st.rerun()
+
+        if st.session_state.get(f"confirm_del_client_{r['id']}"):
+            st.warning(f"¿Eliminar **{r['name']}**? Esta acción no se puede deshacer.")
+            cy, cn, _ = st.columns([1, 1, 6])
+            if cy.button("Sí, eliminar", key=f"yes_del_client_{r['id']}"):
+                try:
+                    from database.supabase_client import get_client
+                    get_client().table("clients").delete().eq("id", r["id"]).execute()
+                except Exception as e:
+                    st.error(f"No se pudo eliminar (¿tiene propuestas asociadas?): {e}")
+                st.session_state.pop(f"confirm_del_client_{r['id']}", None)
+                st.rerun()
+            if cn.button("Cancelar", key=f"no_del_client_{r['id']}"):
+                st.session_state.pop(f"confirm_del_client_{r['id']}", None)
+                st.rerun()
+
+        if edit_client and edit_client.get("id") == r["id"]:
+            st.markdown("##### ✏️ Editando cliente")
+            _client_form(existing=edit_client)
+            _client_sites_linker(r)
+
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
+                    unsafe_allow_html=True)
+
+
+def _prospects_section() -> None:
+    from database.prospects_db import list_all_prospects
+
+    st.markdown("### Prospectos")
+    st.caption(
+        "Personas interesadas que han recibido una cotización pero aún no han comprado. "
+        "Se agregan automáticamente desde el asistente de cotizaciones y se mueven a "
+        "Clientes cuando su propuesta se marca como Ganada — no se editan aquí."
+    )
+
+    try:
+        rows = list_all_prospects()
+    except Exception as e:
+        st.error(f"Error al cargar prospectos: {e}")
+        return
+
+    if not rows:
+        st.info("No hay prospectos todavía.")
+        return
+
+    for r in rows:
+        c1, c2, c3 = st.columns([3, 3, 2])
+        c1.markdown(f"**{r['name']}**" + (f" — {r['empresa']}" if r.get("empresa") else ""))
+        c2.caption(" · ".join(filter(None, [r.get("phone"), r.get("email")])) or "—")
+        c3.caption((r.get("created_at") or "")[:10])
+        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
+                    unsafe_allow_html=True)
+
+
 # ── equipment catalog ─────────────────────────────────────────────────────────
 
 _INV_TYPE_LABELS = {
@@ -997,10 +1182,11 @@ def main() -> None:
     )
     st.divider()
 
-    tab_equip, tab_services, tab_aresep = st.tabs([
+    tab_equip, tab_services, tab_aresep, tab_clients = st.tabs([
         "🔧 Catálogo de equipos",
         "💲 Servicios",
         "📊 Tarifas ARESEP",
+        "👥 Clientes",
     ])
 
     with tab_equip:
@@ -1015,6 +1201,13 @@ def main() -> None:
             _tariff_updater()
         with sub_view:
             _current_tariffs()
+
+    with tab_clients:
+        sub_clients, sub_prospects = st.tabs(["Clientes", "Prospectos"])
+        with sub_clients:
+            _clients_section()
+        with sub_prospects:
+            _prospects_section()
 
 
 main()

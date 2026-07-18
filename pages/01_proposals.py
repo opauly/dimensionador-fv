@@ -323,7 +323,16 @@ def _render_detail_panel(proposal: dict) -> None:
                         update_proposal_status(pid, next_st)
                         st.session_state.pop(f"det_flow_{pid}", None)
                         if next_st == "won":
-                            st.info("🎉 Propuesta ganada.")
+                            prospect_id = proposal.get("prospect_id")
+                            if prospect_id:
+                                from database.clients_db import promote_prospect
+                                try:
+                                    promote_prospect(prospect_id)
+                                    st.info("🎉 Propuesta ganada — cliente movido de Prospectos a Clientes.")
+                                except Exception as promo_err:
+                                    st.warning(f"Propuesta ganada, pero no se pudo promover el prospecto: {promo_err}")
+                            else:
+                                st.info("🎉 Propuesta ganada.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")

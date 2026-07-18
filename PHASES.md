@@ -2,9 +2,9 @@
 
 **Builder:** Oscar Pauly (solo)  
 **Stack:** Streamlit · Supabase · WeasyPrint/Jinja2 · Anthropic SDK · numpy-financial  
-**Reference:** Requirements v3.4  
+**Reference:** Requirements v3.5  
 **Goal:** Real proposals in production as fast as possible  
-**Last updated:** 2026-07-13
+**Last updated:** 2026-07-17
 
 | Phase | Status |
 |---|---|
@@ -15,7 +15,7 @@
 | 4 — AI Features | ✅ Complete (bill parser, tablero, datasheet, load estimator, daytime fraction) |
 | 5 — Off-Grid + Hybrid | ⬜ Not started |
 | 6 — Projects Module | ⬜ Not started |
-| 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅; cost templates, settings pending) |
+| 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅, Clientes/Prospectos ✅; cost templates, settings pending) |
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
 
@@ -429,7 +429,28 @@ The PDF template is the hardest thing to get right visually, and it's the thing 
 
 **Goal:** Victron Monitor is safe to sell as a paid subscription to external customers, not just run internally across your own sites.
 
-This phase belongs to `victron-monitor/`, not the solar proposal tool — it has no dependency on Phases 0–8 and can be done whenever the subscription business is ready to onboard its first external (non-Pauly&Co-owned) site. See [`victron-monitor/README.md`](victron-monitor/README.md) and [`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for current architecture.
+This phase belongs to `victron-monitor/`, not the solar proposal tool — it has no dependency on Phases 0–8 and can be done whenever the subscription business is ready to onboard its first external (non-Pauly&Co-owned) site. See [`victron-monitor/README.md`](victron-monitor/README.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for current architecture.
+
+**Already done, ahead of this phase (not part of its remaining scope):** per-site DB-driven
+config (specs, thresholds, Apps Script URL — migration 006), automatic `daily_health`
+compute in Postgres (migration 005), the client/prospect data model with email routing for
+reports (migrations 007–008), a `system_type` column for future report personalization
+(migration 009), and a recalibrated default battery-cycling threshold shared by Hybrid and
+Off-Grid (migration 010). What's described below — RLS + per-device JWT — is the one piece
+of multi-tenant hardening that's still outstanding.
+
+**Separately tracked TODO, not part of this phase either:** once real Grid Zero (no-battery,
+Fronius) sites exist, two places need `system_type`-conditional logic that's deliberately
+*not* built yet (no real site to verify the change against):
+- `monitoring.compute_daily_health()` (migration 010) — skip the battery-cycling penalty
+  entirely for `system_type = 'grid_zero'` rather than comparing against any threshold,
+  since there's no battery to stress. Marked inline in the function.
+- `weeklyReport()`'s `buildReportHtml()` (Apps Script) — the Battery Health info block and
+  the donut's battery segment/legend are meaningless without a battery; the Grid
+  independence KPI and Grid info block are meaningless for Off-Grid. Both require
+  recomputing the hand-tuned SVG column layout (fixed 4-column KPI row, fixed 2-column
+  info blocks), not just an `if()` wrap. Marked with `TODO(system_type)` comments at the
+  three exact locations.
 
 ### Why this phase exists
 

@@ -9,7 +9,7 @@
 
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 4 full + Phase 3 UX polish (Cotizaciones directed-flow, per-version PDF) + Phase 7 partial (Admin equipment catalog, ARESEP tariff xlsx parser) |
+| **Phase completed** | Phase 4 full + Phase 3 UX polish (Cotizaciones directed-flow, per-version PDF) + Phase 7 partial (Admin equipment catalog, ARESEP tariff xlsx parser, Clientes/Prospectos tab) |
 | **Phase next** | Phase 5 — Off-Grid wizard |
 | **Branch** | main |
 | **Last commit** | see `git log` |
@@ -76,8 +76,8 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
   (caught before push by the auto-mode credential-leak classifier, never reached GitHub —
   fixed by amending before the first successful push). Do not reintroduce a literal key
   into any node's function source.
-- Live/current versions: `node-red/victron_monitor_v1p7.json` and
-  `apps-script/Victron_Events_App_Script_v1p6.js`.
+- Live/current versions: `node-red/victron_monitor_v1p8.json` and
+  `apps-script/Victron_Events_App_Script_v1p7.js`.
 - Old standalone repo `opauly/victron-monitor` is **archived** (2026-07-13) — this repo
   is now the single source of truth for Victron Monitor.
 - **Known gap:** no RLS on `monitoring` — one shared `anon` key can read/write/delete
@@ -104,6 +104,115 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
     anon `SELECT` access to the public tariff tables; tariffs seeded for the relevant
     distributors. Until then a "coming soon" placeholder ships in both the PDF (below the
     4-week trend) and the email.
+- **Weekly report migrated from Google Sheets to Supabase (2026-07-17).** Confirmed by
+  running both versions for the same site/week and comparing output — the Sheets version
+  had two real bugs, not just noise:
+  1. `weeklyReport()`'s row filter only excluded `event === "TEST_DAILY_SUMMARY"`, not
+     `dump_type`, so MANUAL/TEST rows written during testing got summed into the weekly
+     totals — inflated PV/load numbers.
+  2. Battery cycles used `dailyRows[0].battery_usable_kwh || 1` — when that per-row Sheets
+     field was blank, it silently divided discharge kWh by 1 instead of the real ~41 kWh
+     capacity, producing nonsense figures (e.g. "144.32 cyc" in one comparison run).
+  The Supabase version doesn't have either bug: it filters `dump_type=eq.AUTO` server-side,
+  and sources `battery_usable_kwh` from `monitoring.sites` (one reliable row) instead of a
+  per-row Sheets column. Live Apps Script promoted to this version; old Sheets-reading code
+  removed. Node-RED still writes to Sheets as a human-browsable backup — only the *report
+  reader* changed.
+  - **Trigger gotcha when promoting:** Apps Script time-driven triggers always call their
+    function with zero arguments. `weeklyReport()` now requires `siteId`, so the old
+    Monday trigger (pointing at bare `weeklyReport`) had to be deleted and reinstalled
+    against the new `runAllWeeklyReports()` fan-out wrapper — otherwise the schedule
+    would fail silently every week with no email sent.
+  - **Duplicating an Apps Script project ≠ safe URL swap.** `doPost` and the Sheets-writing
+    functions use `SpreadsheetApp.getActiveSpreadsheet()`, which only works if the script
+    is container-bound to that specific Sheet. "File → Make a copy" from the script editor
+    produces a *standalone*, unbound copy — repointing the live Web App URL at a duplicate
+    project would silently break every Node-RED write, not just the report. Always edit
+    code in place in the original (bound) project instead.
+- **Client email routing (2026-07-17).** `monitoring.sites.client_id` (migration 007) links
+  a site to a `public.clients` row. The weekly report's recipient is resolved via
+  `monitoring.get_report_email(site_id)` — a narrow `SECURITY DEFINER` RPC that returns only
+  the linked client's email, falling back to `CONFIG.reportEmail` (internal) if unlinked.
+  Deliberately *not* a direct `GRANT SELECT` on `clients` to `anon` — that would let anyone
+  holding the (field-hardware-resident) anon key enumerate the entire client list's
+  names/emails/phones instead of just answering "what's the email for this one site_id."
+- **Per-site health thresholds actually wired everywhere now (2026-07-17).** Found and fixed
+  a gap: `weeklyReport()`'s battery-stress label was still reading the hardcoded Apps Script
+  `CONFIG.defaultHealthThresholds` unconditionally, while the Postgres-computed
+  `daily_health.health_score` already correctly used per-site thresholds — the two could
+  disagree. Fixed to merge `siteRow.health_thresholds` over the default, matching the
+  pattern `appendDailyHealth()` already used. `CONFIG.defaultHealthThresholds` is
+  deliberately *not* deleted — it's the last-resort fallback if a Supabase fetch fails
+  mid-session; removing it would make every threshold comparison silently evaluate `x >
+  undefined` = false, reporting perfect health regardless of real conditions. Same
+  reasoning applied to Node-RED's `Project Config`: `healthThresholds` and the system-specs
+  block (`batteryUsableKWh`, `pvKwp`, `latitude`, `longitude`) were removed from the
+  hardcoded local object entirely (they were already being overridden by Merge Site
+  Config in the normal path) — `supabaseUrl` also moved to a second Global Environment
+  Variable (`SUPABASE_URL`, type `string` — not a secret, so no `credential` type needed).
+- **`system_type` column added to `monitoring.sites`** (migration 009) —
+  `grid_zero` | `off_grid` | `hybrid`, same vocabulary as `public.proposals.system_type`.
+  Defaults to `hybrid` (matches every current site). Threaded through into the weekly
+  report's data object (`d.systemType`) with `TODO(system_type)` comments marking the
+  exact KPI-card and info-block locations that would need conditional layout for
+  off-grid/grid-zero sites — **not implemented yet**. The KPI/info-block layout is
+  hand-tuned pixel-math SVG (fixed 4-column KPI row, fixed 2-column info blocks), so
+  hiding a card means recomputing column widths, not just wrapping in `if()`. Deliberately
+  deferred until there's a real off-grid or grid-zero site to verify the reflow against —
+  building untested layout math blind was judged not worth the risk.
+- **Battery-cycling threshold recalibrated (migration 010).** Old default
+  (`batteryCyclesHigh: 1.5`/week) was based on nothing real — Hybrid/Off-Grid systems are
+  *designed* to cycle the battery ~daily (~7/week) as normal self-consumption behavior, so
+  the old default flagged every correctly-functioning system as "High stress" permanently.
+  New default (10.0 high / 7.0 mid per week) only flags genuinely abnormal cycling
+  (sustained >1.5–2x/day), based on Pylontech's LFP cycle-life rating (~6,000 cycles @ 80%
+  DOD ≈ 15+ years at daily cycling — well past typical system lifetime) and the fact that
+  depth-of-discharge (already tracked as "Lowest SOC of the Week") is a better stress
+  signal than raw cycle count. Applies identically to Hybrid and Off-Grid — both cycle
+  daily by design, no per-`system_type` value needed for this specific threshold. Where
+  `system_type` *does* need to change behavior: a future no-battery Grid Zero site
+  shouldn't be scored on battery cycling **at all** (not a different number — no
+  applicable metric). Marked as a `TODO(system_type)` inline in
+  `monitoring.compute_daily_health()` and tracked in PHASES.md's Phase 9 section, alongside
+  the Apps Script report TODOs above — same deferral reasoning (no real grid_zero site to
+  verify against yet).
+- **[ARCHITECTURE.md](ARCHITECTURE.md) added (2026-07-17)** — root-level system diagram
+  (Mermaid) covering full wiring across both products: Cerbo GX/Node-RED, Apps Script,
+  Sheets, Gmail, Drive, Supabase (`public` + `monitoring`), and the Streamlit app, plus a
+  Supabase schema ER diagram and the prospect→client lifecycle state diagram.
+
+---
+
+## Clients vs. Prospects (added 2026-07-17)
+
+Business rule from the user: a "client" is someone who has actually bought a project.
+Someone who's only been quoted and hasn't bought is a "prospect" — kept separate so the
+client list doesn't fill up with people who never converted. Full spec in
+[REQUIREMENTS.md §4.6](REQUIREMENTS.md). Implementation summary:
+
+- **Migration 008** (`database/migrations/008_prospects.sql`): new `prospects` table
+  (same shape as `clients` + `empresa` — also fixed a real bug where `clients.empresa`
+  never existed as a column despite `clients_db.py` assuming it did, silently dropping the
+  wizard's "Empresa" field on every save). `proposals.prospect_id` added alongside the
+  existing `client_id`, `CHECK`-constrained mutually exclusive. `promote_prospect_to_client()`
+  — atomic: copies the prospect into `clients`, repoints every proposal referencing them,
+  deletes the prospect row.
+- **Wizard change** (`pages/02_new_proposal.py`): client-step search still queries
+  `clients` only (per explicit decision — a repeat customer is found by name; a genuinely
+  new prospect creating a duplicate-looking prospect row on a second quote is an accepted
+  tradeoff, prospects aren't meant to be a curated list). No search match → `create_prospect()`
+  instead of `upsert_client()`.
+- **Promotion trigger** (`pages/01_proposals.py`, the `next_st === "won"` handler — already
+  the exact right hook point, confirmed the Projects module (`pages/03_projects.py`) is
+  still an unbuilt 6-line stub so there was nothing else to wire around): marking a
+  proposal won calls `promote_prospect()` if `prospect_id` is set. Automatic only — no
+  manual promote button, by explicit choice, to keep exactly one trigger point for the
+  state transition.
+- **Admin → Clientes tab** (`pages/05_admin.py`): list/add/edit/delete clients, checkbox
+  linker to `monitoring.sites` (via new `database/monitoring_sites_db.py`, using
+  `get_client().schema('monitoring')` — confirmed supported by the installed `supabase-py`
+  2.31.0, zero new grants needed since `service_role` already has full `monitoring` access).
+  Read-only Prospectos sub-tab for visibility, no actions (matches automatic-only promotion).
 
 ---
 

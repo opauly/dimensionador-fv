@@ -667,12 +667,24 @@ function generateWeeklyNarrative(stats, lang) {
 // ─────────────────────────────────────────────────────────────────
 // Weekly HTML→PDF report — bilingual, branded, AI narrative
 // ─────────────────────────────────────────────────────────────────
-function weeklyReport() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const daily  = ss.getSheetByName("DailySummary");
-  const health = ss.getSheetByName("DailyHealth");
+// Time-driven triggers always call their function with zero arguments —
+// this wrapper fans out to every active site so the Monday trigger still
+// works. One site's failure is logged and does not block the others.
+function runAllWeeklyReports() {
+  const sites = fetchSupabase_('/sites?active=eq.true&select=site_id', 'monitoring');
+  sites.forEach(function(s) {
+    try {
+      weeklyReport(s.site_id);
+    } catch (e) {
+      Logger.log('weeklyReport failed for ' + s.site_id + ': ' + e);
+    }
+  });
+}
 
-  if (!daily || !health) return;
+function weeklyReport(siteId) {
+  if (!siteId) throw new Error("weeklyReport(siteId) requires a site_id — e.g. weeklyReport('vista-atenas-lp-m3')");
+
+  const siteRow = fetchSiteRow_(siteId);
 
   const today = new Date();
   const end   = new Date(today);
@@ -682,13 +694,12 @@ function weeklyReport() {
   const startStr = formatDate(start);
   const endStr   = formatDate(end);
 
-  // Only AUTO dumps for weekly aggregation (skip TEST/MANUAL rows)
-  const dailyRowsAll = getRowsByDateRange(daily, startStr, endStr);
-  const dailyRows = dailyRowsAll.filter(r => !r.event || r.event !== "TEST_DAILY_SUMMARY");
-  const healthRows = getRowsByDateRange(health, startStr, endStr);
+  // dump_type=AUTO filtering happens server-side (fetchEnergyDailyRows_/fetchDailyHealthRows_)
+  const dailyRows = fetchEnergyDailyRows_(siteId, startStr, endStr, siteRow);
+  const healthRows = fetchDailyHealthRows_(siteId, startStr, endStr);
 
   if (dailyRows.length === 0) {
-    throw new Error("No DailySummary rows found between " + startStr + " and " + endStr);
+    throw new Error("No energy_daily rows found for " + siteId + " between " + startStr + " and " + endStr);
   }
 
   const site = dailyRows[0].site || "Unknown Site";
@@ -699,8 +710,7 @@ function weeklyReport() {
   const prevEnd   = new Date(start);
   const prevStart = new Date(start);
   prevStart.setDate(prevStart.getDate() - 7);
-  const prevRows = getRowsByDateRange(daily, formatDate(prevStart), formatDate(prevEnd))
-    .filter(function(r) { return !r.event || r.event !== "TEST_DAILY_SUMMARY"; });
+  const prevRows = fetchEnergyDailyRows_(siteId, formatDate(prevStart), formatDate(prevEnd), siteRow);
   const prevDM = {};
   prevRows.forEach(function(r) {
     if (!prevDM[r.date]) prevDM[r.date] = { pv: 0, grid: 0, load: 0 };
@@ -717,8 +727,7 @@ function weeklyReport() {
     var wE = new Date(today); wE.setDate(today.getDate() - wi*7);
     var wS = new Date(wE);    wS.setDate(wE.getDate() - 7);
     var wM = {};
-    getRowsByDateRange(daily, formatDate(wS), formatDate(wE))
-      .filter(function(r){return !r.event||r.event!=="TEST_DAILY_SUMMARY";})
+    fetchEnergyDailyRows_(siteId, formatDate(wS), formatDate(wE), siteRow)
       .forEach(function(r){if(!wM[r.date])wM[r.date]={pv:0,load:0}; wM[r.date].pv+=Number(r.pv_kWh||0); wM[r.date].load+=Number(r.load_kWh||0);});
     var wVals=Object.values(wM); var wPv=wVals.reduce(function(a,b){return a+b.pv;},0); var wLoad=wVals.reduce(function(a,b){return a+b.load;},0);
     weekBuckets.push({ label: formatDate(wS).slice(5), pv: Number(wPv.toFixed(1)), load: Number(wLoad.toFixed(1)) });
@@ -829,14 +838,7 @@ function weeklyReport() {
 
   let longestOutageMinutes = 0;
   try {
-    const gridSheet = ss.getSheetByName("GridLost");
-    if (gridSheet) {
-      gridSheet.getDataRange().getValues().slice(1).forEach(function(row) {
-        const rowSite = row[1], dur = Number(row[6]||0), ts = row[0];
-        const rowDate = ts instanceof Date ? Utilities.formatDate(ts, Session.getScriptTimeZone(), "yyyy-MM-dd") : String(ts).slice(0,10);
-        if (rowSite === site && rowDate >= startStr && rowDate <= endStr && dur > longestOutageMinutes) longestOutageMinutes = dur;
-      });
-    }
+    longestOutageMinutes = fetchLongestOutageMinutes_(siteId, startStr, endStr);
   } catch(e) {}
 
   // ── Weather from Open-Meteo (free, no API key) ──────────────────
@@ -896,7 +898,11 @@ function weeklyReport() {
   const gridQualityColor = gridQualityScore>=90?"#1FAE6E":gridQualityScore>=70?"#D4860F":"#C94040";
 
   // ── Battery stress label ─────────────────────────────────────────
-  const thr2 = CONFIG.defaultHealthThresholds;
+  // Per-site override merged over the fallback default — same pattern as
+  // appendDailyHealth()'s threshold merge (line ~183), so the report label
+  // agrees with the Postgres-computed health_score instead of using a
+  // one-size-fits-all constant.
+  const thr2 = Object.assign({}, CONFIG.defaultHealthThresholds, siteRow.health_thresholds || {});
   const battStressLabel = batteryCycles > thr2.batteryCyclesHigh
     ? (lang==="es"?"Alto estrés":"High stress")
     : batteryCycles > thr2.batteryCyclesMid ? (lang==="es"?"Uso activo":"Working hard")
@@ -927,6 +933,10 @@ function weeklyReport() {
   // ── Build HTML report ────────────────────────────────────────────
   const html = buildReportHtml({
     t: t, lang: lang, site: site, startStr: startStr, endStr: endStr,
+    // 'grid_zero' | 'off_grid' | 'hybrid' (monitoring.sites.system_type, migration 009).
+    // Everything today is 'hybrid' — see the TODO markers below for where grid- and
+    // battery-dependent sections would need conditional layout for the other two types.
+    systemType: siteRow.system_type,
     avgHealth: avgHealth, healthStatus: healthStatus, narrative: narrative,
     totals: totals, prevTotals: prevTotals,
     minSoc: minSoc, maxSoc: maxSoc, avgSoc: avgSoc,
@@ -968,16 +978,20 @@ function weeklyReport() {
   }
 
   // ── Send email with key stats inline + PDF attached ───────────────
-  if (CONFIG.reportEmail) {
+  // Prefer the linked client's email (monitoring.sites.client_id -> public.clients.email,
+  // via the get_report_email RPC) over the internal fallback address.
+  const recipientEmail = fetchReportEmail_(siteId) || CONFIG.reportEmail;
+  if (recipientEmail) {
     const emailHtml = buildEmailHtml({
       t: t, lang: lang, site: site, startStr: startStr, endStr: endStr,
       avgHealth: avgHealth, healthStatus: healthStatus, totals: totals,
       gridIndependencePct: gridIndependencePct, batteryCycles: batteryCycles,
-      narrative: narrative, days: dailyGrouped.length
+      narrative: narrative, days: dailyGrouped.length,
+      systemType: siteRow.system_type,
     });
 
     MailApp.sendEmail({
-      to: CONFIG.reportEmail,
+      to: recipientEmail,
       subject: (lang === "es" ? "Reporte Semanal - " : "Weekly Report - ") + site,
       htmlBody: emailHtml,
       attachments: [pdfBlob]
@@ -1131,6 +1145,10 @@ function buildReportHtml(d) {
     kpiWow(x2, pvPct, true) +
     kpiSub(x2, bestDaySub) +
     // Card 3: Grid independence
+    // TODO(system_type): meaningless for d.systemType === 'off_grid' (no grid at all).
+    // Hiding it means dropping to a 3-column KPI row, which requires recomputing
+    // CW/x2/x3/x4 (currently hardcoded to 4 columns) — not a simple if() wrap. Do this
+    // once there's a real off-grid site to verify the reflow against.
     kpiRect(x3, "#F7F9F8") +
     kpiLabel(x3, t.gridIndependence.toUpperCase()) +
     kpiValue(x3, String(d.gridIndependencePct) + "%", "", "#1FAE6E") +
@@ -1229,12 +1247,19 @@ function buildReportHtml(d) {
   const ROW2_H = Math.max(GRID_H, EVENTS_H);
 
   // Row 2 info SVG: grid + events
+  // TODO(system_type): the "grid" block is meaningless for d.systemType === 'off_grid'.
+  // Hiding it means the "events" block needs to become full-width instead of half —
+  // straightforward on its own, but verify against a real off-grid site first.
   const row2SvgContent =
     infoBlockSvg(0, 0, "#F7F9F8", t.sectionGrid, gridRows, GRID_H, t.subGrid) +
     infoBlockSvg(IW + GAP, 0, "#F7F9F8", t.sectionEvents, eventsRows, EVENTS_H, t.subEvents);
   const row2InfoSvg = "<svg width='100%' viewBox='0 0 " + PW + " " + ROW2_H + "' xmlns='http://www.w3.org/2000/svg'>" + row2SvgContent + "</svg>";
 
   // ── Row 1: energy mix + battery — single SVG for correct alignment ──
+  // TODO(system_type): the "battery" block and the donut's battery segment/legend row
+  // are meaningless for a future grid-zero-no-battery site (d.systemType === 'grid_zero',
+  // Fronius). Same reflow caveat as above — needs a real site of that type to verify
+  // against, not implemented yet.
   // Donut at left, legend text beside it, battery block at right column.
   // All in one SVG so columns align perfectly.
   // Energy-mix subtitle can wrap to 2 lines; start the donut below it (with a gap) instead
@@ -1599,6 +1624,125 @@ function buildEmailHtml(d) {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// SUPABASE ACCESS — weekly report data source.
+// Credentials come from Script Properties (Apps Script editor →
+// Project Settings → Script Properties), never hardcoded here — same
+// principle as the Node-RED credential env var. Set:
+//   SUPABASE_URL      = https://qqorjwnlawhlmrmxxgdb.supabase.co/rest/v1
+//   SUPABASE_ANON_KEY = <the shared project's anon public key>
+// ─────────────────────────────────────────────────────────────────
+function getSupabaseConfig_() {
+  const props = PropertiesService.getScriptProperties();
+  const url = props.getProperty('SUPABASE_URL');
+  const key = props.getProperty('SUPABASE_ANON_KEY');
+  if (!url || !key) {
+    throw new Error('SUPABASE_URL / SUPABASE_ANON_KEY not set in Script Properties (Project Settings → Script Properties)');
+  }
+  return { url: url, key: key };
+}
+
+function fetchSupabase_(path, profile) {
+  const cfg = getSupabaseConfig_();
+  const headers = { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key };
+  if (profile) headers['Accept-Profile'] = profile;
+  const resp = UrlFetchApp.fetch(cfg.url + path, { headers: headers, muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200) {
+    throw new Error('Supabase fetch failed [' + path + ']: HTTP ' + resp.getResponseCode() + ' ' + resp.getContentText().slice(0, 300));
+  }
+  return JSON.parse(resp.getContentText());
+}
+
+function fetchSiteRow_(siteId) {
+  const rows = fetchSupabase_('/sites?site_id=eq.' + encodeURIComponent(siteId) + '&select=*', 'monitoring');
+  if (!rows.length) throw new Error('No monitoring.sites row found for site_id=' + siteId);
+  return rows[0];
+}
+
+// SECURITY DEFINER RPC — returns the linked client's email for this
+// site, or null if unlinked. See database/migrations/007_site_client_link.sql.
+// Falls back to CONFIG.reportEmail in weeklyReport() if this returns null.
+function fetchReportEmail_(siteId) {
+  const cfg = getSupabaseConfig_();
+  const resp = UrlFetchApp.fetch(cfg.url + '/rpc/get_report_email', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      apikey: cfg.key,
+      Authorization: 'Bearer ' + cfg.key,
+      'Content-Profile': 'monitoring'
+    },
+    payload: JSON.stringify({ p_site_id: siteId }),
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) return null;
+  const email = JSON.parse(resp.getContentText());
+  return (email && email !== '') ? email : null;
+}
+
+// Normalizes a monitoring.energy_daily row + its site row into the
+// legacy shape the rest of weeklyReport() already expects (same field
+// names the DailySummary sheet used) — so none of the aggregation,
+// weather, solar-ratio, grid-quality, or report-building code below
+// needs to change at all.
+function normalizeEnergyDailyRow_(r, site) {
+  return {
+    date: r.date,
+    site: site.display_name,
+    reportLanguage: site.report_language,
+    latitude: site.latitude,
+    longitude: site.longitude,
+    pv_kwp: site.pv_kwp,
+    battery_usable_kwh: site.battery_usable_kwh,
+    pv_kWh: Number(r.pv_kwh || 0),
+    grid_kWh: Number(r.grid_kwh || 0),
+    load_kWh: Number(r.load_kwh || 0),
+    battery_charge_kWh: Number(r.battery_charge_kwh || 0),
+    battery_discharge_kWh: Number(r.battery_discharge_kwh || 0),
+    outage_count: Number(r.outage_count || 0),
+    outage_minutes: Number(r.outage_minutes || 0),
+    pv_yield_kwh_sc0: Number(r.pv_yield_kwh_sc0 || 0),
+    pv_yield_kwh_sc1: Number(r.pv_yield_kwh_sc1 || 0),
+    min_soc: r.min_soc, max_soc: r.max_soc,
+    min_voltage: r.min_voltage, max_voltage: r.max_voltage,
+    min_temperature: r.min_temperature, max_temperature: r.max_temperature,
+    min_grid_freq: r.min_grid_freq, max_grid_freq: r.max_grid_freq,
+    min_grid_v_l1: r.min_grid_v_l1, max_grid_v_l1: r.max_grid_v_l1,
+    min_grid_v_l2: r.min_grid_v_l2, max_grid_v_l2: r.max_grid_v_l2,
+    battery_reached_float: r.battery_reached_float === true ? 'YES' : 'NO',
+    grid_data_available: r.grid_data_available === true ? 'YES' : 'NO'
+  };
+}
+
+// dump_type=AUTO filtering happens server-side here — equivalent to the
+// Sheets version's client-side ".filter(r => r.event !== 'TEST_DAILY_SUMMARY')".
+function fetchEnergyDailyRows_(siteId, startStr, endStr, site) {
+  const path = '/energy_daily?site_id=eq.' + encodeURIComponent(siteId) +
+    '&dump_type=eq.AUTO&date=gte.' + startStr + '&date=lte.' + endStr +
+    '&order=date.asc&select=*';
+  const rows = fetchSupabase_(path, 'monitoring');
+  return rows.map(function(r) { return normalizeEnergyDailyRow_(r, site); });
+}
+
+// health_status -> status rename keeps the existing healthGrouped[...].status
+// read (in weeklyReport, below) unchanged.
+function fetchDailyHealthRows_(siteId, startStr, endStr) {
+  const path = '/daily_health?site_id=eq.' + encodeURIComponent(siteId) +
+    '&dump_type=eq.AUTO&date=gte.' + startStr + '&date=lte.' + endStr +
+    '&order=date.asc&select=*';
+  const rows = fetchSupabase_(path, 'monitoring');
+  return rows.map(function(r) {
+    return { date: r.date, health_score: r.health_score, status: r.health_status, alarms_count: r.alarms_count };
+  });
+}
+
+function fetchLongestOutageMinutes_(siteId, startStr, endStr) {
+  const path = '/grid_events?site_id=eq.' + encodeURIComponent(siteId) +
+    '&timestamp=gte.' + startStr + 'T00:00:00&timestamp=lte.' + endStr + 'T23:59:59&select=duration_minutes';
+  const rows = fetchSupabase_(path, 'monitoring');
+  return rows.reduce(function(max, r) { return Math.max(max, Number(r.duration_minutes || 0)); }, 0);
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────
 function getRowsByDateRange(sheet, startDate, endDate) {
@@ -1639,7 +1783,7 @@ function formatDate(date) {
 }
 
 function createWeeklyReportTrigger() {
-  ScriptApp.newTrigger("weeklyReport")
+  ScriptApp.newTrigger("runAllWeeklyReports")
     .timeBased()
     .onWeekDay(ScriptApp.WeekDay.MONDAY)
     .atHour(7)

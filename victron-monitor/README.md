@@ -51,9 +51,9 @@ Cerbo GX (Node-RED)
 ```
 victron-monitor/
 ├── node-red/
-│   └── victron_monitor_v1p6.json          # Node-RED flow export (live version)
+│   └── victron_monitor_v1p8.json          # Node-RED flow export (live version)
 ├── apps-script/
-│   └── Victron_Events_App_Script_v1p6.js  # Google Apps Script web app (live version)
+│   └── Victron_Events_App_Script_v1p7.js  # Google Apps Script web app (live version)
 ├── sql/
 │   └── schema.sql                         # Reference copy of the monitoring schema
 ├── docs/
@@ -76,7 +76,7 @@ Victron Monitor and the Pauly&Co Solar Design Tool now run on **one Supabase pro
 This means:
 - **No RLS** on `monitoring` tables — same trust model the solar tool already used (RLS off, access via schema-level `GRANT`s). See the bottom of `sql/schema.sql` for the exact grants.
 - **`monitoring` must stay in Settings → API → Data API → Exposed schemas**, alongside `public`.
-- **Every REST request needs a schema header** — PostgREST doesn't route by URL path. Writes (POST/PATCH) need `Content-Profile: monitoring`; reads (GET) need `Accept-Profile: monitoring`. Every write node in `node-red/victron_monitor_v1p6.json` already sets this.
+- **Every REST request needs a schema header** — PostgREST doesn't route by URL path. Writes (POST/PATCH) need `Content-Profile: monitoring`; reads (GET) need `Accept-Profile: monitoring`. Every write node in `node-red/victron_monitor_v1p8.json` already sets this.
 - Node-RED authenticates with the shared project's `anon` key (not `service_role`) — deliberately, since the key sits in plaintext on physical field hardware and a lower-privilege key limits blast radius if it leaks.
 - Onboarding a new site does **not** require a new Supabase project — insert a row into `monitoring.sites` (see [`docs/onboarding.md`](docs/onboarding.md)).
 
@@ -87,7 +87,7 @@ This means:
 See [`docs/onboarding.md`](docs/onboarding.md) for full steps. Summary:
 
 1. Insert a row into `monitoring.sites` in the shared Supabase project
-2. Import `node-red/victron_monitor_v1p6.json` to the site's Cerbo GX
+2. Import `node-red/victron_monitor_v1p8.json` to the site's Cerbo GX
 3. Edit the `Project Config` node — update `site`, `siteId`, `appScriptUrl`, `supabaseUrl`, `supabaseAnonKey`, `batteryUsableKWh`, `pvKwp`, `utcOffsetHours`, `mpptControllers`
 4. Re-select measurements on all Victron input nodes (~49 nodes — measurement selections are not preserved in JSON export)
 5. Deploy — Modified Flows
@@ -117,7 +117,7 @@ See [`docs/onboarding.md`](docs/onboarding.md) for full steps. Summary:
 
 ## Google Apps Script
 
-Deploy `apps-script/Victron_Events_App_Script_v1p6.js` as a Web App:
+Deploy `apps-script/Victron_Events_App_Script_v1p7.js` as a Web App:
 - Execute as: **Me**
 - Who has access: **Anyone**
 - Always deploy via **Manage deployments → pencil icon → New version** to preserve the URL

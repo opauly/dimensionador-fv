@@ -65,3 +65,42 @@ def upsert_client(
         .execute()
     )
     return result.data[0]
+
+
+def list_all_clients() -> list[dict]:
+    result = (
+        get_client()
+        .table("clients")
+        .select("*")
+        .order("name")
+        .execute()
+    )
+    return result.data or []
+
+
+def update_client(
+    client_id: str,
+    name: str,
+    empresa: str = "",
+    phone: str = "",
+    email: str = "",
+    notes: str = "",
+) -> dict:
+    """Full field update — used by the Admin Clientes editor (unlike
+    upsert_client, this overwrites rather than only filling blanks)."""
+    result = (
+        get_client()
+        .table("clients")
+        .update({"name": name.strip(), "empresa": empresa, "phone": phone, "email": email, "notes": notes})
+        .eq("id", client_id)
+        .execute()
+    )
+    return result.data[0]
+
+
+def promote_prospect(prospect_id: str) -> str:
+    """Moves a prospect into clients (see promote_prospect_to_client in
+    migration 008) and repoints any proposals that referenced them.
+    Returns the new client_id."""
+    result = get_client().rpc("promote_prospect_to_client", {"p_prospect_id": prospect_id}).execute()
+    return result.data

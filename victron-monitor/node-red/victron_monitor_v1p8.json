@@ -1180,7 +1180,7 @@
         "type": "function",
         "z": "9f2c0289aa37986e",
         "name": "Project Config",
-        "func": "// ╔══════════════════════════════════════════════════════════╗\n// ║           PROJECT CONFIGURATION — EDIT THIS NODE         ║\n// ║  All project-specific parameters are defined here.       ║\n// ║  No other node should contain hardcoded project values.  ║\n// ╚══════════════════════════════════════════════════════════╝\n\nconst config = {\n\n    // ── IDENTITY ──────────────────────────────────────────────\n    site:   \"Vista Atenas LP M3\",      // display name (Sheets, Drive, reports)\n    reportLanguage: \"en\",                // \"en\" or \"es\" — weekly report language\n    siteId: \"vista-atenas-lp-m3\",      // slug — must match sites.site_id in Supabase\n\n    // ── GOOGLE APPS SCRIPT ────────────────────────────────────\n    appScriptUrl: \"https://script.google.com/macros/s/AKfycbww6PjJRTZ4gqrSA_CxS5eLBmN6QtUsEWzaT8kP2whv1i87vkG6u4TzqgW-xVstLYvUZw/exec\",\n\n    // ── SUPABASE ──────────────────────────────────────────────\n    // Project URL from Settings → API\n    //supabaseUrl: \"https://rrcxunmcrsopcozodctm.supabase.co/rest/v1\",\n    supabaseUrl: \"https://qqorjwnlawhlmrmxxgdb.supabase.co/rest/v1\",\n    // anon public key from Settings → API\n    supabaseAnonKey: env.get('SUPABASE_ANON_KEY'),\n\n    // ── SYSTEM SPECS ──────────────────────────────────────────\n    batteryUsableKWh: 41.04,\n    pvKwp: 19.36,\n    latitude: 9.969576,\n    longitude: -84.405197,\n\n    // ── TIMEZONE ──────────────────────────────────────────────\n    timezone: \"America/Costa_Rica\",\n    utcOffsetHours: -6,\n\n    // ── DAILY SUMMARY TRIGGER ─────────────────────────────────\n    // \"Auto Daily Inject\" fires at local 23:55 (all days checked).\n    // Cerbo interprets crontab in local system time.\n    dailySummaryLocalTime: \"23:55\",\n\n    // ── ENERGY INTEGRATION ────────────────────────────────────\n    maxIntegrationGapMinutes: 30,\n\n    // ── MPPT CONTROLLERS ──────────────────────────────────────────\n    // One entry per physical MPPT controller on site.\n    // instance: matches Victron service instance (0, 1, 2...)\n    // trackers: up to 4 per controller; active:false = unused input\n    // name: string label matching electrical plans and site tags\n    mpptControllers: [\n        {\n            instance: 0,\n            name: \"MPPT 450/200 HQ2507WTYA7\",\n            trackers: [\n                { index: 0, name: \"S1\", active: true  },\n                { index: 1, name: \"S2\", active: true  },\n                { index: 2, name: \"S3\", active: true  },\n                { index: 3, name: \"N/A\", active: false }\n            ]\n        },\n        {\n            instance: 1,\n            name: \"MPPT 450/200 HQ2507GFD9W\",\n            trackers: [\n                { index: 0, name: \"S4\", active: true  },\n                { index: 1, name: \"S5\", active: true  },\n                { index: 2, name: \"S6\", active: true  },\n                { index: 3, name: \"N/A\", active: false }\n            ]\n        }\n    ],\n\n    // ── HEALTH SCORE THRESHOLDS ───────────────────────────────\n    // Sent to App Script + Supabase trigger uses DB defaults.\n    // To override Supabase thresholds, use compute_daily_health() RPC directly.\n    healthThresholds: {\n        socLowAlarm:       20,\n        socLowWarning:     30,\n        socLowWatch:       40,\n        outageMinLong:    120,\n        outageMinMid:      30,\n        outageCountHigh:    5,\n        gridDepHigh:       50,\n        gridDepMid:        20,\n        batteryCyclesHigh: 1.5,\n        batteryCyclesMid:  1.0\n    }\n};\n\nflow.set(\"config\", config);\n\nnode.status({\n    fill: \"green\",\n    shape: \"dot\",\n    text: \"Config loaded: \" + config.site\n});\n\nnode.log(\"Project config initialised for site: \" + config.site);\nreturn null;",
+        "func": "const config = {\n    site:   \"Vista Atenas LP M3\",\n    reportLanguage: \"en\",\n    siteId: \"vista-atenas-lp-m3\",\n\n    appScriptUrl: \"https://script.google.com/macros/s/AKfycbww6PjJRTZ4gqrSA_CxS5eLBmN6QtUsEWzaT8kP2whv1i87vkG6u4TzqgW-xVstLYvUZw/exec\",\n\n    supabaseUrl:     env.get('SUPABASE_URL'),\n    supabaseAnonKey: env.get('SUPABASE_ANON_KEY'),\n\n    timezone: \"America/Costa_Rica\",\n    utcOffsetHours: -6,\n\n    dailySummaryLocalTime: \"23:55\",\n    maxIntegrationGapMinutes: 30,\n\n    mpptControllers: [\n        { instance: 0, name: \"MPPT 450/200 HQ2507WTYA7\", trackers: [\n            { index: 0, name: \"S1\", active: true }, { index: 1, name: \"S2\", active: true },\n            { index: 2, name: \"S3\", active: true }, { index: 3, name: \"N/A\", active: false }\n        ]},\n        { instance: 1, name: \"MPPT 450/200 HQ2507GFD9W\", trackers: [\n            { index: 0, name: \"S4\", active: true }, { index: 1, name: \"S5\", active: true },\n            { index: 2, name: \"S6\", active: true }, { index: 3, name: \"N/A\", active: false }\n        ]}\n    ]\n\n    // System specs (batteryUsableKWh, pvKwp, latitude, longitude) and\n    // healthThresholds intentionally not set here — both come from\n    // monitoring.sites via Merge Site Config. mpptControllers stays\n    // local (hardware wiring, tied to physical input node selection).\n};\n\nflow.set(\"config\", config);\nnode.status({ fill: \"green\", shape: \"dot\", text: \"Config loaded: \" + config.site });\nnode.log(\"Project config initialised for site: \" + config.site);\nreturn null;",
         "outputs": 0,
         "timeout": 0,
         "noerr": 0,
@@ -3667,6 +3667,106 @@
         ]
     },
     {
+        "id": "c3b8505d03b1be72",
+        "type": "inject",
+        "z": "9f2c0289aa37986e",
+        "name": "Fetch Site Config",
+        "props": [],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "5",
+        "topic": "",
+        "x": 1810,
+        "y": 100,
+        "wires": [
+            [
+                "2b33627440352364"
+            ]
+        ]
+    },
+    {
+        "id": "2b33627440352364",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Prepare Site Fetch",
+        "func": "const config = flow.get('config') || {};\nmsg.method  = 'GET';\nmsg.url     = config.supabaseUrl + '/sites?site_id=eq.' + encodeURIComponent(config.siteId) + '&select=*';\nmsg.headers = {\n    'apikey':         config.supabaseAnonKey,\n    'Authorization':  'Bearer ' + config.supabaseAnonKey,\n    'Accept-Profile': 'monitoring',\n    'Accept':         'application/json'\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2050,
+        "y": 100,
+        "wires": [
+            [
+                "7217e618eacb06c3"
+            ]
+        ]
+    },
+    {
+        "id": "7217e618eacb06c3",
+        "type": "http request",
+        "z": "9f2c0289aa37986e",
+        "name": "",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 2270,
+        "y": 100,
+        "wires": [
+            [
+                "29d9224cb1e8866b"
+            ]
+        ]
+    },
+    {
+        "id": "29d9224cb1e8866b",
+        "type": "function",
+        "z": "9f2c0289aa37986e",
+        "name": "Merge Site Config",
+        "func": "// Overlay DB config onto local fallback. Never wipes bootstrap keys\n// (siteId / supabaseUrl / supabaseAnonKey aren't in the DB row).\nfunction pick(dbVal, localVal) {\n    return (dbVal === null || dbVal === undefined) ? localVal : dbVal;\n}\n\nconst ok   = (msg.statusCode === undefined || msg.statusCode === 200);\nconst rows = msg.payload;\n\nif (!ok || !Array.isArray(rows) || rows.length === 0) {\n    node.warn('Site config fetch failed/empty — keeping local fallback config');\n    node.status({ fill: 'yellow', shape: 'ring', text: 'Using local fallback config' });\n    return null;\n}\n\nconst site   = rows[0];\nconst config = flow.get('config') || {};\n\nconfig.site             = pick(site.display_name,      config.site);\nconfig.reportLanguage   = pick(site.report_language,   config.reportLanguage);\nconfig.batteryUsableKWh = pick(site.battery_usable_kwh, config.batteryUsableKWh);\nconfig.pvKwp            = pick(site.pv_kwp,             config.pvKwp);\nconfig.latitude         = pick(site.latitude,          config.latitude);\nconfig.longitude        = pick(site.longitude,         config.longitude);\nconfig.timezone         = pick(site.timezone,          config.timezone);\nconfig.utcOffsetHours   = pick(site.utc_offset_hours,  config.utcOffsetHours);\nconfig.appScriptUrl     = pick(site.app_script_url,    config.appScriptUrl);\nconfig.healthThresholds = Object.assign({}, config.healthThresholds, site.health_thresholds || {});\n\nflow.set('config', config);\nnode.status({ fill: 'green', shape: 'dot', text: 'Config synced: ' + config.site });\nnode.log('Site config synced from Supabase for ' + config.siteId);\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2490,
+        "y": 100,
+        "wires": [
+            [
+                "05411826bfab8e2e"
+            ]
+        ]
+    },
+    {
+        "id": "05411826bfab8e2e",
+        "type": "debug",
+        "z": "9f2c0289aa37986e",
+        "name": "Debug: Site Config",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2750,
+        "y": 100,
+        "wires": []
+    },
+    {
         "id": "cfd548fb82154206",
         "type": "tls-config",
         "name": "",
@@ -3681,7 +3781,7 @@
         "alpnprotocol": ""
     },
     {
-        "id": "73e349c1be78c3ab",
+        "id": "24561b12fa601a04",
         "type": "global-config",
         "env": [],
         "modules": {

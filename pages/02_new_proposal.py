@@ -126,13 +126,29 @@ def main():
         result = step2_client()
         if result is not None:
             try:
-                from database.clients_db import upsert_client
-                upsert_client(
-                    name=result["name"],
-                    empresa=result.get("empresa", ""),
-                    phone=result.get("phone", ""),
-                    email=result.get("email", ""),
-                )
+                if result.get("client_id"):
+                    # Existing client selected via search — fill blank fields only,
+                    # same behavior as before this change.
+                    from database.clients_db import upsert_client
+                    upsert_client(
+                        name=result["name"],
+                        empresa=result.get("empresa", ""),
+                        phone=result.get("phone", ""),
+                        email=result.get("email", ""),
+                    )
+                else:
+                    # No existing match — this is a new prospect, not a client yet.
+                    # Only becomes a client when a proposal for them is marked won
+                    # (see promote_prospect() in pages/01_proposals.py).
+                    from database.prospects_db import create_prospect
+                    prospect = create_prospect(
+                        name=result["name"],
+                        empresa=result.get("empresa", ""),
+                        phone=result.get("phone", ""),
+                        email=result.get("email", ""),
+                    )
+                    result["prospect_id"] = prospect["id"]
+                    st.session_state["wizard_client"] = result
             except Exception:
                 pass
             st.session_state["wizard_step"] = 2
@@ -152,6 +168,7 @@ def main():
                         client_name=client.get("name", "Sin nombre"),
                         system_type=result.get("system_type", "grid_zero"),
                         client_id=client.get("client_id"),
+                        prospect_id=client.get("prospect_id"),
                     )
                     st.session_state["wizard_proposal_id"] = prop["proposal_id"]
                     st.session_state["wizard_version_id"] = prop["id"]

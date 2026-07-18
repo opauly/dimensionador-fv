@@ -53,7 +53,12 @@ CREATE TABLE IF NOT EXISTS monitoring.sites (
       "outageMinLong": 120, "outageMinMid": 30, "outageCountHigh": 5,
       "gridDepHigh": 50, "gridDepMid": 20,
       "batteryCyclesHigh": 1.5, "batteryCyclesMid": 1.0
-  }'::jsonb
+  }'::jsonb,
+  -- 'grid_zero' | 'off_grid' | 'hybrid' — same vocabulary as
+  -- public.proposals.system_type (migration 009). Drives which report
+  -- cards apply (grid-dependent vs battery-dependent insights).
+  system_type         text        NOT NULL DEFAULT 'hybrid'
+                                    CHECK (system_type IN ('grid_zero', 'off_grid', 'hybrid'))
 );
 
 -- ────────────────────────────────────────────────────────────
