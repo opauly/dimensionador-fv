@@ -1,2 +1,9 @@
 [theme]
 primaryColor = "#4BAE6A"
+
+[server]
+# VRM CSV exports are large — the 80-day reference export is 139 MB. Set
+# explicitly rather than relying on Streamlit's implicit 200 MB default, so
+# raising it later is a visible change. See
+# victron-monitor/docs/vrm-report-v1-implementation-plan.md
+maxUploadSize = 200

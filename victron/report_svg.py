@@ -1,0 +1,575 @@
+from __future__ import annotations
+"""
+SVG blocks for the weekly report, ported from Apps Script's `buildReportHtml()`
+(`victron-monitor/apps-script/Victron_Events_App_Script_v1p7.js` lines 1007-1525).
+
+Every constant, coordinate and colour here is copied from that function
+deliberately — the goal is a report visually indistinguishable from the one
+already being emailed, so "tidying up" the geometry would defeat the purpose.
+Reference PDF used for calibration:
+`Weekly Report - Vista Atenas LP M3 - 2026-07-27.pdf`.
+
+The charts are absolute-coordinate SVG, which is why this port is viable at all:
+nothing is left to the layout engine, so WeasyPrint and Google's converter draw
+identical geometry. The surrounding HTML/CSS shell lives in
+`templates/weekly_report.html`.
+
+Kept in Python rather than Jinja2 on purpose: these blocks are computed geometry
+(wrapping, stacked-height measurement, dash-array arithmetic), and expressing
+that in template syntax would be far harder to check against the original.
+"""
+import math
+from datetime import date
+from html import escape
+
+# ── Palette (from the source) ─────────────────────────────────────
+GREEN = "#1FAE6E"
+BLUE = "#4A9FD4"
+AMBER = "#D4860F"
+RED = "#C94040"
+MINT = "#C8DDD5"
+BG_GREY = "#F7F9F8"
+BG_MINT = "#EEF9F4"
+LINE = "#E8EDEA"
+
+# ── Layout constants (from the source) ────────────────────────────
+PW = 530            # content width all blocks share
+GAP = 8
+IPAD = 11
+ROW_H = 20
+IW = (PW - GAP) / 2  # info-block width (half, minus gap)
+
+
+def esc(v) -> str:
+    return escape(str(v), quote=False)
+
+
+def _f(v, nd=1) -> str:
+    return f"{float(v):.{nd}f}"
+
+
+def wrap_svg_lines(text: str, max_chars: int) -> list[str]:
+    """Word-wrap for SVG <text>, which does not wrap on its own.
+
+    Character-count based, exactly like the original — not font-metric based.
+    Changing this to real metrics would shift every wrapped subtitle.
+    """
+    if not text:
+        return []
+    lines, cur = [], ""
+    for w in str(text).split(" "):
+        cand = f"{cur} {w}" if cur else w
+        if len(cand) > max_chars and cur:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = cand
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+SUB_MAX_CHARS = int((IW - 2 * IPAD) / 3.1)
+
+
+def info_block_first_row_y(subtitle: str | None) -> float:
+    """Y of the first row, from block top: title + subtitle + separator gap."""
+    n = len(wrap_svg_lines(subtitle, SUB_MAX_CHARS)) if subtitle else 0
+    return 14 + n * 9 + 8 + 12
+
+
+def measure_info_block(rows: list[dict], subtitle: str | None) -> float:
+    """Height a block needs. Single source of truth for the renderer and for
+    callers sizing a sibling block to match — they must not drift apart."""
+    return info_block_first_row_y(subtitle) + (len(rows) - 1) * ROW_H + 16
+
+
+def info_block_svg(x: float, y: float, bg: str, title: str,
+                   rows: list[dict], total_h: float,
+                   subtitle: str | None = None) -> str:
+    sub_lines = wrap_svg_lines(subtitle, SUB_MAX_CHARS) if subtitle else []
+    out = (f"<rect x='{_f(x)}' y='{y}' width='{_f(IW)}' height='{total_h}' "
+           f"rx='8' fill='{bg}'/>")
+    out += (f"<text x='{x + IPAD}' y='{y + 14}' font-size='8' font-weight='700' "
+            f"fill='#777'>{esc(title.upper())}</text>")
+    for li, line in enumerate(sub_lines):
+        out += (f"<text x='{x + IPAD}' y='{y + 14 + (li + 1) * 9}' "
+                f"font-size='6.5' fill='#bbb'>{esc(line)}</text>")
+    first = y + info_block_first_row_y(subtitle)
+    out += (f"<line x1='{x + IPAD}' y1='{first - 12}' x2='{x + IW - IPAD}' "
+            f"y2='{first - 12}' stroke='{LINE}' stroke-width='0.5'/>")
+    for i, row in enumerate(rows):
+        ry = first + i * ROW_H
+        out += (f"<text x='{x + IPAD}' y='{ry}' font-size='9.5' fill='#999'>"
+                f"{esc(row['label'])}</text>")
+        out += (f"<text x='{x + IW - IPAD}' y='{ry}' font-size='9.5' "
+                f"font-weight='600' fill='{row.get('valueColor', '#222')}' "
+                f"text-anchor='end'>{esc(row['value'])}</text>")
+        if i < len(rows) - 1:
+            out += (f"<line x1='{x + IPAD}' y1='{ry + 5}' x2='{x + IW - IPAD}' "
+                    f"y2='{ry + 5}' stroke='{LINE}' stroke-width='0.5'/>")
+    return out
+
+
+def _svg(content: str, w: float, h: float) -> str:
+    """No fixed height/preserveAspectRatio, so the SVG fills the container
+    width and derives height from the viewBox instead of letterboxing.
+
+    `font-family` is set on the root deliberately. WeasyPrint's SVG renderer
+    does not inherit the document's body font into <text>, so without this
+    every label falls back to the default sans-serif — which resolved to
+    Verdana here, a much wider face than Arial. That silently overflowed every
+    wrapped subtitle past its block, because the wrap width is computed in
+    characters against Arial-ish metrics. Google's converter inherited Arial,
+    which is why the original never needed to say so.
+    """
+    return (f"<svg width='100%' viewBox='0 0 {w} {h}' "
+            f"font-family='Arial, Helvetica, sans-serif' "
+            f"xmlns='http://www.w3.org/2000/svg'>{content}</svg>")
+
+
+# ══════════════════════════════════════════════════════════════════
+# KPI cards
+# ══════════════════════════════════════════════════════════════════
+CW = (PW - GAP * 3) / 4
+CH = 80
+PAD = 11
+
+
+def score_colors(avg_health: float) -> tuple[str, str, str]:
+    if avg_health >= 90:
+        return GREEN, "#D9F2E6", "#0F7D4A"
+    if avg_health >= 80:
+        return BLUE, "#DCEEF8", "#1A5F88"
+    if avg_health >= 70:
+        return AMBER, "#FDEFC5", "#9A6200"
+    return RED, "#FAD9D9", "#8A1F1F"
+
+
+def wow_pct(curr, prev) -> int | None:
+    if not prev:
+        return None
+    return round((curr - prev) / prev * 100)
+
+
+def kpi_svg(d: dict, t: dict) -> str:
+    score_color, badge_bg, badge_text = score_colors(d["avgHealth"])
+    tot = d["totals"]
+    outage_bg = "#FEF7EC" if tot["outageCount"] > 0 else BG_GREY
+
+    def rect(x, bg):
+        return (f"<rect x='{x}' y='0' width='{_f(CW)}' height='{CH}' rx='8' "
+                f"fill='{bg}'/>")
+
+    def label(x, s):
+        return (f"<text x='{x + PAD}' y='17' font-size='7' font-weight='600' "
+                f"fill='#999'>{esc(s)}</text>")
+
+    def value(x, val, unit, color):
+        return (f"<text x='{x + PAD}' y='43' font-size='21' font-weight='700' "
+                f"fill='{color}'>{esc(val)}"
+                f"<tspan font-size='11' font-weight='400' fill='#999'>"
+                f"{esc(unit)}</tspan></text>")
+
+    def wow(x, pct, positive_is_good=True):
+        if pct is None:
+            return ""
+        good = pct >= 0 if positive_is_good else pct <= 0
+        col = GREEN if good else AMBER
+        sign = "+" if pct >= 0 else ""
+        return (f"<text x='{x + PAD}' y='57' font-size='8' fill='{col}'>"
+                f"{sign}{pct}% {esc(t['wowTrendLabel'])}</text>")
+
+    def sub(x, txt, color="#aaa"):
+        return (f"<text x='{x + PAD}' y='70' font-size='8' fill='{color}'>"
+                f"{esc(txt)}</text>")
+
+    def badge(x, txt, bg, fg):
+        bw = min(len(txt) * 6 + 14, CW - PAD * 2)
+        return (f"<rect x='{x + PAD}' y='58' width='{bw:.0f}' height='15' "
+                f"rx='7.5' fill='{bg}'/>"
+                f"<text x='{x + PAD + 7}' y='69' font-size='8.5' "
+                f"font-weight='600' fill='{fg}'>{esc(txt)}</text>")
+
+    x2, x3, x4 = CW + GAP, (CW + GAP) * 2, (CW + GAP) * 3
+    prev = d.get("prevTotals")
+    pv_pct = wow_pct(tot["pv"], prev["pv"]) if prev else None
+    prev_gi = (100 - prev["grid"] / prev["load"] * 100) if prev and prev["load"] else None
+    gi_pct = wow_pct(d["gridIndependencePct"], prev_gi)
+
+    best = d.get("bestDay")
+    best_sub = f"Best: {_f(best['pv'])} {t['kwh']}" if best else "Best: —"
+    gi_sub = f"{tot['daysSelfSufficient']}/{len(d['dailyGrouped'])} {t['days']}"
+    outage_sub = (f"{tot['outageMinutes']} {t['minutes']}"
+                  if tot["outageCount"] > 0 else t["noOutagesShort"])
+    outage_col = AMBER if tot["outageCount"] > 0 else GREEN
+
+    status_label = t["healthStatus"].get(d["healthStatus"], d["healthStatus"])
+
+    c = (
+        rect(0, BG_MINT) + label(0, t["healthScore"].upper())
+        + value(0, str(d["avgHealth"]), "/100", score_color)
+        + badge(0, status_label, badge_bg, badge_text)
+
+        + rect(x2, BG_GREY) + label(x2, t["pvGenerated"].upper())
+        + value(x2, _f(tot["pv"]), " " + t["kwh"], "#111")
+        + wow(x2, pv_pct) + sub(x2, best_sub)
+    )
+    # A grid-independence card is meaningless without a grid. Unlike the Apps
+    # Script original — where dropping it meant recomputing four hardcoded
+    # column offsets — the cards are laid out from a list here, so an off-grid
+    # site simply gets three evenly-spaced cards.
+    if d.get("systemType") != "off_grid":
+        c += (rect(x3, BG_GREY) + label(x3, t["gridIndependence"].upper())
+              + value(x3, f"{d['gridIndependencePct']}%", "", GREEN)
+              + wow(x3, gi_pct) + sub(x3, gi_sub))
+        c += (rect(x4, outage_bg) + label(x4, t["outages"].upper())
+              + value(x4, str(tot["outageCount"]), "",
+                      AMBER if tot["outageCount"] > 0 else "#111")
+              + sub(x4, outage_sub, outage_col))
+    return _svg(c, PW, CH)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Daily solar vs. consumption bars
+# ══════════════════════════════════════════════════════════════════
+def bar_chart_svg(d: dict, t: dict) -> str:
+    BAR_H_MAX, BAR_W, BAR_GAP, SVG_W, BAR_LPAD = 78, 10, 3, 520, 46
+    sub_lines = wrap_svg_lines(t["subDaily"], int((SVG_W - 22) / 3.2))
+    hdr_h = 16 + len(sub_lines) * 10
+    top_y = hdr_h + 6
+    base_y = top_y + BAR_H_MAX
+    svg_h = base_y + 18
+
+    days = d["dailyGrouped"]
+    n = len(days)
+    slot_w = (SVG_W - BAR_LPAD) / max(n, 1)
+    vals = [float(r.get("pv_kwh") or 0) for r in days] + \
+           [float(r.get("load_kwh") or 0) for r in days]
+    # ceil to the next 10, matching the original's Math.ceil(max/10)*10.
+    # int(x/10)+1 would round an exact multiple of 10 up a whole step.
+    y_max = math.ceil((max(vals) if vals else 1) / 10) * 10 or 10
+
+    def bar_h(v):
+        return max(1, round(float(v or 0) / y_max * BAR_H_MAX))
+
+    s = (f"<text x='11' y='12' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['sectionDaily'].upper())}</text>")
+    for li, line in enumerate(sub_lines):
+        s += (f"<text x='11' y='{12 + (li + 1) * 10}' font-size='7' fill='#bbb'>"
+              f"{esc(line)}</text>")
+    s += _two_bar_legend(SVG_W - 20, t["labelConsumption"], MINT, t)
+
+    for val in (0, round(y_max / 2), y_max):
+        gy = base_y - round(val / y_max * BAR_H_MAX)
+        s += (f"<line x1='{BAR_LPAD}' y1='{gy}' x2='{SVG_W}' y2='{gy}' "
+              f"stroke='{LINE}' stroke-width='0.5'/>")
+        s += (f"<text x='{BAR_LPAD - 3}' y='{gy + 3}' text-anchor='end' "
+              f"font-size='7' fill='#bbb'>{val} kWh</text>")
+
+    for i, r in enumerate(days):
+        cx = BAR_LPAD + slot_w * i + slot_w / 2
+        pv_h, load_h = bar_h(r.get("pv_kwh")), bar_h(r.get("load_kwh"))
+        s += (f"<rect x='{_f(cx - BAR_W - BAR_GAP / 2)}' y='{_f(base_y - pv_h)}' "
+              f"width='{BAR_W}' height='{pv_h}' fill='{GREEN}' rx='1'/>"
+              f"<rect x='{_f(cx + BAR_GAP / 2)}' y='{_f(base_y - load_h)}' "
+              f"width='{BAR_W}' height='{load_h}' fill='{MINT}' rx='1'/>"
+              f"<text x='{_f(cx)}' y='{svg_h - 4}' text-anchor='middle' "
+              f"font-size='8' fill='#aaa'>{esc(day_abbr(r['date'], t))}</text>")
+    return _svg(s, SVG_W, svg_h)
+
+
+def _two_bar_legend(right_x: float, cons_label: str, cons_color: str, t: dict) -> str:
+    """Right-aligned Solar/Consumption legend, matching the SOC chart's styling."""
+    CWID, SWATCH, TXTGAP, ITEMGAP = 3.7, 7, 3, 12
+    solar_label = t["labelSolar"]
+    solar_w, cons_w = len(solar_label) * CWID, len(cons_label) * CWID
+    total = SWATCH + TXTGAP + solar_w + ITEMGAP + SWATCH + TXTGAP + cons_w
+    x = right_x - total
+    s = (f"<rect x='{_f(x)}' y='6' width='7' height='7' rx='1' fill='{GREEN}'/>"
+         f"<text x='{_f(x + SWATCH + TXTGAP)}' y='13' font-size='7' fill='#aaa'>"
+         f"{esc(solar_label)}</text>")
+    x += SWATCH + TXTGAP + solar_w + ITEMGAP
+    s += (f"<rect x='{_f(x)}' y='6' width='7' height='7' rx='1' "
+          f"fill='{cons_color}'/>"
+          f"<text x='{_f(x + SWATCH + TXTGAP)}' y='13' font-size='7' fill='#aaa'>"
+          f"{esc(cons_label)}</text>")
+    return s
+
+
+def day_abbr(iso_date: str, t: dict) -> str:
+    """Weekday label. The original builds `new Date(date+"T12:00:00")` and reads
+    getDay(); midday avoids any timezone rollover, and Python's isoweekday()
+    is remapped to the same Sunday-first list."""
+    d = date.fromisoformat(str(iso_date)[:10])
+    return t["dayAbbr"][(d.weekday() + 1) % 7]
+
+
+# ══════════════════════════════════════════════════════════════════
+# Row 1 — energy mix donut + battery block
+# ══════════════════════════════════════════════════════════════════
+C_CIRC = 175.9
+
+
+def _seg(pct: float, prev_sum: float) -> str:
+    ln = pct / 100 * C_CIRC
+    off = (C_CIRC / 4) - (prev_sum / 100 * C_CIRC)
+    return f"stroke-dasharray='{ln:.1f} {C_CIRC:.1f}' stroke-dashoffset='{off:.1f}'"
+
+
+def row1_svg(d: dict, t: dict, batt_rows: list[dict]) -> str:
+    tot = d["totals"]
+    total_energy = tot["pv"] + tot["grid"] + tot["discharge"]
+    solar_pct = round(tot["pv"] / total_energy * 100) if total_energy else 0
+    grid_pct = round(tot["grid"] / total_energy * 100) if total_energy else 0
+    batt_pct = max(0, 100 - solar_pct - grid_pct)
+    sd = _f(tot["pv"] / total_energy * 100) if total_energy else "0.0"
+    bd = _f(tot["discharge"] / total_energy * 100) if total_energy else "0.0"
+    gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
+
+    batt_h = measure_info_block(batt_rows, t["subBattery"])
+    em_sub = wrap_svg_lines(t["subEnergyMix"], int((IW - 2 * IPAD) / 3.4))
+    em_head_h = 16 + len(em_sub) * 9 + 12
+    row1_h = max(batt_h, em_head_h + 72 + 8)
+    DX = 8
+    DY = max(em_head_h, (row1_h - 72) / 2)
+    LX = DX + 80
+
+    s = (f"<rect x='0' y='0' width='{_f(IW)}' height='{row1_h}' rx='8' "
+         f"fill='{BG_GREY}'/>"
+         f"<text x='{IPAD}' y='16' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['energyMix'].upper())}</text>")
+    # Renders at font-size 7, not 6.5, so it needs the wider px/char above —
+    # reusing SUB_MAX_CHARS here would let a line overflow the box.
+    for li, line in enumerate(em_sub):
+        s += (f"<text x='{IPAD}' y='{16 + (li + 1) * 9}' font-size='7' "
+              f"fill='#bbb'>{esc(line)}</text>")
+
+    s += (f"<g transform='translate({DX},{DY:.0f})'>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{LINE}' stroke-width='11'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{GREEN}' "
+          f"stroke-width='11' {_seg(solar_pct, 0)} stroke-linecap='butt'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{BLUE}' "
+          f"stroke-width='11' {_seg(batt_pct, solar_pct)} stroke-linecap='butt'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{MINT}' "
+          f"stroke-width='11' {_seg(grid_pct, solar_pct + batt_pct)} stroke-linecap='butt'/>"
+          f"<text x='36' y='39' text-anchor='middle' font-size='12' "
+          f"font-weight='700' fill='#111'>{sd}%</text>"
+          f"<text x='36' y='50' text-anchor='middle' font-size='8' fill='#999'>solar</text>"
+          f"</g>")
+
+    for i, (lbl, col, pctd, kwh) in enumerate([
+        (t["labelSolar"], GREEN, sd, tot["pv"]),
+        (t["labelBattery"], BLUE, bd, tot["discharge"]),
+        (t["labelGrid"], MINT, gd, tot["grid"]),
+    ]):
+        cy = DY + 22 + i * 20
+        s += (f"<circle cx='{LX + 4}' cy='{cy}' r='4' fill='{col}'/>"
+              f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
+              f"{esc(lbl)}</text>"
+              f"<text x='{LX + 55}' y='{cy + 4}' font-size='9' font-weight='600' "
+              f"fill='#222'>{pctd}% · {_f(kwh)} {esc(t['kwh'])}</text>")
+
+    s += info_block_svg(IW + GAP, 0, BG_GREY, t["sectionBattery"],
+                        batt_rows, row1_h, t["subBattery"])
+    return _svg(s, PW, row1_h)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Row 2 — grid quality + events
+# ══════════════════════════════════════════════════════════════════
+def two_block_row_svg(left_title: str, left_rows: list[dict], left_sub: str,
+                      right_title: str, right_rows: list[dict], right_sub: str,
+                      right_bg: str = BG_GREY) -> str:
+    lh = measure_info_block(left_rows, left_sub)
+    rh = measure_info_block(right_rows, right_sub)
+    h = max(lh, rh)
+    c = (info_block_svg(0, 0, BG_GREY, left_title, left_rows, lh, left_sub)
+         + info_block_svg(IW + GAP, 0, right_bg, right_title, right_rows, rh, right_sub))
+    return _svg(c, PW, h)
+
+
+def single_block_row_svg(title: str, rows: list[dict], sub: str) -> str:
+    """Full-width variant, used when a system_type makes the sibling block
+    meaningless (e.g. Grid Quality on an off-grid site)."""
+    h = measure_info_block(rows, sub)
+    r = (f"<rect x='0' y='0' width='{PW}' height='{h}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='{IPAD}' y='14' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(title.upper())}</text>")
+    for li, line in enumerate(wrap_svg_lines(sub, int((PW - 2 * IPAD) / 3.1))):
+        r += (f"<text x='{IPAD}' y='{14 + (li + 1) * 9}' font-size='6.5' "
+              f"fill='#bbb'>{esc(line)}</text>")
+    first = info_block_first_row_y(sub)
+    r += (f"<line x1='{IPAD}' y1='{first - 12}' x2='{PW - IPAD}' y2='{first - 12}' "
+          f"stroke='{LINE}' stroke-width='0.5'/>")
+    for i, row in enumerate(rows):
+        ry = first + i * ROW_H
+        r += (f"<text x='{IPAD}' y='{ry}' font-size='9.5' fill='#999'>"
+              f"{esc(row['label'])}</text>"
+              f"<text x='{PW - IPAD}' y='{ry}' font-size='9.5' font-weight='600' "
+              f"fill='{row.get('valueColor', '#222')}' text-anchor='end'>"
+              f"{esc(row['value'])}</text>")
+        if i < len(rows) - 1:
+            r += (f"<line x1='{IPAD}' y1='{ry + 5}' x2='{PW - IPAD}' y2='{ry + 5}' "
+                  f"stroke='{LINE}' stroke-width='0.5'/>")
+    return _svg(r, PW, h)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 4-week solar trend (page 2)
+# ══════════════════════════════════════════════════════════════════
+def four_week_trend_svg(buckets: list[dict], t: dict) -> str:
+    FW, F_LPAD, F_RPAD = PW, 46, IPAD
+    BM4, BW4, BAR4GAP = 60, 15, 3
+    sub_lines = wrap_svg_lines(t["sub4Week"], int((FW - 22) / 3.2))
+    hdr = 16 + len(sub_lines) * 10
+    top = hdr + 14
+    baseline = top + BM4
+    date_y = baseline + 16
+    trend_y = baseline + 30
+    note_y = trend_y + 16
+    box_h = note_y + 6
+
+    vals = [v for b in buckets for v in (b["pv"], b.get("load") or 0) if v > 0]
+    y_max = math.ceil((max(vals) if vals else 1) / 50) * 50 or 100
+    n = len(buckets)
+    slot_w = (FW - F_LPAD - F_RPAD) / max(n, 1)
+
+    def bh(v):
+        return max(2 if v > 0 else 0, round(v / y_max * BM4))
+
+    s = (f"<rect x='0' y='0' width='{FW}' height='{box_h}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='11' y='12' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['fourWeekChart'].upper())}</text>")
+    for li, line in enumerate(sub_lines):
+        s += (f"<text x='11' y='{12 + (li + 1) * 10}' font-size='7' fill='#bbb'>"
+              f"{esc(line)}</text>")
+    s += _two_bar_legend(FW - 20, t["labelConsumption"], "#E0E8E4", t)
+
+    for val in (0, round(y_max / 2), y_max):
+        gy = baseline - round(val / y_max * BM4)
+        s += (f"<line x1='{F_LPAD}' y1='{gy}' x2='{FW - F_RPAD}' y2='{gy}' "
+              f"stroke='{LINE}' stroke-width='0.5'/>"
+              f"<text x='{F_LPAD - 3}' y='{gy + 3}' text-anchor='end' "
+              f"font-size='7' fill='#bbb'>{val} kWh</text>")
+
+    for i, b in enumerate(buckets):
+        cx = F_LPAD + slot_w * (i + 0.5)
+        pv_h, ld_h = bh(b["pv"]), bh(b.get("load") or 0)
+        pv_x, ld_x = cx - BW4 - BAR4GAP / 2, cx + BAR4GAP / 2
+        current = i == n - 1
+        s += (f"<rect x='{pv_x:.1f}' y='{baseline - pv_h}' width='{BW4}' "
+              f"height='{pv_h}' rx='2' fill='{GREEN if current else MINT}'/>"
+              f"<rect x='{ld_x:.1f}' y='{baseline - ld_h}' width='{BW4}' "
+              f"height='{ld_h}' rx='2' fill='#E0E8E4'/>"
+              f"<text x='{cx:.1f}' y='{date_y}' text-anchor='middle' "
+              f"font-size='8' fill='#aaa'>{esc(b['label'])}</text>")
+        if b["pv"] > 0:
+            s += (f"<text x='{pv_x + BW4 / 2:.1f}' y='{baseline - pv_h - 3}' "
+                  f"text-anchor='middle' font-size='7.5' "
+                  f"fill='{GREEN if current else '#aaa'}'>{b['pv']}</text>")
+        # Anchored under THIS week's solar bar — the week the change describes —
+        # rather than floating between two bars. Colour is neutral on purpose:
+        # a week-on-week solar change is weather, not something the customer
+        # did right or wrong, so only the ▲/▼ glyph carries direction.
+        if i > 0 and buckets[i - 1]["pv"] > 0 and b["pv"] > 0:
+            chg = round((b["pv"] - buckets[i - 1]["pv"]) / buckets[i - 1]["pv"] * 100)
+            arrow = "▲ " if chg >= 0 else "▼ "
+            sign = "+" if chg >= 0 else ""
+            s += (f"<text x='{pv_x + BW4 / 2:.1f}' y='{trend_y}' "
+                  f"text-anchor='middle' font-size='7.5' fill='#777'>"
+                  f"{arrow}{sign}{chg}%</text>")
+
+    s += (f"<text x='11' y='{note_y}' font-size='7' fill='#bbb'>"
+          f"{esc(t['trendNote'])}</text>")
+    return _svg(s, FW, box_h)
+
+
+# ══════════════════════════════════════════════════════════════════
+# Estimated savings placeholder (page 2)
+# ══════════════════════════════════════════════════════════════════
+def savings_placeholder_svg(t: dict) -> str:
+    """Full-width placeholder until the Supabase-backed tariff calculation is
+    wired in. Kept because the reference report ships it — removing it would
+    change what customers already receive."""
+    W, PADX = PW, 11
+    sub_lines = wrap_svg_lines(t["subSavings"], int((W - 2 * PADX) / 3.1))
+    sep_y = 14 + len(sub_lines) * 9 + 8
+    row_y = sep_y + 16
+    h = row_y + 4
+    s = (f"<rect x='0' y='0' width='{W}' height='{h}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='{PADX}' y='14' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['tariffSavings'].upper())}</text>")
+    for li, line in enumerate(sub_lines):
+        s += (f"<text x='{PADX}' y='{14 + (li + 1) * 9}' font-size='6.5' "
+              f"fill='#bbb'>{esc(line)}</text>")
+    s += (f"<line x1='{PADX}' y1='{sep_y}' x2='{W - PADX}' y2='{sep_y}' "
+          f"stroke='{LINE}' stroke-width='0.5'/>"
+          f"<text x='{PADX}' y='{row_y}' font-size='9.5' fill='#999'>"
+          f"{esc(t['tariffComingSoon'])}</text>"
+          f"<text x='{W - PADX}' y='{row_y}' text-anchor='end' font-size='9.5' "
+          f"font-weight='600' fill='#bbb'>{esc(t['comingSoonValue'])}</text>")
+    return _svg(s, W, h)
+
+
+# ══════════════════════════════════════════════════════════════════
+# SOC timeline (page 2)
+# ══════════════════════════════════════════════════════════════════
+def soc_chart_svg(d: dict, t: dict) -> str:
+    SH, SW, SPAD, SPH, SPY = 168, PW, 30, 112, 34
+
+    def sy(p):
+        return SPY + SPH - (float(p) / 100 * SPH)
+
+    s = (f"<rect x='0' y='0' width='{SW}' height='{SH}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='{IPAD}' y='12' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['socTimeline'].upper())}</text>"
+         f"<text x='{IPAD}' y='22' font-size='7' fill='#bbb'>"
+         f"{esc(t['subSocChart'])}</text>"
+         f"<rect x='{SW - SPAD - 95}' y='6' width='7' height='7' rx='1' "
+         f"fill='{GREEN}' fill-opacity='0.3'/>"
+         f"<text x='{SW - SPAD - 86}' y='13' font-size='7' fill='#aaa'>"
+         f"{esc(t['labelMaxSocBand'])}</text>"
+         f"<circle cx='{SW - SPAD - 22}' cy='10' r='3' fill='{GREEN}'/>"
+         f"<text x='{SW - SPAD - 17}' y='13' font-size='7' fill='#aaa'>"
+         f"{esc(t['labelMinSoc'])}</text>")
+
+    for p in (0, 50, 100):
+        y = sy(p)
+        s += (f"<line x1='{SPAD}' y1='{y:.1f}' x2='{SW - SPAD}' y2='{y:.1f}' "
+              f"stroke='{LINE}' stroke-width='0.5'/>"
+              f"<text x='{SPAD - 3}' y='{y + 3:.1f}' font-size='7' fill='#ccc' "
+              f"text-anchor='end'>{p}%</text>")
+
+    days = d["dailyGrouped"]
+    n = len(days)
+    sw = (SW - SPAD * 2) / max(n - 1, 1)
+
+    band_fwd, band_rev, min_line = "", "", ""
+    first_max = first_min = True
+    for i, r in enumerate(days):
+        x = SPAD + i * sw
+        if r.get("max_soc") is not None:
+            band_fwd += f"{'M' if first_max else 'L'}{x:.1f},{sy(r['max_soc']):.1f} "
+            first_max = False
+        if r.get("min_soc") is not None:
+            band_rev = f"L{x:.1f},{sy(r['min_soc']):.1f} " + band_rev
+            min_line += f"{'M' if first_min else 'L'}{x:.1f},{sy(r['min_soc']):.1f} "
+            first_min = False
+    if band_fwd and band_rev:
+        s += (f"<path d='{band_fwd}{band_rev}Z' fill='{GREEN}' "
+              f"fill-opacity='0.12'/>")
+    if min_line:
+        s += f"<path d='{min_line}' fill='none' stroke='{GREEN}' stroke-width='1.5'/>"
+
+    for i, r in enumerate(days):
+        x = SPAD + i * sw
+        mp = r.get("min_soc") if r.get("min_soc") is not None else 0
+        dy = sy(mp)
+        s += (f"<circle cx='{x:.1f}' cy='{dy:.1f}' r='2.5' fill='{GREEN}'/>"
+              f"<text x='{x:.1f}' y='{SH - 5}' text-anchor='middle' "
+              f"font-size='7.5' fill='#aaa'>{esc(day_abbr(r['date'], t))}</text>")
+        if float(mp) < 40:
+            s += (f"<text x='{x + 4:.1f}' y='{dy - 4:.1f}' font-size='7' "
+                  f"fill='{AMBER}'>{_f(mp, 0)}%</text>")
+    return _svg(s, SW, SH)
