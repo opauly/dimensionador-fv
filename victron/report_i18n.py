@@ -73,6 +73,11 @@ EN = {
     "labelMaxSocBand": "Max SOC (band)",
     "labelMinSoc": "Min SOC",
     "dayAbbr": ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+    "gridExport": "Energy Exported to Grid",
+    "gridExportKpi": "Energy Exported",
+    "ofGeneration": "of generation",
+    "solarExpectedEstimated": "Expected output (estimated)",
+    "weatherFallbackNote": "no weather data — estimate only",
     "fourWeekChart": "4-week solar trend",
     "sub4Week": "Compares solar production across the past 4 weeks to help spot "
                 "seasonal trends.",
@@ -134,6 +139,30 @@ ES = dict(EN, **{
     "labelGrid": "Red",
     "labelConsumption": "Consumo",
     "dayAbbr": ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"],
+    # Block subtitles. These inherit from EN via the dict(EN, **{...}) spread,
+    # so anything not overridden here silently renders in English inside an
+    # otherwise-Spanish report.
+    "subDaily": "Compara la producción solar diaria contra el consumo de la "
+                "propiedad para cada día de esta semana.",
+    "subEnergyMix": "Muestra cuánta de su energía vino de los paneles solares, "
+                    "las baterías y la red eléctrica.",
+    "subBattery": "Indica qué tan bien cargaron y descargaron sus baterías "
+                  "durante la semana.",
+    "subGrid": "Mide la calidad y estabilidad del suministro de la red "
+               "eléctrica en su sitio.",
+    "subEvents": "Registra los cortes de red y eventos de alarma detectados "
+                 "por el sistema esta semana.",
+    "subSocChart": "Muestra el nivel de carga máximo y mínimo diario de la "
+                   "batería — bajar de 20% indica uso intenso.",
+    "subSolarPerf": "Compara la producción solar real contra el máximo teórico "
+                    "según la capacidad instalada y la luz disponible.",
+    "subWeather": "Condiciones climáticas locales de la semana — la nubosidad y "
+                  "la lluvia reducen directamente la producción solar.",
+    "gridExport": "Energía exportada a la red",
+    "gridExportKpi": "Energía Exportada",
+    "ofGeneration": "de lo generado",
+    "solarExpectedEstimated": "Producción esperada (estimada)",
+    "weatherFallbackNote": "sin datos de clima — solo estimación",
     "fourWeekChart": "Tendencia solar de 4 semanas",
     "sub4Week": "Compara la producción solar de las últimas 4 semanas para "
                 "identificar tendencias estacionales.",

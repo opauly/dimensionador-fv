@@ -151,6 +151,49 @@ def tab_upload() -> None:
     batt = b.number_input("Batería utilizable (kWh)", min_value=0.0, step=0.1, key="up_batt")
     stype = c.selectbox("Tipo de sistema", SYSTEM_TYPES, key="up_type")
 
+    # Location drives the Open-Meteo call, which in turn drives the weather
+    # block AND the expected-output figure behind the performance ratio.
+    # Without coordinates the report falls back to a flat 4.5 peak-sun-hours
+    # assumption, and the "ratio" degenerates into actual-vs-assumption.
+    st.markdown("##### Ubicación")
+    st.caption(
+        "Necesaria para el clima y el índice de rendimiento. Sin coordenadas, "
+        "la producción esperada se estima con un supuesto fijo y el índice "
+        "pierde sentido."
+    )
+    a, b = st.columns([2, 1])
+    location = a.text_input("Ubicación", key="up_loc",
+                            placeholder="Atenas, Alajuela")
+    tz = b.text_input("Zona horaria", value="America/Costa_Rica", key="up_tz")
+    a, b, c = st.columns([1, 1, 1])
+    lat = a.number_input("Latitud", value=0.0, format="%.6f", key="up_lat")
+    lng = b.number_input("Longitud", value=0.0, format="%.6f", key="up_lng")
+    with c:
+        st.write("")
+        if st.button("📍 Buscar por ubicación", key="up_geo",
+                     help="Geocodifica el texto de Ubicación (Costa Rica)"):
+            try:
+                from calculations.pvgis import geocode_cr
+                parts = [p.strip() for p in (location or "").split(",")]
+                got = geocode_cr(parts[0], parts[1] if len(parts) > 1 else "")
+                if got:
+                    st.session_state["up_lat"], st.session_state["up_lng"] = got[0], got[1]
+                    st.rerun()
+                st.warning("No se encontró esa ubicación.")
+            except Exception as exc:  # noqa: BLE001
+                st.warning(f"No se pudo geocodificar: {exc}")
+
+    exports = st.checkbox(
+        "Este sistema exporta energía a la red",
+        key="up_export",
+        help=(
+            "Los sistemas híbridos/ESS con inyección envían excedente a la red "
+            "(lecturas negativas de Grid L1/L2). Actívalo para que el reporte "
+            "muestre la energía exportada. El consumo de red siempre se mide "
+            "solo como importación."
+        ),
+    )
+
     up = st.file_uploader("Archivo CSV de VRM", type=["csv"], key="up_file")
     st.caption("Límite de carga: 200 MB (una exportación de ~80 días pesa ~140 MB).")
 
@@ -180,6 +223,11 @@ def tab_upload() -> None:
             "customer": cust_name.strip(), "site": site_name.strip(),
             "filename": up.name, "pv_kwp": pv_kwp or None,
             "battery_usable_kwh": batt or None, "system_type": stype,
+            "location": location or None, "timezone": tz or "America/Costa_Rica",
+            # 0,0 is Null Island, not "unknown" — store NULL so the report can
+            # tell the difference and say weather is unavailable.
+            "latitude": lat or None, "longitude": lng or None,
+            "exports_to_grid": exports,
         }
 
     parsed = st.session_state.get("vrm_parsed")
@@ -227,7 +275,12 @@ def tab_upload() -> None:
                 site_id = ingest.make_site_id(cust["slug"], meta["site"])
                 fields = {"pv_kwp": meta["pv_kwp"],
                           "battery_usable_kwh": meta["battery_usable_kwh"],
-                          "system_type": meta["system_type"]}
+                          "system_type": meta["system_type"],
+                          "location": meta["location"],
+                          "timezone": meta["timezone"],
+                          "latitude": meta["latitude"],
+                          "longitude": meta["longitude"],
+                          "exports_to_grid": meta["exports_to_grid"]}
                 if parsed.get("installation_id"):
                     fields["vrm_installation_id"] = int(parsed["installation_id"])
                 ingest.upsert_site(cust["id"], site_id, meta["site"], **fields)
@@ -322,6 +375,19 @@ def tab_report() -> None:
     e.metric("Salud", f"{d['avgHealth']}/100", d["healthStatus"])
     st.caption(f"Periodo {d['startStr']} → {d['endStr']} · "
                f"{len(d['dailyGrouped'])} días · esquema `{d['schema']}`")
+
+    # `weatherErrors` only has entries when the site HAS coordinates and the
+    # fetch still failed — distinct from simply not having lat/long, which the
+    # report labels "Datos de clima no disponibles" with no error attached.
+    # Without this the two looked identical: an operator staring at a report
+    # generated moments after saving coordinates would have no way to tell "not
+    # configured" from "the weather service didn't answer, try again".
+    if d.get("weatherErrors"):
+        st.warning(
+            "No se pudo obtener el clima de Open-Meteo (el sitio sí tiene "
+            "coordenadas). El PDF se generó igual, sin ese bloque. "
+            f"Detalle: {d['weatherErrors'][-1]}"
+        )
 
     st.download_button("⬇️ Descargar PDF", data=rep["pdf"],
                        file_name=rep["name"], mime="application/pdf",

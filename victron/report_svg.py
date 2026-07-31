@@ -71,6 +71,89 @@ def wrap_svg_lines(text: str, max_chars: int) -> list[str]:
 
 SUB_MAX_CHARS = int((IW - 2 * IPAD) / 3.1)
 
+# ── Text width estimation ─────────────────────────────────────────
+# SVG <text> does not wrap or shrink to fit, so a label/value pair that is too
+# wide silently draws on top of itself. English never triggered it; Spanish does
+# ("Puntaje de calidad de red" + "84/100 — Fluctuaciones menores" against
+# "Grid quality score" + "66/100 — Poor"). The original has the same flaw — it
+# only ever shipped English layouts that happened to fit.
+#
+# Per-class widths in em, calibrated against Arial in the reference PDF
+# ("59.57 – 60.68 Hz" measures 74.7pt at 9.81pt → ~0.476 em/char average).
+_W_NARROW = set("iljItfr.,:;'`|!()[]{}-· ")
+_W_WIDE = set("mwMW@%")
+
+
+def text_width(s: str, size: float, bold: bool = False) -> float:
+    """Approximate rendered width in SVG user units.
+
+    An estimate on purpose: pulling real font metrics in would mean loading the
+    face here, and the only decision it drives is "shrink or not", where being
+    slightly conservative is the safe direction.
+    """
+    w = 0.0
+    for ch in str(s):
+        if ch in _W_NARROW:
+            w += 0.30
+        elif ch in _W_WIDE:
+            w += 0.83
+        elif ch.isupper() or ch.isdigit():
+            w += 0.60
+        else:
+            w += 0.51
+    return w * size * (1.05 if bold else 1.0)
+
+
+ROW_SIZE_MAX = 9.5
+ROW_SIZE_FLOOR = 7.0
+ROW_GAP = 10.0
+
+
+def row_fits(label: str, value: str, avail: float, size: float,
+             gap: float = ROW_GAP) -> bool:
+    return (text_width(label, size)
+            + text_width(value, size, bold=True) + gap) <= avail
+
+
+def uniform_row_size(groups: list[tuple[list[dict], float]],
+                     size: float = ROW_SIZE_MAX,
+                     floor: float = ROW_SIZE_FLOOR) -> float:
+    """One row font size for the whole report.
+
+    Sizing each row independently is technically tighter but reads as a
+    mistake: a single shrunken line next to full-size neighbours looks like a
+    rendering glitch rather than a deliberate choice. So the report finds the
+    largest size at which *every* row fits and uses it everywhere — uniform,
+    and only as small as the longest label/value pair actually requires.
+
+    `groups` is [(rows, available width)], since half-width and full-width
+    blocks have different room.
+    """
+    s = size
+    while s > floor:
+        if all(row_fits(r["label"], r["value"], avail, s)
+               for rows, avail in groups for r in rows):
+            return s
+        s -= 0.25
+    return floor
+
+
+def fit_value(label: str, value: str, avail: float, size: float,
+              gap: float = ROW_GAP) -> str:
+    """Value text trimmed to fit beside `label` at `size`.
+
+    Only bites at the floor, when even the smallest uniform size cannot fit a
+    pair — ellipsizing is still better than drawing two strings on top of each
+    other.
+    """
+    if row_fits(label, value, avail, size, gap):
+        return str(value)
+    room = avail - text_width(label, size) - gap
+    out = str(value)
+    while out and text_width(out, size, bold=True) > room:
+        out = out[:-1]
+    return (out[:-1] + "…") if len(out) > 1 else "…"
+
 
 def info_block_first_row_y(subtitle: str | None) -> float:
     """Y of the first row, from block top: title + subtitle + separator gap."""
@@ -86,7 +169,13 @@ def measure_info_block(rows: list[dict], subtitle: str | None) -> float:
 
 def info_block_svg(x: float, y: float, bg: str, title: str,
                    rows: list[dict], total_h: float,
-                   subtitle: str | None = None) -> str:
+                   subtitle: str | None = None,
+                   first_row_y: float | None = None,
+                   row_size: float = ROW_SIZE_MAX) -> str:
+    """`first_row_y` overrides where rows start, so two blocks side by side can
+    share a baseline even when their subtitles wrap to different line counts.
+    Without it a 1-line subtitle next to a 2-line one leaves the two columns'
+    rows visibly out of step — invisible in English, obvious in Spanish."""
     sub_lines = wrap_svg_lines(subtitle, SUB_MAX_CHARS) if subtitle else []
     out = (f"<rect x='{_f(x)}' y='{y}' width='{_f(IW)}' height='{total_h}' "
            f"rx='8' fill='{bg}'/>")
@@ -95,16 +184,19 @@ def info_block_svg(x: float, y: float, bg: str, title: str,
     for li, line in enumerate(sub_lines):
         out += (f"<text x='{x + IPAD}' y='{y + 14 + (li + 1) * 9}' "
                 f"font-size='6.5' fill='#bbb'>{esc(line)}</text>")
-    first = y + info_block_first_row_y(subtitle)
+    first = y + (first_row_y if first_row_y is not None
+                 else info_block_first_row_y(subtitle))
     out += (f"<line x1='{x + IPAD}' y1='{first - 12}' x2='{x + IW - IPAD}' "
             f"y2='{first - 12}' stroke='{LINE}' stroke-width='0.5'/>")
+    avail = IW - 2 * IPAD
     for i, row in enumerate(rows):
         ry = first + i * ROW_H
-        out += (f"<text x='{x + IPAD}' y='{ry}' font-size='9.5' fill='#999'>"
+        vtext = fit_value(row["label"], row["value"], avail, row_size)
+        out += (f"<text x='{x + IPAD}' y='{ry}' font-size='{row_size:g}' fill='#999'>"
                 f"{esc(row['label'])}</text>")
-        out += (f"<text x='{x + IW - IPAD}' y='{ry}' font-size='9.5' "
+        out += (f"<text x='{x + IW - IPAD}' y='{ry}' font-size='{row_size:g}' "
                 f"font-weight='600' fill='{row.get('valueColor', '#222')}' "
-                f"text-anchor='end'>{esc(row['value'])}</text>")
+                f"text-anchor='end'>{esc(vtext)}</text>")
         if i < len(rows) - 1:
             out += (f"<line x1='{x + IPAD}' y1='{ry + 5}' x2='{x + IW - IPAD}' "
                     f"y2='{ry + 5}' stroke='{LINE}' stroke-width='0.5'/>")
@@ -223,10 +315,22 @@ def kpi_svg(d: dict, t: dict) -> str:
         c += (rect(x3, BG_GREY) + label(x3, t["gridIndependence"].upper())
               + value(x3, f"{d['gridIndependencePct']}%", "", GREEN)
               + wow(x3, gi_pct) + sub(x3, gi_sub))
-        c += (rect(x4, outage_bg) + label(x4, t["outages"].upper())
-              + value(x4, str(tot["outageCount"]), "",
-                      AMBER if tot["outageCount"] > 0 else "#111")
-              + sub(x4, outage_sub, outage_col))
+
+        # On a site that feeds back, exported energy is the more informative
+        # headline than an outage count that is usually zero — a grid-tied
+        # exporting system is by definition connected. Outages are not dropped:
+        # they stay as a row in the Events block, so nothing is lost.
+        if d.get("exportsToGrid"):
+            exported = tot.get("gridExport", 0.0)
+            share = (exported / tot["pv"] * 100) if tot["pv"] else 0
+            c += (rect(x4, BG_MINT) + label(x4, t["gridExportKpi"].upper())
+                  + value(x4, _f(exported), " " + t["kwh"], GREEN)
+                  + sub(x4, f"{share:.0f}% {t['ofGeneration']}", "#aaa"))
+        else:
+            c += (rect(x4, outage_bg) + label(x4, t["outages"].upper())
+                  + value(x4, str(tot["outageCount"]), "",
+                          AMBER if tot["outageCount"] > 0 else "#111")
+                  + sub(x4, outage_sub, outage_col))
     return _svg(c, PW, CH)
 
 
@@ -317,7 +421,8 @@ def _seg(pct: float, prev_sum: float) -> str:
     return f"stroke-dasharray='{ln:.1f} {C_CIRC:.1f}' stroke-dashoffset='{off:.1f}'"
 
 
-def row1_svg(d: dict, t: dict, batt_rows: list[dict]) -> str:
+def row1_svg(d: dict, t: dict, batt_rows: list[dict],
+             row_size: float = ROW_SIZE_MAX) -> str:
     tot = d["totals"]
     total_energy = tot["pv"] + tot["grid"] + tot["discharge"]
     solar_pct = round(tot["pv"] / total_energy * 100) if total_energy else 0
@@ -371,7 +476,7 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict]) -> str:
               f"fill='#222'>{pctd}% · {_f(kwh)} {esc(t['kwh'])}</text>")
 
     s += info_block_svg(IW + GAP, 0, BG_GREY, t["sectionBattery"],
-                        batt_rows, row1_h, t["subBattery"])
+                        batt_rows, row1_h, t["subBattery"], row_size=row_size)
     return _svg(s, PW, row1_h)
 
 
@@ -380,16 +485,23 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════════════
 def two_block_row_svg(left_title: str, left_rows: list[dict], left_sub: str,
                       right_title: str, right_rows: list[dict], right_sub: str,
-                      right_bg: str = BG_GREY) -> str:
-    lh = measure_info_block(left_rows, left_sub)
-    rh = measure_info_block(right_rows, right_sub)
+                      right_bg: str = BG_GREY,
+                      row_size: float = ROW_SIZE_MAX) -> str:
+    # Shared row baseline so the two columns stay in step regardless of how
+    # many lines each subtitle wraps to.
+    first = max(info_block_first_row_y(left_sub), info_block_first_row_y(right_sub))
+    lh = first + (len(left_rows) - 1) * ROW_H + 16
+    rh = first + (len(right_rows) - 1) * ROW_H + 16
     h = max(lh, rh)
-    c = (info_block_svg(0, 0, BG_GREY, left_title, left_rows, lh, left_sub)
-         + info_block_svg(IW + GAP, 0, right_bg, right_title, right_rows, rh, right_sub))
+    c = (info_block_svg(0, 0, BG_GREY, left_title, left_rows, lh, left_sub,
+                        first_row_y=first, row_size=row_size)
+         + info_block_svg(IW + GAP, 0, right_bg, right_title, right_rows, rh,
+                          right_sub, first_row_y=first, row_size=row_size))
     return _svg(c, PW, h)
 
 
-def single_block_row_svg(title: str, rows: list[dict], sub: str) -> str:
+def single_block_row_svg(title: str, rows: list[dict], sub: str,
+                         row_size: float = ROW_SIZE_MAX) -> str:
     """Full-width variant, used when a system_type makes the sibling block
     meaningless (e.g. Grid Quality on an off-grid site)."""
     h = measure_info_block(rows, sub)
@@ -402,13 +514,15 @@ def single_block_row_svg(title: str, rows: list[dict], sub: str) -> str:
     first = info_block_first_row_y(sub)
     r += (f"<line x1='{IPAD}' y1='{first - 12}' x2='{PW - IPAD}' y2='{first - 12}' "
           f"stroke='{LINE}' stroke-width='0.5'/>")
+    avail_full = PW - 2 * IPAD
     for i, row in enumerate(rows):
         ry = first + i * ROW_H
-        r += (f"<text x='{IPAD}' y='{ry}' font-size='9.5' fill='#999'>"
+        vtext = fit_value(row["label"], row["value"], avail_full, row_size)
+        r += (f"<text x='{IPAD}' y='{ry}' font-size='{row_size:g}' fill='#999'>"
               f"{esc(row['label'])}</text>"
-              f"<text x='{PW - IPAD}' y='{ry}' font-size='9.5' font-weight='600' "
+              f"<text x='{PW - IPAD}' y='{ry}' font-size='{row_size:g}' font-weight='600' "
               f"fill='{row.get('valueColor', '#222')}' text-anchor='end'>"
-              f"{esc(row['value'])}</text>")
+              f"{esc(vtext)}</text>")
         if i < len(rows) - 1:
             r += (f"<line x1='{IPAD}' y1='{ry + 5}' x2='{PW - IPAD}' y2='{ry + 5}' "
                   f"stroke='{LINE}' stroke-width='0.5'/>")

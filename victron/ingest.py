@@ -18,6 +18,7 @@ this side would not survive to the insert. It exists for direct-SQL backfills.
 A single upload firing the trigger once per day-row is fine.
 """
 import re
+import unicodedata
 
 from database.supabase_client import get_client
 
@@ -30,8 +31,19 @@ def _t(name: str):
 
 
 def slugify(value: str) -> str:
-    """Lowercase ASCII slug, matching vrm.customers.slug's CHECK constraint."""
-    s = re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+    """Lowercase ASCII slug, matching vrm.customers.slug's CHECK constraint.
+
+    Accents are transliterated (í → i), not stripped. This is load-bearing for
+    re-uploads, not cosmetic: the slug *is* the site identity, so if "Rebeca
+    Ruíz" and "Rebeca Ruiz" produced different slugs, re-uploading the same
+    site's export with the accent typed differently would silently create a
+    second site and a duplicate copy of its history instead of updating the
+    first. Dropping the accent character outright gave "rebeca-ru-z" and
+    "jos-pe-a" — mangled, and different from the unaccented spelling.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(value).strip().lower())
+    ascii_only = "".join(c for c in decomposed if not unicodedata.combining(c))
+    s = re.sub(r"[^a-z0-9]+", "-", ascii_only).strip("-")
     if not s or not s[0].isalnum():
         raise ValueError(f"Cannot build a slug from {value!r}")
     return s

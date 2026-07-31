@@ -616,7 +616,125 @@ Report *rendering* is fully replaced. Retiring Apps Script entirely needs 2–4
 ported: a scheduler, a transactional email sender, and archive storage
 (Supabase Storage is already used for proposal PDFs).
 
-## 13. One placement question left open
+## 13. Second real site: grid export, Spanish layout, parser robustness (2026-07-29)
+
+Findings from ingesting a second export — VRM installation 793865, El Encino
+(Casona), 81 days, 164 columns (vs 264 for the first).
+
+### Grid export is real and large
+
+That site exported **1,138 kWh against 324 kWh imported** over 81 days — 26,022
+negative `Grid L1/L2` samples. Not an edge case; it is most of its grid
+interaction.
+
+`grid_kwh` deliberately still means **import only**, matching what Node-RED
+writes into `monitoring.energy_daily`. Redefining it as net would silently
+change every historical comparison and break the shared reader. Export lives in
+`grid_export_kwh` (already created by migration 012) and is surfaced in the
+report only when the site is marked as exporting — an always-zero row on a
+non-exporting site is noise, and omitting it on an exporting one hides a third
+of the story.
+
+- **Migration 013** adds `vrm.sites.exports_to_grid`.
+- Upload form gains the checkbox; the report adds an "Energy exported to grid"
+  row to the Events block.
+
+### The Spanish overlap was not a font-size problem
+
+Reported as "bigger font than the Apps Script original". Measured instead:
+glyph sizes are **identical** to the reference PDF at every size (9.81, 7.88,
+7.23, 6.71, 21.69 …), differing only in floating-point noise.
+
+The real cause is text length. `info_block_svg` draws the label left-anchored
+and the value right-anchored with nothing between them; SVG `<text>` neither
+wraps nor shrinks, so a long pair silently overlaps. "Puntaje de calidad de red"
++ "84/100 — Fluctuaciones menores" collides where "Grid quality score" +
+"66/100 — Poor" fits. **The original has the same flaw** — it only ever shipped
+layouts in a language that happened to fit.
+
+Fixed with `text_width()` / `fit_row()`: shrink label and value together until
+they fit, down to a 7.0 floor, then ellipsize rather than overlap. English
+output is unchanged (verified: all 19 reference figures still exact).
+
+Two further issues the Spanish render exposed, both invisible in English:
+
+- **Block subtitles were still English.** `ES` is built as `dict(EN, **{...})`,
+  so the eight `sub*` keys never overridden silently rendered English inside an
+  otherwise-Spanish report. Translated.
+- **Side-by-side blocks fell out of alignment** when one subtitle wrapped to two
+  lines and its neighbour to one. `two_block_row_svg` now computes a shared
+  first-row baseline.
+
+### Weather needs coordinates — and the fallback was overstating performance
+
+Weather was unavailable because the upload tab never collected lat/long. Added
+location, timezone, lat/long and a geocode button (reusing
+`calculations/pvgis.py:geocode_cr`) to the upload form; `0,0` is stored as NULL
+so "unknown" is distinguishable from Null Island.
+
+Worth more than the missing weather block: without coordinates, expected output
+falls back to a flat 4.5 peak-sun-hours assumption, so the "performance ratio"
+becomes actual-vs-assumption and lands near 100% (that site showed **99.9%**,
+which reads as a perfect system and means nothing). The report now labels it
+"Expected output (estimated)" with a "no weather data — estimate only" note in
+grey rather than the usual green/amber/red.
+
+### Parser robustness
+
+Compared the two exports: 215 vs 147 distinct columns; only 4 columns unique to
+the smaller one. Changes:
+
+- **`SIGNALS` now carries an aggregation mode.** A real bug: `_pick` returned
+  only the *first* column of a duplicated name, so on a two-charger site the
+  `Solar Charger::PV power` fallback would have reported **half** the
+  generation. Power signals now sum across devices (`SUM`); state readings
+  (SOC, voltage, temperature) take the first (`FIRST`), where summing would be
+  nonsense.
+- **More candidates per signal** — AC-coupled PV, `VE.Bus Output power N` as a
+  load fallback, `Battery Monitor::Power`, `System overview::Battery Voltage`.
+- **`load_w` is now a required signal.** It is derived from L1/L2/L3 rather
+  than picked, so its absence showed up as an all-null series, not a missing
+  signal — a report with zero consumption would have rendered, with grid
+  independence, energy mix and performance all silently wrong.
+- **Phase-3 absence no longer warns.** `load_l3_w`/`grid_l3_w` are missing on
+  every split-phase site, i.e. most of them; warning about it trains the
+  operator to ignore warnings.
+
+Both exports re-verified after the change, and the first site re-checked against
+the Node-RED oracle — no regression (worst-case days are the CSV's partial final
+day, 15.6 h vs a full day).
+
+## 14. Uniform row type + export-aware layout (2026-07-29)
+
+**Row font is now uniform per report, not per row.** The first fix sized each
+row independently, which fits tighter but reads as a rendering glitch — one
+shrunken line beside full-size neighbours. `uniform_row_size()` now finds the
+largest size at which *every* info-block row in the report fits and applies it
+everywhere. Measured result: **English 9.5 (unchanged), Spanish 8.5** — Spanish
+gets one consistent, slightly smaller face rather than a single odd line.
+Per-row ellipsizing survives only as a floor case, for a pair that cannot fit
+even at 7.0.
+
+**Exporting sites get an export KPI instead of an outage count.** On a site that
+feeds back, exported energy is the more informative headline: a grid-tied
+exporting system is by definition connected, so its outage count is
+near-permanently zero. The 4th KPI card becomes "Energy Exported / 79.7 kWh /
+36% of generation" on a mint background when `exports_to_grid` is set.
+
+Nothing is lost by the swap — outages remain as a row in the Events block
+alongside the export total, so the number is still on the page.
+
+**The narrative now knows about export.** Without it, Claude described a heavily
+exporting week purely in terms of consumption, which reads as though the
+surplus went nowhere. The prompt gains the exported kWh and its share of
+generation, framed as a positive outcome rather than waste. Verified: the
+Spanish narrative now opens with "generó 221.6 kWh de energía solar, exportando
+79.7 kWh a la red — un resultado que refleja un sistema bien dimensionado".
+
+English output re-verified after both changes: row size still 9.5 and every
+reference figure intact.
+
+## 15. One placement question left open
 
 Whether the new Python modules live under `victron-monitor/` (product-aligned, but that
 directory currently holds only Node-RED/Apps Script/SQL — no Python, no `__init__.py`, and

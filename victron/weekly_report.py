@@ -24,6 +24,7 @@ Two intentional differences from the original, both agreed before the port:
    SVG column offsets.
 """
 import json
+import logging
 import os
 import urllib.parse
 import urllib.request
@@ -43,12 +44,29 @@ _NARRATIVE_MODEL = "claude-sonnet-4-6"
 # ══════════════════════════════════════════════════════════════════
 # Weather
 # ══════════════════════════════════════════════════════════════════
+_WEATHER_TIMEOUT_S = 8
+_WEATHER_RETRIES = 2
+_log = logging.getLogger(__name__)
+
+
 def fetch_weather(lat: float, lng: float, start: str, end: str,
-                  timezone: str = "America/Costa_Rica") -> dict | None:
+                  timezone: str = "America/Costa_Rica",
+                  errors: list[str] | None = None) -> dict | None:
     """Open-Meteo archive, same endpoint and fields as the original.
 
     Returns None on any failure — the report must still render without it, and
-    the weather block has its own "unavailable" state.
+    the weather block has its own "unavailable" state. That fallback must not
+    also be silent: a DNS/TLS/timeout failure and "this site has no
+    coordinates" produce the identical dict-is-None result to every caller, but
+    they are different problems (one is fixed by filling in lat/lng, the other
+    is transient). If `errors` is passed, the failure reason is appended to it
+    so the caller — the report UI — can tell the two apart instead of always
+    showing the same "weather unavailable" message regardless of cause.
+
+    Retries once on a short timeout before giving up: the original single
+    20s-timeout attempt was observed to fail outright on a slow/congested
+    network path to archive-api.open-meteo.com, where two shorter attempts
+    (8s each) succeeded — a transient handshake stall, not a dead host.
     """
     params = {
         "latitude": f"{float(lat):.4f}", "longitude": f"{float(lng):.4f}",
@@ -58,12 +76,23 @@ def fetch_weather(lat: float, lng: float, start: str, end: str,
         "timezone": timezone,
     }
     url = "https://archive-api.open-meteo.com/v1/archive?" + urllib.parse.urlencode(params)
-    try:
-        with urllib.request.urlopen(url, timeout=20) as r:
-            if r.status != 200:
-                return None
-            daily = json.loads(r.read()).get("daily") or {}
-    except Exception:
+
+    last_reason = None
+    for attempt in range(1, _WEATHER_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=_WEATHER_TIMEOUT_S) as r:
+                if r.status != 200:
+                    last_reason = f"Open-Meteo returned HTTP {r.status}"
+                    continue
+                daily = json.loads(r.read()).get("daily") or {}
+                break
+        except Exception as exc:  # noqa: BLE001 — any failure degrades to "no weather"
+            last_reason = f"{type(exc).__name__}: {exc}"
+            _log.warning("Weather fetch attempt %d/%d failed for (%.4f, %.4f): %s",
+                        attempt, _WEATHER_RETRIES, lat, lng, last_reason)
+    else:
+        if errors is not None:
+            errors.append(last_reason or "Open-Meteo request failed")
         return None
 
     sun = daily.get("sunshine_duration") or []
@@ -123,6 +152,16 @@ def generate_narrative(stats: dict, lang: str) -> str:
         f"\n- Best production day: {stats['bestDay']} kWh"
         f"\n- Worst production day: {stats['worstDay']} kWh"
     )
+    # Only for sites that feed back. Without this the narrative can describe a
+    # heavily exporting week purely in terms of what was consumed, which reads
+    # as though the surplus went nowhere.
+    if stats.get("gridExportKwh"):
+        prompt += (
+            f"\n- Energy exported to the grid: {stats['gridExportKwh']} kWh "
+            f"({stats['gridExportPct']}% of what the system generated). This "
+            "site feeds surplus back to the utility, so treat the export as a "
+            "positive outcome of a well-sized system, not as waste."
+        )
     if stats.get("weatherAvailable"):
         prompt += (
             f"\n- Weather: avg {stats['avgSunshineHrs']} sunshine hrs/day, days "
@@ -189,6 +228,7 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
         "daysFullCharge": sum(1 for r in days if r.get("battery_reached_float")),
         "daysNoGridData": sum(1 for r in days if not r.get("grid_data_available")),
         "daysSelfSufficient": sum(1 for r in days if _num(r.get("grid_kwh")) <= 0),
+        "gridExport": sum(_num(r.get("grid_export_kwh")) for r in days),
     }
 
     prev = window["previous_days"]
@@ -237,10 +277,12 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
     longest_outage = window["longest_outage_minutes"]
 
     weather = None
+    weather_errors: list[str] = []
     if with_weather and site.get("latitude") is not None:
         weather = fetch_weather(site["latitude"], site["longitude"],
                                 window["period_start"], window["period_end"],
-                                site.get("timezone") or "America/Costa_Rica")
+                                site.get("timezone") or "America/Costa_Rica",
+                                errors=weather_errors)
 
     pv_kwp = _num(site.get("pv_kwp"), 0)
     if weather and weather["totalIrradianceKwh"] > 0:
@@ -300,6 +342,10 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
             "avgCloudPct": weather["avgCloudPct"] if weather else None,
             "solarPerformancePct": solar_perf,
             "gridQualityScore": gq, "gridQualityStatus": gq_status,
+            "gridExportKwh": (round(totals["gridExport"], 1)
+                              if site.get("exports_to_grid") else None),
+            "gridExportPct": (round(totals["gridExport"] / totals["pv"] * 100)
+                              if site.get("exports_to_grid") and totals["pv"] else 0),
         }, lang)
 
     return {
@@ -322,6 +368,12 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
         "gridQualityColor": gq_color,
         "battStressLabel": stress, "battStressColor": stress_color,
         "narrative": narrative, "missingDays": window["missing_days"],
+        # Distinguishes "no coordinates on this site" from "Open-Meteo request
+        # failed" — both leave `weather` at None, but only one is fixed by
+        # filling in lat/lng. Empty unless with_weather=True and coordinates
+        # were present but the fetch still failed.
+        "weatherErrors": weather_errors,
+        "exportsToGrid": bool(site.get("exports_to_grid")),
         "trend": window["trend"],
     }
 
@@ -371,12 +423,29 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
          "valueColor": S.AMBER if oc > 0 else "#222"},
         {"label": t["alarmEpisodes"], "value": str(d["alarmEpisodesTotal"])},
     ]
+    # Only on sites configured as exporting. On a site that never feeds back, an
+    # always-zero row is noise; on one that does, omitting it hides a large part
+    # of its grid interaction.
+    if d.get("exportsToGrid"):
+        events.append({
+            "label": t["gridExport"],
+            "value": f"{d['totals']['gridExport']:.1f} {t['kwh']}",
+            "valueColor": S.GREEN,
+        })
+
+    # Without weather, expected output is a flat 4.5 peak-sun-hours assumption,
+    # so the "ratio" is really actual-vs-assumption and lands suspiciously near
+    # 100%. Say so rather than presenting it as a measured performance figure.
+    has_weather = d["weather"] is not None
     perf = [
         {"label": t["solarActual"], "value": f"{d['totals']['pv']:.1f} {t['kwh']}"},
-        {"label": t["solarExpected"], "value": fmt(d["expectedPv"], 1, f" {t['kwh']}")},
+        {"label": t["solarExpected"] if has_weather else t["solarExpectedEstimated"],
+         "value": fmt(d["expectedPv"], 1, f" {t['kwh']}")},
         {"label": t["solarPerformancePct"],
-         "value": f"{d['solarPerformancePct']}%" if d["solarPerformancePct"] is not None else "—",
-         "valueColor": (S.GREEN if (d["solarPerformancePct"] or 0) >= 90
+         "value": (f"{d['solarPerformancePct']}%" if d["solarPerformancePct"] is not None
+                   else "—") + ("" if has_weather else f" · {t['weatherFallbackNote']}"),
+         "valueColor": ("#999" if not has_weather else
+                        S.GREEN if (d["solarPerformancePct"] or 0) >= 90
                         else S.AMBER if (d["solarPerformancePct"] or 0) >= 70 else S.RED)},
     ]
     w = d["weather"]
@@ -394,18 +463,29 @@ def render_html(d: dict) -> str:
     has_grid = d["systemType"] in ("grid_zero", "hybrid")
     has_batt = d["systemType"] in ("off_grid", "hybrid")
 
+    # One row font size for the whole report. Sizing each row independently
+    # fits tighter but reads as a rendering glitch — a single shrunken line
+    # beside full-size neighbours. Solved once here, applied everywhere.
+    half, full = S.IW - 2 * S.IPAD, S.PW - 2 * S.IPAD
+    groups = [(batt, half), (events, half), (perf, half), (weather, half)]
+    groups.append((grid, half if has_grid else full))
+    row_size = S.uniform_row_size(groups)
+
     if has_grid:
         row2 = S.two_block_row_svg(t["sectionGrid"], grid, t["subGrid"],
-                                   t["sectionEvents"], events, t["subEvents"])
+                                   t["sectionEvents"], events, t["subEvents"],
+                                   row_size=row_size)
     else:
         # No grid to assess — Events takes the full width rather than sitting
         # beside an empty half.
-        row2 = S.single_block_row_svg(t["sectionEvents"], events, t["subEvents"])
+        row2 = S.single_block_row_svg(t["sectionEvents"], events, t["subEvents"],
+                                      row_size=row_size)
 
     row3 = S.two_block_row_svg(
         t["solarPerformance"], perf, t["subSolarPerf"],
         t["weatherTitle"], weather, t["subWeather"],
         right_bg=S.BG_MINT if d["weather"] else S.BG_GREY,
+        row_size=row_size,
     )
 
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR),
@@ -418,8 +498,9 @@ def render_html(d: dict) -> str:
         # Pre-built SVG must not be HTML-escaped by autoescape.
         kpi_svg=_safe(S.kpi_svg(d, t)),
         bar_svg=_safe(S.bar_chart_svg(d, t)),
-        row1_svg=_safe(S.row1_svg(d, t, batt) if has_batt
-                       else S.single_block_row_svg(t["sectionGrid"], grid, t["subGrid"])),
+        row1_svg=_safe(S.row1_svg(d, t, batt, row_size=row_size) if has_batt
+                       else S.single_block_row_svg(t["sectionGrid"], grid,
+                                                   t["subGrid"], row_size=row_size)),
         row2_svg=_safe(row2),
         soc_svg=_safe(S.soc_chart_svg(d, t)) if has_batt else "",
         row3_svg=_safe(row3),

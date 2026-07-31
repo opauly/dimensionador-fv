@@ -45,29 +45,57 @@ import pandas as pd
 # treated as the last-known power level persisting across the whole hole.
 MAX_GAP_S = 300
 
-# Canonical signal → candidate ("Device", "Description") pairs, first match wins.
+# Canonical signal → (aggregation, [candidate ("Device", "Description") pairs]).
+#
+# Candidates are tried in order; the first one present wins. A VRM export only
+# contains the columns the user ticked in the portal, and column availability
+# varies by hardware, so each signal needs alternatives rather than one exact
+# name. Verified against two real exports with different column sets (264 vs
+# 164 columns).
+#
+# The aggregation matters as much as the candidate list. A site can have several
+# of the same device — two solar chargers is common, and both export under the
+# identical column name. For *power* that must be summed, or a two-charger site
+# silently reports half its generation. For a *state* reading (SOC, voltage,
+# temperature) summing would be nonsense, so the first device is used.
+#   "sum"   — additive across devices
+#   "first" — one representative device
+SUM, FIRST = "sum", "first"
+
 SIGNALS = {
-    "pv_w":        [("System overview", "PV - DC-coupled"), ("Solar Charger", "PV power")],
-    "load_l1_w":   [("System overview", "AC Consumption L1")],
-    "load_l2_w":   [("System overview", "AC Consumption L2")],
-    "load_l3_w":   [("System overview", "AC Consumption L3")],
-    "grid_l1_w":   [("System overview", "Grid L1"), ("Grid meter", "Grid L1 - Power")],
-    "grid_l2_w":   [("System overview", "Grid L2"), ("Grid meter", "Grid L2 - Power")],
-    "grid_l3_w":   [("System overview", "Grid L3"), ("Grid meter", "Grid L3 - Power")],
-    "batt_w":      [("System overview", "Battery Power")],
-    "soc_pct":     [("System overview", "Battery SOC"), ("Battery Monitor", "State of charge")],
-    "batt_v":      [("Battery Monitor", "Voltage")],
-    "batt_temp_c": [("Battery Monitor", "Battery temperature")],
-    "grid_alarm":  [("System overview", "Grid alarm")],
-    "grid_v_l1":   [("VE.Bus System", "Input voltage phase 1")],
-    "grid_v_l2":   [("VE.Bus System", "Input voltage phase 2")],
-    "grid_freq":   [("VE.Bus System", "Input frequency 1")],
+    "pv_w":        (SUM,   [("System overview", "PV - DC-coupled"),
+                            ("System overview", "PV - AC-coupled"),
+                            ("Solar Charger", "PV power")]),
+    "load_l1_w":   (SUM,   [("System overview", "AC Consumption L1"),
+                            ("VE.Bus System", "Output power 1")]),
+    "load_l2_w":   (SUM,   [("System overview", "AC Consumption L2"),
+                            ("VE.Bus System", "Output power 2")]),
+    "load_l3_w":   (SUM,   [("System overview", "AC Consumption L3"),
+                            ("VE.Bus System", "Output power 3")]),
+    "grid_l1_w":   (SUM,   [("System overview", "Grid L1"),
+                            ("Grid meter", "Grid L1 - Power")]),
+    "grid_l2_w":   (SUM,   [("System overview", "Grid L2"),
+                            ("Grid meter", "Grid L2 - Power")]),
+    "grid_l3_w":   (SUM,   [("System overview", "Grid L3"),
+                            ("Grid meter", "Grid L3 - Power")]),
+    "batt_w":      (SUM,   [("System overview", "Battery Power"),
+                            ("Battery Monitor", "Power")]),
+    "soc_pct":     (FIRST, [("System overview", "Battery SOC"),
+                            ("Battery Monitor", "State of charge")]),
+    "batt_v":      (FIRST, [("Battery Monitor", "Voltage"),
+                            ("System overview", "Battery Voltage")]),
+    "batt_temp_c": (FIRST, [("Battery Monitor", "Battery temperature")]),
+    "grid_alarm":  (FIRST, [("System overview", "Grid alarm")]),
+    "grid_v_l1":   (FIRST, [("VE.Bus System", "Input voltage phase 1")]),
+    "grid_v_l2":   (FIRST, [("VE.Bus System", "Input voltage phase 2")]),
+    "grid_freq":   (FIRST, [("VE.Bus System", "Input frequency 1")]),
 }
 
-# Signals required for the export to be usable at all. Anything else missing
-# degrades individual report fields; these missing means it isn't a usable
-# VRM system export.
-REQUIRED_SIGNALS = ["pv_w", "batt_w", "soc_pct"]
+# Without these the file cannot produce a meaningful report, so ingestion is
+# refused rather than producing one with zeros in it. `load` is included
+# deliberately: a report whose consumption is 0 would still render, and every
+# derived figure (grid independence, energy mix, performance) would be wrong.
+REQUIRED_SIGNALS = ["pv_w", "batt_w", "soc_pct", "load_w"]
 
 # Per-solar-charger daily yield counters. Duplicated once per charger.
 YIELD_TODAY = ("Solar Charger", "Yield today")
@@ -182,12 +210,22 @@ def _pick_all(df: pd.DataFrame, device: str, desc: str) -> list[pd.Series]:
     return [col]
 
 
-def _pick(df: pd.DataFrame, specs: list[tuple[str, str]]) -> pd.Series | None:
-    """First available column from a candidate list."""
+def _pick(df: pd.DataFrame, specs: list[tuple[str, str]],
+          how: str = FIRST) -> pd.Series | None:
+    """First matching candidate, aggregated across devices per `how`.
+
+    `how=SUM` is what makes a multi-device site correct: two solar chargers
+    both publish `Solar Charger::PV power`, and taking only the first would
+    silently halve generation.
+    """
     for device, desc in specs:
         cols = _pick_all(df, device, desc)
-        if cols:
+        if not cols:
+            continue
+        if len(cols) == 1 or how == FIRST:
             return cols[0]
+        numeric = [pd.to_numeric(c, errors="coerce") for c in cols]
+        return pd.concat(numeric, axis=1).sum(axis=1, min_count=1)
     return None
 
 
@@ -195,8 +233,8 @@ def tidy(raw: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """Extract the canonical signals into a clean frame, plus what's missing."""
     out = pd.DataFrame(index=raw.index)
     missing: list[str] = []
-    for name, specs in SIGNALS.items():
-        col = _pick(raw, specs)
+    for name, (how, specs) in SIGNALS.items():
+        col = _pick(raw, specs, how)
         if col is None:
             missing.append(name)
             out[name] = np.nan
@@ -227,19 +265,29 @@ def validate_export(raw: pd.DataFrame, tidied: pd.DataFrame,
     Deliberately loud rather than silent: a CSV that parses into a plausible
     but wrong report is the failure mode worth spending effort on.
     """
-    blocking = [s for s in REQUIRED_SIGNALS if s in missing]
+    # `load_w` is derived from the L1/L2/L3 columns rather than picked directly,
+    # so its absence shows up as an all-null series, not as a missing signal.
+    derived_missing = [s for s in ("load_w", "grid_w")
+                       if s in tidied and tidied[s].notna().sum() == 0]
+    blocking = [s for s in REQUIRED_SIGNALS
+                if s in missing or s in derived_missing]
     if blocking:
         raise VrmCsvError(
             "Export is missing required signals: " + ", ".join(blocking) +
-            ". Check that the VRM export included the system overview and "
-            "battery data, not only a subset of devices."
+            ". In the VRM portal, include the System overview (PV, AC "
+            "consumption, battery) and Battery Monitor data in the export, "
+            "not only a subset of devices."
         )
     if len(raw) < 2:
         raise VrmCsvError("Export contains fewer than two samples.")
 
     warnings: list[str] = []
-    if missing:
-        warnings.append("Signals not found in this export: " + ", ".join(missing))
+    # Phase-3 columns are absent on every split-phase (120/240 V) site, which is
+    # most of them — reporting that as a problem trains the operator to ignore
+    # warnings.
+    notable = [s for s in missing if s not in ("load_l3_w", "grid_l3_w")]
+    if notable:
+        warnings.append("Signals not found in this export: " + ", ".join(notable))
 
     step = raw.index.to_series().diff().dt.total_seconds()
     big_gaps = int((step > MAX_GAP_S).sum())
