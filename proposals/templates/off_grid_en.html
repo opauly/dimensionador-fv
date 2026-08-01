@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
@@ -114,23 +114,6 @@ body {
 .gt td.left  { text-align: left; }
 .gt td.right { text-align: right; }
 
-/* "Cálculos esperados" label row above billing columns */
-.calc-label-cell {
-  background: #fff;
-  border: none;
-  padding: 0;
-}
-.calc-label-text {
-  background: #fff;
-  color: #555;
-  font-weight: normal;
-  font-style: italic;
-  font-size: 6pt;
-  text-align: right;
-  border: none;
-  padding: 0 2pt 1pt 0;
-}
-
 /* ── COST TABLE ─────────────────────────────────────────────────────────── */
 .cost-table { margin-bottom: 3pt; }
 .cost-table th.th-item  { width: 27%; text-align: left; }
@@ -148,11 +131,11 @@ body {
 .cost-subtotal td { color: #666; }
 
 /* ── TECHNICAL + SUMMARY (partial-width tables) ─────────────────────────── */
-.tech-wrap { margin-bottom: 3pt; }
 .tech-table {
-  width: 68%;
+  width: 80%;
   border-collapse: collapse;
   font-size: 6.5pt;
+  margin-bottom: 3pt;
 }
 .tech-table th {
   background: #4BAE6A;
@@ -170,7 +153,7 @@ body {
 }
 
 .summary-table {
-  width: 30%;
+  width: 45%;
   border-collapse: collapse;
   font-size: 6.5pt;
   margin-bottom: 3pt;
@@ -354,15 +337,36 @@ body {
   line-height: 1.35;
   text-align: center;
 }
+
+/* ── BOTTOM-PINNED GENERAL INFO ─────────────────────────────────────────── */
+/* .page-wrap holds everything except the fixed footer, sized to exactly one
+   page's content box (A4 841.89pt − top margin 21.26pt − bottom margin
+   76.54pt = 744.09pt, see @page above). .bottom-group (Notes/Warranty)
+   gets margin-top:auto, which a flex column resolves by consuming all
+   left-over space above it — so on a normal-length proposal it sits flush
+   against the footer instead of floating in the middle of the page with a
+   dead gap below it. On a proposal heavy enough to need a 2nd page, this
+   degrades gracefully to plain top-down flow (min-height stops applying
+   once content exceeds it, so nothing overlaps or gets clipped).
+*/
+.page-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 744pt;
+}
+.bottom-group {
+  margin-top: auto;
+}
 </style>
 </head>
 <body>
+<div class="page-wrap">
 
 <!-- ── HEADER ────────────────────────────────────────────────────────────── -->
 <div class="header">
   <div class="header-left">
-    <div class="title-cotizacion">COTIZACIÓN</div>
-    <div class="title-solar">ENERGÍA SOLAR</div>
+    <div class="title-cotizacion">QUOTATION</div>
+    <div class="title-solar">SOLAR ENERGY</div>
   </div>
   <div class="header-logo">
     {% if logo_b64 %}<img src="{{ logo_b64 }}" alt="Pauly &amp; Co.">{% endif %}
@@ -371,12 +375,11 @@ body {
 
 <!-- ── CLIENT INFO ────────────────────────────────────────────────────────── -->
 <table class="client-table">
-  {% if quote_number %}<tr><td class="lbl">N° COTIZACIÓN:</td><td>{{ quote_number }}</td></tr>{% endif %}
-  <tr><td class="lbl">CLIENTE:</td><td>{{ client.name }}</td></tr>
-  <tr><td class="lbl">UBICACIÓN:</td><td>{{ client.location }}</td></tr>
-  <tr><td class="lbl">NISE:</td><td>{{ client.nise }}</td></tr>
-  <tr><td class="lbl">FECHA:</td><td>{{ date }}</td></tr>
-  <tr><td class="lbl">SISTEMA:</td><td>{{ system_type_label }}</td></tr>
+  {% if quote_number %}<tr><td class="lbl">QUOTE NO.:</td><td>{{ quote_number }}</td></tr>{% endif %}
+  <tr><td class="lbl">CLIENT:</td><td>{{ client.name }}</td></tr>
+  <tr><td class="lbl">LOCATION:</td><td>{{ client.location }}</td></tr>
+  <tr><td class="lbl">DATE:</td><td>{{ date }}</td></tr>
+  <tr><td class="lbl">SYSTEM:</td><td>{{ system_type_label }}</td></tr>
 </table>
 
 <!-- ── INTRO PARAGRAPH ───────────────────────────────────────────────────── -->
@@ -386,74 +389,14 @@ body {
   {% endfor %}
 </div>
 
-<!-- ── FACTURACIÓN MENSUAL PROMEDIO ─────────────────────────────────────── -->
-<div class="section-row">
-  <span class="section-title">FACTURACIÓN MENSUAL PROMEDIO</span>
-</div>
-<table class="gt">
-  <thead>
-    <tr>
-      <th colspan="3" class="calc-label-text" style="text-align:center;">Escenario actual</th>
-      <th colspan="4" class="calc-label-text">Cálculos esperados</th>
-    </tr>
-    <tr>
-      <th style="width:10%;">Mes</th>
-      <th style="width:15%;">Consumo<br>actual (kWh)</th>
-      <th style="width:15%;">Factura actual</th>
-      <th style="width:15%;">Generación<br>esperada (kWh)</th>
-      <th style="width:15%;">Nuevo<br>consumo (kWh)</th>
-      <th style="width:15%;">Nueva factura</th>
-      <th style="width:15%;">Ahorro</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Promedio</td>
-      <td>{{ billing_avg.consumption_kwh }}</td>
-      <td>{{ billing_avg.bill_crc }}</td>
-      <td>{{ billing_avg.generation_kwh }}</td>
-      <td>{{ billing_avg.new_consumption_kwh }}</td>
-      <td>{{ billing_avg.new_bill_crc }}</td>
-      <td>{{ billing_avg.savings_crc }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- ── BENEFICIOS ────────────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO</span></div>
-<table class="gt">
-  <thead>
-    <tr>
-      <th style="width:12%;">Ahorro<br>durante el<br>primer año</th>
-      <th style="width:11%;">Ahorro en<br>25 años</th>
-      <th style="width:9%;">Tasa Interna<br>de Retorno<br>(TIR)</th>
-      <th style="width:8%;">Retorno de<br>Inversión<br>(ROI)</th>
-      <th style="width:9%;">Reducción<br>mensual<br>en factura</th>
-      <th style="width:11%;">Ahorro<br>promedio<br>mensual</th>
-      <th style="width:40%;">Notas</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ benefits.savings_year1 }}</td>
-      <td>{{ benefits.savings_25yr }}</td>
-      <td>{{ benefits.irr }}</td>
-      <td>{{ benefits.roi }}</td>
-      <td>{{ benefits.pct_savings }}</td>
-      <td>{{ benefits.avg_monthly_savings }}</td>
-      <td class="left" style="font-size:6pt;">{{ benefits.notes }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- ── DETALLES DE COSTOS ─────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">DETALLES DE COSTOS</span></div>
+<!-- ── COST DETAILS ───────────────────────────────────────────────────────── -->
+<div class="section-row"><span class="section-title">COST DETAILS</span></div>
 <table class="gt cost-table">
   <thead>
     <tr>
-      <th class="th-item">Ítem</th>
-      <th class="th-qty">Cantidad</th>
-      <th class="th-specs">Especificaciones</th>
+      <th class="th-item">Item</th>
+      <th class="th-qty">Quantity</th>
+      <th class="th-specs">Specifications</th>
       <th class="th-total">Total</th>
     </tr>
   </thead>
@@ -467,13 +410,13 @@ body {
     </tr>
     {% endfor %}
     <tr class="cost-subtotal">
-      <td class="td-item">Subtotal (sin IVA)</td>
+      <td class="td-item">Subtotal (excl. VAT)</td>
       <td></td>
       <td></td>
       <td class="td-total">{{ subtotal_usd }}</td>
     </tr>
     <tr class="cost-subtotal">
-      <td class="td-item">IVA</td>
+      <td class="td-item">VAT</td>
       <td></td>
       <td></td>
       <td class="td-total">{{ iva_usd }}</td>
@@ -487,38 +430,38 @@ body {
   </tbody>
 </table>
 
-<!-- ── DETALLES TÉCNICOS ──────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">DETALLES TÉCNICOS</span></div>
-<div class="tech-wrap">
-  <table class="tech-table">
-    <thead>
-      <tr>
-        <th>Potencia<br>instalada (kW)</th>
-        <th>Área de techo<br>(m2)</th>
-        <th>Paneles<br>solares</th>
-        <th>Inversores</th>
-        <th>Aprovechamiento<br>solar</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>{{ technical.system_kw }}</td>
-        <td>{{ technical.area_m2 }}</td>
-        <td>{{ technical.panel_count }}</td>
-        <td>{{ technical.inverter_count }}</td>
-        <td>{{ technical.self_consumption_pct }}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+<!-- ── TECHNICAL DETAILS ──────────────────────────────────────────────────── -->
+<div class="section-row"><span class="section-title">TECHNICAL DETAILS</span></div>
+<table class="tech-table">
+  <thead>
+    <tr>
+      <th>Installed<br>capacity (kW)</th>
+      <th>Roof area<br>(m2)</th>
+      <th>Estimated daily<br>energy (kWh)</th>
+      <th>Battery capacity<br>@10h (kWh)</th>
+      <th>Maximum battery<br>discharge</th>
+      <th>Solar<br>utilization</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ technical.system_kw }}</td>
+      <td>{{ technical.area_m2 }}</td>
+      <td>{{ technical.daily_generation_kwh }}</td>
+      <td>{{ technical.battery_kwh }}</td>
+      <td>{{ technical.discharge_pct }}</td>
+      <td>{{ technical.utilization_pct }}</td>
+    </tr>
+  </tbody>
+</table>
 
-<!-- ── RESUMEN ────────────────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">RESUMEN</span></div>
+<!-- ── SUMMARY ────────────────────────────────────────────────────────────── -->
+<div class="section-row"><span class="section-title">SUMMARY</span></div>
 <table class="summary-table">
   <thead>
     <tr>
-      <th style="width:65%;">Total</th>
-      <th style="width:35%;">$/Wp</th>
+      <th style="width:50%;">Total</th>
+      <th style="width:50%;">$/Wp Price</th>
     </tr>
   </thead>
   <tbody>
@@ -529,17 +472,18 @@ body {
   </tbody>
 </table>
 
-<!-- ── COBERTURA MENSUAL (gráfico SVG en línea) ──────────────────────────── -->
+<!-- ── MONTHLY COVERAGE (inline SVG chart) ───────────────────────────────── -->
 {% if coverage_chart_svg %}
 <div class="coverage-block">
-  <div class="section-row"><span class="section-title">COBERTURA MENSUAL ESTIMADA</span></div>
+  <div class="section-row"><span class="section-title">ESTIMATED MONTHLY COVERAGE</span></div>
   <div class="coverage-chart">{{ coverage_chart_svg | safe }}</div>
-  <div class="coverage-note">Estimaciones de diseño según la irradiancia solar real del sitio; la producción real varía según clima, sombreado y uso.</div>
+  <div class="coverage-note">Design estimates based on the site's real solar irradiance; actual output varies with weather, shading and usage.</div>
 </div>
 {% endif %}
 
-<!-- ── NOTAS ADICIONALES ──────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">NOTAS ADICIONALES</span></div>
+<div class="bottom-group">
+<!-- ── ADDITIONAL NOTES ───────────────────────────────────────────────────── -->
+<div class="section-row"><span class="section-title">ADDITIONAL NOTES</span></div>
 <ul class="notes-list">
   {% for note in payment_notes %}
   <li>{{ note }}</li>
@@ -548,8 +492,8 @@ body {
 <table class="bank-table">
   <thead>
     <tr>
-      <th>Transferencia Local</th>
-      <th>Transferencia Internacional</th>
+      <th>Local Transfer</th>
+      <th>International Transfer</th>
     </tr>
   </thead>
   <tbody>
@@ -564,49 +508,56 @@ body {
   </tbody>
 </table>
 
-<!-- ── DETALLES DE GARANTÍA ──────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">DETALLES DE GARANTÍA</span></div>
+<!-- ── WARRANTY DETAILS ───────────────────────────────────────────────────── -->
+<div class="section-row"><span class="section-title">WARRANTY DETAILS</span></div>
 <table class="warranty-table">
   <thead>
     <tr>
-      <th style="width:25%;">Detalle</th>
-      <th style="width:20%;">Plazo</th>
-      <th style="width:55%;">Condiciones</th>
+      <th style="width:25%;">Detail</th>
+      <th style="width:20%;">Term</th>
+      <th style="width:55%;">Conditions</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td class="wleft" rowspan="2">Paneles solares</td>
-      <td>10 años</td>
-      <td class="wleft">Contra defectos de fábrica</td>
+      <td class="wleft" rowspan="2">Solar panels</td>
+      <td>10 years</td>
+      <td class="wleft">Against manufacturing defects</td>
     </tr>
     <tr>
-      <td>25 años</td>
-      <td class="wleft">Contra defectos de potencia de salida</td>
+      <td>25 years</td>
+      <td class="wleft">Against output power defects</td>
     </tr>
     <tr>
-      <td class="wleft">Inversores</td>
+      <td class="wleft">Inverters</td>
       <td>{{ warranty_inverter_years }}</td>
-      <td class="wleft">Contra defectos de fábrica</td>
+      <td class="wleft">Against manufacturing defects</td>
     </tr>
     <tr>
-      <td class="wleft">Instalación</td>
-      <td>3 años</td>
-      <td class="wleft">Contra defectos de cableado y montaje</td>
+      <td class="wleft">Batteries</td>
+      <td>{{ warranty_battery_years }}</td>
+      <td class="wleft">Against manufacturing defects</td>
     </tr>
     <tr>
-      <td class="wleft">Mantenimiento</td>
-      <td>Anual</td>
-      <td class="wleft">Al menos 1 por año (costo extra)</td>
+      <td class="wleft">Installation</td>
+      <td>3 years</td>
+      <td class="wleft">Against wiring and mounting defects</td>
+    </tr>
+    <tr>
+      <td class="wleft">Maintenance</td>
+      <td>Annual</td>
+      <td class="wleft">At least 1 per year (extra cost)</td>
     </tr>
   </tbody>
 </table>
 
-<!-- ── PIE DE PÁGINA FIJO ────────────────────────────────────────────────── -->
+</div>
+</div>
+<!-- ── PINNED FOOTER ──────────────────────────────────────────────────────── -->
 <div class="footer-wrap">
   <div class="footer-card">
     <div class="footer-sig">
-      {% if signature_white_b64 %}<img src="{{ signature_white_b64 }}" alt="Firma">{% endif %}
+      {% if signature_white_b64 %}<img src="{{ signature_white_b64 }}" alt="Signature">{% endif %}
     </div>
     <div class="footer-center">
       <div class="name">{{ company.contact_name }}</div>
@@ -614,15 +565,15 @@ body {
       <div>{{ company.license }}</div>
     </div>
     <div class="footer-right">
-      <p><span class="contact-label">Teléfono/WhatsApp:</span> {{ company.phone }}</p>
-      <p><span class="contact-label">Correo:</span> {{ company.email }}</p>
-      <p><span class="contact-label">Sitio web:</span> {{ company.website }}</p>
+      <p><span class="contact-label">Phone/WhatsApp:</span> {{ company.phone }}</p>
+      <p><span class="contact-label">Email:</span> {{ company.email }}</p>
+      <p><span class="contact-label">Website:</span> {{ company.website }}</p>
     </div>
     <div class="footer-isotipo">
       {% if isotipo_white_b64 %}<img src="{{ isotipo_white_b64 }}" alt="Pauly &amp; Co.">{% endif %}
     </div>
   </div>
-  <div class="validity">Validez de la oferta: {{ validity_days }} días hábiles a partir de su entrega</div>
+  <div class="validity">Offer validity: {{ validity_days }} business days from its delivery</div>
 </div>
 
 </body>

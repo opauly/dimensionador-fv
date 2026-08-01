@@ -131,3 +131,115 @@ def parse_tablero(file_bytes: bytes, media_type: str) -> list[dict]:
         raise ValueError("No se encontraron cargas activas en el tablero.")
 
     return result
+
+
+# ── Off-Grid variant (Phase 5) ───────────────────────────────────────────────
+#
+# Deliberately does NOT ask the AI for h/día or días/mes — that's exactly the
+# naive "nameplate × assumed hours" pattern the load-profile taxonomy
+# (tools/off-grid-wizard-load-profile-approach.md) was built to replace.
+# This only extracts what a tablero photo can actually tell you (name, count,
+# nameplate power); calculations/load_profile_off_grid.py's classify-then-
+# estimate pipeline handles the energy math deterministically afterward.
+
+_PROMPT_OFF_GRID = """
+Analyze this electrical panel schedule (tablero eléctrico) from Costa Rica.
+
+Extract all active electrical circuits. For each circuit return ONLY:
+- Descripción: short human-readable load name (Spanish, capitalize)
+- Cantidad: quantity (1 per circuit unless identical loads share a breaker)
+- Potencia (kW): nameplate power in kW (use VA value directly, divide by 1000 —
+  assume VA ≈ W for resistive loads; for motors multiply VA × 0.85 before dividing)
+
+Do NOT estimate usage hours, duty cycle, or days per month — that is
+deliberately out of scope for this extraction.
+
+Rules:
+- Skip "Prevista" (provisional/future) circuits — they are not installed yet
+- Skip breakers with 0 VA or blank descriptions
+- For 240V dual-phase breakers that appear as paired rows (same CKT), use the
+  total VA shown (the table may already show the combined value in the VA column)
+- Merge identical load types in the same area into a single row with Cantidad > 1
+  if it makes sense
+- Keep the description concise and descriptive (e.g. "Tomacorrientes Cuartos"
+  not the full CKT text)
+
+Return ONLY a JSON array with no markdown fences:
+[
+  {"Descripción": "Refrigerador", "Cantidad": 1, "Potencia (kW)": 0.5},
+  {"Descripción": "Iluminación general", "Cantidad": 1, "Potencia (kW)": 0.3}
+]
+"""
+
+
+def parse_tablero_off_grid(file_bytes: bytes, media_type: str) -> list[dict]:
+    """
+    Extract installed electrical loads from a tablero image or PDF, for the
+    Off-Grid/Hybrid wizard — name/quantity/nameplate power only, no hours.
+
+    Args:
+        file_bytes: Raw bytes of the image (JPEG/PNG) or PDF.
+        media_type: MIME type — "image/jpeg", "image/png", or "application/pdf".
+
+    Returns:
+        List of load dicts: [{"Descripción", "Cantidad", "Potencia (kW)"}, ...]
+
+    Raises:
+        ValueError: If no loads are extracted.
+        anthropic.APIError: On API errors.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    b64 = base64.standard_b64encode(file_bytes).decode("utf-8")
+
+    if media_type == "application/pdf":
+        file_block = {
+            "type": "document",
+            "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+        }
+    else:
+        file_block = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": b64},
+        }
+
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    file_block,
+                    {"type": "text", "text": _PROMPT_OFF_GRID},
+                ],
+            }
+        ],
+    )
+
+    text = response.content[0].text.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1].lstrip("json").strip() if len(parts) > 1 else text
+
+    loads = json.loads(text)
+
+    if not isinstance(loads, list) or not loads:
+        raise ValueError("No se extrajeron cargas del tablero.")
+
+    result = []
+    for row in loads:
+        kw = float(row.get("Potencia (kW)") or 0)
+        if kw <= 0:
+            continue
+        result.append({
+            "Descripción":   str(row.get("Descripción", "Carga")),
+            "Cantidad":      int(row.get("Cantidad") or 1),
+            "Potencia (kW)": round(kw, 2),
+        })
+
+    if not result:
+        raise ValueError("No se encontraron cargas activas en el tablero.")
+
+    return result

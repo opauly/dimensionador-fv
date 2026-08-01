@@ -32,9 +32,6 @@ def step1_system_type() -> dict | None:
         )
         system_type = system_options[sys_label]
 
-        if system_type != "grid_zero":
-            st.info("Off-Grid e Híbrido disponibles en Fase 5. Por ahora solo Grid Zero está habilitado.")
-
     with col_lang:
         lang_options = {"Español": "es", "English": "en"}
         lang_label = st.radio(
@@ -53,7 +50,7 @@ def step1_system_type() -> dict | None:
             _autosave()
             st.rerun()
     with col_next:
-        if st.button("Siguiente →", key="w1_next", type="primary", disabled=(system_type != "grid_zero")):
+        if st.button("Siguiente →", key="w1_next", type="primary"):
             result = {"system_type": system_type, "language": language}
             st.session_state["wizard_meta"] = result
             return result
@@ -73,12 +70,12 @@ def step2_client() -> dict | None:
     # Initialize form widget keys from saved state (only on first render;
     # callbacks may overwrite these later without triggering the conflict error).
     _defaults = {
-        "w2_name":     current.get("name", ""),
-        "w2_empresa":  current.get("empresa", ""),
-        "w2_phone":    current.get("phone", ""),
-        "w2_email":    current.get("email", ""),
-        "w2_location": current.get("location", ""),
-        "w2_nise":     current.get("nise", "N/A"),
+        "w2_name":     current.get("name") or "",
+        "w2_empresa":  current.get("empresa") or "",
+        "w2_phone":    current.get("phone") or "",
+        "w2_email":    current.get("email") or "",
+        "w2_location": current.get("location") or "",
+        "w2_nise":     current.get("nise") or "N/A",
     }
     for _k, _v in _defaults.items():
         st.session_state.setdefault(_k, _v)
@@ -102,7 +99,7 @@ def step2_client() -> dict | None:
             matches = search_clients(search_query)
             if matches:
                 options = {
-                    f"{m['name']} — {m.get('phone', '')} {m.get('email', '')}".strip(" —"): m
+                    f"{m['name']} — {m.get('phone') or ''} {m.get('email') or ''}".strip(" —"): m
                     for m in matches
                 }
                 st.session_state["_w2_client_options"] = options
@@ -112,12 +109,12 @@ def step2_client() -> dict | None:
                     opts = st.session_state.get("_w2_client_options", {})
                     if sel and sel != "— Nuevo cliente —" and sel in opts:
                         c = opts[sel]
-                        st.session_state["w2_name"]     = c.get("name", "")
-                        st.session_state["w2_empresa"]  = c.get("empresa", "")
-                        st.session_state["w2_phone"]    = c.get("phone", "")
-                        st.session_state["w2_email"]    = c.get("email", "")
-                        st.session_state["w2_location"] = c.get("location", "")
-                        st.session_state["w2_nise"]     = c.get("nise", "N/A")
+                        st.session_state["w2_name"]     = c.get("name") or ""
+                        st.session_state["w2_empresa"]  = c.get("empresa") or ""
+                        st.session_state["w2_phone"]    = c.get("phone") or ""
+                        st.session_state["w2_email"]    = c.get("email") or ""
+                        st.session_state["w2_location"] = c.get("location") or ""
+                        st.session_state["w2_nise"]     = c.get("nise") or "N/A"
                         st.session_state["_w2_selected_client_id"] = c["id"]
                     else:
                         st.session_state["_w2_selected_client_id"] = None
@@ -157,7 +154,7 @@ def step2_client() -> dict | None:
                         (" ✉️" if v.get("sent_to_client") else "")
                         + (" 🔒" if v.get("locked") else "")
                     )
-                    label = f"{qn} — {p.get('system_type', '')} — ${v.get('total_usd') or 0:,.0f}{icons}"
+                    label = f"{qn} — {p.get('system_type') or ''} — ${v.get('total_usd') or 0:,.0f}{icons}"
                     version_opts[label] = {"proposal_id": p["id"], "version_id": v["id"]}
 
             if version_opts:
@@ -173,12 +170,12 @@ def step2_client() -> dict | None:
                         st.session_state["wizard_proposal_id"] = ch["proposal_id"]
                         st.session_state["wizard_version_id"]  = ch["version_id"]
                         loaded = st.session_state.get("wizard_client", {})
-                        st.session_state["w2_name"]     = loaded.get("name", "")
-                        st.session_state["w2_empresa"]  = loaded.get("empresa", "")
-                        st.session_state["w2_phone"]    = loaded.get("phone", "")
-                        st.session_state["w2_email"]    = loaded.get("email", "")
-                        st.session_state["w2_location"] = loaded.get("location", "")
-                        st.session_state["w2_nise"]     = loaded.get("nise", "N/A")
+                        st.session_state["w2_name"]     = loaded.get("name") or ""
+                        st.session_state["w2_empresa"]  = loaded.get("empresa") or ""
+                        st.session_state["w2_phone"]    = loaded.get("phone") or ""
+                        st.session_state["w2_email"]    = loaded.get("email") or ""
+                        st.session_state["w2_location"] = loaded.get("location") or ""
+                        st.session_state["w2_nise"]     = loaded.get("nise") or "N/A"
 
                 st.selectbox(
                     "Cotizaciones anteriores (opcional)",
@@ -279,13 +276,16 @@ def step3_site() -> dict | None:
             )
 
     pvgis_data = current.get("pvgis_data")
+    pvgis_daily = current.get("pvgis_daily")
     lat = current.get("lat")
     lon = current.get("lon")
+    system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+    needs_daily_series = system_type in ("off_grid", "hybrid")
 
     col_pvgis, _ = st.columns([2, 3])
     with col_pvgis:
         if st.button("🌤 Obtener irradiancia solar (PVGIS)", key="w3_pvgis"):
-            from calculations.pvgis import fetch_irradiance, geocode_cr
+            from calculations.pvgis import fetch_irradiance, fetch_daily_series, geocode_cr
 
             with st.spinner("Geocodificando y consultando PVGIS…"):
                 # Use manual coords if non-zero, else geocode
@@ -302,12 +302,19 @@ def step3_site() -> dict | None:
                 if lat and lon:
                     try:
                         pvgis_data = fetch_irradiance(lat, lon)
+                        # Off-Grid/Hybrid also need a real daily-resolution
+                        # series for the Step 6 battery-SoC simulation — Grid
+                        # Zero has no battery reliability concept, so skip the
+                        # extra PVGIS call for it.
+                        if needs_daily_series:
+                            pvgis_daily = fetch_daily_series(lat, lon)
                         # Persist immediately so subsequent reruns don't lose the data
                         st.session_state["wizard_site"] = {
                             **st.session_state.get("wizard_site", {}),
                             "lat": lat,
                             "lon": lon,
                             "pvgis_data": pvgis_data,
+                            "pvgis_daily": pvgis_daily,
                         }
                         st.success(f"Irradiancia obtenida para {lat:.3f}, {lon:.3f}")
                     except Exception as e:
@@ -357,6 +364,7 @@ def step3_site() -> dict | None:
                 "lat": lat,
                 "lon": lon,
                 "pvgis_data": pvgis_data,
+                "pvgis_daily": pvgis_daily,
             }
             st.session_state["wizard_site"] = result
             return result
@@ -365,3 +373,99 @@ def step3_site() -> dict | None:
         st.caption("Es necesario obtener los datos de irradiancia para continuar.")
 
     return None
+
+
+def monthly_coverage_chart(
+    generation_kwh: list[float],
+    consumption_kwh: list[float],
+    recharge_kwh: list[float] | None = None,
+    flag_shortfall: bool = True,
+):
+    """
+    Interactive Plotly twin of proposals/charts.py's monthly_coverage_svg() —
+    same monthly data, same color family (imported from there so the two
+    never drift apart), hoverable — for live review in the wizard (Step 6).
+    The PDF keeps the static SVG version since WeasyPrint can't render
+    Plotly; this is only for on-screen use.
+
+    Generación gets its own bar per month; Consumo (+ Recarga de batería,
+    stacked on top, when given) gets a second bar alongside it — same
+    grouped-then-stacked layout as the PDF chart, built with Plotly's
+    offsetgroup mechanism (bars sharing an offsetgroup stack; different
+    offsetgroups sit side by side).
+    """
+    import plotly.graph_objects as go
+    from calculations.sizing_grid_zero import MONTHS_ES
+    from proposals.charts import GREEN, MINT, AMBER, NAVY
+
+    gen_colors = [
+        AMBER if (flag_shortfall and g < c) else GREEN
+        for g, c in zip(generation_kwh, consumption_kwh)
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=MONTHS_ES, y=generation_kwh, name="Generación", marker_color=gen_colors,
+        offsetgroup=0, hovertemplate="%{x}<br>Generación: %{y:,.0f} kWh<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=MONTHS_ES, y=consumption_kwh, name="Consumo", marker_color=MINT,
+        offsetgroup=1, hovertemplate="%{x}<br>Consumo: %{y:,.0f} kWh<extra></extra>",
+    ))
+    if recharge_kwh:
+        fig.add_trace(go.Bar(
+            x=MONTHS_ES, y=recharge_kwh, name="Recarga de batería", marker_color=NAVY,
+            offsetgroup=1, base=consumption_kwh,
+            hovertemplate="%{x}<br>Recarga de batería: %{y:,.0f} kWh<extra></extra>",
+        ))
+    fig.update_layout(
+        barmode="group",
+        yaxis_title="kWh/mes",
+        height=280,
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
+def inject_step6_heading_css() -> None:
+    """Two-tier heading system for Step 6 'Equipos', shared by both wizards so
+    section/subsection font, weight, color and spacing are identical instead
+    of drifting per st.markdown() call across wizard/off_grid.py and
+    wizard/grid_zero.py.
+
+    Section (`#### `) marks a major, self-contained topic and is always
+    preceded by st.divider(). Subsection (`##### `) elaborates on the
+    section directly above it — a secondary chart or detail — and is never
+    preceded by a divider; its spacing comes entirely from margin-top here.
+    Before this existed, a subsection right after its section (no divider
+    between them, by design) had no guaranteed spacing at all and could
+    visually collide with the block above it (CONTEXT.md 2026-07-31: the
+    Validación del diseño → Margen de diseño case that surfaced this).
+
+    Only affects whichever step is actually mounted in the DOM at render
+    time (Streamlit reruns the whole script per step change), so calling
+    this from step6_equipment() doesn't leak into other steps' `####`/`#####`
+    headings even though the CSS selector itself is unscoped.
+    """
+    st.markdown(
+        """
+        <style>
+        [data-testid="stMarkdownContainer"] h4 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #1E2D54;
+            margin-top: 1.75rem;
+            margin-bottom: 0.6rem;
+        }
+        [data-testid="stMarkdownContainer"] h5 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #374151;
+            margin-top: 1.25rem;
+            margin-bottom: 0.4rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )

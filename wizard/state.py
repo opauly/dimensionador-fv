@@ -170,3 +170,34 @@ def get_bank_info() -> dict:
         "bank_local_lines_en": _DEFAULT_BANK_LOCAL_EN,
         "bank_intl_lines_en": _DEFAULT_BANK_INTL_EN,
     }
+
+
+# ── Downloaded-PDF filename convention ──────────────────────────────────────
+# Convention (2026-07-28): "PC-2026-009_Henry_Garita_ES.pdf" — quote number
+# first so a folder of quotes sorts numerically/chronologically on its own,
+# then the client, then the language. The version suffix rides along inside
+# the quote number when there is one ("PC-2026-009-v2_..."), so revisions never
+# overwrite each other in a downloads folder.
+
+def _safe_filename_part(value: str) -> str:
+    """Filesystem-safe fragment: keeps letters/digits, collapses everything else
+    to single underscores. Accents are kept — macOS/Linux handle them fine and
+    'Peña' reading as 'Pena' in a client-facing filename looks like a typo."""
+    import re
+    cleaned = re.sub(r"[^\w\-]+", "_", (value or "").strip(), flags=re.UNICODE)
+    return cleaned.strip("_") or "propuesta"
+
+
+def pdf_filename(quote_number: str, client_name: str, lang_label: str) -> str:
+    """
+    Download filename for a generated proposal PDF.
+
+    quote_number is the already-formatted string ("PC-2026-009" /
+    "PC-2026-009-v2"); it can be empty for a draft that hasn't been assigned
+    one yet, in which case the name falls back to the client + language alone
+    rather than emitting a leading underscore.
+    """
+    parts = [p for p in (_safe_filename_part(quote_number) if quote_number else "",
+                         _safe_filename_part(client_name),
+                         lang_label) if p]
+    return "_".join(parts) + ".pdf"

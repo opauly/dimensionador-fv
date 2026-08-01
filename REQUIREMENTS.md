@@ -1,11 +1,20 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.5
+# Pauly&Co Solar Design Tool — Final Requirements v3.7
 
-**Version:** 3.5  
-**Date:** 2026-07-17  
+**Version:** 3.7  
+**Date:** 2026-07-31  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.6 → v3.7
+
+- **Off-Grid/Hybrid load profile: taxonomy-driven estimation, not nameplate × assumed hours (Phase 5, completes the phase — see PHASES.md).** Connected loads only ever carry name + quantity + nameplate power; naive "watts × assumed hours" sizing was directly observed to overstate real consumption by 2–2.5x. Replaced with a 5-category taxonomy (fixed/cycling appliance, behavior-driven, climate-driven, discretionary/variable, ignition-only) that routes each load to the estimation method its energy use actually depends on — deterministic lookup tables, NEC-derived behavior formulas, degree-day climate math, or targeted intake questions — rather than one generic formula for everything. AI (Claude) is used only for bounded jobs with a checkable answer — classifying free-text load names into the 5 categories, extracting structured values from free-text intake answers — never for the energy math itself, which stays deterministic and reproducible. Design rationale and full taxonomy: `tools/off-grid-wizard-load-profile-approach.md`. Implemented in `calculations/load_profile_off_grid.py`.
+- **Real day-by-day battery simulation replaces flat discharge-% sizing (Off-Grid/Hybrid).** `calculations/sizing_off_grid.py: simulate_battery_soc()` now runs the site's actual PVGIS daily irradiance series (not a monthly average) against the battery bank day-by-day, tracking real state-of-charge, unmet-load days, and longest low-SoC streak — driving the reliability-scenario picker (Step 6) with a genuine year-long simulation instead of a single average-day discharge percentage.
+- **New calculated metric: solar utilization / curtailment (Grid Zero + Off-Grid/Hybrid).** Surfaces, for the first time, what fraction of a system's annual/monthly generation is actually used (self-consumption + battery charging) versus curtailed (battery full with no grid to export to, or generation exceeding daytime consumption with no export). Off-Grid derives this from the real day-by-day simulation above; Grid Zero derives it from the AI-estimated daytime-consumption fraction. Surfaced in the wizard (Step 6 scenario comparison + a dedicated chart, Step 8 review) and in the proposal PDF (`DETALLES TÉCNICOS` gained an "Aprovechamiento solar" column, both system types, both languages) — this is a real, previously-invisible design finding (e.g. an array oversized relative to its battery/load looked identical to a well-matched one before this metric existed).
+- **Proposal PDF: monthly coverage chart repositioned and made a first-class section (both system types, both languages).** Moved from the very end of the document (after Warranty Details, right before the footer) to directly after the cost/technical summary and before Additional Notes — reads as part of the technical proposal, not an appendix. Required real page-layout engineering to keep proposals to one page after the move (see CONTEXT.md 2026-07-31 for the WeasyPrint-specific mechanics); Off-Grid/Hybrid proposals now additionally keep Notes/Warranty grouped tight against the footer regardless of how much content precedes them.
+
+- **Site Maintenance Register (new — see Section 4.7, Phase 10 in PHASES.md, planned but not yet built):** analyzed the existing `Registro de mantenimientos FV.xlsx` — a 23-installation, 12-client register with a rolling 365-day-from-last-visit preventive-maintenance cycle, maintained manually outside the tool. Planned data model: `monitoring.sites` (Victron Monitor's table) stays the single source of truth for site *identity* — one row per meter/device, monitored or not — gaining `property_id`, `panel_count`, `inverter_count`, `battery_count`, `monitoring_urls` directly as columns (none are secrets, so no need to wall them off); `latitude`/`longitude` already existed and just need populating via the existing `calculations/pvgis.py:geocode_cr()` from Phase 2. Only `public.site_properties` (groups multiple meters at one physical location into a single maintenance visit/charge), `public.site_credentials` (plaintext WiFi/portal passwords — genuinely sensitive), and `public.maintenance_visits` (normalized visit log — inherently one-to-many) live in `public` schema, service_role only, because `monitoring.sites` carries a blanket `GRANT ALL ... TO anon` for field-hardware access (Section 4.5) with no RLS. Analysis also found a real geocoding bug (province-ambiguous city fallback mismatches "San Isidro, Heredia" to Pérez Zeledón coordinates) to fix before import, and confirmed 15 of the 22 real non-Lori sites have no battery — `system_type` is inferred per row (`grid_zero` vs `hybrid`) rather than left at the table default. UI will hang off the Projects nav item but isn't scoped to a `projects` row, since most of the 23 real sites predate this tool.
 
 ## Change log v3.4 → v3.5
 
@@ -293,6 +302,13 @@ project_expenses ( ... )
 project_payments ( ... )
 project_invoices ( ... )
 
+-- Site maintenance register (see Section 4.7, Phase 10 — planned, not yet built)
+-- monitoring.sites gains: property_id, panel_count, inverter_count, battery_count, monitoring_urls
+-- (latitude/longitude already existed). These two tables are public schema (service_role only):
+site_properties ( ... )
+site_credentials ( ... )
+maintenance_visits ( ... )
+
 -- Settings
 app_settings (
   key text PRIMARY KEY,
@@ -345,6 +361,21 @@ A **client** is someone who has bought a project. Someone who's only been quoted
 - **Promotion is automatic**, not manual: marking a proposal **won** (`pages/01_proposals.py`) calls `promote_prospect_to_client()`, an atomic Postgres function that copies the prospect into `clients`, repoints every proposal that referenced them, and deletes the prospect row. This is a **move**, not a copy — a promoted prospect no longer exists as a prospect.
 - Admin → Clientes → "Nuevo cliente" writes directly to `clients` — an intentional, on-purpose add, bypassing the prospect stage (e.g. adding a known customer who didn't come through a quote).
 - Both tables share the same shape: `name`, `empresa`, `phone`, `email`, `notes`.
+
+---
+
+### 4.7 Site Maintenance Register (added v3.6, planned — Phase 10 in PHASES.md)
+
+Replaces the manual `Registro de mantenimientos FV.xlsx` (analyzed 2026-07-18: `Proyectos FV` sheet — 23 real installations, 12 clients, per-year visit-date columns; `Cronograma` sheet — a Google Sheets-only array-formula dashboard computing overdue sites and a month-by-month due calendar from a rolling 365-days-since-last-visit rule).
+
+- **Site identity is not duplicated.** `monitoring.sites` (Victron Monitor's table, Section 4.5) stays the single source of truth for one physical meter/device — Victron-monitored or not. Confirmed via live query (2026-07-18) that it currently holds only 3 rows: Lori Pickett's `vista-atenas-lp-m1/m2/m3`, all still unlinked to any `client_id`. Importing the register must not touch those rows beyond backfilling `property_id`/`client_id`/coordinates.
+- **Only genuinely sensitive/one-to-many data lives off `monitoring.sites`.** `monitoring` tables carry `GRANT ALL ... TO anon` with no RLS (Section 4.5, field-hardware trust model) — but panel/inverter/battery counts and monitoring URLs aren't secrets, so (refined 2026-07-18) they're added directly as new columns on `monitoring.sites` (`property_id`, `panel_count`, `inverter_count`, `battery_count`, `monitoring_urls`). `latitude`/`longitude` already exist there and just need populating. Only `public.site_credentials` (plaintext WiFi/portal passwords — genuinely a secret) and `public.maintenance_visits` (inherently one-to-many, can't be a column) stay in `public` schema, service_role only, same trust boundary as `clients`/`proposals`.
+- **A property can span multiple sites/meters.** Preventive maintenance is billed and visited per physical location, not per meter — Lori Pickett's one $1,450 visit covers all 3 of her meters. `public.site_properties` is the new grouping entity a visit attaches to; `monitoring.sites.property_id` links each meter to its property. The same client's sites in different locations (e.g. Karen Montealegre's 3 distinct properties) are separate properties with independent maintenance cycles.
+- **`system_type` is inferred on import**, not left at the table default: `battery_count > 0 → hybrid`, else `→ grid_zero`. 15 of the 22 real non-Lori sites have no battery — confirming real `grid_zero` installations already exist, just not (yet) Victron-monitored ones.
+- **Coordinates reuse `calculations/pvgis.py:geocode_cr()`** (built in Phase 2 for the wizard's Site step) rather than new geocoding code. Running it against all 22 xlsx locations (2026-07-18) surfaced a real bug worth fixing before the import runs: its city-only fallback (used when the exact `"city, province"` key misses) matches "San Isidro" to Pérez Zeledón regardless of province — wrong for María Lía Artavia's "San Isidro, **Heredia**" site, ~150km off. Needs a province-qualified lookup entry or a forced Nominatim call for that one row.
+- **Due-date logic** ports the xlsx's `next_due = last_visit_date + 365 days` (falling back to `commissioned_at` if never visited) into a Postgres function, `public.get_property_maintenance_status()`, following the same per-entity-thresholds pattern already used by `monitoring.compute_daily_health()` (Section 4.5) — `maintenance_interval_days` is a per-property column, not a hardcoded 365.
+- **UI placement:** a tab reachable from the Projects nav item, listing every property regardless of whether a `projects` row exists — most of the 23 real sites were installed before this tool existed and have no proposal/project history.
+- Full schema, migration-script plan, and validation checklist: [PHASES.md — Phase 10](PHASES.md).
 
 ---
 

@@ -1,0 +1,54 @@
+{# One article. Each control PUTs on change and swaps this <tr> for the
+   server's re-render, so the row always shows what was actually stored. #}
+<tr id="row-{{ a.id }}" {% if highlight == a.id %}style="background:#FBF6E9"{% endif %}>
+  <td>
+    <div>{{ a.name|short_name }}</div>
+    {% if a.note %}<div class="note">{{ a.note }}</div>{% endif %}
+  </td>
+
+  {% for role, current in [("primary", a.primary), ("backup", a.backup)] %}
+    <td>
+      <select name="name"
+              hx-put="{{ url_for('board.set_article_owner', article_id=a.id, role=role) }}"
+              hx-target="closest tr" hx-swap="outerHTML">
+        <option value="">— none —</option>
+        {% for name in roster %}
+          <option value="{{ name }}" {% if name == current %}selected{% endif %}>{{ name }}</option>
+        {% endfor %}
+      </select>
+    </td>
+  {% endfor %}
+
+  <td>
+    <select name="type"
+            hx-put="{{ url_for('board.set_article_type', article_id=a.id) }}"
+            hx-target="closest tr" hx-swap="outerHTML">
+      {% for option in ["Fixed", "Flexible"] %}
+        <option value="{{ option }}" {% if option == a.type %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  </td>
+
+  <td>{{ a.status|status_badge }}</td>
+
+  <td>
+    <div class="reviewCell">
+      <span style="font-size:12px; color:var(--muted)">{{ a.lastReviewed|pretty_date }}</span>
+      <button class="markBtn" title="Mark reviewed today"
+              hx-post="{{ url_for('board.mark_reviewed', article_id=a.id) }}"
+              hx-target="closest tr" hx-swap="outerHTML">✓</button>
+      <input type="date" name="lastReviewed" style="width:132px; padding:3px 6px; font-size:11px;"
+             title="Backdate a review — recorded as an extra entry in the log, nothing is overwritten"
+             hx-put="{{ url_for('board.backdate_review', article_id=a.id) }}"
+             hx-trigger="change" hx-target="closest tr" hx-swap="outerHTML" />
+    </div>
+    {% if a.dueDate %}<span class="dueHint">due {{ a.dueDate|pretty_date }}</span>{% endif %}
+  </td>
+
+  <td>
+    <button class="btn ghost" title="Remove article"
+            hx-delete="{{ url_for('board.delete_article', article_id=a.id) }}"
+            hx-confirm="Remove “{{ a.name|short_name }}”? Its history stays in the activity log."
+            hx-target="closest tr" hx-swap="outerHTML">✖</button>
+  </td>
+</tr>

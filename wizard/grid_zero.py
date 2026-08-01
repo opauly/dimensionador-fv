@@ -5,7 +5,7 @@ import streamlit as st
 
 from wizard.state import autosave_if_possible as _autosave
 
-from config import BRAND_GREEN, BRAND_GREEN_LIGHT
+from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY
 
 
 # ── Step 4 — Utility account ─────────────────────────────────────────────────
@@ -633,6 +633,8 @@ def _scenario_projection(
 def step6_equipment() -> dict | None:
     """Panel + inverter selection, MPPT validation, 3 auto scenarios + manual mode."""
     st.markdown("### Paso 6 — Equipos")
+    from wizard.common import inject_step6_heading_css
+    inject_step6_heading_css()
 
     from database.equipment_db import list_panels, list_inverters, list_monitoring_devices
     from calculations.mppt import validate_string_design, check_design
@@ -660,6 +662,7 @@ def step6_equipment() -> dict | None:
     default_panel_idx = next((i for i, p in enumerate(panels) if p["id"] == current.get("panel_id")), 0)
     default_inv_idx   = next((i for i, inv in enumerate(inverters) if inv["id"] == current.get("inverter_id")), 0)
 
+    st.markdown("#### Selección de equipos")
     col1, col2 = st.columns(2)
     with col1:
         panel_label    = st.selectbox("Panel solar *", list(panel_options.keys()), index=default_panel_idx, key="w6_panel")
@@ -695,6 +698,19 @@ def step6_equipment() -> dict | None:
             f'</div>',
             unsafe_allow_html=True,
         )
+
+    mon_col, _mon_col2 = st.columns(2)
+    with mon_col:
+        mon_label = st.selectbox("Sistema de monitoreo (opcional)", list(monitoring_options.keys()), key="w6_mon")
+        selected_monitoring = monitoring_options[mon_label]
+        if selected_monitoring:
+            st.markdown(
+                f'<div style="background:{BRAND_GREEN_LIGHT};border-radius:6px;padding:0.6rem 1rem;font-size:0.85rem;line-height:1.8;">'
+                f'<b>{selected_monitoring["brand"]} {selected_monitoring["model"]}</b><br>'
+                f'Compatible con: {selected_monitoring.get("compatible_with", "—")}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     # Clear manual selection when equipment changes
     equip_key = f"{selected_panel['id']}_{selected_inverter['id']}"
@@ -762,11 +778,14 @@ def step6_equipment() -> dict | None:
     selected_scenario_label = st.session_state.get("w6_selected_scenario", current.get("mppt_scenario", "B"))
 
     if scenarios:
-        st.markdown("#### 🔁 Opción 1 — Configuración automática")
+        st.markdown("#### Opción 1 — Configuración automática")
         st.caption("El sistema calcula y propone tres configuraciones MPPT basadas en tu consumo y equipo seleccionado.")
         scenario_data = []
         for s in scenarios:
             ok_icon = "✅" if s["within_limits"] else "⚠️"
+            s_proj = _scenario_projection(
+                s["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
+            )
             scenario_data.append({
                 "Escenario":       f"Escenario {s['scenario']}",
                 "Paneles/string":  s["panels_per_string"],
@@ -776,6 +795,7 @@ def step6_equipment() -> dict | None:
                 "Área (m²)":       s.get("area_m2") or round(s["total_panels"] * area_panel, 1),
                 "Voc total (V)":   s["voc_total"],
                 "Vmp total (V)":   s["vmp_total"],
+                "Aprovechamiento solar": f"{s_proj['self_consumption_pct']}%",
                 "Estado":          ok_icon,
                 "Notas":           s["notes"],
             })
@@ -881,7 +901,7 @@ def step6_equipment() -> dict | None:
 
     # ── Manual design ─────────────────────────────────────────────────────────
     st.divider()
-    st.markdown("#### ⚙️ Opción 2 — Configuración manual")
+    st.markdown("#### Opción 2 — Configuración manual")
     st.caption("Ajusta los parámetros libremente y verifica los límites del inversor en tiempo real.")
 
     b_scenario = next((s for s in (scenarios or []) if s["scenario"] == "B"), None)
@@ -986,11 +1006,227 @@ def step6_equipment() -> dict | None:
                 unsafe_allow_html=True,
             )
 
-    # ── Monitoring + navigation ───────────────────────────────────────────────
     st.divider()
-    mon_label = st.selectbox("Sistema de monitoreo (opcional)", list(monitoring_options.keys()), key="w6_mon")
-    selected_monitoring = monitoring_options[mon_label]
 
+    # ── Chosen config resolved once here — validate_string_design()'s
+    # scenario dicts and check_design()'s manual dict share the same keys
+    # (see calculations/mppt.py: _combo_metrics()), so Validación/Margen/
+    # Dimensionamiento/Generación-vs-consumo below don't need separate
+    # manual/auto branches past this point.
+    if using_manual:
+        chosen = m if (m is not None and m.get("within_limits")) else None
+    else:
+        chosen = next((s for s in (scenarios or []) if s["scenario"] == selected_scenario_label), None)
+    _resolved_kw = chosen["system_kw"] if chosen else None
+
+    if chosen:
+        # ── Validación del diseño — pass/fail banner + Voc/Vmp/Corriente vs.
+        # the inverter's own limits. No charge controller or battery in Grid
+        # Zero, so these three inverter-facing checks are the whole picture.
+        st.markdown("#### Validación del diseño")
+        voc_ok = chosen["voc_total"] <= vmax
+        vmp_ok = vmin_mppt <= chosen["vmp_total"] <= vmax_mppt
+        imp_ok = chosen["imp_per_mppt"] <= imax_mppt
+        is_chosen_valid = chosen["within_limits"]
+
+        banner_bg, banner_border, banner_icon = (
+            ("#f0fdf4", "#16a34a", "✅") if is_chosen_valid else ("#fef2f2", "#dc2626", "❌")
+        )
+        banner_text = "Configuración válida" if is_chosen_valid else "Configuración inválida"
+        st.markdown(
+            f'<div style="background:{banner_bg};border-left:4px solid {banner_border};'
+            f'border-radius:6px;padding:0.6rem 0.9rem;margin-bottom:0.6rem;font-weight:700;'
+            f'color:{BRAND_NAVY};">{banner_icon} {banner_text}</div>',
+            unsafe_allow_html=True,
+        )
+        _mppt_param_row("Voc total", f"{chosen['voc_total']} V", voc_ok, f"≤ {vmax:.0f} V")
+        _mppt_param_row("Vmp total", f"{chosen['vmp_total']} V", vmp_ok, f"{vmin_mppt:.0f}–{vmax_mppt:.0f} V")
+        _mppt_param_row("Corriente por MPPT", f"{chosen['imp_per_mppt']} A", imp_ok, f"≤ {imax_mppt:.0f} A")
+        if not is_chosen_valid and chosen.get("notes"):
+            st.caption(f"⚠️ {chosen['notes']}")
+
+        # ── Margen de diseño — grouped with Validación (both are electrical-
+        # limits checks). Only Voc and Corriente reduce to a single "% of a
+        # ceiling" number — Vmp has a two-sided window (min AND max), already
+        # fully covered by the pass/fail row above, so it's not force-fit
+        # into a margin bar the way a ceiling-only metric is.
+        st.markdown("##### Margen de diseño")
+        st.caption("Qué tan cerca está el diseño de los límites eléctricos del inversor (Voc, corriente por MPPT).")
+
+        def _margin_pct_color(pct: float) -> str:
+            if pct > 95:
+                return "#dc2626"
+            if pct > 80:
+                return "#b45309"
+            return BRAND_GREEN
+
+        margin_items = [
+            ("Voc del arreglo (vs. inversor)", (chosen["voc_total"] / vmax * 100) if vmax else 0),
+            ("Corriente por MPPT (vs. inversor)", (chosen["imp_per_mppt"] / imax_mppt * 100) if imax_mppt else 0),
+        ]
+        import plotly.graph_objects as go
+        margin_fig = go.Figure(go.Bar(
+            x=[v for _, v in margin_items],
+            y=[k for k, _ in margin_items],
+            orientation="h",
+            marker_color=[_margin_pct_color(v) for _, v in margin_items],
+            text=[f"{v:.0f}%" for _, v in margin_items],
+            textposition="outside",
+        ))
+        margin_fig.add_vline(x=100, line_dash="dash", line_color="#9ca3af")
+        margin_fig.update_layout(
+            xaxis=dict(title="% del límite", range=[0, max(110, max(v for _, v in margin_items) * 1.15)]),
+            height=160,
+            margin=dict(t=10, b=10, l=10, r=30),
+        )
+        st.plotly_chart(margin_fig, use_container_width=True)
+        st.caption("Verde: margen cómodo (<80% del límite). Ámbar: 80–95%. Rojo: >95%, revisar diseño.")
+
+        st.divider()
+
+        # ── Dimensionamiento calculado — consolidated chip row + metric
+        # cards for the chosen config, same pattern as wizard/off_grid.py's
+        # Step 6. Monthly units throughout (kWh/mes), matching the rest of
+        # this file's Grid Zero math (_scenario_projection() etc.) rather
+        # than Off-Grid's daily (kWh/día) convention.
+        st.markdown("#### Dimensionamiento calculado")
+        scenario_note = "manual" if chosen["scenario"] == "M" else f"Escenario {chosen['scenario']}"
+        st.caption(f"Configuración activa: {scenario_note}")
+        _dim_chips = [
+            f"🔢 <b>{chosen['total_panels']}</b> paneles",
+            f"🔀 <b>{chosen['panels_per_string']}</b> en serie × <b>{chosen['strings']}</b> en paralelo",
+            f"⚡ <b>{chosen['system_kw']} kW</b>",
+            f"📐 <b>{chosen['area_m2']} m²</b>",
+        ]
+        st.markdown(
+            '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.4rem 0 0.9rem;">'
+            + "".join(
+                f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;'
+                f'padding:2px 9px;font-size:0.8rem;">{c}</span>' for c in _dim_chips
+            )
+            + '</div>',
+            unsafe_allow_html=True,
+        )
+
+        chosen_proj = _scenario_projection(
+            chosen["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
+        )
+        dm1, dm2 = st.columns(2)
+        with dm1:
+            st.markdown(
+                f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.7rem 0.9rem;'
+                f'margin-bottom:0.5rem;min-height:5.5rem;">'
+                f'<div style="font-size:0.78rem;color:#6b7280;">Generación mensual</div>'
+                f'<div style="font-size:1.4rem;font-weight:700;color:{BRAND_NAVY};margin-top:1pt;">'
+                f'{chosen_proj["gen"]:,} kWh/mes</div></div>',
+                unsafe_allow_html=True,
+            )
+        with dm2:
+            st.markdown(
+                f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.7rem 0.9rem;'
+                f'margin-bottom:0.5rem;min-height:5.5rem;">'
+                f'<div style="font-size:0.78rem;color:#6b7280;">Cobertura</div>'
+                f'<div style="font-size:1.4rem;font-weight:700;color:{BRAND_NAVY};margin-top:1pt;">'
+                f'{chosen_proj["coverage"]}%</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── Generación vs. consumo — monthly snapshot for the chosen config.
+        # Only 2 bars (no "Recarga de batería" third bar — no battery here);
+        # the surplus this system can't use is covered by "Aprovechamiento
+        # de generación solar" below instead.
+        if chosen_proj["gen"] > 0:
+            st.markdown("##### Generación vs. consumo")
+            st.caption("Balance de energía mensual: lo que genera el sistema frente a lo que consume el sitio.")
+            gen_fig = go.Figure(go.Bar(
+                x=[chosen_proj["gen"], avg_kwh],
+                y=["Generación mensual", "Consumo mensual"],
+                orientation="h",
+                marker_color=[BRAND_GREEN, BRAND_NAVY],
+                text=[f"{chosen_proj['gen']:,} kWh/mes", f"{avg_kwh:,.0f} kWh/mes"],
+                textposition="outside",
+            ))
+            gen_fig.update_layout(
+                xaxis=dict(title="kWh/mes", range=[0, max(chosen_proj["gen"], avg_kwh) * 1.3]),
+                height=180,
+                margin=dict(t=10, b=10, l=10, r=10),
+            )
+            st.plotly_chart(gen_fig, use_container_width=True)
+
+        st.divider()
+
+    # ── Estadísticas — groups the two parallel chart-driven analyses
+    # (monthly coverage, solar utilization) as subsections of one section
+    # instead of two independent divider-bounded sections — they're both
+    # read-only analysis of the same chosen config, not separate decisions.
+    if _resolved_kw:
+        st.markdown("#### Estadísticas")
+
+    # ── Same monthly data/colors as the PDF's "Cobertura mensual estimada" —
+    # rendered here with Plotly (hoverable) instead of the PDF's static SVG.
+    # Grid Zero has no battery, so recharge_kwh stays None (plain grouped bar)
+    # and flag_shortfall stays False (generation sitting below consumption
+    # every month is the deliberate zero-export design, not a fault — see
+    # proposals/charts.py's docstring). Reflects whichever scenario/manual
+    # config is currently selected above, not the final persisted equipment.
+    if _resolved_kw and pvgis_monthly and len(pvgis_monthly) == 12:
+        _months_data = consumption.get("months_data", [])
+        _monthly_kwh_real = [md["kwh"] for md in _months_data] if len(_months_data) == 12 else [avg_kwh] * 12
+        _gen_m = [round(v * _resolved_kw, 1) for v in pvgis_monthly]
+        from wizard.common import monthly_coverage_chart
+        st.markdown("##### Cobertura mensual estimada")
+        st.caption(
+            "Generación mensual real (PVGIS) frente al consumo mensual real facturado, para la "
+            "configuración seleccionada arriba."
+        )
+        st.plotly_chart(
+            monthly_coverage_chart(_gen_m, _monthly_kwh_real, flag_shortfall=False),
+            use_container_width=True,
+        )
+
+    # ── Aprovechamiento de generación solar ───────────────────────────────
+    # Grid Zero has no battery — the same curtailment concept Off-Grid gets
+    # from a real day-by-day simulation is estimated here from the AI daytime-
+    # consumption fraction (_scenario_projection()). Lives here, not in Step 8,
+    # because this is the step where the user can still act on it — pick a
+    # different scenario/manual config and watch the split change. Step 8 only
+    # echoes the resulting percentage as a summary KV.
+    if _resolved_kw:
+        st.markdown("##### Aprovechamiento de generación solar")
+        _step6_proj = _scenario_projection(
+            _resolved_kw, avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
+        )
+        self_consumption_pct = _step6_proj["self_consumption_pct"]
+        used_kwh_month = round(_step6_proj["gen"] - _step6_proj["curtailed"])
+        curtailed_kwh_month = round(_step6_proj["curtailed"])
+        st.caption(
+            "Modelo sin exportación: solo la generación que coincide con consumo diurno se aprovecha; el "
+            "resto se recorta porque el sistema no exporta excedentes a la red. Estimado con IA sobre qué "
+            f"fracción del consumo ocurre en horas de sol{' — ' + ai_note if ai_note else ''}."
+        )
+        import plotly.graph_objects as go
+        util_fig = go.Figure()
+        util_fig.add_trace(go.Bar(
+            y=["Generación mensual"], x=[used_kwh_month], name="Autoconsumido", orientation="h",
+            marker_color=BRAND_GREEN, text=[f"{self_consumption_pct}% · {used_kwh_month:,} kWh"], textposition="inside",
+        ))
+        util_fig.add_trace(go.Bar(
+            y=["Generación mensual"], x=[curtailed_kwh_month], name="Recorte solar (no aprovechado)", orientation="h",
+            marker_color="#d1d5db", text=[f"{100 - self_consumption_pct}% · {curtailed_kwh_month:,} kWh"], textposition="inside",
+        ))
+        util_fig.update_layout(
+            barmode="stack", height=130, margin=dict(t=10, b=10, l=10, r=10),
+            xaxis_title="kWh/mes", showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        )
+        st.plotly_chart(util_fig, use_container_width=True)
+        if self_consumption_pct < 50:
+            st.warning(
+                f"⚠️ Solo el {self_consumption_pct}% de la generación mensual se aprovecha — el sistema "
+                "está sobredimensionado frente al consumo diurno de este cliente."
+            )
+
+    # ── Navigation ─────────────────────────────────────────────────────────────
     st.divider()
     col_back, _, col_next = st.columns([1, 3, 1])
     with col_back:
@@ -1013,6 +1249,15 @@ def step6_equipment() -> dict | None:
                 )
                 active_label = selected_scenario_label
 
+            # Persisted so Step 8 (and the PDF) can show the same
+            # self-consumption/curtailment figure already displayed per
+            # scenario above, without recomputing daytime_fraction context
+            # from scratch later.
+            projection = _scenario_projection(
+                chosen_scenario["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc,
+                tariff_info, daytime_fraction,
+            )
+
             result = {
                 "panel_id":        selected_panel["id"],
                 "panel":           selected_panel,
@@ -1021,6 +1266,11 @@ def step6_equipment() -> dict | None:
                 "mppt_scenario":   active_label,
                 "chosen_scenario": chosen_scenario,
                 "scenarios":       scenarios or [],
+                "projection":      projection,
+                # Persisted alongside (not read back out of the transient
+                # w6_coverage_ai session key, which _autosave() doesn't
+                # serialize) so Step 8's caption survives a resumed session.
+                "daytime_fraction_note": ai_note,
                 "monitoring_id":   selected_monitoring["id"] if selected_monitoring else None,
                 "monitoring":      selected_monitoring,
             }
@@ -1369,6 +1619,10 @@ def step8_review() -> None:
     chosen = equipment.get("chosen_scenario", {})
     panel_count = chosen.get("total_panels", 0)
     system_kw = chosen.get("system_kw", 0.0)
+    # Computed here (persisted from Step 6, not recomputed) so the
+    # "Aprovechamiento solar" KV below has a number before the summary panel
+    # is even built — same value the PDF's technical table shows.
+    projection = equipment.get("projection", {})
 
     pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
     avg_kwh = consumption.get("avg_kwh", 0)
@@ -1437,7 +1691,10 @@ def step8_review() -> None:
     def _kv(label: str, value: str, subtitle: str = "", accent: bool = False) -> str:
         color = "#0d9488" if accent else "#1e293b"
         sub = (f'<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px;'
-               f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">'
+               # Wraps instead of ellipsis-truncating — a clipped equipment model
+               # number ("Victron Energy MultiPlus-II 48/3…") hides which unit was
+               # quoted. Same fix applied in wizard/off_grid.py's _kv().
+               f'white-space:normal;overflow-wrap:anywhere;line-height:1.35;max-width:190px;">'
                f'{subtitle}</div>') if subtitle else ""
         return (
             f'<div style="min-width:100px;">'
@@ -1468,6 +1725,7 @@ def step8_review() -> None:
     html += _kv("Paneles", str(panel_count), subtitle=panel_sub)
     html += _kv("Inversores", str(inv_qty), subtitle=inverter_sub)
     html += _kv("Área", f"{area_m2} m²")
+    html += _kv("Aprovechamiento solar", f"{projection['self_consumption_pct']}%" if projection else "—")
     html += '</div>'
 
     # ── Costos del proyecto ───────────────────────────────────────────────────
@@ -1517,10 +1775,86 @@ def step8_review() -> None:
     html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
 
+    # ── Cumulative savings / payback curve ──────────────────────────────────
+    # IRR/ROI/25yr-savings above are single numbers; this shows the same
+    # projection as a year-by-year cash flow so payback is something a client
+    # can see, not just read. Same cashflow formula as calculations/financials.py
+    # (escalation=0.05 default), just kept year-by-year instead of collapsed.
+    if savings_year1_usd > 0 and total_usd > 0:
+        st.divider()
+        st.markdown("#### Flujo de caja acumulado (25 años)")
+        st.caption("Proyección de ahorro acumulado a lo largo de 25 años, con el punto de equilibrio marcado.")
+        import plotly.graph_objects as go
+        escalation = 0.05
+        years = list(range(0, 26))
+        cashflow = [-total_usd] + [savings_year1_usd * ((1 + escalation) ** y) for y in range(25)]
+        cumulative = []
+        running = 0.0
+        for cf in cashflow:
+            running += cf
+            cumulative.append(round(running, 2))
+        breakeven_year = next((y for y, c in zip(years, cumulative) if c >= 0), None)
+        point_colors = [BRAND_GREEN if c >= 0 else "#dc2626" for c in cumulative]
+        cash_fig = go.Figure()
+        cash_fig.add_trace(go.Scatter(
+            x=years, y=cumulative, mode="lines", line=dict(color=BRAND_NAVY, width=2),
+            fill="tozeroy", fillcolor="rgba(30,45,84,0.08)", name="Flujo acumulado",
+        ))
+        cash_fig.add_trace(go.Scatter(
+            x=years, y=cumulative, mode="markers", marker=dict(size=5, color=point_colors), showlegend=False,
+        ))
+        cash_fig.add_hline(y=0, line_color="#9ca3af", line_width=1)
+        if breakeven_year is not None:
+            cash_fig.add_vline(
+                x=breakeven_year, line_dash="dash", line_color=BRAND_GREEN,
+                annotation_text=f"Punto de equilibrio: año {breakeven_year}", annotation_position="top",
+            )
+        cash_fig.update_layout(
+            xaxis_title="Año", yaxis_title="Flujo acumulado (USD)",
+            height=300, margin=dict(t=30, b=10, l=10, r=10),
+        )
+        st.plotly_chart(cash_fig, use_container_width=True)
+        st.caption(
+            f"Supone escalamiento anual de tarifa del {escalation * 100:.0f}% sobre el ahorro año 1 "
+            f"(${savings_year1_usd:,.0f}). Inversión inicial: ${total_usd:,.0f}."
+        )
+
     # ── Intro paragraph ───────────────────────────────────────────────────────
     st.divider()
     st.markdown("#### Párrafo introductorio")
-    st.caption("Este texto aparecerá en la propuesta. En Fase 4 lo generará Claude. Puedes editarlo ahora.")
+    st.caption(
+        "Este texto abre la propuesta en el PDF. Puedes escribirlo a mano o generarlo con IA — "
+        "la IA solo puede usar las cifras ya calculadas arriba (potencia, paneles, ahorro, "
+        "payback); no inventa precios, plazos ni garantías. Revísalo siempre antes de enviar."
+    )
+
+    # See the twin block in wizard/off_grid.py: the button writes session_state
+    # and reruns so the text_area below picks up the new value (Streamlit
+    # forbids mutating a widget's value after instantiation).
+    if st.button("✨ Generar con IA", key="w8_gen_intro"):
+        from ai.proposal_writer import generate_intro
+
+        with st.spinner("Redactando párrafo introductorio…"):
+            client_info = st.session_state.get("wizard_client", {})
+            site_info = st.session_state.get("wizard_site", {})
+            params = {
+                "system_type_key": "grid_zero",
+                "system_type": "Grid Zero (sin exportación de excedentes)",
+                "client_name": client_info.get("name", ""),
+                "location": client_info.get("location")
+                    or f"{site_info.get('city', '')}, {site_info.get('province', '')}".strip(", "),
+                "system_kw": sizing.get("system_kw", 0),
+                "panel_count": sizing.get("panel_count", 0),
+                "panel_model": f"{panel.get('brand','')} {panel.get('model','')}".strip(),
+                "inverter_model": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
+                "savings_year1_usd": round(savings_year1_usd) if savings_year1_usd else 0,
+                "pct_savings": round(pct_savings, 1) if pct_savings else 0,
+                "roi_years": round(roi_years, 1) if roi_years else 0,
+            }
+            generated = generate_intro(params, language).get(language, "")
+        st.session_state["wizard_proposal_text"] = generated
+        st.session_state["w8_intro"] = generated  # widget key — see off_grid.py note
+        st.rerun()
 
     default_intro_es = (
         "Esta propuesta se basa en la facturación eléctrica mensual aproximada. "
@@ -1537,7 +1871,12 @@ def step8_review() -> None:
     if not saved_text:
         saved_text = default_intro_es if language == "es" else default_intro_en
 
-    proposal_text = st.text_area("Texto introductorio", value=saved_text, height=120, key="w8_intro")
+    # Seed the widget key once rather than passing `value=` — the IA button
+    # assigns this key directly, and doing both trips Streamlit's "created with
+    # a default value but also had its value set via the Session State API"
+    # warning. See the twin block in wizard/off_grid.py.
+    st.session_state.setdefault("w8_intro", saved_text)
+    proposal_text = st.text_area("Texto introductorio", height=120, key="w8_intro")
     st.session_state["wizard_proposal_text"] = proposal_text
 
     # ── Generate PDF ─────────────────────────────────────────────────────────
@@ -1594,9 +1933,23 @@ def step8_review() -> None:
             except Exception:
                 pass
 
+            # Monthly coverage for the PDF chart. Grid Zero is the richer case:
+            # `monthly_kwh` is the client's real 12-month billed consumption and
+            # `sizing["monthly_generation"]` is PVGIS-driven per-month output,
+            # so both series carry genuine seasonality.
+            _gen_12 = sizing.get("monthly_generation") or []
+            _monthly_coverage = (
+                {
+                    "generation": [round(v, 1) for v in _gen_12],
+                    "consumption": [round(v, 1) for v in monthly_kwh],
+                }
+                if len(_gen_12) == 12 and len(monthly_kwh) == 12 else {}
+            )
+
             pdf_data = {
                 "date": today,
                 "quote_number": _quote_num_str,
+                "monthly_coverage": _monthly_coverage,
                 "client": {
                     "name": client.get("name", ""),
                     "location": client.get("location", f"{site.get('city', '')}, {site.get('province', '')}"),
@@ -1623,12 +1976,15 @@ def step8_review() -> None:
                 "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica nacional",
                 "benefits_notes_en": "Excess energy delivered to the national grid is not considered",
                 "cost_items": cost_items,
+                "subtotal_usd": costs.get("subtotal_usd", total_usd),
+                "iva_usd": costs.get("iva_usd", 0),
                 "total_usd": total_usd,
                 "technical": {
                     "system_kw": system_kw,
                     "area_m2": area_m2,
                     "panel_count": panel_count,
                     "inverter_count": 1,
+                    "self_consumption_pct": projection.get("self_consumption_pct") if projection else None,
                 },
                 "cost_per_wp": costs.get("cost_per_wp", 0),
                 "warranty_inverter_years": warranty_inv_years_es,
@@ -1655,13 +2011,14 @@ def step8_review() -> None:
                 with st.spinner("Generando PDF…"):
                     pdf_bytes = generate_pdf(pdf_data, "grid_zero", language)
 
+                from wizard.state import pdf_filename
+
                 lang_label = "ES" if language == "es" else "EN"
-                client_name_safe = client.get("name", "propuesta").replace(" ", "_")
                 st.success(f"PDF generado — {len(pdf_bytes):,} bytes")
                 st.download_button(
                     label=f"⬇ Descargar PDF ({lang_label})",
                     data=pdf_bytes,
-                    file_name=f"cotizacion_{client_name_safe}_{lang_label}.pdf",
+                    file_name=pdf_filename(_quote_num_str, client.get("name", ""), lang_label),
                     mime="application/pdf",
                     key="w8_download",
                 )

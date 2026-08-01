@@ -9,7 +9,7 @@ st.set_page_config(page_title="Nueva cotización — Pauly&Co Solar", layout="wi
 
 from config import BRAND_GREEN, BRAND_NAVY, WIZARD_STEPS_GRID_ZERO
 
-STEP_LABELS = [
+STEP_LABELS_GRID_ZERO = [
     "Cliente",
     "Tipo e idioma",
     "Sitio e irradiancia",
@@ -20,11 +20,24 @@ STEP_LABELS = [
     "Revisión y PDF",
 ]
 
+STEP_LABELS_OFF_GRID = [
+    "Cliente",
+    "Tipo e idioma",
+    "Sitio e irradiancia",
+    "Cargas",
+    "Demanda",
+    "Equipos",
+    "Costos",
+    "Revisión y PDF",
+]
+
 
 def _render_progress(current_step: int) -> None:
-    """Render step breadcrumb at the top."""
-    cols = st.columns(len(STEP_LABELS))
-    for i, (col, label) in enumerate(zip(cols, STEP_LABELS), start=1):
+    """Render step breadcrumb at the top. Step 4/5 labels depend on system_type."""
+    system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+    step_labels = STEP_LABELS_GRID_ZERO if system_type == "grid_zero" else STEP_LABELS_OFF_GRID
+    cols = st.columns(len(step_labels))
+    for i, (col, label) in enumerate(zip(cols, step_labels), start=1):
         with col:
             if i < current_step:
                 st.markdown(
@@ -187,54 +200,71 @@ def main():
             st.rerun()
 
     elif current_step == 4:
-        from wizard.grid_zero import step4_utility
-        result = step4_utility()
+        system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+        if system_type == "grid_zero":
+            from wizard.grid_zero import step4_utility as step4
+        elif system_type == "off_grid":
+            from wizard.off_grid import step4_loads as step4
+        else:
+            from wizard.hybrid import step4_loads as step4
+        result = step4()
         if result is not None:
             st.session_state["wizard_step"] = 5
             _autosave_if_possible()
             st.rerun()
 
     elif current_step == 5:
-        from wizard.grid_zero import step5_consumption
-        result = step5_consumption()
+        system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+        if system_type == "grid_zero":
+            from wizard.grid_zero import step5_consumption as step5
+        elif system_type == "off_grid":
+            from wizard.off_grid import step5_demand as step5
+        else:
+            from wizard.hybrid import step5_demand as step5
+        result = step5()
         if result is not None:
             st.session_state["wizard_step"] = 6
             _autosave_if_possible()
             st.rerun()
 
     elif current_step == 6:
-        from wizard.grid_zero import step6_equipment
-        result = step6_equipment()
+        system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+        if system_type == "grid_zero":
+            from wizard.grid_zero import step6_equipment as step6
+        elif system_type == "off_grid":
+            from wizard.off_grid import step6_equipment as step6
+        else:
+            from wizard.hybrid import step6_equipment as step6
+        result = step6()
         if result is not None:
             st.session_state["wizard_step"] = 7
             _autosave_if_possible()
             st.rerun()
 
     elif current_step == 7:
-        from wizard.grid_zero import step7_costs
-        result = step7_costs()
+        system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+        if system_type == "grid_zero":
+            from wizard.grid_zero import step7_costs as step7
+        elif system_type == "off_grid":
+            from wizard.off_grid import step7_costs as step7
+        else:
+            from wizard.hybrid import step7_costs as step7
+        result = step7()
         if result is not None:
             st.session_state["wizard_step"] = 8
             _autosave_if_possible()
             st.rerun()
 
     elif current_step == 8:
-        from wizard.grid_zero import step8_review
-        step8_review()
-
-    # Phase 1 test buttons (collapsed)
-    with st.expander("🧪 Prueba Fase 1 — PDF con datos de muestra", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Generar PDF prueba — Español", key="p1_es"):
-                from proposals.generator import generate_pdf, MARIA_JOSE_DATA
-                pdf = generate_pdf(MARIA_JOSE_DATA, "grid_zero", "es")
-                st.download_button("⬇ Descargar ES", pdf, "muestra_es.pdf", "application/pdf", key="p1_dl_es")
-        with col2:
-            if st.button("Generar PDF prueba — English", key="p1_en"):
-                from proposals.generator import generate_pdf, MARIA_JOSE_DATA
-                pdf = generate_pdf(MARIA_JOSE_DATA, "grid_zero", "en")
-                st.download_button("⬇ Download EN", pdf, "sample_en.pdf", "application/pdf", key="p1_dl_en")
-
+        system_type = st.session_state.get("wizard_meta", {}).get("system_type", "grid_zero")
+        if system_type == "grid_zero":
+            from wizard.grid_zero import step8_review
+            step8_review()
+        elif system_type == "off_grid":
+            from wizard.off_grid import step8_review
+            step8_review(language=st.session_state.get("wizard_meta", {}).get("language", "es"))
+        else:
+            from wizard.hybrid import step8_review
+            step8_review(language=st.session_state.get("wizard_meta", {}).get("language", "es"))
 
 main()

@@ -70,10 +70,10 @@ MARIA_JOSE_DATA: dict = {
         "pct_savings": 67.26,
     },
     "benefits_notes_es": (
-        "No se considera la entrega de excedentes de energía a la red eléctrica nacional"
+        "No se considera la entrega de excedentes de energía a la red eléctrica."
     ),
     "benefits_notes_en": (
-        "Excess energy delivered to the national grid is not considered"
+        "Excess energy delivered to the grid is not considered."
     ),
     "cost_items": [
         {"item": "Paneles solares",               "item_en": "Solar panels",               "qty": 16,   "specs": "JA Solar 620 W",                                                                    "total": 1760.00},
@@ -86,6 +86,10 @@ MARIA_JOSE_DATA: dict = {
         {"item": "Transporte de equipo",           "item_en": "Equipment transport",        "qty": None, "specs": "San José - Guanacaste",                                                            "specs_en": "San José - Guanacaste",                                    "total": 500.00},
         {"item": "Sistema de monitoreo remoto",    "item_en": "Remote monitoring system",   "qty": 1,    "specs": "Fronius Smart Meter",                                                               "total": 600.00},
     ],
+    # subtotal_usd/iva_usd pinned to total_usd/0 — total_usd is the validated
+    # María José Castro reference figure (CONTEXT.md), not derived math here.
+    "subtotal_usd": 18110.00,
+    "iva_usd": 0.0,
     "total_usd": 18110.00,
     "technical": {
         "system_kw": 9.92,
@@ -153,6 +157,95 @@ MARIA_JOSE_DATA: dict = {
 }
 
 
+# ── hardcoded reference data (Jorge Ramírez — Off-Grid) ──────────────────────
+# Used for the sample-PDF test panel (Cotizaciones page). Matches the
+# validation reference numbers in CONTEXT.md ("Off-Grid — Jorge Ramírez").
+
+JORGE_RAMIREZ_DATA: dict = {
+    "date": "1/7/2026",
+    "client": {
+        "name": "Jorge Ramírez",
+        "location": "Guanacaste, Costa Rica",
+        "nise": "N/A",
+    },
+    "system_type_label": "Off-Grid",
+    "intro_lines": [
+        (
+            "Esta propuesta presenta un sistema solar aislado (off-grid) diseñado para "
+            "cubrir el consumo diario estimado de la vivienda de forma independiente de "
+            "la red eléctrica nacional, incluyendo banco de baterías para autonomía "
+            "nocturna y de respaldo."
+        ),
+    ],
+    "cost_items": [
+        {"item": "Paneles solares",              "item_en": "Solar panels",              "qty": 8, "specs": "JA Solar 620 W",                     "total": 1840.00},
+        {"item": "Inversor/cargador",             "item_en": "Inverter/charger",          "qty": 1, "specs": "Victron MultiPlus-II 48/5000/70-50", "total": 2400.00},
+        {"item": "Baterías",                      "item_en": "Batteries",                 "qty": 2, "specs": "Pylontech US5000C 4.8 kWh",          "total": 3200.00},
+        {"item": "Controlador de carga",          "item_en": "Charge controller",         "qty": 1, "specs": "Victron SmartSolar MPPT 250/100",    "total": 650.00},
+        {"item": "Estructura de montaje",         "item_en": "Mounting structure",        "qty": None, "specs": "Estructura para techo",            "specs_en": "Roof mounting structure", "total": 500.00},
+        {"item": "Materiales eléctricos",         "item_en": "Electrical materials",      "qty": None, "specs": "Cableado, protecciones y BOS",     "specs_en": "Wiring, protection devices and BOS", "total": 700.00},
+        {"item": "Mano de obra",                  "item_en": "Labor",                     "qty": None, "specs": "Instalación y costos relacionados con la obra", "specs_en": "Installation and related project costs", "total": 800.00},
+        {"item": "Diseño y gestión",               "item_en": "Design & management",       "qty": None, "specs": "Estudios preliminares y gestión del proyecto", "specs_en": "Preliminary studies and project management", "total": 230.00},
+    ],
+    # subtotal_usd/iva_usd pinned to total_usd/0 — total_usd is the validated
+    # Jorge Ramírez reference figure (CONTEXT.md), not derived math here.
+    "subtotal_usd": 10320.00,
+    "iva_usd": 0.0,
+    "total_usd": 10320.00,
+    "technical": {
+        "system_kw": 5.0,
+        "area_m2": 16,
+        "daily_generation_kwh": 6.38,
+        "battery_kwh": 9.60,
+        "discharge_pct": 66.46,
+    },
+    "cost_per_wp": 2.06,
+    "warranty_inverter_years": "5 años",
+    "warranty_inverter_years_en": "5 years",
+    "warranty_battery_years": "10 años",
+    "warranty_battery_years_en": "10 years",
+    "payment_notes_es": [
+        "Solicitamos un pago inicial del 70% por adelantado y el 30% restante contra entrega del proyecto",
+        "Duración estimada: 15 días después del pago inicial",
+        "Se entrega factura electrónica por el monto total",
+        "Los pagos se realizan mediante transferencia bancaria a la siguiente cuenta:",
+    ],
+    "payment_notes_en": [
+        "We request an initial payment of 70% in advance and the remaining 30% upon project delivery",
+        "Estimated duration: 15 days after initial payment",
+        "An electronic invoice is provided for the full amount",
+        "Payments are made via bank transfer to the following account:",
+    ],
+    "bank_local_lines": MARIA_JOSE_DATA["bank_local_lines"],
+    "bank_intl_lines": MARIA_JOSE_DATA["bank_intl_lines"],
+    "bank_local_lines_en": MARIA_JOSE_DATA["bank_local_lines_en"],
+    "bank_intl_lines_en": MARIA_JOSE_DATA["bank_intl_lines_en"],
+    "company": MARIA_JOSE_DATA["company"],
+    "validity_days": 15,
+}
+
+
+# ── hardcoded reference data (Hybrid variant of Jorge Ramírez) ───────────────
+# Same off_grid template/context shape; only the label and intro copy differ.
+
+HYBRID_DATA: dict = {
+    **JORGE_RAMIREZ_DATA,
+    "client": {
+        "name": "Jorge Ramírez (Híbrido)",
+        "location": "Guanacaste, Costa Rica",
+        "nise": "N/A",
+    },
+    "system_type_label": "Híbrido",
+    "intro_lines": [
+        (
+            "Esta propuesta presenta un sistema solar híbrido: conectado a la red "
+            "eléctrica nacional para uso normal, con banco de baterías de respaldo "
+            "para continuar operando durante interrupciones del suministro."
+        ),
+    ],
+}
+
+
 # ── context builder ──────────────────────────────────────────────────────────
 
 def _build_context(data: dict, language: str) -> dict:
@@ -200,15 +293,84 @@ def _build_context(data: dict, language: str) -> dict:
             "notes":                data.get("benefits_notes_es" if es else "benefits_notes_en", ""),
         },
         "cost_items":    cost_items_fmt,
+        "subtotal_usd":  _usd(data.get("subtotal_usd", data["total_usd"])),
+        "iva_usd":       _usd(data.get("iva_usd", 0)),
         "total_usd":     _usd(data["total_usd"]),
         "technical": {
             "system_kw":      f"{tech['system_kw']:.2f}",
             "area_m2":        str(tech["area_m2"]),
             "panel_count":    str(tech["panel_count"]),
             "inverter_count": str(tech["inverter_count"]),
+            # AI-estimated (daytime consumption fraction), not simulated like
+            # Off-Grid's — see wizard/grid_zero.py: _scenario_projection().
+            # None when never calculated (draft never ran "Calcular MPPT").
+            "self_consumption_pct": _pct(tech["self_consumption_pct"], 0) if tech.get("self_consumption_pct") is not None else "—",
         },
         "cost_per_wp":            f"{data['cost_per_wp']:.2f}",
         "warranty_inverter_years": data.get("warranty_inverter_years" if es else "warranty_inverter_years_en", "5 años"),
+        "payment_notes":  data.get("payment_notes_es" if es else "payment_notes_en", []),
+        "bank_local_lines":  data.get("bank_local_lines"    if es else "bank_local_lines_en",  []),
+        "bank_intl_lines":   data.get("bank_intl_lines"     if es else "bank_intl_lines_en",   []),
+        "company": {
+            "contact_name":  co.get("contact_name", ""),
+            "contact_title": co.get("contact_title", "") if es else co.get("contact_title_en", co.get("contact_title", "")),
+            "license":       co.get("license", ""),
+            "phone":         co.get("phone", ""),
+            "email":         co.get("email", ""),
+            "website":       co.get("website", ""),
+        },
+        "validity_days": data.get("validity_days", 15),
+    }
+
+
+def _build_context_off_grid(data: dict, language: str) -> dict:
+    """
+    Flatten and format Off-Grid/Hybrid wizard data into Jinja2 template context.
+
+    No billing_avg/benefits (no utility bill or grid-savings model for a
+    system with no — or, for Hybrid, only partial — grid dependency) —
+    replaced by battery/discharge/autonomy technical fields instead.
+    """
+    es = (language == "es")
+    tech = data["technical"]
+    co = data["company"]
+
+    cost_items_fmt = []
+    for ci in data["cost_items"]:
+        cost_items_fmt.append({
+            "item":  ci["item"]    if es else ci.get("item_en", ci["item"]),
+            "qty":   str(ci["qty"]) if ci.get("qty") is not None else "–",
+            "specs": ci["specs"]   if es else ci.get("specs_en", ci["specs"]),
+            "total": _usd(ci["total"]),
+        })
+
+    return {
+        "logo_b64":            get_logo_b64(),
+        "signature_b64":       get_signature_b64(),
+        "signature_white_b64": get_signature_white_b64(),
+        "isotipo_white_b64":   get_isotipo_white_b64(),
+        "date":           data["date"],
+        "quote_number":   data.get("quote_number", ""),
+        "client":         data["client"],
+        "system_type_label": data["system_type_label"],
+        "intro_lines":    data["intro_lines"],
+        "cost_items":    cost_items_fmt,
+        "subtotal_usd":  _usd(data.get("subtotal_usd", data["total_usd"])),
+        "iva_usd":       _usd(data.get("iva_usd", 0)),
+        "total_usd":     _usd(data["total_usd"]),
+        "technical": {
+            "system_kw":              f"{tech['system_kw']:.2f}",
+            "area_m2":                 str(tech["area_m2"]),
+            "daily_generation_kwh":    _kwh(tech.get("daily_generation_kwh", 0)),
+            "battery_kwh":             _kwh(tech.get("battery_kwh", 0)),
+            "discharge_pct":           _pct(tech.get("discharge_pct", 0)),
+            # None when the draft has no real daily PVGIS series to simulate
+            # against (see wizard/off_grid.py: _og_monthly_coverage_and_sim()).
+            "utilization_pct":        _pct(tech["utilization_pct"], 0) if tech.get("utilization_pct") is not None else "—",
+        },
+        "cost_per_wp":            f"{data['cost_per_wp']:.2f}",
+        "warranty_inverter_years": data.get("warranty_inverter_years" if es else "warranty_inverter_years_en", "5 años"),
+        "warranty_battery_years":  data.get("warranty_battery_years" if es else "warranty_battery_years_en", "10 años"),
         "payment_notes":  data.get("payment_notes_es" if es else "payment_notes_en", []),
         "bank_local_lines":  data.get("bank_local_lines"    if es else "bank_local_lines_en",  []),
         "bank_intl_lines":   data.get("bank_intl_lines"     if es else "bank_intl_lines_en",   []),
@@ -270,7 +432,9 @@ def build_from_wizard_blob(
             "total":    total,
         })
 
-    total_usd   = float(costs.get("total_usd") or 0)
+    total_usd    = float(costs.get("total_usd") or 0)
+    subtotal_usd = float(costs.get("subtotal_usd") or total_usd)
+    iva_usd      = float(costs.get("iva_usd") or 0)
     cost_per_wp = round(total_usd / (system_kw * 1000), 2) if system_kw else 0.0
     area_m2     = round(panel_count * float(panel.get("width_m") or 1.134) * float(panel.get("height_m") or 2.278), 1)
 
@@ -345,9 +509,11 @@ def build_from_wizard_blob(
         "intro_lines":       [blob.get("proposal_text", "")] if blob.get("proposal_text") else [],
         "billing_avg":       billing_avg,
         "benefits":          benefits,
-        "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica nacional",
-        "benefits_notes_en": "Excess energy delivered to the national grid is not considered",
+        "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica.",
+        "benefits_notes_en": "Excess energy delivered to the grid is not considered",
         "cost_items":        cost_items,
+        "subtotal_usd":      subtotal_usd,
+        "iva_usd":           iva_usd,
         "total_usd":         total_usd,
         "technical": {
             "system_kw":      system_kw,
@@ -396,8 +562,33 @@ def generate_pdf(data: dict, system_type: str, language: str) -> bytes:
         loader=FileSystemLoader(str(TEMPLATE_DIR)),
         autoescape=True,
     )
-    template = env.get_template(f"{system_type}_{language}.html")
-    context = _build_context(data, language)
+    # Hybrid shares the off_grid template file — same technical shape
+    # (array + battery + discharge), just a different system_type_label.
+    template_key = "grid_zero" if system_type == "grid_zero" else "off_grid"
+    template = env.get_template(f"{template_key}_{language}.html")
+    context = _build_context(data, language) if system_type == "grid_zero" else _build_context_off_grid(data, language)
+
+    # Monthly-coverage chart. Built here rather than in each wizard so both
+    # system types and both languages share one implementation, and so a
+    # proposal without usable 12-month data simply renders no chart section
+    # (monthly_coverage_svg returns "") instead of raising.
+    from proposals.charts import monthly_coverage_svg
+
+    _coverage = data.get("monthly_coverage") or {}
+    context["coverage_chart_svg"] = monthly_coverage_svg(
+        _coverage.get("generation"),
+        _coverage.get("consumption"),
+        language,
+        # Grid Zero intentionally generates less than total consumption (it
+        # covers daytime use only, the grid covers the rest), so months below
+        # the line are normal there and must not be flagged. Off-Grid/Hybrid
+        # have no grid to fall back on, so a shortfall is a real finding.
+        flag_shortfall=(system_type != "grid_zero"),
+        # Grid Zero has no battery — recharge_kwh stays None there and the
+        # chart falls back to its original plain consumption bar.
+        recharge_kwh=_coverage.get("recharge"),
+    )
+
     html_str = template.render(**context)
 
     pdf = weasyprint.HTML(

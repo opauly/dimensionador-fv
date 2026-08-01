@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Wiki Ownership Board</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+<script src="{{ url_for('static', filename='vendor/htmx-2.0.4.min.js') }}" defer></script>
+</head>
+<body>
+  <div class="header">
+    <div class="header-inner">
+      <div>
+        <div class="eyebrow"><span class="dot"></span> MBD Documentation Team</div>
+        <h1>Wiki Ownership Board</h1>
+      </div>
+      <div class="headerRight">
+        {% include "partials/_identity.html" %}
+        <div>
+          {# Lives outside #dashboard, so it needs its own refresh hook or it
+             goes stale the moment an owner or review changes. #}
+          <div class="stat-big" id="healthy-pct"
+               hx-get="{{ url_for('board.headline') }}"
+               hx-trigger="dashboard-refresh from:body"
+               hx-swap="innerHTML">{{ summary.healthy_pct }}%</div>
+          <div class="stat-label">pages up to date</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    {% include "partials/_dashboard.html" %}
+
+    <div class="tabs">
+      {% for key, label in [("articles","Articles"), ("team","Team &amp; Balances"), ("activity","Activity")] %}
+        <button class="tab {% if tab == key %}active{% endif %}"
+                hx-get="{{ url_for('board.panel', name=key) }}"
+                hx-target="#panel" hx-swap="innerHTML"
+                hx-push-url="{{ url_for('board.index', tab=key) }}"
+                hx-on::after-request="document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); this.classList.add('active')">
+          {{ label|safe }}
+        </button>
+      {% endfor %}
+    </div>
+
+    <div id="panel">{% block panel %}{% endblock %}</div>
+
+    <div class="footer">
+      Local prototype — data lives in a SQLite file on this machine.
+      Ask your team before treating it as the source of truth.
+    </div>
+  </div>
+
+  <div id="flash"></div>
+  <script>
+    // Single toast for every htmx write, so each action visibly lands.
+    document.body.addEventListener("htmx:afterRequest", (e) => {
+      const verb = (e.detail.requestConfig?.verb || "get").toLowerCase();
+      if (verb === "get") return;
+      const flash = document.getElementById("flash");
+      flash.textContent = e.detail.successful ? "Saved" : "Something went wrong — reload and try again";
+      flash.classList.add("show");
+      clearTimeout(window.__flashTimer);
+      window.__flashTimer = setTimeout(() => flash.classList.remove("show"), 1400);
+    });
+  </script>
+</body>
+</html>

@@ -13,11 +13,12 @@
 | 2 — Grid Zero Wizard | ✅ Complete |
 | 3 — Proposal Management | ✅ Complete + UX polish (directed flow, per-version PDF) |
 | 4 — AI Features | ✅ Complete (bill parser, tablero, datasheet, load estimator, daytime fraction) |
-| 5 — Off-Grid + Hybrid | ⬜ Not started |
+| 5 — Off-Grid + Hybrid | ✅ Complete — includes a taxonomy-driven load profile estimator beyond the original spec (see below) |
 | 6 — Projects Module | ⬜ Not started |
 | 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅, Clientes/Prospectos ✅; cost templates, settings pending) |
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
+| 10 — Site Register & Preventive Maintenance Scheduler | ⬜ Not started (spans both products, no dependency on 0–9) |
 
 ---
 
@@ -292,6 +293,15 @@ The PDF template is the hardest thing to get right visually, and it's the thing 
 - Compare: 5.0 kW, 16 m², 6.38 kWh/day, 9.60 kWh battery @10h, 66.46% discharge, $10,320 total, $2.08/Wp
 - PDF matches Jorge Ramírez reference visually and numerically
 
+### Beyond the original spec
+
+Real usage after the phase "completed" surfaced gaps the original spec didn't anticipate — closed as part of the same phase rather than deferred, since they change how the wizard actually sizes systems, not just how it looks:
+
+- **Load profile: taxonomy-driven estimation, not nameplate × assumed hours.** The original spec's "3-scenario buttons (Conservative/Optimal/Maximum)" approach was directly observed to overstate real consumption by 2–2.5x on a real quote. Replaced with a 5-category taxonomy (fixed/cycling, behavior-driven, climate-driven, discretionary, ignition-only) routing each load to a deterministic estimation method suited to what actually drives its energy use, with AI used only for bounded classification/extraction, never the energy math itself. Full design rationale: `tools/off-grid-wizard-load-profile-approach.md`. Implemented in `calculations/load_profile_off_grid.py`. See REQUIREMENTS.md changelog v3.6→v3.7.
+- **Real day-by-day battery simulation replaces flat discharge-%.** `simulate_battery_soc()` runs the site's actual PVGIS daily series against the battery bank across a full reference year (tracking real SoC, unmet-load days, longest low-SoC streak) instead of a single average-day discharge percentage — drives the Step 6 reliability-scenario picker.
+- **New solar-utilization/curtailment metric (both Off-Grid and Grid Zero).** What fraction of a year/month's generation is actually used vs. curtailed — a real, previously-invisible finding (e.g. an oversized array reads identical to a well-matched one on every other number). Surfaced in the wizard (Step 6 + Step 8) and the PDF (`DETALLES TÉCNICOS` gained an "Aprovechamiento solar" column). See REQUIREMENTS.md changelog v3.6→v3.7.
+- **Proposal PDF layout, both system types:** the monthly coverage chart moved from the end of the document to a first-class section right after the cost/technical summary (previously an appendix-like afterthought after Warranty Details); Off-Grid/Hybrid additionally keeps Notes/Warranty pinned tight against the footer via a CSS flexbox layout regardless of how much content precedes them. Full mechanics and the WeasyPrint-specific gotchas encountered: CONTEXT.md, 2026-07-31 entries.
+
 ---
 
 ## Phase 6 — Projects Module (5–6 days)
@@ -483,6 +493,103 @@ As of v3.4, every site in `monitoring.sites` is reachable by **one shared Supaba
 
 ---
 
+## Phase 10 — Site Register & Preventive Maintenance Scheduler (4–6 days, spans both products)
+
+**Goal:** Every installed system — Victron-monitored or not — has one durable record, and the tool tells you who's overdue for a maintenance visit. Replaces the manual `Registro de mantenimientos FV.xlsx` Google Sheet (analyzed 2026-07-18: 23 real installations across 12 clients, a rolling 365-days-from-last-visit due date computed per row, and a hand-built month-by-month "who's due when" dashboard on Google Sheets-only array formulas).
+
+### Why this phase exists
+
+The register currently lives in a spreadsheet with no connection to this tool's own data — a customer's `clients` row, their won `projects`, and their Victron `monitoring.sites` row (if any) are three separate identities today with no shared "this is one physical site" concept, and there's no computed overdue/due-soon status anywhere in the app.
+
+### Where this sits relative to other phases
+
+- UI hangs off the **Projects** nav item (decided over a top-level "Sitios" area or an Admin sub-tab), but the register itself is **not** scoped to a single `projects` row — most of the 23 real sites predate this tool and have no proposal/project history. `site_properties` / `monitoring.sites` are the anchor entities; a `projects` link is optional, not required.
+- Off the critical path, same as Phase 9 — no dependency on Phase 6 (Projects financial ledgers) being finished first, though it will likely land in the same nav tab once Phase 6 exists.
+- Touches the `monitoring` schema (Victron Monitor's territory) as well as `public` schema (solar tool's territory) — cross-product, like the weekly-report tariff-savings feature below.
+
+### Key modeling decision: site identity stays in `monitoring.sites`, only secrets and visit history move out
+
+`monitoring.sites` carries a blanket `GRANT ALL ... TO anon` with no RLS (documented gap, see Phase 9) because the anon key lives on physical field hardware (Cerbo GX devices). Only genuinely sensitive data needs to be walled off from that — panel/inverter/battery counts and dashboard URLs aren't secrets, so (refined 2026-07-18, after the initial split proved more cautious than necessary) they live directly on `monitoring.sites`:
+
+- **`monitoring.sites`** stays the single source of truth for site *identity* — one row per meter/device, Victron-monitored or not (confirmed via live query 2026-07-18: today it holds exactly 3 rows, `vista-atenas-lp-m1/m2/m3`, Lori Pickett's 3 Victron installations at one property, all still unlinked to any `client_id`). Gains: `property_id`, `panel_count`, `inverter_count`, `battery_count`, `monitoring_urls` (text[]). `latitude`/`longitude` already exist as columns — the 22 non-Victron sites just need them populated (see geocoding below).
+- **Only `credentials` and visit history stay off `monitoring.sites`**, in `public` schema (service_role only, same trust boundary as `clients`/`proposals`) — those are the two that either are secrets (plaintext WiFi/portal passwords) or are inherently one-to-many (a visit log can't be a column).
+- A property can span multiple `monitoring.sites` rows (one visit, one charge, covers every meter at that location — e.g. Lori Pickett's M1/M2/M3), but the same client's sites in different locations are separate properties with separate visit schedules (e.g. Karen Montealegre's 3 distinct properties in Santa Ana each get their own maintenance cycle).
+
+### Geocoding — reuse, don't rebuild
+
+`calculations/pvgis.py:geocode_cr(city, province)` (built in Phase 2 for the wizard's Site step) already does exactly this: a Costa Rica city lookup table, falling back to Nominatim. Ran it against all 22 xlsx locations (2026-07-18) — only Naranjo and Liberia hit the lookup table directly; the rest fall through to a live Nominatim call at import time (canton-centroid accuracy, not exact-address — acceptable for a maintenance register, not for anything needing precision).
+
+**Found a real bug to fix first:** `geocode_cr()`'s fallback strips the province and matches on city name alone when the exact `"city, province"` key misses. The lookup table's only `"san isidro"` entry is Pérez Zeledón's (San José) — but María Lía Artavia's site is "San Isidro, **Heredia**", ~150km away. There are at least 3 "San Isidro"s in Costa Rica. Fix before the import runs: add a province-qualified key to `_CR_LOOKUP`, or force this one row through Nominatim directly instead of the ambiguous fallback.
+
+### Tasks
+
+**Schema (`database/migrations/011_site_maintenance_register.sql`)**
+```sql
+ALTER TABLE monitoring.sites
+  ADD COLUMN IF NOT EXISTS property_id      uuid;  -- REFERENCES public.site_properties(id), added once that table exists
+ALTER TABLE monitoring.sites
+  ADD COLUMN IF NOT EXISTS panel_count      int;
+ALTER TABLE monitoring.sites
+  ADD COLUMN IF NOT EXISTS inverter_count   int;
+ALTER TABLE monitoring.sites
+  ADD COLUMN IF NOT EXISTS battery_count    int;
+ALTER TABLE monitoring.sites
+  ADD COLUMN IF NOT EXISTS monitoring_urls  text[];
+-- latitude/longitude already exist (migration 004) — no ALTER needed, just backfill values
+
+CREATE TABLE public.site_properties (
+  id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id                   uuid REFERENCES public.clients(id),
+  name                        text NOT NULL,
+  location                    text,
+  maintenance_interval_days   int NOT NULL DEFAULT 365,
+  created_at                  timestamptz DEFAULT now()
+);
+
+CREATE TABLE public.site_credentials (
+  site_id      text PRIMARY KEY REFERENCES monitoring.sites(site_id),
+  credentials  text,   -- service_role only; never GRANTed to anon
+  notes        text
+);
+
+CREATE TABLE public.maintenance_visits (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  property_id   uuid REFERENCES public.site_properties(id) ON DELETE CASCADE,
+  visit_date    date NOT NULL,
+  amount_usd    numeric(10,2),
+  technician    text,
+  notes         text,
+  created_at    timestamptz DEFAULT now()
+);
+```
+
+- `public.get_property_maintenance_status(property_id)` — Postgres function mirroring `monitoring.compute_daily_health()`'s pattern: reads `MAX(visit_date)` for the property (falls back to the earliest `commissioned_at` among its linked `monitoring.sites` rows if never visited), adds `maintenance_interval_days`, returns `{next_due_date, status}` where status is `overdue` / `due_soon` (within 30 days) / `up_to_date` — replaces the xlsx's `IF(P="","",P+365)` plus its red conditional-format rule.
+
+**One-time migration script (`tools/import_maintenance_register.py`)**
+- Fix the `geocode_cr()` San Isidro collision first (see above)
+- Reads `Registro de mantenimientos FV.xlsx` (`Proyectos FV` sheet) via openpyxl
+- Matches each `Cliente` to an existing `public.clients` row — all 12 are already paying customers, so log (don't silently create) any that fail to match
+- Groups rows into `site_properties` by (client, location)
+- **Skips Lori Pickett's 3 rows entirely** (`vista-atenas-lp-m1/m2/m3` already exist) — only backfills their `property_id`, `client_id` (currently null), and geocoded coordinates if missing
+- Inserts a `monitoring.sites` row for each of the other 22 xlsx rows: mints a slug `site_id` from the `Proyecto` name (e.g. `karen-montealegre-guarda`), fills `panel_count`/`inverter_count`/`battery_count` directly from the xlsx counts, geocodes `location` via `geocode_cr()` into `latitude`/`longitude`, sets `system_type = 'hybrid'` if `battery_count > 0` else `'grid_zero'` (confirmed 2026-07-18: 15 of the 22 have no battery), leaves Victron-only columns (`health_thresholds`, `app_script_url`, etc.) at their defaults since these aren't monitored
+- Converts every populated yearly `Fecha`/`Monto` cell (2021–2026 columns in the xlsx) into one `maintenance_visits` row
+- Flags the `Credenciales` cell contents for manual review in a dry-run/print-only pass before writing anything to `public.site_credentials` — no blind import of plaintext WiFi/portal passwords
+
+**UI**
+- New tab reachable from the Projects nav — not nested inside a single project's detail page, since it needs to list every property regardless of whether a `projects` record exists
+- Overdue list (red) + upcoming-by-month view, replacing the `Cronograma` sheet's manual calendar
+- Property detail: linked `monitoring.sites` rows (with panel/inverter/battery counts, monitoring URLs shown inline), visit history, "log a visit" form
+- Credentials field rendered only within the Streamlit session (already single-user/service_role — no new exposure beyond what the app already holds), fetched from `public.site_credentials` separately from the rest of the site row
+
+**Validation**
+- Run the import script in dry-run mode; confirm the 22 new `monitoring.sites` rows + property groupings match the xlsx 1:1 (client, location, panel/inverter/battery counts, system_type)
+- Confirm geocoded coordinates are sane per row (spot-check against Google Maps for the province), and specifically confirm Hacienda Zurquí lands in Heredia, not Pérez Zeledón
+- Confirm Lori Pickett's existing 3 rows keep their original `id`/`created_at` after import, and end up with the correct `client_id`
+- Confirm `get_property_maintenance_status()` reproduces the xlsx's current overdue flags for every property (cross-check against the `Cronograma` sheet's red-highlighted rows)
+- Log a new visit for a test property, confirm status flips from overdue → up_to_date and `next_due_date` recalculates
+
+---
+
 ## Future — Victron weekly-report tariff savings (separate product, not scheduled)
 
 **Goal:** the Victron weekly PDF + email show an **estimated savings** figure for the customer, instead of the current "coming soon" placeholder.
@@ -510,10 +617,12 @@ Belongs to `victron-monitor/`, not the solar tool's roadmap. Cross-product: the 
 | 7 | Admin + polish | 3–4 | Week 11 |
 | 8 | QA + handoff | 2–3 | Week 11–12 |
 | 9 | Victron Monitor multi-tenant hardening | 3–5 | Whenever needed — independent of 0–8 |
+| 10 | Site register & maintenance scheduler | 4–6 | Whenever needed — independent of 0–9 |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
-**Victron Monitor sellable to external customers:** End of Phase 9, triggered by business need (first external customer), not by calendar time
+**Victron Monitor sellable to external customers:** End of Phase 9, triggered by business need (first external customer), not by calendar time  
+**Site register replaces the maintenance spreadsheet:** End of Phase 10, triggered by whenever you want off the manual xlsx, not by calendar time
 
 These are part-time estimates assuming 2–3 focused hours per day alongside client work. If you have a full week free, Phase 0+1 can be done in 3 days.
 
@@ -544,6 +653,8 @@ Phase 7 + 8 (admin + QA) ← always last
 Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Grid proposal urgent before the AI features are done, do Phase 5 first.
 
 **Phase 9 is off this critical path entirely.** It belongs to Victron Monitor, a separate product sharing this repo and Supabase project — not a step in the solar tool's proposal/projects/admin roadmap. Trigger it by business need (onboarding the first external Victron Monitor customer), not by sequence.
+
+**Phase 10 is also off this critical path.** It spans both products (extends `monitoring.sites`, adds new `public` schema tables) and its UI hangs off the Projects nav item without depending on Phase 6 being built. Trigger it whenever you're ready to retire the manual maintenance spreadsheet.
 
 ---
 

@@ -114,23 +114,6 @@ body {
 .gt td.left  { text-align: left; }
 .gt td.right { text-align: right; }
 
-/* "Cálculos esperados" label row above billing columns */
-.calc-label-cell {
-  background: #fff;
-  border: none;
-  padding: 0;
-}
-.calc-label-text {
-  background: #fff;
-  color: #555;
-  font-weight: normal;
-  font-style: italic;
-  font-size: 6pt;
-  text-align: right;
-  border: none;
-  padding: 0 2pt 1pt 0;
-}
-
 /* ── COST TABLE ─────────────────────────────────────────────────────────── */
 .cost-table { margin-bottom: 3pt; }
 .cost-table th.th-item  { width: 27%; text-align: left; }
@@ -148,11 +131,11 @@ body {
 .cost-subtotal td { color: #666; }
 
 /* ── TECHNICAL + SUMMARY (partial-width tables) ─────────────────────────── */
-.tech-wrap { margin-bottom: 3pt; }
 .tech-table {
-  width: 68%;
+  width: 80%;
   border-collapse: collapse;
   font-size: 6.5pt;
+  margin-bottom: 3pt;
 }
 .tech-table th {
   background: #4BAE6A;
@@ -170,7 +153,7 @@ body {
 }
 
 .summary-table {
-  width: 30%;
+  width: 45%;
   border-collapse: collapse;
   font-size: 6.5pt;
   margin-bottom: 3pt;
@@ -354,9 +337,30 @@ body {
   line-height: 1.35;
   text-align: center;
 }
+
+/* ── BOTTOM-PINNED GENERAL INFO ─────────────────────────────────────────── */
+/* .page-wrap holds everything except the fixed footer, sized to exactly one
+   page's content box (A4 841.89pt − top margin 21.26pt − bottom margin
+   76.54pt = 744.09pt, see @page above). .bottom-group (Notas/Garantía)
+   gets margin-top:auto, which a flex column resolves by consuming all
+   left-over space above it — so on a normal-length proposal it sits flush
+   against the footer instead of floating in the middle of the page with a
+   dead gap below it. On a proposal heavy enough to need a 2nd page, this
+   degrades gracefully to plain top-down flow (min-height stops applying
+   once content exceeds it, so nothing overlaps or gets clipped).
+*/
+.page-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 744pt;
+}
+.bottom-group {
+  margin-top: auto;
+}
 </style>
 </head>
 <body>
+<div class="page-wrap">
 
 <!-- ── HEADER ────────────────────────────────────────────────────────────── -->
 <div class="header">
@@ -374,7 +378,6 @@ body {
   {% if quote_number %}<tr><td class="lbl">N° COTIZACIÓN:</td><td>{{ quote_number }}</td></tr>{% endif %}
   <tr><td class="lbl">CLIENTE:</td><td>{{ client.name }}</td></tr>
   <tr><td class="lbl">UBICACIÓN:</td><td>{{ client.location }}</td></tr>
-  <tr><td class="lbl">NISE:</td><td>{{ client.nise }}</td></tr>
   <tr><td class="lbl">FECHA:</td><td>{{ date }}</td></tr>
   <tr><td class="lbl">SISTEMA:</td><td>{{ system_type_label }}</td></tr>
 </table>
@@ -385,66 +388,6 @@ body {
   <p style="margin:0 0 2pt 0;">{{ line }}</p>
   {% endfor %}
 </div>
-
-<!-- ── FACTURACIÓN MENSUAL PROMEDIO ─────────────────────────────────────── -->
-<div class="section-row">
-  <span class="section-title">FACTURACIÓN MENSUAL PROMEDIO</span>
-</div>
-<table class="gt">
-  <thead>
-    <tr>
-      <th colspan="3" class="calc-label-text" style="text-align:center;">Escenario actual</th>
-      <th colspan="4" class="calc-label-text">Cálculos esperados</th>
-    </tr>
-    <tr>
-      <th style="width:10%;">Mes</th>
-      <th style="width:15%;">Consumo<br>actual (kWh)</th>
-      <th style="width:15%;">Factura actual</th>
-      <th style="width:15%;">Generación<br>esperada (kWh)</th>
-      <th style="width:15%;">Nuevo<br>consumo (kWh)</th>
-      <th style="width:15%;">Nueva factura</th>
-      <th style="width:15%;">Ahorro</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>Promedio</td>
-      <td>{{ billing_avg.consumption_kwh }}</td>
-      <td>{{ billing_avg.bill_crc }}</td>
-      <td>{{ billing_avg.generation_kwh }}</td>
-      <td>{{ billing_avg.new_consumption_kwh }}</td>
-      <td>{{ billing_avg.new_bill_crc }}</td>
-      <td>{{ billing_avg.savings_crc }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- ── BENEFICIOS ────────────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">BENEFICIOS A CORTO / MEDIANO / LARGO PLAZO</span></div>
-<table class="gt">
-  <thead>
-    <tr>
-      <th style="width:12%;">Ahorro<br>durante el<br>primer año</th>
-      <th style="width:11%;">Ahorro en<br>25 años</th>
-      <th style="width:9%;">Tasa Interna<br>de Retorno<br>(TIR)</th>
-      <th style="width:8%;">Retorno de<br>Inversión<br>(ROI)</th>
-      <th style="width:9%;">Reducción<br>mensual<br>en factura</th>
-      <th style="width:11%;">Ahorro<br>promedio<br>mensual</th>
-      <th style="width:40%;">Notas</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ benefits.savings_year1 }}</td>
-      <td>{{ benefits.savings_25yr }}</td>
-      <td>{{ benefits.irr }}</td>
-      <td>{{ benefits.roi }}</td>
-      <td>{{ benefits.pct_savings }}</td>
-      <td>{{ benefits.avg_monthly_savings }}</td>
-      <td class="left" style="font-size:6pt;">{{ benefits.notes }}</td>
-    </tr>
-  </tbody>
-</table>
 
 <!-- ── DETALLES DE COSTOS ─────────────────────────────────────────────────── -->
 <div class="section-row"><span class="section-title">DETALLES DE COSTOS</span></div>
@@ -489,36 +432,36 @@ body {
 
 <!-- ── DETALLES TÉCNICOS ──────────────────────────────────────────────────── -->
 <div class="section-row"><span class="section-title">DETALLES TÉCNICOS</span></div>
-<div class="tech-wrap">
-  <table class="tech-table">
-    <thead>
-      <tr>
-        <th>Potencia<br>instalada (kW)</th>
-        <th>Área de techo<br>(m2)</th>
-        <th>Paneles<br>solares</th>
-        <th>Inversores</th>
-        <th>Aprovechamiento<br>solar</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>{{ technical.system_kw }}</td>
-        <td>{{ technical.area_m2 }}</td>
-        <td>{{ technical.panel_count }}</td>
-        <td>{{ technical.inverter_count }}</td>
-        <td>{{ technical.self_consumption_pct }}</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+<table class="tech-table">
+  <thead>
+    <tr>
+      <th>Potencia<br>instalada (kW)</th>
+      <th>Área de techo<br>(m2)</th>
+      <th>Energía diaria<br>estimada (kWh)</th>
+      <th>Capacidad de<br>batería @10h (kWh)</th>
+      <th>Descarga máxima<br>de batería</th>
+      <th>Aprovechamiento<br>solar</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ technical.system_kw }}</td>
+      <td>{{ technical.area_m2 }}</td>
+      <td>{{ technical.daily_generation_kwh }}</td>
+      <td>{{ technical.battery_kwh }}</td>
+      <td>{{ technical.discharge_pct }}</td>
+      <td>{{ technical.utilization_pct }}</td>
+    </tr>
+  </tbody>
+</table>
 
 <!-- ── RESUMEN ────────────────────────────────────────────────────────────── -->
 <div class="section-row"><span class="section-title">RESUMEN</span></div>
 <table class="summary-table">
   <thead>
     <tr>
-      <th style="width:65%;">Total</th>
-      <th style="width:35%;">$/Wp</th>
+      <th style="width:50%;">Total</th>
+      <th style="width:50%;">Precio $/Wp</th>
     </tr>
   </thead>
   <tbody>
@@ -538,6 +481,7 @@ body {
 </div>
 {% endif %}
 
+<div class="bottom-group">
 <!-- ── NOTAS ADICIONALES ──────────────────────────────────────────────────── -->
 <div class="section-row"><span class="section-title">NOTAS ADICIONALES</span></div>
 <ul class="notes-list">
@@ -590,6 +534,11 @@ body {
       <td class="wleft">Contra defectos de fábrica</td>
     </tr>
     <tr>
+      <td class="wleft">Baterías</td>
+      <td>{{ warranty_battery_years }}</td>
+      <td class="wleft">Contra defectos de fábrica</td>
+    </tr>
+    <tr>
       <td class="wleft">Instalación</td>
       <td>3 años</td>
       <td class="wleft">Contra defectos de cableado y montaje</td>
@@ -602,6 +551,8 @@ body {
   </tbody>
 </table>
 
+</div>
+</div>
 <!-- ── PIE DE PÁGINA FIJO ────────────────────────────────────────────────── -->
 <div class="footer-wrap">
   <div class="footer-card">

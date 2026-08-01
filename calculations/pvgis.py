@@ -12,11 +12,17 @@ def _cache_key(lat: float, lon: float) -> str:
     return f"pvgis_{lat:.3f}_{lon:.3f}"
 
 
-def get_cached_irradiance(lat: float, lon: float) -> dict | None:
-    """Return cached PVGIS data for this lat/lon, or None if not cached."""
+def _cache_key_daily(lat: float, lon: float) -> str:
+    # Separate row from the monthly cache: different endpoint/shape/payload
+    # size, and the daily series may need to be refetched independently
+    # (e.g. if the chosen reference year later changes) without disturbing
+    # the monthly cache every other part of the app already depends on.
+    return f"pvgis_daily_{lat:.3f}_{lon:.3f}"
+
+
+def _get_cached(key: str) -> dict | None:
     from database.supabase_client import get_client
 
-    key = _cache_key(lat, lon)
     try:
         result = (
             get_client()
@@ -34,10 +40,9 @@ def get_cached_irradiance(lat: float, lon: float) -> dict | None:
     return None
 
 
-def _store_cache(lat: float, lon: float, data: dict) -> None:
+def _store_cache_at(key: str, data: dict) -> None:
     from database.supabase_client import get_client
 
-    key = _cache_key(lat, lon)
     payload = {
         "key": key,
         "value": json.dumps(data),
@@ -47,6 +52,15 @@ def _store_cache(lat: float, lon: float, data: dict) -> None:
         get_client().table("app_settings").upsert(payload, on_conflict="key").execute()
     except Exception:
         pass
+
+
+def get_cached_irradiance(lat: float, lon: float) -> dict | None:
+    """Return cached PVGIS monthly data for this lat/lon, or None if not cached."""
+    return _get_cached(_cache_key(lat, lon))
+
+
+def _store_cache(lat: float, lon: float, data: dict) -> None:
+    _store_cache_at(_cache_key(lat, lon), data)
 
 
 def fetch_irradiance(lat: float, lon: float) -> dict:
@@ -80,6 +94,7 @@ def fetch_irradiance(lat: float, lon: float) -> dict:
     monthly = raw["outputs"]["monthly"]["fixed"]
     totals = raw["outputs"]["totals"]["fixed"]
     inputs_meta = raw.get("inputs", {})
+    meteo = inputs_meta.get("meteo_data", {})
 
     result = {
         "monthly_kwh_kwp": [m["E_m"] for m in monthly],
@@ -87,9 +102,93 @@ def fetch_irradiance(lat: float, lon: float) -> dict:
         "optimal_angle": inputs_meta.get("mounting_system", {}).get("fixed", {}).get("slope", {}).get("value", 10),
         "location_name": f"{lat:.3f}, {lon:.3f}",
         "fetched_at": datetime.now(timezone.utc).isoformat(),
+        # PVGIS's available historical-year range at this location (varies by
+        # radiation database — e.g. PVGIS-NSRDB tops out well before
+        # PVGIS-SARAH2's range). fetch_daily_series() needs this to pick a
+        # real, in-range year for its hourly request instead of guessing.
+        "year_min": meteo.get("year_min"),
+        "year_max": meteo.get("year_max"),
     }
 
     _store_cache(lat, lon, result)
+    return result
+
+
+def fetch_daily_series(lat: float, lon: float) -> dict:
+    """
+    Real daily generation series for one representative historical year, for
+    battery-SoC simulation — as opposed to fetch_irradiance()'s multi-year
+    *monthly averages*, which flatten away the day-to-day and multi-day-streak
+    variability a real reliability simulation needs (see
+    calculations/sizing_off_grid.py: simulate_battery_soc()).
+
+    Uses PVGIS's `seriescalc` endpoint for actual hourly PV output (not the
+    "typical meteorological year" construction, which splices together
+    different real months from different years and so would erase real
+    cross-month cloudy streaks) for a single real year, aggregated here into
+    365 daily kWh/kWp totals. Same PV-model params as fetch_irradiance() (same
+    loss/mounting/tech) so the two series stay comparable.
+
+    Caches in Supabase under a separate key from the monthly cache. Returns
+    dict with keys: daily_kwh_kwp (list[365]), year (int), location_name,
+    fetched_at.
+    """
+    key = _cache_key_daily(lat, lon)
+    cached = _get_cached(key)
+    if cached:
+        return cached
+
+    monthly = fetch_irradiance(lat, lon)
+    year = monthly.get("year_max") or 2015  # last-resort fallback if an older cache row predates year_max
+
+    def _request(y: int):
+        return requests.get(
+            f"{PVGIS_API_BASE}/seriescalc",
+            params={
+                "lat": lat,
+                "lon": lon,
+                "peakpower": 1,
+                "loss": 14,
+                "outputformat": "json",
+                "pvcalculation": 1,
+                "mountingplace": "free",
+                "pvtechchoice": "crystSi",
+                "startyear": y,
+                "endyear": y,
+            },
+            timeout=30,
+        )
+
+    resp = _request(year)
+    if resp.status_code == 400:
+        # Stale/missing year_max (e.g. a monthly cache row from before this
+        # field existed) can point outside the range this location's
+        # radiation database actually covers. PVGIS's own error message names
+        # the real bounds, so parse it once and retry instead of failing.
+        try:
+            msg = resp.json().get("message", "")
+            digits = [int(t) for t in msg.replace("and", " ").split() if t.isdigit()]
+            if len(digits) >= 2:
+                year = digits[-1]
+                resp = _request(year)
+        except Exception:
+            pass
+    resp.raise_for_status()
+    raw = resp.json()
+
+    daily_wh: dict[str, float] = {}
+    for h in raw["outputs"]["hourly"]:
+        day = h["time"].split(":")[0]
+        daily_wh[day] = daily_wh.get(day, 0.0) + h["P"]
+
+    result = {
+        "daily_kwh_kwp": [round(v / 1000, 3) for _, v in sorted(daily_wh.items())],
+        "year": year,
+        "location_name": f"{lat:.3f}, {lon:.3f}",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _store_cache_at(key, result)
     return result
 
 

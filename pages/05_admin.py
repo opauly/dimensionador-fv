@@ -554,7 +554,7 @@ def _client_sites_linker(client: dict) -> None:
         st.caption("No hay sitios registrados en Victron Monitor.")
         return
 
-    st.markdown("###### 🔗 Sitios de Victron Monitor vinculados")
+    st.markdown("###### Proyectos vinculados:")
     for s in sites:
         linked = s.get("client_id") == client["id"]
         checked = st.checkbox(

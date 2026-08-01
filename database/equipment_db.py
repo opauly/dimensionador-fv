@@ -78,7 +78,26 @@ def delete_inverter(inverter_id: str) -> None:
 
 
 def list_batteries() -> list[dict]:
-    raise NotImplementedError("Phase 5")
+    result = (
+        get_client()
+        .table("batteries")
+        .select("id, brand, model, chemistry, capacity_kwh, capacity_ah, voltage_v, dod_pct, cycles, warranty_yr, cost_usd, notes")
+        .order("brand")
+        .execute()
+    )
+    return result.data or []
+
+
+def get_battery(battery_id: str) -> dict | None:
+    result = (
+        get_client()
+        .table("batteries")
+        .select("*")
+        .eq("id", battery_id)
+        .single()
+        .execute()
+    )
+    return result.data
 
 
 def upsert_battery(data: dict) -> dict:
@@ -86,7 +105,26 @@ def upsert_battery(data: dict) -> dict:
 
 
 def list_charge_controllers() -> list[dict]:
-    raise NotImplementedError("Phase 5")
+    result = (
+        get_client()
+        .table("charge_controllers")
+        .select("id, brand, model, type, vin_max, vout, imax_in, imax_out, cost_usd, notes")
+        .order("brand")
+        .execute()
+    )
+    return result.data or []
+
+
+def get_charge_controller(charge_controller_id: str) -> dict | None:
+    result = (
+        get_client()
+        .table("charge_controllers")
+        .select("*")
+        .eq("id", charge_controller_id)
+        .single()
+        .execute()
+    )
+    return result.data
 
 
 def upsert_charge_controller(data: dict) -> dict:

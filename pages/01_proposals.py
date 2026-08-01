@@ -108,6 +108,42 @@ a.vrow-pill-btn:hover {
     border-color: #4BAE6A;
     color: #4BAE6A;
 }
+/* Detail-panel action buttons — brand navy instead of default Streamlit grey */
+.st-key-det_continuar_wrap button {
+    background-color: #1E2D54 !important;
+    border-color: #1E2D54 !important;
+    color: #ffffff !important;
+}
+.st-key-det_continuar_wrap button:hover:not(:disabled) {
+    background-color: #16213f !important;
+    border-color: #16213f !important;
+    color: #ffffff !important;
+}
+.st-key-det_continuar_wrap button:disabled {
+    background-color: #e2e8f0 !important;
+    border-color: #e2e8f0 !important;
+    color: #94a3b8 !important;
+}
+.st-key-det_newv_wrap button {
+    background-color: transparent !important;
+    border-color: #1E2D54 !important;
+    color: #1E2D54 !important;
+}
+.st-key-det_newv_wrap button:hover:not(:disabled) {
+    background-color: #eef1f6 !important;
+}
+.st-key-det_newv_wrap button:disabled {
+    border-color: #e2e8f0 !important;
+    color: #94a3b8 !important;
+}
+/* Detail-panel outer border — a real container, not the old open/close-div hack */
+.st-key-det_panel_wrap {
+    border: 1.5px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 14px 16px 12px;
+    margin: 4px 0 8px;
+    background: white;
+}
 </style>
 """
 
@@ -174,13 +210,17 @@ def _generate_pdf_bytes(vid: str, proposal: dict, vquote: str) -> bytes | None:
         return None
 
 
-def _badge(status: str) -> str:
-    label, bg, fg = STATUS_BADGE.get(status, ("—", "#f1f5f9", "#64748b"))
+def _pill(label: str, bg: str, fg: str) -> str:
     return (
         f'<span style="display:inline-flex;align-items:center;height:20px;padding:0 9px;'
         f'border-radius:10px;font-size:0.7rem;font-weight:600;background:{bg};color:{fg};">'
         f'{label}</span>'
     )
+
+
+def _badge(status: str) -> str:
+    label, bg, fg = STATUS_BADGE.get(status, ("—", "#f1f5f9", "#64748b"))
+    return _pill(label, bg, fg)
 
 
 # ── Table row (HTML content column + selector button) ─────────────────────────
@@ -285,19 +325,13 @@ def _render_detail_panel(proposal: dict) -> None:
     total_str = f"${vtotal:,.0f}" if vtotal else "—"
     note_str  = f"— {vnote}" if vnote else "—"
 
-    with st.container():
-        st.markdown(
-            '<div style="border:1.5px solid #bfdbfe;border-radius:8px;'
-            'padding:14px 16px 12px;margin:4px 0 8px;background:white;">',
-            unsafe_allow_html=True,
-        )
-
+    with st.container(key="det_panel_wrap"):
         dl_state_key = f"pdf_bytes_{vid}"
         vpdf         = cur_ver.get("pdf_path")
         note_suffix  = f" · {vnote}" if vnote else ""
 
-        # ── Layout: [title+flow col] | divider | [b1 Continuar] [b2 Nueva] ─
-        t_col, _sep, b1, b2 = st.columns([3, 0.03, 1.5, 1.5])
+        # ── Layout: [title+flow col] | [b1 Continuar] [b2 Nueva] ─
+        t_col, b1, b2 = st.columns([3, 1.5, 1.5])
 
         with t_col:
             badge_html = _badge(status)
@@ -342,26 +376,22 @@ def _render_detail_panel(proposal: dict) -> None:
                     unsafe_allow_html=True,
                 )
 
-        with _sep:
-            st.markdown(
-                '<div style="border-left:1px solid #cbd5e1;height:60px;margin:0 auto;width:1px;"></div>',
-                unsafe_allow_html=True,
-            )
-
-        # b1 — Continuar (active when unlocked)
+        # b1 — Continuar (active when unlocked) — solid navy, primary action
         with b1:
-            if st.button("✏️ Continuar", key=f"det_open_{vid}",
-                         disabled=vlocked, use_container_width=True):
-                _open_version(pid, vid)
+            with st.container(key="det_continuar_wrap"):
+                if st.button("Continuar", key=f"det_open_{vid}",
+                             disabled=vlocked, use_container_width=True):
+                    _open_version(pid, vid)
 
-        # b2 — Nueva versión (active when locked)
+        # b2 — Nueva versión (active when locked) — navy outline, secondary action
         with b2:
-            if st.button("📋 Nueva versión", key=f"det_newv_{vid}",
-                         disabled=not vlocked, use_container_width=True):
-                try:
-                    _new_version_from(pid, vid)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+            with st.container(key="det_newv_wrap"):
+                if st.button("Nueva versión", key=f"det_newv_{vid}",
+                             disabled=not vlocked, use_container_width=True):
+                    try:
+                        _new_version_from(pid, vid)
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
         # ── Versions ──────────────────────────────────────────────────────────
         st.markdown(
@@ -376,8 +406,6 @@ def _render_detail_panel(proposal: dict) -> None:
         else:
             for v in reversed(versions):
                 _render_version_row_compact(v, proposal)
-
-        st.markdown('</div>', unsafe_allow_html=True)
 
 
 def _render_version_row_compact(v: dict, proposal: dict) -> None:
@@ -394,16 +422,17 @@ def _render_version_row_compact(v: dict, proposal: dict) -> None:
     vquote   = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), vnum)
 
     vtotal_str   = f"${vtotal:,.0f}" if vtotal else "—"
-    lock_icon    = "🔒 Bloqueada" if vlocked else "✏️ Borrador"
-    sent_str     = " · 📤 Enviada" if vsent else ""
-    note_str     = f" · {vnote}" if vnote else ""
+    lock_badge   = _pill("Bloqueada", "#f1f5f9", "#64748b") if vlocked else _pill("Borrador", "#fef9c3", "#a16207")
+    sent_badge   = " " + _pill("Enviada", "#dbeafe", "#1d4ed8") if vsent else ""
+    note_html    = f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:2px;">{vnote}</div>' if vnote else ""
     dl_state_key = f"pdf_bytes_{vid}"
 
     rc1, rc2, _gap, rc3 = st.columns([3, 1, 0.25, 0.9])
     with rc1:
         st.markdown(
             f'<div style="font-size:0.78rem;font-weight:600;color:#1e293b;padding:3px 0;">{vquote}</div>'
-            f'<div style="font-size:0.7rem;color:#94a3b8;">{lock_icon}{sent_str}{note_str}</div>',
+            f'<div style="padding:2px 0;">{lock_badge}{sent_badge}</div>'
+            f'{note_html}',
             unsafe_allow_html=True,
         )
     with rc2:
@@ -418,7 +447,7 @@ def _render_version_row_compact(v: dict, proposal: dict) -> None:
                 url = _signed_url(vpdf)
                 if url:
                     st.markdown(
-                        f'<a href="{url}" target="_blank" rel="noopener" class="vrow-pill-btn">⬇ PDF</a>',
+                        f'<a href="{url}" target="_blank" rel="noopener" class="vrow-pill-btn">PDF</a>',
                         unsafe_allow_html=True,
                     )
             elif dl_state_key in st.session_state:
@@ -426,11 +455,11 @@ def _render_version_row_compact(v: dict, proposal: dict) -> None:
                 b64 = _b64.b64encode(st.session_state[dl_state_key]).decode()
                 st.markdown(
                     f'<a href="data:application/pdf;base64,{b64}" download="{vquote}.pdf"'
-                    f' class="vrow-pill-btn">⬇ PDF</a>',
+                    f' class="vrow-pill-btn">PDF</a>',
                     unsafe_allow_html=True,
                 )
             else:
-                choice = st.pills("", ["📄 Generar"], key=f"v_gen_{vid}",
+                choice = st.pills("", ["Generar PDF"], key=f"v_gen_{vid}",
                                   label_visibility="collapsed")
                 if choice is not None:
                     st.session_state.pop(f"v_gen_{vid}", None)
@@ -458,7 +487,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
     with bcol:
-        if st.button("➕ Nueva", type="primary", key="p1_new",
+        if st.button("Nueva cotización", type="primary", key="p1_new",
                      use_container_width=True):
             _clear_wizard()
             st.switch_page("pages/02_new_proposal.py")
@@ -499,30 +528,57 @@ def main() -> None:
 
     if not proposals:
         st.info("No hay cotizaciones. Crea una nueva con el botón de arriba.")
-        return
+    else:
+        st.caption(f"{len(proposals)} cotización(es)")
+        st.write("")
 
-    st.caption(f"{len(proposals)} cotización(es)")
+        # ── Table ─────────────────────────────────────────────────────────────
+        # Header spans 16/17 of the width (matching the content_col in _render_row)
+        hdr_col, _ = st.columns([16, 1])
+        with hdr_col:
+            st.markdown(_HEADER_HTML, unsafe_allow_html=True)
+
+        selected_pid = st.session_state.get("p1_selected_pid")
+
+        for proposal in proposals:
+            pid         = proposal["id"]
+            is_selected = pid == selected_pid
+
+            clicked = _render_row(proposal, is_selected)
+            if clicked:
+                st.session_state["p1_selected_pid"] = None if is_selected else pid
+                st.rerun()
+
+            if is_selected:
+                _render_detail_panel(proposal)
+
     st.write("")
+    st.write("")
+    _render_test_pdf_panel()
 
-    # ── Table ─────────────────────────────────────────────────────────────────
-    # Header spans 16/17 of the width (matching the content_col in _render_row)
-    hdr_col, _ = st.columns([16, 1])
-    with hdr_col:
-        st.markdown(_HEADER_HTML, unsafe_allow_html=True)
 
-    selected_pid = st.session_state.get("p1_selected_pid")
+def _render_test_pdf_panel() -> None:
+    """Discreet dev tool: generate a sample PDF per system type without going through the wizard."""
+    with st.expander("🧪 Generar PDF de prueba", expanded=False):
+        from proposals.generator import generate_pdf, MARIA_JOSE_DATA, JORGE_RAMIREZ_DATA, HYBRID_DATA
 
-    for proposal in proposals:
-        pid         = proposal["id"]
-        is_selected = pid == selected_pid
+        sample_data = {
+            "Grid Zero": ("grid_zero", MARIA_JOSE_DATA, "muestra_grid_zero"),
+            "Off-Grid":  ("off_grid",  JORGE_RAMIREZ_DATA, "muestra_off_grid"),
+            "Híbrido":   ("hybrid",    HYBRID_DATA, "muestra_hibrido"),
+        }
+        sys_label = st.radio("Tipo de sistema", list(sample_data.keys()), horizontal=True, key="p1_test_pdf_type")
+        system_type, data, filename_base = sample_data[sys_label]
 
-        clicked = _render_row(proposal, is_selected)
-        if clicked:
-            st.session_state["p1_selected_pid"] = None if is_selected else pid
-            st.rerun()
-
-        if is_selected:
-            _render_detail_panel(proposal)
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Generar — Español", key="p1_test_pdf_es"):
+                pdf = generate_pdf(data, system_type, "es")
+                st.download_button("⬇ Descargar ES", pdf, f"{filename_base}_es.pdf", "application/pdf", key="p1_test_pdf_dl_es")
+        with col2:
+            if st.button("Generar — English", key="p1_test_pdf_en"):
+                pdf = generate_pdf(data, system_type, "en")
+                st.download_button("⬇ Download EN", pdf, f"{filename_base}_en.pdf", "application/pdf", key="p1_test_pdf_dl_en")
 
 
 main()

@@ -5,7 +5,7 @@
 <style>
 @page {
   size: A4;
-  margin: 0.75cm 1.2cm 0.75cm 1.2cm;
+  margin: 0.75cm 1.2cm 2.7cm 1.2cm;
 }
 
 * { box-sizing: border-box; }
@@ -15,7 +15,7 @@ body {
   font-size: 7pt;
   color: #222;
   margin: 0;
-  padding: 0 0 60pt 0;
+  padding: 0;
   line-height: 1.15;
 }
 
@@ -31,16 +31,17 @@ body {
   font-weight: bold;
   color: #1E2D54;
   line-height: 1;
-  margin-bottom: 1pt;
+  display: inline-block;
+  border-bottom: 2.5pt solid #4BAE6A;
+  padding-bottom: 2pt;
 }
 .title-solar {
+  display: block;
   font-size: 13pt;
   font-weight: bold;
   color: #4BAE6A;
-  display: inline-block;
-  border-bottom: 2.5pt solid #4BAE6A;
-  padding-bottom: 1pt;
   line-height: 1.15;
+  margin-top: 3pt;
 }
 .header-logo img {
   height: 40pt;
@@ -75,7 +76,7 @@ body {
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 1pt;
-  margin-top: 6pt;
+  margin-top: 4pt;
 }
 .section-title {
   font-weight: bold;
@@ -138,10 +139,11 @@ body {
   border-top: 1pt solid #888;
   background: #f9f9f9;
 }
+.cost-subtotal td { color: #666; }
 
 .tech-wrap { margin-bottom: 3pt; }
 .tech-table {
-  width: 56%;
+  width: 68%;
   border-collapse: collapse;
   font-size: 6.5pt;
 }
@@ -185,7 +187,7 @@ body {
   list-style: none;
   margin: 1pt 0 2pt 0;
   padding: 0;
-  font-size: 6.5pt;
+  font-size: 5.5pt;
 }
 .notes-list li::before {
   content: "·  ";
@@ -221,7 +223,7 @@ body {
 .warranty-table {
   width: 68%;
   border-collapse: collapse;
-  font-size: 6.5pt;
+  font-size: 5.5pt;
   margin-bottom: 3pt;
 }
 .warranty-table th {
@@ -233,7 +235,7 @@ body {
   border: 0.5pt solid #3d9a5c;
 }
 .warranty-table td {
-  padding: 1.5pt 4pt;
+  padding: 0.5pt 4pt;
   border: 0.5pt solid #ccc;
   text-align: center;
   vertical-align: middle;
@@ -243,15 +245,9 @@ body {
 /* ── PINNED FOOTER ──────────────────────────────────────────────────────────── */
 .footer-wrap {
   position: fixed;
-  bottom: 0;
+  bottom: -1.95cm;   /* sits inside the reserved @page bottom margin */
   left: 0;
   right: 0;
-}
-.footer-heading {
-  font-size: 6pt;
-  font-weight: bold;
-  color: #4BAE6A;
-  margin-bottom: 1pt;
 }
 .footer-card {
   display: flex;
@@ -317,6 +313,36 @@ body {
   font-size: 6.5pt;
   color: #555;
   margin-top: 2pt;
+}
+.coverage-chart {
+  max-width: 320pt;
+  margin: 2pt auto 1pt auto;
+  /* Only the chart image itself is protected from splitting across a page
+     boundary — NOT the whole heading+chart+caption group (that used to be
+     .coverage-block's rule). Protecting the whole group meant that if it
+     didn't fit in the space remaining on the page, WeasyPrint pushed the
+     entire block to the next page, wasting whatever room was left and
+     dragging every section after it down too — the cause of a real 1-page
+     proposal ballooning to 2 pages with a near-empty page 2 after this
+     section was moved earlier in the doc (see CONTEXT.md 2026-07-31). Only
+     protecting the SVG itself lets the heading/caption flow normally.
+  */
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.coverage-note {
+  max-width: 320pt;
+  margin: 0 auto 10pt auto;
+  /* Deliberately larger than the tight rhythm used everywhere else — this is
+     the one intentional gap on the page, marking the transition from
+     proposal/design content (Costos, Técnicos, Resumen, Cobertura) to
+     general administrative info (Notas, Garantía), which sits close to the
+     footer with its own tight rhythm (see CONTEXT.md 2026-07-31).
+  */
+  font-size: 6pt;
+  color: #6B7280;
+  line-height: 1.35;
+  text-align: center;
 }
 </style>
 </head>
@@ -430,6 +456,18 @@ body {
       <td class="td-total">{{ item.total }}</td>
     </tr>
     {% endfor %}
+    <tr class="cost-subtotal">
+      <td class="td-item">Subtotal (excl. VAT)</td>
+      <td></td>
+      <td></td>
+      <td class="td-total">{{ subtotal_usd }}</td>
+    </tr>
+    <tr class="cost-subtotal">
+      <td class="td-item">VAT</td>
+      <td></td>
+      <td></td>
+      <td class="td-total">{{ iva_usd }}</td>
+    </tr>
     <tr class="cost-total">
       <td class="td-item"><strong>Total</strong></td>
       <td></td>
@@ -449,6 +487,7 @@ body {
         <th>Roof area<br>(m2)</th>
         <th>Solar<br>panels</th>
         <th>Inverters</th>
+        <th>Solar<br>utilization</th>
       </tr>
     </thead>
     <tbody>
@@ -457,6 +496,7 @@ body {
         <td>{{ technical.area_m2 }}</td>
         <td>{{ technical.panel_count }}</td>
         <td>{{ technical.inverter_count }}</td>
+        <td>{{ technical.self_consumption_pct }}</td>
       </tr>
     </tbody>
   </table>
@@ -478,6 +518,15 @@ body {
     </tr>
   </tbody>
 </table>
+
+<!-- ── MONTHLY COVERAGE (inline SVG chart) ───────────────────────────────── -->
+{% if coverage_chart_svg %}
+<div class="coverage-block">
+  <div class="section-row"><span class="section-title">ESTIMATED MONTHLY COVERAGE</span></div>
+  <div class="coverage-chart">{{ coverage_chart_svg | safe }}</div>
+  <div class="coverage-note">Design estimates based on the site's real solar irradiance; actual output varies with weather, shading and usage.</div>
+</div>
+{% endif %}
 
 <!-- ADDITIONAL NOTES -->
 <div class="section-row"><span class="section-title">ADDITIONAL NOTES</span></div>
@@ -545,7 +594,6 @@ body {
 
 <!-- PINNED FOOTER -->
 <div class="footer-wrap">
-  <div class="footer-heading">More information</div>
   <div class="footer-card">
     <div class="footer-sig">
       {% if signature_white_b64 %}<img src="{{ signature_white_b64 }}" alt="Signature">{% endif %}
