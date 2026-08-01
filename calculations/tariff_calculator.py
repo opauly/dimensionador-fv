@@ -56,6 +56,25 @@ def estimate_bill_crc(kwh: float, tariff_info: dict) -> float:
     return round(subtotal + iva)
 
 
+def estimate_blended_effective_rate_crc(monthly_kwh: float,
+                                        tariff_infos: list[dict]) -> float | None:
+    """Effective ₡/kWh averaged across several tariffs at the same consumption
+    level — used by the VRM weekly report for a Costa Rica site with no known
+    distributor, so a real number can be shown without asking which utility a
+    customer is on.
+
+    Averages the *result* (bill ÷ kWh) rather than merging tier structures: CR
+    distributors don't share tier boundaries, so there's no principled way to
+    combine the tiers themselves, but every one of them reduces to a single
+    effective rate at a given consumption level, and those rates ARE
+    comparable and can be averaged.
+    """
+    if monthly_kwh <= 0 or not tariff_infos:
+        return None
+    rates = [estimate_bill_crc(monthly_kwh, t) / monthly_kwh for t in tariff_infos]
+    return sum(rates) / len(rates)
+
+
 def fill_bill_amounts(history: list[dict], tariff_info: dict) -> list[dict]:
     """
     Return a copy of history with bill_crc estimated from tariff for every month.

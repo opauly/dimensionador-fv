@@ -480,6 +480,65 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict],
     return _svg(s, PW, row1_h)
 
 
+def energy_mix_full_svg(d: dict, t: dict) -> str:
+    """Energy mix donut alone, full width, Solar/Grid split only — no battery
+    slice or legend row.
+
+    For `grid_zero` sites (grid connection, no battery). The donut is still
+    meaningful without a battery — it's just a 2-way split — so the earlier
+    version of this report substituted a second, full-width Grid Quality block
+    into this slot instead, which then duplicated the Grid Quality block row2
+    already renders for any grid-connected system. Solar/Battery/Grid is also
+    deliberately not just "Solar/0%/Grid": a `grid_zero` site has no battery
+    hardware at all, so the slice is structurally absent, not a
+    coincidentally-quiet week for a battery that exists.
+    """
+    tot = d["totals"]
+    total_energy = tot["pv"] + tot["grid"]
+    solar_pct = round(tot["pv"] / total_energy * 100) if total_energy else 0
+    grid_pct = max(0, 100 - solar_pct)
+    sd = _f(tot["pv"] / total_energy * 100) if total_energy else "0.0"
+    gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
+
+    em_sub = wrap_svg_lines(t["subEnergyMix"], int((PW - 2 * IPAD) / 3.4))
+    em_head_h = 16 + len(em_sub) * 9 + 12
+    h = em_head_h + 72 + 8
+    DX = 8
+    DY = em_head_h
+    LX = DX + 80
+
+    s = (f"<rect x='0' y='0' width='{PW}' height='{h}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='{IPAD}' y='16' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['energyMix'].upper())}</text>")
+    for li, line in enumerate(em_sub):
+        s += (f"<text x='{IPAD}' y='{16 + (li + 1) * 9}' font-size='7' "
+              f"fill='#bbb'>{esc(line)}</text>")
+
+    s += (f"<g transform='translate({DX},{DY:.0f})'>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{LINE}' stroke-width='11'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{GREEN}' "
+          f"stroke-width='11' {_seg(solar_pct, 0)} stroke-linecap='butt'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{MINT}' "
+          f"stroke-width='11' {_seg(grid_pct, solar_pct)} stroke-linecap='butt'/>"
+          f"<text x='36' y='39' text-anchor='middle' font-size='12' "
+          f"font-weight='700' fill='#111'>{sd}%</text>"
+          f"<text x='36' y='50' text-anchor='middle' font-size='8' fill='#999'>solar</text>"
+          f"</g>")
+
+    for i, (lbl, col, pctd, kwh) in enumerate([
+        (t["labelSolar"], GREEN, sd, tot["pv"]),
+        (t["labelGrid"], MINT, gd, tot["grid"]),
+    ]):
+        cy = DY + 22 + i * 20
+        s += (f"<circle cx='{LX + 4}' cy='{cy}' r='4' fill='{col}'/>"
+              f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
+              f"{esc(lbl)}</text>"
+              f"<text x='{LX + 55}' y='{cy + 4}' font-size='9' font-weight='600' "
+              f"fill='#222'>{pctd}% · {_f(kwh)} {esc(t['kwh'])}</text>")
+
+    return _svg(s, PW, h)
+
+
 # ══════════════════════════════════════════════════════════════════
 # Row 2 — grid quality + events
 # ══════════════════════════════════════════════════════════════════

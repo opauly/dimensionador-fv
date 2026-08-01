@@ -8,3 +8,4 @@ plotly>=5.22.0
 pillow>=10.3.0
 python-dotenv>=1.0.1
 requests>=2.32.0
+timezonefinder>=6.5.0

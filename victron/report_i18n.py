@@ -85,6 +85,13 @@ EN = {
                  "week (mostly driven by weather).",
     "tariffSavings": "Estimated savings",
     "tariffComingSoon": "Tariff data coming soon",
+    "savingsThisWeek": "This week",
+    "savingsBasisLabel": "Basis",
+    "savingsBasisCr": "Average of {n} Costa Rica T-RE tariffs",
+    "savingsBasisFlat": "Configured rate",
+    "subSavingsOffGrid": "This site has no grid connection. Estimated cost "
+                         "avoided by using solar instead of buying this "
+                         "energy from the grid, had the site been connected.",
     "subSavings": "Estimated electricity cost avoided this week by using solar "
                   "instead of buying from the grid.",
     "comingSoonValue": "— soon",
@@ -170,6 +177,14 @@ ES = dict(EN, **{
                  "semana anterior (principalmente por el clima).",
     "tariffSavings": "Ahorro estimado",
     "tariffComingSoon": "Datos de tarifa próximamente",
+    "savingsThisWeek": "Esta semana",
+    "savingsBasisLabel": "Base de cálculo",
+    "savingsBasisCr": "Promedio de {n} tarifas T-RE de Costa Rica",
+    "savingsBasisFlat": "Tarifa configurada",
+    "subSavingsOffGrid": "Este sitio no tiene conexión a la red. Costo "
+                         "eléctrico estimado que se habría evitado usando "
+                         "energía solar en vez de comprarla a la red, si el "
+                         "sitio estuviera conectado.",
     "subSavings": "Estimado del costo eléctrico evitado esta semana al usar "
                   "energía solar en vez de comprarla a la red.",
     "comingSoonValue": "— pronto",

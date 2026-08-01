@@ -33,7 +33,7 @@ from datetime import date
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from database import vrm_report_db as db
-from victron import report_i18n, report_svg as S
+from victron import report_i18n, report_svg as S, savings as savings_mod
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _SYSTEM_EFF = 0.80          # same derating the original uses
@@ -373,6 +373,7 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
         # filling in lat/lng. Empty unless with_weather=True and coordinates
         # were present but the fetch still failed.
         "weatherErrors": weather_errors,
+        "savings": savings_mod.compute_weekly_savings(totals, site, len(days)),
         "exportsToGrid": bool(site.get("exports_to_grid")),
         "trend": window["trend"],
     }
@@ -463,13 +464,40 @@ def render_html(d: dict) -> str:
     has_grid = d["systemType"] in ("grid_zero", "hybrid")
     has_batt = d["systemType"] in ("off_grid", "hybrid")
 
+    savings_rows = None
+    if d.get("savings"):
+        sv = d["savings"]
+        basis = (t["savingsBasisCr"].format(n=sv["basisCount"])
+                if sv["basisCount"] is not None else t["savingsBasisFlat"])
+        savings_rows = [
+            {"label": t["savingsThisWeek"],
+             "value": savings_mod.format_money(sv["amount"], sv["currency"]),
+             "valueColor": S.GREEN},
+            {"label": t["savingsBasisLabel"], "value": basis},
+        ]
+
     # One row font size for the whole report. Sizing each row independently
     # fits tighter but reads as a rendering glitch — a single shrunken line
     # beside full-size neighbours. Solved once here, applied everywhere.
     half, full = S.IW - 2 * S.IPAD, S.PW - 2 * S.IPAD
     groups = [(batt, half), (events, half), (perf, half), (weather, half)]
     groups.append((grid, half if has_grid else full))
+    if savings_rows:
+        groups.append((savings_rows, full))
     row_size = S.uniform_row_size(groups)
+
+    if savings_rows:
+        # Off-grid sites have no counterfactual "what you'd have paid the
+        # utility" without spelling out that it IS a counterfactual — the
+        # formula (avoided grid purchase) doesn't change, only the label,
+        # since the whole point is telling the reader that number is
+        # hypothetical rather than a real avoided bill.
+        savings_sub = (t["subSavingsOffGrid"] if d["systemType"] == "off_grid"
+                       else t["subSavings"])
+        savings_svg = S.single_block_row_svg(t["tariffSavings"], savings_rows,
+                                             savings_sub, row_size=row_size)
+    else:
+        savings_svg = S.savings_placeholder_svg(t)
 
     if has_grid:
         row2 = S.two_block_row_svg(t["sectionGrid"], grid, t["subGrid"],
@@ -498,14 +526,21 @@ def render_html(d: dict) -> str:
         # Pre-built SVG must not be HTML-escaped by autoescape.
         kpi_svg=_safe(S.kpi_svg(d, t)),
         bar_svg=_safe(S.bar_chart_svg(d, t)),
+        # A system with no battery (grid_zero) still has a meaningful energy
+        # mix — Solar vs. Grid — so this is a real report block, not a
+        # meaningless one hidden behind has_grid the way the battery/SOC
+        # blocks are hidden behind has_batt elsewhere in this function. The
+        # earlier version put Grid Quality here instead, which duplicated the
+        # Grid Quality block row2 already renders for any grid-connected
+        # system — found by checking system_type behaviour end to end, not
+        # by a report ever actually being generated for a grid_zero site.
         row1_svg=_safe(S.row1_svg(d, t, batt, row_size=row_size) if has_batt
-                       else S.single_block_row_svg(t["sectionGrid"], grid,
-                                                   t["subGrid"], row_size=row_size)),
+                       else S.energy_mix_full_svg(d, t)),
         row2_svg=_safe(row2),
         soc_svg=_safe(S.soc_chart_svg(d, t)) if has_batt else "",
         row3_svg=_safe(row3),
         trend_svg=_safe(S.four_week_trend_svg(d["trend"], t)),
-        savings_svg=_safe(S.savings_placeholder_svg(t)),
+        savings_svg=_safe(savings_svg),
     )
 
 

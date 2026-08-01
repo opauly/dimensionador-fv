@@ -121,6 +121,76 @@ def geocode_cr(city: str, province: str) -> tuple[float, float] | None:
     return None
 
 
+_tz_finder = None  # lazy singleton — TimezoneFinder() loads its boundary data
+                   # on construction (noticeable, ~1-2s); reused across calls.
+
+
+def _get_tz_finder():
+    global _tz_finder
+    if _tz_finder is None:
+        from timezonefinder import TimezoneFinder
+        _tz_finder = TimezoneFinder()
+    return _tz_finder
+
+
+def reverse_geocode(lat: float, lng: float) -> dict | None:
+    """Coordinates → display location + IANA timezone + ISO country code —
+    everything a site record needs, from the one input that's genuinely
+    global. Complements `geocode_cr()` (name → coords, Costa Rica only) with
+    the opposite direction, worldwide.
+
+    Two independent lookups combined into one result: Nominatim's reverse
+    endpoint for location/country (network call, can fail), and
+    `timezonefinder` for the timezone (offline boundary data, always
+    resolves for any valid lat/lng on land — no dependency on a third-party
+    API that could rate-limit or go down for something this deterministic).
+
+    Returns `{"location": str | None, "country_code": str | None,
+    "timezone": str | None}`, or None only if the coordinates don't resolve
+    to anything at all (e.g. open ocean, or Nominatim unreachable AND no
+    timezone match). Each field is independently optional — a remote point
+    can resolve a timezone with no nearby named place, or vice versa.
+    """
+    location = None
+    country_code = None
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={"lat": lat, "lon": lng, "format": "json",
+                    "zoom": 10, "addressdetails": 1,
+                    # Without this Nominatim returns names in the LOCAL
+                    # language of whatever place was found — Ukrainian for a
+                    # point in Ukraine, Thai for Bangkok, etc. "es" first
+                    # since the operator using this form reads Spanish; "en"
+                    # as the fallback for anywhere OSM has no Spanish name at
+                    # all, which is still far more places than have no
+                    # English name.
+                    "accept-language": "es,en"},
+            headers={"User-Agent": "PaulyCoSolarTool/1.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        addr = data.get("address") or {}
+        country_code = (addr.get("country_code") or "").upper() or None
+        place = (addr.get("city") or addr.get("town") or addr.get("village")
+                 or addr.get("municipality") or addr.get("county"))
+        region = addr.get("state") or addr.get("region")
+        parts = [p for p in (place, region) if p]
+        location = ", ".join(parts) if parts else data.get("display_name")
+    except Exception:
+        pass
+
+    try:
+        timezone = _get_tz_finder().timezone_at(lat=lat, lng=lng)
+    except Exception:
+        timezone = None
+
+    if location is None and country_code is None and timezone is None:
+        return None
+    return {"location": location, "country_code": country_code, "timezone": timezone}
+
+
 # Lookup table for most-common Pauly&Co service areas
 _CR_LOOKUP: dict[str, tuple[float, float]] = {
     "san josé": (9.9281, -84.0907),

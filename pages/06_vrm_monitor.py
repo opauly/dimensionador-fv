@@ -22,14 +22,38 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import BRAND_GREEN, BRAND_GREEN_LIGHT  # noqa: E402
+from config import BRAND_GREEN, BRAND_GREEN_LIGHT, COUNTRIES  # noqa: E402
 from database import vrm_report_db as rdb  # noqa: E402
 from victron import ingest, vrm_csv, weekly_report as wr  # noqa: E402
+from victron import savings as vrm_savings  # noqa: E402
 
 st.set_page_config(page_title="VRM Monitor — Pauly&Co Solar", layout="wide")
 
 SYSTEM_TYPES = ["hybrid", "off_grid", "grid_zero"]
 LANGS = {"es": "Español", "en": "English"}
+_COUNTRY_CODES = list(COUNTRIES)
+_DEFAULT_COUNTRY_IDX = _COUNTRY_CODES.index("CR")
+
+
+@st.cache_data(ttl=3600)
+def _timezones() -> list[str]:
+    """Full IANA list — searchable via Streamlit's selectbox filter-as-you-type,
+    so 598 entries is navigable despite not being curated. Falls back to a
+    short common list if the host has no tz database (zoneinfo needs one; not
+    expected on this machine, but the report tool must not crash without it)."""
+    try:
+        from zoneinfo import available_timezones
+        return sorted(available_timezones())
+    except Exception:  # noqa: BLE001
+        return ["America/Costa_Rica", "America/New_York", "America/Mexico_City",
+                "America/Bogota", "America/Sao_Paulo", "Europe/Madrid", "UTC"]
+
+
+def _tz_index(tz_list: list[str], default: str = "America/Costa_Rica") -> int:
+    try:
+        return tz_list.index(default)
+    except ValueError:
+        return 0
 
 
 def _flash(msg: str, kind: str = "success") -> None:
@@ -81,6 +105,9 @@ def tab_sites() -> None:
             "kWp": s.get("pv_kwp"),
             "Batería kWh": s.get("battery_usable_kwh"),
             "Idioma": s.get("report_language"),
+            "País": s.get("country") or "CR",
+            "Tarifa ahorro": (f"{s['savings_rate']} {s['savings_currency']}"
+                             if s.get("savings_rate") else "—"),
             "Activo": "Sí" if s.get("active") else "No",
         } for s in sites])
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -103,10 +130,21 @@ def tab_sites() -> None:
             a, b, c = st.columns(3)
             lang = a.selectbox("Idioma del reporte", list(LANGS), format_func=LANGS.get)
             location = b.text_input("Ubicación", placeholder="Atenas, Alajuela")
-            tz = c.text_input("Zona horaria", value="America/Costa_Rica")
-            a, b = st.columns(2)
+            tz_list = _timezones()
+            tz = c.selectbox("Zona horaria", tz_list, index=_tz_index(tz_list))
+            a, b, c = st.columns(3)
             lat = a.number_input("Latitud", value=0.0, format="%.6f")
             lng = b.number_input("Longitud", value=0.0, format="%.6f")
+            country = c.selectbox(
+                "País", _COUNTRY_CODES, format_func=lambda k: COUNTRIES[k],
+                index=_DEFAULT_COUNTRY_IDX,
+                help="CR calcula el ahorro con tarifas ARESEP; cualquier otro "
+                     "país usa la tarifa fija de abajo.")
+            a, b = st.columns(2)
+            savings_rate = a.number_input("Tarifa de ahorro (por kWh)", min_value=0.0,
+                                          step=0.01, format="%.4f",
+                                          help="Solo se usa si País no es CR.")
+            savings_currency = b.selectbox("Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES)
 
             if st.form_submit_button("Guardar", type="primary"):
                 if not cust_name.strip() or not site_name.strip():
@@ -124,6 +162,9 @@ def tab_sites() -> None:
                             # Weather (and therefore the performance ratio) needs
                             # coordinates; 0,0 is Null Island, not "unknown".
                             latitude=lat or None, longitude=lng or None,
+                            country=(country or "CR").strip().upper() or "CR",
+                            savings_rate=savings_rate or None,
+                            savings_currency=savings_currency if savings_rate else None,
                         )
                         _clear_caches()
                         _flash(f"Sitio guardado: `{site_id}`")
@@ -143,13 +184,29 @@ def tab_upload() -> None:
         "en la base de datos."
     )
 
+    # A geocode button's on_click code runs AFTER the widgets below have already
+    # rendered in that same script pass, so it cannot write st.session_state["up_loc"]
+    # etc. directly — Streamlit raises StreamlitAPIException for that. Instead the
+    # button stages the new value under a "_pending_" key and reruns; this block,
+    # which runs before any of those widgets are instantiated, consumes the staged
+    # value into the widget's real key. Same pattern CONTEXT.md documents for the
+    # wizard's versioned-key resets, applied here without needing a version counter
+    # since these are single-shot overwrites, not list resets.
+    for pending, real in [("_up_pending_lat", "up_lat"), ("_up_pending_lng", "up_lng"),
+                          ("_up_pending_loc", "up_loc"), ("_up_pending_country", "up_country"),
+                          ("_up_pending_tz", "up_tz")]:
+        if pending in st.session_state:
+            st.session_state[real] = st.session_state.pop(pending)
+
     a, b = st.columns(2)
     cust_name = a.text_input("Cliente", key="up_cust", placeholder="Vista Atenas")
     site_name = b.text_input("Sitio", key="up_site", placeholder="2 Floor Pool")
-    a, b, c = st.columns(3)
+    a, b, c, d = st.columns(4)
     pv_kwp = a.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, key="up_kwp")
     batt = b.number_input("Batería utilizable (kWh)", min_value=0.0, step=0.1, key="up_batt")
     stype = c.selectbox("Tipo de sistema", SYSTEM_TYPES, key="up_type")
+    lang = d.selectbox("Idioma del reporte", list(LANGS), format_func=LANGS.get,
+                       key="up_lang")
 
     # Location drives the Open-Meteo call, which in turn drives the weather
     # block AND the expected-output figure behind the performance ratio.
@@ -157,31 +214,86 @@ def tab_upload() -> None:
     # assumption, and the "ratio" degenerates into actual-vs-assumption.
     st.markdown("##### Ubicación")
     st.caption(
-        "Necesaria para el clima y el índice de rendimiento. Sin coordenadas, "
-        "la producción esperada se estima con un supuesto fijo y el índice "
-        "pierde sentido."
+        "Necesaria para el clima y el índice de rendimiento. Ingresá "
+        "Latitud/Longitud (de Google Maps o el instalador) y usá el botón "
+        "para completar Ubicación, Zona horaria y País automáticamente — "
+        "funciona en cualquier país. Los tres campos siguen siendo editables "
+        "a mano si hace falta corregir algo."
     )
-    a, b = st.columns([2, 1])
-    location = a.text_input("Ubicación", key="up_loc",
-                            placeholder="Atenas, Alajuela")
-    tz = b.text_input("Zona horaria", value="America/Costa_Rica", key="up_tz")
-    a, b, c = st.columns([1, 1, 1])
+    tz_list = _timezones()
+    a, b, c = st.columns([1, 1, 1.3])
     lat = a.number_input("Latitud", value=0.0, format="%.6f", key="up_lat")
     lng = b.number_input("Longitud", value=0.0, format="%.6f", key="up_lng")
     with c:
         st.write("")
-        if st.button("📍 Buscar por ubicación", key="up_geo",
-                     help="Geocodifica el texto de Ubicación (Costa Rica)"):
-            try:
-                from calculations.pvgis import geocode_cr
-                parts = [p.strip() for p in (location or "").split(",")]
-                got = geocode_cr(parts[0], parts[1] if len(parts) > 1 else "")
-                if got:
-                    st.session_state["up_lat"], st.session_state["up_lng"] = got[0], got[1]
+        if st.button("🌍 Buscar por coordenadas", key="up_revgeo",
+                     help="Completa Ubicación, Zona horaria y País a partir "
+                          "de Latitud/Longitud — cualquier país."):
+            if not lat and not lng:
+                st.warning("Ingresá latitud y longitud primero.")
+            else:
+                from calculations.pvgis import reverse_geocode
+                got = reverse_geocode(lat, lng)
+                if not got:
+                    st.warning("No se pudo resolver esas coordenadas.")
+                else:
+                    if got.get("location"):
+                        st.session_state["_up_pending_loc"] = got["location"]
+                    if got.get("timezone") in tz_list:
+                        st.session_state["_up_pending_tz"] = got["timezone"]
+                    code = got.get("country_code")
+                    if code and code in COUNTRIES:
+                        st.session_state["_up_pending_country"] = code
+                    elif code:
+                        st.warning(f"País detectado ({code}) no está en la "
+                                   f"lista — seleccionalo manualmente.")
                     st.rerun()
-                st.warning("No se encontró esa ubicación.")
-            except Exception as exc:  # noqa: BLE001
-                st.warning(f"No se pudo geocodificar: {exc}")
+
+    a, b, c = st.columns([2, 1, 1])
+    location = a.text_input("Ubicación", key="up_loc",
+                            placeholder="Atenas, Alajuela")
+    # `index=` is only a first-render default. Once the reverse-geocode button
+    # has staged a value into session_state (see the pending-key block above),
+    # passing `index=` again on top of that makes Streamlit warn — "created
+    # with a default value but also had its value set via the Session State
+    # API" — even though it still resolves correctly. Omitting it once the key
+    # already governs the widget avoids the warning outright.
+    tz_kwargs = {} if "up_tz" in st.session_state else {"index": _tz_index(tz_list)}
+    tz = b.selectbox("Zona horaria", tz_list, key="up_tz", **tz_kwargs)
+    country_kwargs = ({} if "up_country" in st.session_state
+                      else {"index": _DEFAULT_COUNTRY_IDX})
+    country = c.selectbox(
+        "País", _COUNTRY_CODES, format_func=lambda k: COUNTRIES[k], key="up_country",
+        help="Determina cómo se estima el ahorro: Costa Rica usa tarifas "
+             "ARESEP automáticamente; cualquier otro país usa la tarifa fija "
+             "de abajo.",
+        **country_kwargs,
+    )
+
+    # No electric-company picker anywhere — Costa Rica needs none (blended
+    # ARESEP average, computed automatically from `país`), and everywhere else
+    # gets one flat rate typed in once, not a distributor list.
+    st.markdown("##### Ahorro estimado")
+    if stype == "off_grid":
+        st.caption(
+            "Este sitio es off-grid: no tiene conexión a la red. El reporte "
+            "mostrará el ahorro como una cifra hipotética — lo que se habría "
+            "pagado por esta energía si el sitio estuviera conectado a la "
+            "red, no un ahorro sobre una factura real."
+        )
+    else:
+        st.caption(
+            "Para sitios en Costa Rica (país = CR) el ahorro se calcula solo, "
+            "con el promedio de tarifas ARESEP T-RE — no hace falta indicar "
+            "nada más acá. Para cualquier otro país, indicá una tarifa fija; "
+            "si se deja en 0, el reporte no muestra una cifra de ahorro en "
+            "vez de inventar una."
+        )
+    a, b = st.columns(2)
+    savings_rate = a.number_input("Tarifa (por kWh)", min_value=0.0, step=0.01,
+                                  format="%.4f", key="up_rate")
+    savings_currency = b.selectbox("Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES,
+                                   key="up_currency")
 
     exports = st.checkbox(
         "Este sistema exporta energía a la red",
@@ -223,11 +335,15 @@ def tab_upload() -> None:
             "customer": cust_name.strip(), "site": site_name.strip(),
             "filename": up.name, "pv_kwp": pv_kwp or None,
             "battery_usable_kwh": batt or None, "system_type": stype,
+            "report_language": lang,
             "location": location or None, "timezone": tz or "America/Costa_Rica",
             # 0,0 is Null Island, not "unknown" — store NULL so the report can
             # tell the difference and say weather is unavailable.
             "latitude": lat or None, "longitude": lng or None,
             "exports_to_grid": exports,
+            "country": (country or "CR").strip().upper() or "CR",
+            "savings_rate": savings_rate or None,
+            "savings_currency": savings_currency if savings_rate else None,
         }
 
     parsed = st.session_state.get("vrm_parsed")
@@ -246,8 +362,20 @@ def tab_upload() -> None:
     st.caption(
         f"Instalación VRM **{parsed['installation_id'] or '—'}** · periodo "
         f"{parsed['period_start'][:10]} → {parsed['period_end'][:10]} · "
-        f"zona horaria del archivo: {parsed['timezone_label']}"
+        f"zona horaria del archivo: {parsed['timezone_label']} · "
+        f"reporte en **{LANGS.get(meta['report_language'], meta['report_language'])}**"
     )
+    _og_note = " (hipotético — sitio off-grid)" if meta["system_type"] == "off_grid" else ""
+    if meta["country"] == "CR":
+        st.caption(f"💰 Ahorro estimado: automático, promedio de tarifas ARESEP T-RE{_og_note}.")
+    elif meta["savings_rate"]:
+        st.caption(
+            f"💰 Ahorro estimado: tarifa fija "
+            f"{vrm_savings.format_money(meta['savings_rate'], meta['savings_currency'])}"
+            f"/kWh{_og_note}."
+        )
+    else:
+        st.caption("💰 Ahorro estimado: no se mostrará (país no-CR sin tarifa configurada).")
 
     for w in parsed["warnings"]:
         st.warning(w)
@@ -276,11 +404,15 @@ def tab_upload() -> None:
                 fields = {"pv_kwp": meta["pv_kwp"],
                           "battery_usable_kwh": meta["battery_usable_kwh"],
                           "system_type": meta["system_type"],
+                          "report_language": meta["report_language"],
                           "location": meta["location"],
                           "timezone": meta["timezone"],
                           "latitude": meta["latitude"],
                           "longitude": meta["longitude"],
-                          "exports_to_grid": meta["exports_to_grid"]}
+                          "exports_to_grid": meta["exports_to_grid"],
+                          "country": meta["country"],
+                          "savings_rate": meta["savings_rate"],
+                          "savings_currency": meta["savings_currency"]}
                 if parsed.get("installation_id"):
                     fields["vrm_installation_id"] = int(parsed["installation_id"])
                 ingest.upsert_site(cust["id"], site_id, meta["site"], **fields)

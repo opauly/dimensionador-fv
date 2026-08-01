@@ -734,7 +734,216 @@ Spanish narrative now opens with "generó 221.6 kWh de energía solar, exportand
 English output re-verified after both changes: row size still 9.5 and every
 reference figure intact.
 
-## 15. One placement question left open
+## 15. Estimated savings — real number, no company picker anywhere (2026-07-29)
+
+Replaced the permanent "Tariff data coming soon" placeholder. Design decided
+with the user before building, three explicit choices:
+
+1. **CR default** = blended average across all 8 seeded distributors' T-RE
+   tariffs (not a single distributor like CNFL) — chosen over picking one
+   company specifically to avoid bias toward any particular utility.
+2. **Exported energy does not count toward savings** — only avoided grid
+   purchase (`load − grid import`) does. Export compensation (net metering vs
+   net billing vs none) is a policy variable that differs by country and even
+   by CR distributor; modeling it without knowing the specific policy risks a
+   confidently wrong number.
+3. **Non-CR rate lives in the upload flow itself**, not just the Sitios tab —
+   one numeric rate + a 3-item currency dropdown (CRC/USD/EUR), explicitly
+   *not* a distributor/company picker.
+
+**New files:**
+- `calculations/tariff_calculator.py: estimate_blended_effective_rate_crc()`
+  — averages the *result* (bill ÷ kWh) across tariffs at the same consumption
+  level, not the tier structures themselves (which don't share boundaries
+  across distributors, so there's no principled way to merge them directly).
+- `victron/savings.py` — the country-branching logic. `country == 'CR'` runs
+  the blend (process-cached 1h, confirmed all 8 seeded distributors have
+  complete T-RE tiers); anything else reads `sites.savings_rate` /
+  `savings_currency` (migration 014, `vrm.sites` only — `monitoring.sites`
+  needs nothing new since every real site there is already Costa Rica).
+  Returns `None` — never a fabricated number — when neither basis exists.
+
+**Report integration:** the savings block reuses `single_block_row_svg()`
+unchanged (two rows: amount, basis), folded into the same uniform-row-size
+pass as every other block, rather than adding new SVG. Verified rendering:
+CR path (₡31,772, "Average of 8 Costa Rica T-RE tariffs"), non-CR flat-rate
+path ($57.78, "Configured rate"), the Spanish translation of both labels, and
+the no-basis fallback (country set, no rate configured) correctly keeping the
+original placeholder instead of showing anything invented.
+
+**UI:** upload form gains País (free text, default "CR") + rate/currency
+fields, with a live caption stating which of the three outcomes will apply
+before the file is even processed. Mirrored into the Sitios manual-entry
+form; the Sitios table gained País and "Tarifa ahorro" columns.
+
+## 16. Off-grid savings framing, dropdown UX, reverse geocoding (2026-07-29)
+
+Four usability fixes to the savings feature and site form, all verified live.
+
+**Off-grid savings are labeled as hypothetical, not hidden.** An off-grid site
+has no grid connection, so `load − grid import` still computes a real
+avoided-purchase-equivalent volume (grid import is always 0), but calling it
+"savings" without qualification implies a real bill that never existed. The
+formula is unchanged; only the subtitle changes, in both the report
+(`subSavingsOffGrid`) and the upload form's live caption, which reacts to the
+"Tipo de sistema" selection *before* the file is even uploaded. Verified: the
+caption reads "Este sitio es off-grid: no tiene conexión a la red. El reporte
+mostrará el ahorro como una cifra hipotética…" the moment `off_grid` is picked.
+
+**Zona horaria and País are now dropdowns, not free text.** Timezone uses
+Python's `zoneinfo.available_timezones()` (598 entries, cached 1h) rather than
+a curated list — correctness matters here since it drives both the Open-Meteo
+call and CR alarm-episode day-bucketing, and IANA's list doesn't need
+maintaining. País uses a new `config.COUNTRIES` dict (ISO 3166-1 alpha-2 →
+Spanish name, ~60 entries + "Otro"), since no such list existed anywhere in
+the repo. Both are searchable via Streamlit's built-in filter-as-you-type.
+
+**Reverse geocoding**: `calculations/pvgis.py:reverse_geocode(lat, lng)`, new,
+complementing the existing `geocode_cr()` (name → coords, CR-only) with the
+opposite direction for any country, via Nominatim's `/reverse` endpoint.
+Verified against real coordinates: Atenas CR → `{"location": "Atenas,
+Alajuela", "country_code": "CR"}`; NYC → `{"location": "New York, New York",
+"country_code": "US"}`; Null Island → `None`. Wired into the upload form as a
+second button ("🌍 Coordenadas → ubicación/país") alongside the existing
+forward-search one.
+
+**A real pre-existing bug, found by testing the new button rather than by
+reading the code.** Both geocode buttons write `st.session_state["up_loc"]`
+etc. *after* those widgets have already rendered earlier in the same script
+pass — Streamlit raises `StreamlitAPIException: cannot be modified after the
+widget with key … is instantiated` for that, unconditionally. This means the
+**original forward-geocode button had this exact bug all along**; it had
+never actually been clicked through in a live browser check before now, only
+reasoned about by pattern-matching. Fixed both with the pending-key pattern
+CONTEXT.md already documents for the wizard's versioned-widget resets: a
+button stages its result under a `_up_pending_*` key and reruns; a block at
+the top of `tab_upload()`, which runs before any of the affected widgets are
+instantiated, consumes the staged value into the widget's real key. Verified
+live after the fix: both buttons work with no exception.
+
+## 17. One button, one input, three fields — coordinates as the source of truth (2026-07-29)
+
+The two-button layout from §16 was confusing: "Ubicación → coordenadas" only
+worked for Costa Rica, "Coordenadas → ubicación/país" worked everywhere but
+didn't fill timezone, and nothing made clear which button did what without
+reading the tooltip. Collapsed to **one button, one direction**: coordinates
+in, location + timezone + country out, worldwide.
+
+**New dependency: `timezonefinder`.** Nominatim's reverse endpoint (checked
+the raw response directly) does not return a timezone in any field. Coordinate
+→ IANA timezone name is exactly what `timezonefinder` solves — offline
+boundary data, no added network call or third-party API key, deterministic.
+Lazy singleton (`_get_tz_finder()`), since constructing `TimezoneFinder()`
+loads its data (~1–2s) and shouldn't repeat per call.
+
+`reverse_geocode()` now combines two independent lookups — Nominatim
+(location/country, can fail) and `timezonefinder` (timezone, effectively
+always resolves) — into one result, each field independently optional.
+Verified against four real cities on four continents: Atenas CR, New York,
+Madrid, Sydney all resolved location + country + timezone correctly in one
+call; Null Island correctly returned no location/country while still handing
+back a nominal `Etc/GMT` (expected `timezonefinder` behaviour over open ocean,
+not a bug).
+
+**Layout now matches the actual data flow**: Latitud/Longitud first (the
+input), the single "🌍 Buscar por coordenadas" button, then
+Ubicación/Zona horaria/País below as the (still independently editable)
+output — instead of the old order that implied Ubicación was the primary
+field.
+
+The CR-only forward search (`geocode_cr()`, text → coordinates) is removed
+from this form specifically, not deleted — it's still used as-is by the
+proposal wizard's own site step (`wizard/common.py`), which is unrelated to
+this page and wasn't part of this change.
+
+**A second instance of the pending-key warning**, caught by testing rather
+than assumed fixed by the §16 pattern: passing both `index=` (a first-render
+default) and a pre-seeded `session_state[key]` on the same selectbox call
+triggers a benign but visible Streamlit warning ("created with a default
+value but also had its value set via the Session State API"). Fixed by
+omitting `index=` once the key is already in `session_state` — reproduced live
+(the warning appeared for Madrid/`up_tz`), fixed, then re-verified with a
+different city (Sydney) to confirm it wasn't a one-off.
+
+## 18. Two real bugs from testing a coordinate the curated list never covered
+(2026-07-29)
+
+User tested Chernobyl (51.273417, 30.227378) — a real coordinate, not a
+contrived edge case — and found two things simultaneously:
+
+1. **Ubicación came back in Ukrainian** ("Київська область"), not Spanish.
+   Diagnosis, not guesswork: Nominatim returns place names in the *local*
+   language of whatever it finds unless `accept-language` is specified, and
+   the reverse call never set it. Fixed with `accept-language: "es,en"` — the
+   operator using this form reads Spanish; English is the fallback for the
+   (rare) place OSM has no Spanish name for at all.
+2. **País stayed "Costa Rica"** instead of switching to Ukraine. Diagnosis:
+   `reverse_geocode()` correctly returned `country_code: "UA"` — confirmed by
+   calling it directly — but "UA" was never in `config.COUNTRIES`, which
+   §16/17 built as a curated ~64-entry list. The code path for an unrecognized
+   code was a `st.warning()`, which fired but was easy to miss, silently
+   leaving the wrong country selected.
+
+**Root cause of #2 is the design, not a missing entry.** A curated list will
+always have gaps against "vrm may be anywhere," and each gap fails silently
+in exactly this way. Replaced the 64-country list with a near-exhaustive one
+— every UN member plus common territories, **200 entries**, verified no
+duplicate keys. "UA" → "Ucrania" is in it now, but so is everywhere else that
+was equally likely to be missing.
+
+**Bonus from the `accept-language` fix**: every previously-tested city now
+also returns its Spanish name — "Nueva York" instead of "New York", "Sídney"
+instead of "Sydney" — consistent with the rest of the app's language, not
+just fixing the one broken case.
+
+Verified live with the exact reported coordinates: Ubicación → "Óblast de
+Kyiv", País → "Ucrania", no warning.
+
+## 19. Report language in the upload form; a real grid_zero rendering bug found by
+answering "does system_type actually work" honestly (2026-07-29)
+
+**Report language was never in the upload form.** `report_language` existed
+on `vrm.sites` since migration 012 and was correctly wired into the *Sitios*
+manual-entry form's `LANGS` selectbox — but never into *Cargar CSV*, the path
+every real site actually goes through. Every uploaded site was silently
+getting whatever the column's default is. Added the same selectbox there,
+threaded through `meta`/`fields` the same way `system_type` already was, and
+surfaced the choice in the pre-import summary caption so the operator sees it
+before saving, not after.
+
+**A real duplicate-block bug in `grid_zero` reports, never caught because no
+`grid_zero` report had ever actually been rendered.** Asked directly whether
+fields differ by `system_type` — checking the code rather than recalling it
+found that for `grid_zero` (grid connection, no battery), the report drew
+**"Grid Quality" twice**: once as a wrong full-width fallback in the row1
+slot (meant for something else, substituted there because `has_batt` is
+False), and again in row2 (correctly, since `has_grid` is True). Meanwhile the
+energy-mix donut — Solar vs. Grid, still meaningful with no battery — never
+rendered at all for that system type.
+
+Root cause: `row1_svg()` always pairs the donut with a *battery* info-block;
+when there's no battery to pair (`has_batt=False`), the calling code
+substituted a Grid Quality block instead of building a battery-less variant of
+the donut row. New `energy_mix_full_svg()` — full-width, Solar/Grid only, no
+battery slice or legend row (deliberately, not just a coincidentally-zero
+one — a `grid_zero` site has no battery hardware at all). Verified: rendered
+a real site as `grid_zero`, confirmed Grid Quality now appears exactly once
+and the 2-way donut renders correctly; re-rendered the same site as its real
+`hybrid` type immediately after to confirm zero regression (all 19 original
+reference figures, energy mix, and Battery Health block still intact).
+
+**On the "Incluir" field** (user question, not a bug): it is exactly what it
+looks like — two operator-side toggles (`with_narrative`, `with_weather`)
+skipping the Claude API call and the Open-Meteo call, useful when iterating
+on a report quickly or when either service is unavailable/unwanted for a
+specific pull. It was built as an operational shortcut, not as a designed
+customer-personalization feature — there's no third option beyond those two,
+and nothing else currently plugs into that pattern. Worth calling out as a
+real idea for later (e.g. an operator toggle for which report sections a
+specific customer wants to receive), but that's a proposal for future work,
+not something already built for that purpose.
+
+## 20. One placement question left open
 
 Whether the new Python modules live under `victron-monitor/` (product-aligned, but that
 directory currently holds only Node-RED/Apps Script/SQL — no Python, no `__init__.py`, and
