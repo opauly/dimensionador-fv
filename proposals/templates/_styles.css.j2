@@ -1,0 +1,426 @@
+{# ═══════════════════════════════════════════════════════════════════════════
+   SHARED PROPOSAL STYLESHEET — included by all four templates
+   (grid_zero_es/en, off_grid_es/en).
+
+   Before this file existed, each template carried its own ~350-line copy of
+   these rules. They drifted: .summary-table was 30% wide in one pair and 45%
+   in the other, .tech-wrap existed in one pair and had been flattened out of
+   the other, and the flexbox bottom-pinning had only ever been applied to
+   Off-Grid. Every fix had to be hand-applied four times (CONTEXT.md records a
+   sed pass that clobbered unrelated rules doing exactly this).
+
+   Keep ALL shared rules here. A template should only carry a <style> block of
+   its own for something genuinely specific to that system type.
+
+   ── Density scale ────────────────────────────────────────────────────────
+   The custom properties below are the single knob for how tight the document
+   is. The one-page budget is genuinely tight (see the regression set in
+   CONTEXT.md), so if a future proposal overflows, change a variable here once
+   rather than hand-tuning individual rules in four files. WeasyPrint 66
+   resolves var() normally.
+   ═══════════════════════════════════════════════════════════════════════ #}
+:root {
+  --fs-body:   7pt;    /* intro, client table */
+  --fs-table:  6.5pt;  /* standard data tables */
+  --fs-fine:   6pt;    /* bank details, chart caption, footer */
+  --fs-micro:  5.5pt;  /* notes list, warranty table — floor for legibility */
+  --gap-section: 4pt;  /* space above every section heading */
+  --gap-table:   3pt;  /* space below every table */
+  --pad-cell-y: 1.5pt;
+  --pad-cell-x: 3pt;
+
+  --navy:  #1E2D54;
+  --green: #4BAE6A;
+  --green-border: #3d9a5c;
+}
+
+@page {
+  size: A4;
+  /* The bottom margin is a reserved band for the fixed footer. .footer-wrap
+     is position:fixed, so WeasyPrint paints it on every page — reserving the
+     space with body padding instead would reserve nothing on the pages
+     before the last, and content would render underneath it. */
+  margin: 0.75cm 1.2cm 2.7cm 1.2cm;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: var(--fs-body);
+  color: #222;
+  margin: 0;
+  padding: 0;
+  line-height: 1.15;
+}
+
+/* ── BOTTOM-PINNED GENERAL INFO ─────────────────────────────────────────── */
+/* .page-wrap holds everything except the fixed footer, sized to exactly one
+   page's content box (A4 841.89pt − top margin 21.26pt − bottom margin
+   76.54pt = 744.09pt, see @page above). .flex-spacer sits immediately before
+   .bottom-group (Notas/Garantía) and soaks up every remaining point of that
+   height, so the general-information block lands flush above the footer
+   instead of floating mid-page with a dead gap below it — regardless of how
+   much or little content precedes it.
+
+   IMPORTANT — why a spacer div and not `margin-top: auto` on .bottom-group:
+   WeasyPrint 66 does not resolve auto margins on flex items. Verified
+   directly: with `margin-top:auto` the bottom block renders immediately under
+   the preceding content (y≈30pt of a 744pt box) whether or not the container
+   has an explicit height. `flex-grow` IS honored, so the spacer is what
+   actually does the work here. Do not "simplify" this back to an auto margin.
+   (`justify-content: space-between` also works, but would distribute gaps
+   between ALL of .page-wrap's children, not just before the bottom group.)
+
+   Degrades safely on a proposal heavy enough to need a 2nd page: flex-grow
+   only distributes *free* space, so once content exceeds min-height the
+   spacer collapses to zero and layout falls back to plain top-down flow with
+   no overlap or clipping.
+
+   NOTE: do not wrap a table in a plain <div> inside .page-wrap. WeasyPrint
+   adds ~17pt of phantom height to such a div once it becomes a flex item —
+   diagnosed on .tech-wrap, which is why that wrapper no longer exists and
+   .tech-table carries its own margin instead. */
+.page-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 744pt;
+}
+.flex-spacer {
+  flex-grow: 1;
+}
+
+/* ── HEADER ─────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4pt;
+}
+.header-left { flex: 1; }
+.title-cotizacion {
+  font-size: 22pt;
+  font-weight: bold;
+  color: var(--navy);
+  line-height: 1;
+  /* inline-block so the green rule is exactly as wide as the word, not the
+     whole flex column */
+  display: inline-block;
+  border-bottom: 2.5pt solid var(--green);
+  padding-bottom: 2pt;
+}
+.title-solar {
+  display: block;
+  font-size: 13pt;
+  font-weight: bold;
+  color: var(--green);
+  line-height: 1.15;
+  margin-top: 3pt;
+}
+.header-logo img {
+  height: 40pt;
+  display: block;
+}
+
+/* ── CLIENT TABLE ───────────────────────────────────────────────────────── */
+.client-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4pt;
+  font-size: var(--fs-body);
+}
+.client-table td {
+  padding: 1.5pt 5pt;
+  border: 0.5pt solid #bbb;
+}
+.client-table .lbl {
+  font-weight: bold;
+  width: 20%;
+  background: #f2f2f2;
+  color: #444;
+}
+
+/* ── INTRO PARAGRAPH ────────────────────────────────────────────────────── */
+.intro {
+  font-size: var(--fs-body);
+  margin-bottom: 4pt;
+  line-height: 1.3;
+}
+
+/* ── SECTION TITLES ─────────────────────────────────────────────────────── */
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1pt;
+  margin-top: var(--gap-section);
+}
+.section-title {
+  font-weight: bold;
+  font-size: var(--fs-body);
+  color: var(--navy);
+}
+
+/* ── STANDARD GREEN TABLE ───────────────────────────────────────────────── */
+.gt {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--gap-table);
+  font-size: var(--fs-table);
+}
+.gt th {
+  background: var(--green);
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt var(--pad-cell-x);
+  text-align: center;
+  vertical-align: middle;
+  border: 0.5pt solid var(--green-border);
+  line-height: 1.1;
+}
+.gt td {
+  padding: var(--pad-cell-y) var(--pad-cell-x);
+  border: 0.5pt solid #ccc;
+  text-align: center;
+  vertical-align: middle;
+}
+.gt td.left  { text-align: left; }
+.gt td.right { text-align: right; }
+
+/* Italic "Escenario actual" / "Cálculos esperados" label row above the
+   billing columns. Grid Zero only, but harmless where unused. */
+.calc-label-cell {
+  background: #fff;
+  border: none;
+  padding: 0;
+}
+.calc-label-text {
+  background: #fff;
+  color: #555;
+  font-weight: normal;
+  font-style: italic;
+  font-size: var(--fs-fine);
+  text-align: right;
+  border: none;
+  padding: 0 2pt 1pt 0;
+}
+
+/* ── COST TABLE ─────────────────────────────────────────────────────────── */
+.cost-table { margin-bottom: var(--gap-table); }
+.cost-table th.th-item  { width: 27%; text-align: left; }
+.cost-table th.th-qty   { width: 10%; }
+.cost-table th.th-specs { width: 43%; text-align: left; }
+.cost-table th.th-total { width: 20%; }
+.cost-table td.td-item  { text-align: left; }
+.cost-table td.td-specs { text-align: left; }
+.cost-table td.td-total { text-align: right; }
+.cost-total td {
+  font-weight: bold;
+  border-top: 1pt solid #888;
+  background: #f9f9f9;
+}
+.cost-subtotal td { color: #666; }
+
+/* ── TECHNICAL DETAILS ──────────────────────────────────────────────────── */
+/* Full width on both system types. Grid Zero and Off-Grid carry a different
+   number of columns (different metrics are meaningful for each), but the
+   table itself spans the same width so the two documents read as one family.
+   The final column is $/Wp on both — RESUMEN was removed as a section, since
+   the contract total it duplicated is already the last row of DETALLES DE
+   COSTOS and $/Wp is a technical metric. No wrapper div: see .page-wrap. */
+.tech-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-table);
+  margin-bottom: var(--gap-table);
+}
+.tech-table th {
+  background: var(--green);
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 4pt;
+  text-align: center;
+  border: 0.5pt solid var(--green-border);
+  line-height: 1.1;
+}
+.tech-table td {
+  padding: var(--pad-cell-y) 4pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+}
+/* $/Wp closes out the row — tinted so it reads as the commercial summary
+   figure rather than just another technical spec. */
+.tech-table th.th-wp,
+.tech-table td.td-wp {
+  border-left: 1pt solid #888;
+}
+.tech-table td.td-wp {
+  font-weight: bold;
+  background: #f9f9f9;
+}
+
+/* ── NOTES / PAYMENT ────────────────────────────────────────────────────── */
+.notes-list {
+  list-style: none;
+  margin: 1pt 0 2pt 0;
+  padding: 0;
+  font-size: var(--fs-micro);
+}
+.notes-list li::before {
+  content: "·  ";
+  font-weight: bold;
+}
+.notes-list li {
+  margin-bottom: 0.5pt;
+}
+
+/* ── BANK TRANSFER TABLE ────────────────────────────────────────────────── */
+.bank-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-fine);
+  margin-bottom: var(--gap-table);
+}
+.bank-table th {
+  background: var(--green);
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 5pt;
+  text-align: center;
+  border: 0.5pt solid var(--green-border);
+  width: 50%;
+}
+.bank-table td {
+  padding: 2.5pt 5pt;
+  border: 0.5pt solid #ccc;
+  vertical-align: top;
+  line-height: 1.35;
+  width: 50%;
+}
+
+/* ── WARRANTY TABLE ─────────────────────────────────────────────────────── */
+/* font-size and cell padding here are the specific fix for a real overflow
+   (CONTEXT.md 2026-07-31): vertical padding, not font size, is what actually
+   governs row height in a table this dense. */
+.warranty-table {
+  width: 68%;
+  border-collapse: collapse;
+  font-size: var(--fs-micro);
+  margin-bottom: var(--gap-table);
+}
+.warranty-table th {
+  background: var(--green);
+  color: #fff;
+  font-weight: bold;
+  padding: 2pt 4pt;
+  text-align: center;
+  border: 0.5pt solid var(--green-border);
+}
+.warranty-table td {
+  padding: 0.5pt 4pt;
+  border: 0.5pt solid #ccc;
+  text-align: center;
+  vertical-align: middle;
+}
+.warranty-table td.wleft { text-align: left; }
+
+/* ── MONTHLY COVERAGE CHART ─────────────────────────────────────────────── */
+.coverage-chart {
+  max-width: 320pt;
+  margin: 2pt auto 1pt auto;
+  /* Only the chart image itself is protected from splitting across a page
+     boundary — NOT the whole heading+chart+caption group. Protecting the
+     whole group meant that if it didn't fit in the space remaining on the
+     page, WeasyPrint pushed the entire block to the next page, wasting
+     whatever room was left and dragging every section after it down too —
+     the cause of a real 1-page proposal ballooning to 2 pages once this
+     section moved earlier in the document (CONTEXT.md 2026-07-31). */
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.coverage-note {
+  max-width: 320pt;
+  /* Deliberately larger bottom margin than the tight rhythm used everywhere
+     else — this is the one intentional gap on the page, marking the
+     transition from proposal/design content (Costos, Técnicos, Cobertura) to
+     general administrative info (Notas, Garantía), which sits against the
+     footer with its own tight rhythm. */
+  margin: 0 auto 10pt auto;
+  font-size: var(--fs-fine);
+  color: #6B7280;
+  line-height: 1.35;
+  text-align: center;
+}
+
+/* ── PINNED FOOTER ──────────────────────────────────────────────────────── */
+.footer-wrap {
+  position: fixed;
+  bottom: -1.95cm;   /* pulled down into the reserved @page bottom margin */
+  left: 0;
+  right: 0;
+}
+.footer-card {
+  display: flex;
+  align-items: center;
+  background: var(--navy);
+  color: #fff;
+  padding: 4pt 7pt;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.footer-sig {
+  width: 14%;
+  text-align: center;
+  vertical-align: middle;
+}
+.footer-sig img {
+  height: 28pt;
+  display: inline-block;
+  vertical-align: middle;
+}
+.footer-center {
+  width: 38%;
+  text-align: center;
+  font-size: var(--fs-fine);
+  color: #fff;
+  padding: 0 5pt;
+}
+.footer-center .name {
+  font-weight: bold;
+  font-size: 6.5pt;
+  color: #fff;
+  margin-bottom: 1pt;
+}
+.footer-right {
+  width: 36%;
+  font-size: var(--fs-fine);
+  color: #fff;
+  padding-left: 5pt;
+  border-left: 0.5pt solid rgba(255,255,255,0.2);
+}
+.footer-right p {
+  margin: 0.5pt 0;
+}
+.footer-right .contact-label {
+  font-weight: bold;
+  margin-right: 2pt;
+  color: #fff;
+}
+.footer-isotipo {
+  width: 12%;
+  text-align: center;
+  vertical-align: middle;
+}
+.footer-isotipo img {
+  height: 32pt;
+  display: inline-block;
+  vertical-align: middle;
+  opacity: 0.85;
+}
+.validity {
+  text-align: center;
+  font-style: italic;
+  font-size: 6.5pt;
+  color: #555;
+  margin-top: 2pt;
+}

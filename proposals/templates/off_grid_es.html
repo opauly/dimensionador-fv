@@ -3,360 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <style>
-@page {
-  size: A4;
-  margin: 0.75cm 1.2cm 2.7cm 1.2cm;
-}
-
-* { box-sizing: border-box; }
-
-body {
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 7pt;
-  color: #222;
-  margin: 0;
-  padding: 0;
-  line-height: 1.15;
-}
-
-/* ── HEADER ─────────────────────────────────────────────────────────────── */
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 4pt;
-}
-.header-left { flex: 1; }
-.title-cotizacion {
-  font-size: 22pt;
-  font-weight: bold;
-  color: #1E2D54;
-  line-height: 1;
-  display: inline-block;
-  border-bottom: 2.5pt solid #4BAE6A;
-  padding-bottom: 2pt;
-}
-.title-solar {
-  display: block;
-  font-size: 13pt;
-  font-weight: bold;
-  color: #4BAE6A;
-  line-height: 1.15;
-  margin-top: 3pt;
-}
-.header-logo img {
-  height: 40pt;
-  display: block;
-}
-
-/* ── CLIENT TABLE ───────────────────────────────────────────────────────── */
-.client-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 4pt;
-  font-size: 7pt;
-}
-.client-table td {
-  padding: 1.5pt 5pt;
-  border: 0.5pt solid #bbb;
-}
-.client-table .lbl {
-  font-weight: bold;
-  width: 20%;
-  background: #f2f2f2;
-  color: #444;
-}
-
-/* ── INTRO PARAGRAPH ────────────────────────────────────────────────────── */
-.intro {
-  font-size: 7pt;
-  margin-bottom: 4pt;
-  line-height: 1.3;
-}
-
-/* ── SECTION TITLES ─────────────────────────────────────────────────────── */
-.section-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 1pt;
-  margin-top: 4pt;
-}
-.section-title {
-  font-weight: bold;
-  font-size: 7pt;
-  color: #1E2D54;
-}
-
-/* ── STANDARD GREEN TABLE ───────────────────────────────────────────────── */
-.gt {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 3pt;
-  font-size: 6.5pt;
-}
-.gt th {
-  background: #4BAE6A;
-  color: #fff;
-  font-weight: bold;
-  padding: 2pt 3pt;
-  text-align: center;
-  vertical-align: middle;
-  border: 0.5pt solid #3d9a5c;
-  line-height: 1.1;
-}
-.gt td {
-  padding: 1.5pt 3pt;
-  border: 0.5pt solid #ccc;
-  text-align: center;
-  vertical-align: middle;
-}
-.gt td.left  { text-align: left; }
-.gt td.right { text-align: right; }
-
-/* ── COST TABLE ─────────────────────────────────────────────────────────── */
-.cost-table { margin-bottom: 3pt; }
-.cost-table th.th-item  { width: 27%; text-align: left; }
-.cost-table th.th-qty   { width: 10%; }
-.cost-table th.th-specs { width: 43%; text-align: left; }
-.cost-table th.th-total { width: 20%; }
-.cost-table td.td-item  { text-align: left; }
-.cost-table td.td-specs { text-align: left; }
-.cost-table td.td-total { text-align: right; }
-.cost-total td {
-  font-weight: bold;
-  border-top: 1pt solid #888;
-  background: #f9f9f9;
-}
-.cost-subtotal td { color: #666; }
-
-/* ── TECHNICAL + SUMMARY (partial-width tables) ─────────────────────────── */
-.tech-table {
-  width: 80%;
-  border-collapse: collapse;
-  font-size: 6.5pt;
-  margin-bottom: 3pt;
-}
-.tech-table th {
-  background: #4BAE6A;
-  color: #fff;
-  font-weight: bold;
-  padding: 2pt 4pt;
-  text-align: center;
-  border: 0.5pt solid #3d9a5c;
-  line-height: 1.1;
-}
-.tech-table td {
-  padding: 1.5pt 4pt;
-  border: 0.5pt solid #ccc;
-  text-align: center;
-}
-
-.summary-table {
-  width: 45%;
-  border-collapse: collapse;
-  font-size: 6.5pt;
-  margin-bottom: 3pt;
-}
-.summary-table th {
-  background: #4BAE6A;
-  color: #fff;
-  font-weight: bold;
-  padding: 2pt 4pt;
-  text-align: center;
-  border: 0.5pt solid #3d9a5c;
-}
-.summary-table td {
-  padding: 1.5pt 4pt;
-  border: 0.5pt solid #ccc;
-  text-align: center;
-  font-weight: bold;
-}
-
-/* ── NOTES / PAYMENT ────────────────────────────────────────────────────── */
-.notes-list {
-  list-style: none;
-  margin: 1pt 0 2pt 0;
-  padding: 0;
-  font-size: 5.5pt;
-}
-.notes-list li::before {
-  content: "·  ";
-  font-weight: bold;
-}
-.notes-list li {
-  margin-bottom: 0.5pt;
-}
-
-/* ── BANK TRANSFER TABLE ────────────────────────────────────────────────── */
-.bank-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 6pt;
-  margin-bottom: 3pt;
-}
-.bank-table th {
-  background: #4BAE6A;
-  color: #fff;
-  font-weight: bold;
-  padding: 2pt 5pt;
-  text-align: center;
-  border: 0.5pt solid #3d9a5c;
-  width: 50%;
-}
-.bank-table td {
-  padding: 2.5pt 5pt;
-  border: 0.5pt solid #ccc;
-  vertical-align: top;
-  line-height: 1.35;
-  width: 50%;
-}
-
-/* ── WARRANTY TABLE ─────────────────────────────────────────────────────── */
-.warranty-table {
-  width: 68%;
-  border-collapse: collapse;
-  font-size: 5.5pt;
-  margin-bottom: 3pt;
-}
-.warranty-table th {
-  background: #4BAE6A;
-  color: #fff;
-  font-weight: bold;
-  padding: 2pt 4pt;
-  text-align: center;
-  border: 0.5pt solid #3d9a5c;
-}
-.warranty-table td {
-  padding: 0.5pt 4pt;
-  border: 0.5pt solid #ccc;
-  text-align: center;
-  vertical-align: middle;
-}
-.warranty-table td.wleft { text-align: left; }
-
-/* ── PINNED FOOTER ──────────────────────────────────────────────────────── */
-.footer-wrap {
-  position: fixed;
-  bottom: -1.95cm;   /* sits inside the reserved @page bottom margin */
-  left: 0;
-  right: 0;
-}
-.footer-card {
-  display: flex;
-  align-items: center;
-  background: #1E2D54;
-  color: #fff;
-  padding: 4pt 7pt;
-  page-break-inside: avoid;
-  break-inside: avoid;
-}
-.footer-sig {
-  width: 14%;
-  text-align: center;
-  vertical-align: middle;
-}
-.footer-sig img {
-  height: 28pt;
-  display: inline-block;
-  vertical-align: middle;
-}
-.footer-center {
-  width: 38%;
-  text-align: center;
-  font-size: 6pt;
-  color: #fff;
-  padding: 0 5pt;
-}
-.footer-center .name {
-  font-weight: bold;
-  font-size: 6.5pt;
-  color: #fff;
-  margin-bottom: 1pt;
-}
-.footer-right {
-  width: 36%;
-  font-size: 6pt;
-  color: #fff;
-  padding-left: 5pt;
-  border-left: 0.5pt solid rgba(255,255,255,0.2);
-}
-.footer-right p {
-  margin: 0.5pt 0;
-}
-.footer-right .contact-label {
-  font-weight: bold;
-  margin-right: 2pt;
-  color: #fff;
-}
-.footer-isotipo {
-  width: 12%;
-  text-align: center;
-  vertical-align: middle;
-}
-.footer-isotipo img {
-  height: 32pt;
-  display: inline-block;
-  vertical-align: middle;
-  opacity: 0.85;
-}
-.validity {
-  text-align: center;
-  font-style: italic;
-  font-size: 6.5pt;
-  color: #555;
-  margin-top: 2pt;
-}
-.coverage-chart {
-  max-width: 320pt;
-  margin: 2pt auto 1pt auto;
-  /* Only the chart image itself is protected from splitting across a page
-     boundary — NOT the whole heading+chart+caption group (that used to be
-     .coverage-block's rule). Protecting the whole group meant that if it
-     didn't fit in the space remaining on the page, WeasyPrint pushed the
-     entire block to the next page, wasting whatever room was left and
-     dragging every section after it down too — the cause of a real 1-page
-     proposal ballooning to 2 pages with a near-empty page 2 after this
-     section was moved earlier in the doc (see CONTEXT.md 2026-07-31). Only
-     protecting the SVG itself lets the heading/caption flow normally.
-  */
-  page-break-inside: avoid;
-  break-inside: avoid;
-}
-.coverage-note {
-  max-width: 320pt;
-  margin: 0 auto 10pt auto;
-  /* Deliberately larger than the tight rhythm used everywhere else — this is
-     the one intentional gap on the page, marking the transition from
-     proposal/design content (Costos, Técnicos, Resumen, Cobertura) to
-     general administrative info (Notas, Garantía), which sits close to the
-     footer with its own tight rhythm (see CONTEXT.md 2026-07-31).
-  */
-  font-size: 6pt;
-  color: #6B7280;
-  line-height: 1.35;
-  text-align: center;
-}
-
-/* ── BOTTOM-PINNED GENERAL INFO ─────────────────────────────────────────── */
-/* .page-wrap holds everything except the fixed footer, sized to exactly one
-   page's content box (A4 841.89pt − top margin 21.26pt − bottom margin
-   76.54pt = 744.09pt, see @page above). .bottom-group (Notas/Garantía)
-   gets margin-top:auto, which a flex column resolves by consuming all
-   left-over space above it — so on a normal-length proposal it sits flush
-   against the footer instead of floating in the middle of the page with a
-   dead gap below it. On a proposal heavy enough to need a 2nd page, this
-   degrades gracefully to plain top-down flow (min-height stops applying
-   once content exceeds it, so nothing overlaps or gets clipped).
-*/
-.page-wrap {
-  display: flex;
-  flex-direction: column;
-  min-height: 744pt;
-}
-.bottom-group {
-  margin-top: auto;
-}
+{% include "_styles.css.j2" %}
 </style>
 </head>
 <body>
@@ -431,6 +78,9 @@ body {
 </table>
 
 <!-- ── DETALLES TÉCNICOS ──────────────────────────────────────────────────── -->
+{# RESUMEN used to follow this section as a standalone two-cell table. It was
+   removed: its "Total" duplicated the last row of DETALLES DE COSTOS above,
+   and $/Wp is a technical metric, so it now closes out this table instead. #}
 <div class="section-row"><span class="section-title">DETALLES TÉCNICOS</span></div>
 <table class="tech-table">
   <thead>
@@ -441,6 +91,7 @@ body {
       <th>Capacidad de<br>batería @10h (kWh)</th>
       <th>Descarga máxima<br>de batería</th>
       <th>Aprovechamiento<br>solar</th>
+      <th class="th-wp">Precio<br>$/Wp</th>
     </tr>
   </thead>
   <tbody>
@@ -451,23 +102,7 @@ body {
       <td>{{ technical.battery_kwh }}</td>
       <td>{{ technical.discharge_pct }}</td>
       <td>{{ technical.utilization_pct }}</td>
-    </tr>
-  </tbody>
-</table>
-
-<!-- ── RESUMEN ────────────────────────────────────────────────────────────── -->
-<div class="section-row"><span class="section-title">RESUMEN</span></div>
-<table class="summary-table">
-  <thead>
-    <tr>
-      <th style="width:50%;">Total</th>
-      <th style="width:50%;">Precio $/Wp</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>{{ total_usd }}</td>
-      <td>{{ cost_per_wp }}</td>
+      <td class="td-wp">{{ cost_per_wp }}</td>
     </tr>
   </tbody>
 </table>
@@ -481,6 +116,7 @@ body {
 </div>
 {% endif %}
 
+<div class="flex-spacer"></div>
 <div class="bottom-group">
 <!-- ── NOTAS ADICIONALES ──────────────────────────────────────────────────── -->
 <div class="section-row"><span class="section-title">NOTAS ADICIONALES</span></div>

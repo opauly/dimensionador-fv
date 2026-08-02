@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from wizard.state import autosave_if_possible as _autosave
+from proposals.generator import _site_location
 
 from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY
 
@@ -1952,7 +1953,10 @@ def step8_review() -> None:
                 "monthly_coverage": _monthly_coverage,
                 "client": {
                     "name": client.get("name", ""),
-                    "location": client.get("location", f"{site.get('city', '')}, {site.get('province', '')}"),
+                    # `or`, not .get(key, default): "location" routinely exists
+                    # holding an empty string, which .get() happily returns,
+                    # leaving the PDF's UBICACIÓN row blank.
+                    "location": client.get("location") or _site_location(site),
                     "nise": utility.get("nise", client.get("nise", "N/A")),
                 },
                 "system_type_label": "Grid Zero",
@@ -1973,8 +1977,8 @@ def step8_review() -> None:
                     "avg_monthly_savings_usd": avg_monthly_savings_usd,
                     "pct_savings": pct_savings,
                 },
-                "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica nacional",
-                "benefits_notes_en": "Excess energy delivered to the national grid is not considered",
+                "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica",
+                "benefits_notes_en": "Excess energy delivered to the grid is not considered",
                 "cost_items": cost_items,
                 "subtotal_usd": costs.get("subtotal_usd", total_usd),
                 "iva_usd": costs.get("iva_usd", 0),

@@ -21,6 +21,30 @@ TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 # ── formatters ───────────────────────────────────────────────────────────────
 
+def _qty(v) -> str:
+    """
+    Format a cost-line quantity for display.
+
+    Off-Grid stores quantities as floats while Grid Zero stores ints, so a
+    plain str() rendered "4.0 paneles" on one system type and "5" on the
+    other. Integral values always render without a decimal; a genuinely
+    fractional quantity keeps it.
+    """
+    if v is None:
+        return "–"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _site_location(site: dict) -> str:
+    """"City, Province" from a wizard site dict, skipping whichever is missing."""
+    parts = [str(site.get(k) or "").strip() for k in ("city", "province")]
+    return ", ".join(p for p in parts if p)
+
+
 def _crc(v: float) -> str:
     return f"₡{int(round(v)):,}"
 
@@ -260,7 +284,7 @@ def _build_context(data: dict, language: str) -> dict:
     for ci in data["cost_items"]:
         cost_items_fmt.append({
             "item":  ci["item"]    if es else ci.get("item_en", ci["item"]),
-            "qty":   str(ci["qty"]) if ci.get("qty") is not None else "–",
+            "qty":   _qty(ci.get("qty")),
             "specs": ci["specs"]   if es else ci.get("specs_en", ci["specs"]),
             "total": _usd(ci["total"]),
         })
@@ -339,7 +363,7 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
     for ci in data["cost_items"]:
         cost_items_fmt.append({
             "item":  ci["item"]    if es else ci.get("item_en", ci["item"]),
-            "qty":   str(ci["qty"]) if ci.get("qty") is not None else "–",
+            "qty":   _qty(ci.get("qty")),
             "specs": ci["specs"]   if es else ci.get("specs_en", ci["specs"]),
             "total": _usd(ci["total"]),
         })
@@ -409,18 +433,45 @@ def build_from_wizard_blob(
     language    = meta.get("language", "es")
     panel       = equipment.get("panel", {})
     inverter    = equipment.get("inverter", {})
-    chosen      = equipment.get("chosen_scenario", {})
-    panel_count = int(chosen.get("total_panels") or 0)
-    system_kw   = float(chosen.get("system_kw") or 0)
+    system_type = proposal.get("system_type", "grid_zero")
+    is_off_grid = system_type != "grid_zero"
+
+    # The two wizards store their sizing result under different keys: Grid Zero
+    # writes equipment.chosen_scenario, Off-Grid/Hybrid write equipment.array
+    # (plus equipment.battery_bank). This function only ever read
+    # chosen_scenario, so every Off-Grid PDF generated from the Cotizaciones
+    # list came out with 0.00 kW / 0.0 m² / 0.00 kWh in DETALLES TÉCNICOS and
+    # $0.00/Wp. The wizard's own Step 8 was unaffected — it builds its data
+    # dict directly instead of going through here.
+    chosen       = equipment.get("chosen_scenario", {}) or {}
+    array        = equipment.get("array", {}) or {}
+    battery_bank = equipment.get("battery_bank", {}) or {}
+
+    if is_off_grid:
+        panel_count = int(array.get("panel_count") or equipment.get("panel_count") or 0)
+        system_kw   = float(array.get("array_kw") or 0)
+    else:
+        panel_count = int(chosen.get("total_panels") or 0)
+        system_kw   = float(chosen.get("system_kw") or 0)
 
     # ── Cost items ────────────────────────────────────────────────────────────
     inv_qty    = 1
     cost_items = []
     for li in costs.get("line_items", []):
         qty     = li.get("qty")
-        unit    = float(li.get("unit_cost_usd") or 0)
         iva_pct = float(li.get("iva_pct") or 0)
-        total   = round((float(qty) if qty is not None else 1) * unit * (1 + iva_pct), 2)
+        # The wizard already stores a computed `total` per line; prefer it.
+        # Recomputing here read "unit_cost_usd", a key the wizard has never
+        # written (it writes "unit_cost"), so every line total silently came
+        # out $0.00 while the Total row — which comes from costs.total_usd,
+        # not from summing these — stayed correct. That only affected PDFs
+        # generated from the Cotizaciones list, since the wizard's own Step 8
+        # builds its data dict directly rather than going through here.
+        if li.get("total") is not None:
+            total = round(float(li["total"]), 2)
+        else:
+            unit  = float(li.get("unit_cost") or li.get("unit_cost_usd") or 0)
+            total = round((float(qty) if qty is not None else 1) * unit * (1 + iva_pct), 2)
         if li.get("item") == "Inversores" and qty:
             inv_qty = int(float(qty))
         cost_items.append({
@@ -436,7 +487,13 @@ def build_from_wizard_blob(
     subtotal_usd = float(costs.get("subtotal_usd") or total_usd)
     iva_usd      = float(costs.get("iva_usd") or 0)
     cost_per_wp = round(total_usd / (system_kw * 1000), 2) if system_kw else 0.0
-    area_m2     = round(panel_count * float(panel.get("width_m") or 1.134) * float(panel.get("height_m") or 2.278), 1)
+    # Off-Grid's sizing step already stored the array area; only fall back to
+    # deriving it from panel dimensions when it isn't there (Grid Zero).
+    area_m2 = float(array.get("area_m2") or 0) or round(
+        panel_count * float(panel.get("width_m") or 1.134) * float(panel.get("height_m") or 2.278), 1
+    )
+    if is_off_grid and equipment.get("inverter_qty"):
+        inv_qty = int(float(equipment["inverter_qty"]))
 
     # ── Billing / financials (best-effort recompute) ──────────────────────────
     billing_avg = {
@@ -502,7 +559,14 @@ def build_from_wizard_blob(
         "quote_number":      quote_str,
         "client": {
             "name":     client_data.get("name") or proposal.get("client_name", ""),
-            "location": client_data.get("address") or site.get("address") or "",
+            # site never carries an "address" key — wizard/common.py's site step
+            # writes city/province — so this used to fall through to "" and the
+            # UBICACIÓN row rendered blank on any proposal whose client record
+            # had no address of its own. `or` (not .get(default)) throughout:
+            # these keys routinely exist holding an empty string.
+            "location": (client_data.get("address")
+                         or site.get("address")
+                         or _site_location(site)),
             "nise":     client_data.get("nise") or "N/A",
         },
         "system_type_label": sys_labels.get(proposal.get("system_type", "grid_zero"), "Grid Zero"),
@@ -520,6 +584,19 @@ def build_from_wizard_blob(
             "area_m2":        area_m2,
             "panel_count":    panel_count,
             "inverter_count": inv_qty,
+            # Off-Grid/Hybrid columns — read by _build_context_off_grid(), which
+            # renders a different set of metrics than Grid Zero. Absent (and
+            # unused) on a Grid Zero blob, where battery_bank/array are empty.
+            "daily_generation_kwh": float(array.get("daily_generation_kwh") or 0),
+            "battery_kwh":          float(battery_bank.get("total_kwh_installed") or 0),
+            "discharge_pct":        float(battery_bank.get("discharge_pct") or 0),
+            # None (not 0) when never simulated, so the template renders "—"
+            # rather than claiming a real 0% utilization.
+            "utilization_pct":      battery_bank.get("utilization_pct"),
+            # Grid Zero's solar-utilization figure, stored by the Step 6
+            # projection. None (not 0) when a draft never ran "Calcular MPPT",
+            # so the template renders "—" instead of a fake 0%.
+            "self_consumption_pct": (equipment.get("projection") or {}).get("self_consumption_pct"),
         },
         "cost_per_wp":               cost_per_wp,
         "warranty_inverter_years":   f"{inv_warranty} años",

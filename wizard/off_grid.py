@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from wizard.state import autosave_if_possible as _autosave
+from proposals.generator import _site_location
 from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY
 
 from calculations.load_profile_off_grid import CATEGORY_LABELS_ES, COMMON_LOADS_CATALOG_V1, BEHAVIOR_KWH_PER_BEDROOM_DAY_V1
@@ -1820,7 +1821,7 @@ def step8_review(
                 "system_type": "Off-Grid (sistema aislado)"
                     if meta.get("system_type") == "off_grid" else "Híbrido (red + respaldo)",
                 "client_name": client.get("name", ""),
-                "location": client.get("location") or f"{site.get('city', '')}, {site.get('province', '')}".strip(", "),
+                "location": client.get("location") or _site_location(site),
                 "system_kw": array.get("array_kw", 0),
                 "panel_count": panel_count,
                 "panel_model": f"{panel.get('brand','')} {panel.get('model','')}".strip(),
@@ -1897,7 +1898,7 @@ def step8_review(
                 "monthly_coverage": _og_monthly_coverage,
                 "client": {
                     "name": client.get("name", ""),
-                    "location": client.get("location", f"{site.get('city', '')}, {site.get('province', '')}"),
+                    "location": client.get("location") or _site_location(site),
                     "nise": client.get("nise", "N/A"),
                 },
                 "system_type_label": "Off-Grid" if meta.get("system_type") == "off_grid" else "Híbrido",
