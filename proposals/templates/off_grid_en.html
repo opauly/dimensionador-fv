@@ -91,6 +91,7 @@
       <th>Battery capacity<br>@10h (kWh)</th>
       <th>Maximum battery<br>discharge</th>
       <th>Solar<br>utilization</th>
+      {% if hybrid_savings %}<th>Bill<br>reduction</th>{% endif %}
       <th class="th-wp">Price<br>$/Wp</th>
     </tr>
   </thead>
@@ -102,10 +103,17 @@
       <td>{{ technical.battery_kwh }}</td>
       <td>{{ technical.discharge_pct }}</td>
       <td>{{ technical.utilization_pct }}</td>
+      {% if hybrid_savings %}<td>~{{ hybrid_savings.savings_pct }}</td>{% endif %}
       <td class="td-wp">{{ cost_per_wp }}</td>
     </tr>
   </tbody>
 </table>
+{% if hybrid_savings %}
+<div class="coverage-note" style="margin-top:-4pt;">
+  Estimated electricity bill without solar: {{ hybrid_savings.old_bill_crc }}/mo · with solar: {{ hybrid_savings.new_bill_crc }}/mo
+  ({{ hybrid_savings.savings_crc }}/mo estimated savings).
+</div>
+{% endif %}
 
 <!-- ── MONTHLY COVERAGE (inline SVG chart) ───────────────────────────────── -->
 {% if coverage_chart_svg %}

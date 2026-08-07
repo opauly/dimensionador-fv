@@ -954,3 +954,105 @@ app is structured, at the cost of splitting Victron Monitor's code across two di
 Recommend `victron/` at the repo root for the Python code, with a pointer added to
 `victron-monitor/README.md`. Worth confirming before scaffolding, since it's cheap now and
 annoying later.
+
+## 21. Custom date range — plan only, not yet built (2026-07-29)
+
+`monitoring` reports are explicitly out of scope for this: they stay the automatic fixed
+1-week report they are today, no change. Everything below is `vrm` only.
+
+Two phases, agreed with the user before writing any code:
+
+### Phase A — arbitrary range up to 31 days (near-term)
+
+Generalizes today's report from "exactly 7 days ending on a chosen date" to "any
+operator-chosen `(start, end)` within the site's available data, capped at 31 days" — same
+template, same block set, just no longer hardcoded to 7.
+
+**Already generalizes with no work**, confirmed by reading the code, not assumed:
+- Daily rows are summed / health-averaged over the window already — nothing here assumes 7.
+- CR savings already scales the monthly-equivalent off `num_days`, not a literal week.
+
+**Mechanical parameter threading:**
+- `vrm_report_db.py`: `week_bounds()` (hardcoded `start = end − 6 days`) → accept an explicit
+  `(start, end)` pair for the `vrm` path. `monitoring`'s call site is untouched.
+- "vs prev" week-over-week comparison → "same length window, immediately preceding" instead
+  of a hardcoded 7-day lookback. Trivial once the window itself is a parameter.
+- `build_report_data(site_id, start, end, schema, ...)` — signature moves from `week_ending`
+  to explicit bounds, `vrm` call path only.
+- Reporte tab (`vrm` origin only): two date inputs instead of one, constrained to
+  `get_available_dates()`'s actual min/max for that site. `monitoring` origin keeps today's
+  single "Semana que termina el" picker unchanged.
+- Enforce the 31-day cap in the data layer (reject, not just hide in the UI) — defense in
+  depth, same reasoning as every other validation in this pipeline.
+
+**4-week trend: unchanged, per explicit decision.** Stays a fixed 4×7-day view ending on the
+report's end date, decoupled from whatever custom range was chosen for the main numbers —
+still useful context regardless of what the operator picked.
+
+**The one genuinely open piece — chart legibility beyond ~10 days:**
+- `bar_chart_svg()`'s daily bars use day-of-week labels (Mon–Sun), fine for ≤7ish days,
+  illegible and repetitive past that. Needs date labels for longer spans, and likely
+  thinned labels (every 2nd/3rd bar) as the count climbs toward 31 — concrete thresholds
+  need picking against real rendered output, not guessed once and assumed to hold.
+  Bars themselves (as opposed to labels) may stay one-per-day up to 31; verify visually
+  rather than assume.
+  Same question for the SOC daily chart, though line/area charts tolerate more points
+  better than bars.
+- Copy: "Weekly Energy Report" / "WEEKLY HEALTH SCORE" / "this week" (narrative prompt) /
+  "vs prev" are all literally weekly-flavored text. Open decision: genericize wording only
+  for the `vrm` path (two translation-dict variants), or genericize everywhere including
+  `monitoring` (one wording set — "Health Score" reads fine for an exact 7-day period too,
+  and "weekly" was never load-bearing information). Leaning toward the latter for
+  simplicity, not decided.
+
+### Phase B — long-window "Overview" report (later, plan only)
+
+Not a bigger version of the Phase A template. Past somewhere around a month, daily bars and
+a daily SOC chart stop being legible *or* useful — a 3-month report should answer "is this
+system trending well / is there a seasonal weak spot", not "what happened on a specific
+Tuesday". Triggered when a selected/available range exceeds the Phase A cap.
+
+**Architecture: one report generator, band-conditional blocks** — the same pattern
+`system_type` already uses (`has_grid`/`has_batt` swap whole blocks in/out). Add an
+`is_overview` flag the same way, threaded from `num_days > 31`.
+
+**Blocks needing zero change** (already period-length-agnostic): KPI summary cards, the
+savings block, alarm/outage counts, the 4-week trend (always its own fixed thing regardless
+of band).
+
+**Blocks that change, and the reusable primitive they all share:**
+`four_week_trend_svg()` already contains the one piece of machinery Phase B actually needs —
+grouping daily rows into N buckets and summing per bucket. Generalizing that from "always 4
+buckets of 7 days" into "N buckets of ~7-or-~30 days spanning an arbitrary range" is the
+single reusable building block behind everything below:
+- Daily bar chart → weekly or monthly aggregated bars (same bucketing primitive).
+- Daily SOC chart → weekly min/max SOC band instead of per-day.
+- Health score → currently one averaged number for the whole window; over 3 months that
+  hides real variation (a bad month buried inside an otherwise-fine quarter). Should become
+  a bucketed trend line — new visual real estate, not a reworked KPI card.
+- Grid dependency / battery cycling as a trend over the period — both are already computed
+  per day (they feed the health score), so this is a new chart over existing numbers, not
+  new computation.
+- **Seasonal coverage — the likely flagship chart for "why 3 months matters".** The Off-Grid
+  *proposal* wizard already has this exact concept (Step 6, monthly PVGIS-estimated
+  generation vs. a flat consumption line, weakest month flagged — see this file's Phase 5
+  history in `CONTEXT.md`). A VRM Overview report's version would be the same idea driven by
+  *real measured* monthly PV vs. real measured monthly load — arguably more compelling than
+  the proposal tool's PVGIS-estimated version, since it's a system that's actually running.
+- Narrative prompt needs a genuinely different frame ("how has this system trended over the
+  quarter") — a distinct prompt template, not a reworded one-week prompt.
+
+**Scoping note that matters:** Phase B is entirely a rendering-layer feature. `fetch_report_window`
+already fetches raw daily rows generically for any range; Phase B's bucketing happens
+client-side in Python on data already being ingested and stored today. **No changes to the
+CSV mapper, the `vrm` schema, or ingestion at all** — purely `weekly_report.py` /
+`report_svg.py` / i18n.
+
+**Open UI question, not decided:** does exceeding the Phase A cap *automatically* switch to
+the Overview layout, or does the operator explicitly pick "Detallado" vs. "Resumen"? Leaning
+toward automatic (the cap becomes a mode boundary, not a hard stop) — to be decided when
+Phase B is actually scoped.
+
+**Sequencing:** Phase A first (bounded, mechanical, extends what already works). Phase B
+after, once Phase A's chart-legibility work has already answered some of the "how many
+bars/labels actually fit" questions Phase B will hit again at a coarser granularity.

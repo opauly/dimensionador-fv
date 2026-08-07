@@ -7,19 +7,23 @@ from wizard.state import autosave_if_possible as _autosave
 from proposals.generator import _site_location
 from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY
 
-from calculations.load_profile_off_grid import CATEGORY_LABELS_ES, COMMON_LOADS_CATALOG_V1, BEHAVIOR_KWH_PER_BEDROOM_DAY_V1
+from calculations.load_profile_off_grid import (
+    CATEGORY_LABELS_ES, COMMON_LOADS_CATALOG_V1, BEHAVIOR_KWH_PER_BEDROOM_DAY_V1, classify_load_category,
+)
 
 _CATEGORY_AUTO_LABEL = "(Automático)"
 _CATEGORY_LABEL_TO_KEY = {v: k for k, v in CATEGORY_LABELS_ES.items()}
 _CATEGORY_SELECT_OPTIONS = [_CATEGORY_AUTO_LABEL] + list(CATEGORY_LABELS_ES.values())
 
-_DEFAULT_LOADS = [
-    {"Descripción": "Refrigerador", "Cantidad": 1, "Potencia (kW)": 0.5, "Categoría": CATEGORY_LABELS_ES["fixed_cycling"]},
-]
-# Iluminación general / Tomacorrientes are deliberately NOT default rows — general
-# lighting/outlet use is always covered by the habitaciones/espacios × nivel de uso
-# aggregate (Paso 5), never by an individual load's own wattage, so listing them
-# here would suggest they need to be itemized when they don't.
+# No seed row — an empty starting table. A single hardcoded "Refrigerador"
+# example used to be pre-loaded here, but it silently persisted into
+# session_state the moment the data editor rendered at all (Streamlit writes
+# the widget's current value back every run, not only on submit), so every
+# import method (catálogo/tablero/texto) ended up appending onto it instead
+# of a genuinely empty list — a phantom duplicate row the engineer never
+# added. With three real ways to populate this table now (catálogo, tablero,
+# texto) plus the editor's own "+" row control, a seed example isn't needed.
+_DEFAULT_LOADS: list[dict] = []
 
 _HOME_CLASS_LABELS = {
     "Básica": "basic",
@@ -67,6 +71,247 @@ _CATEGORY_CHART_COLORS = {
 
 # ── Step 4 — Cargas eléctricas y perfil de consumo general ───────────────────
 
+def _render_loads_block(key_prefix: str, current: dict) -> tuple[int, str, list[dict]]:
+    """
+    Renders the full loads-input UI — Uso general aggregate config, cargas
+    comunes catálogo picker, tablero-image import, paste-text import, and
+    the final editable table — under session-state keys namespaced by
+    `key_prefix`. Extracted from step4_loads() (previously hardcoded to
+    "w4og_*") so it can render twice on the same Step 4 page: once for
+    critical/backup loads (key_prefix="w4og", unchanged keys — no session
+    state migration needed for existing drafts), once for a Hybrid system's
+    separate main-panel loads (a different key_prefix, e.g. "w4h_mp") —
+    two independent tables that never read or write each other's state.
+
+    `current` is the previously-saved sub-dict for THIS specific block
+    (num_bedrooms/home_class/loads_display) — callers scope this themselves
+    (wizard_consumption itself for critical loads, a nested sub-dict for the
+    main panel), so the two blocks stay fully independent.
+
+    Returns (num_bedrooms, home_class, loads_data) — loads_data is the raw
+    edited table (list of {"Descripción","Cantidad","Potencia (kW)","Categoría"}
+    dicts), same shape callers already turn into a "loads" list today.
+    """
+    def _append_loads(new_rows: list[dict]) -> None:
+        """Shared by every import method (catálogo/tablero/texto) — always
+        appends onto whatever's already in the table, never silently drops
+        prior rows from a different method."""
+        st.session_state[f"{key_prefix}_loads_data"] = (
+            st.session_state.get(f"{key_prefix}_loads_data", []) + new_rows
+        )
+        st.session_state[f"{key_prefix}_loads_ver"] = st.session_state.get(f"{key_prefix}_loads_ver", 0) + 1
+
+    def _classified_rows(extracted: list[dict]) -> list[dict]:
+        """Runs each AI-extracted load through the same category classifier
+        Step 5 uses (calculations/load_profile_off_grid.classify_load_category)
+        right at import time, instead of leaving every row at "(Automático)"
+        until Step 5 resolves it — the engineer sees (and can correct) the
+        real category immediately in this table."""
+        rows = []
+        for r in extracted:
+            category_key = classify_load_category(r["Descripción"])
+            rows.append({
+                "Descripción": r["Descripción"], "Cantidad": r["Cantidad"],
+                "Potencia (kW)": r["Potencia (kW)"],
+                "Categoría": CATEGORY_LABELS_ES.get(category_key, _CATEGORY_AUTO_LABEL),
+            })
+        return rows
+
+    # ── Block 1: Uso general (aggregate) + cargas comunes (catálogo) ────────
+    # Grouped together as the "no AI needed" input block — both are plain
+    # dropdown/picker interactions. Blocks 2 and 3 below are the AI-parsed
+    # import methods (tablero image/PDF, pasted text); the resulting table
+    # always comes last, fed by whichever combination of these was used.
+    st.markdown("##### Uso general")
+    st.caption(
+        "Cubre iluminación y el consumo de fondo de tomacorrientes — lo que está siempre "
+        "conectado (computadora, router, reloj, cargadores). **No cubre electrodomésticos** "
+        "(microondas, TV, lavadora, cafetera, plantilla): esos se listan abajo y se dimensionan "
+        "por separado. Aplica tanto para viviendas (usa dormitorios) como para negocios pequeños "
+        "(usa oficinas u otros espacios equivalentes)."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        num_bedrooms = st.number_input(
+            "Habitaciones / espacios", min_value=1, max_value=15,
+            value=int(current.get("num_bedrooms") or 3), key=f"{key_prefix}_bedrooms",
+            help="Para una vivienda: número de dormitorios. Para un negocio: número de oficinas "
+                 "u otros espacios equivalentes. Se usa como el multiplicador directo del consumo "
+                 "general (Paso 5): kWh/día/espacio × espacios.",
+        )
+    with col2:
+        class_label = st.selectbox(
+            "Nivel de uso general", list(_HOME_CLASS_LABELS.keys()),
+            index=list(_HOME_CLASS_LABELS.values()).index(current.get("home_class", "standard")),
+            key=f"{key_prefix}_class",
+        )
+        home_class = _HOME_CLASS_LABELS[class_label]
+
+    # Visible explanation with a concrete kWh/day example per tier — kWh/day alone
+    # isn't a tangible unit for most customers, so tie it to a fixed reference
+    # space count and pull rates straight from the benchmark table (never
+    # hardcoded here) so the copy can't drift out of sync with the calculation.
+    n = _USAGE_LEVEL_EXAMPLE_SPACES
+    st.markdown("\n".join(
+        f"- **{label}** ({BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key]:.1f} kWh/día/espacio) — "
+        f"{_USAGE_LEVEL_DESCRIPTIONS[label]} "
+        f"*Ej.: {n} espacios ≈ {BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key] * n:.1f} kWh/día.*"
+        for label, key in _HOME_CLASS_LABELS.items()
+    ))
+
+    st.markdown("##### Cargas comunes")
+    st.caption(
+        "Agrega cargas típicas desde el catálogo — potencia y categoría ya vienen precargadas, "
+        "ambas editables después de agregar en la tabla final."
+    )
+    # Versioned key (mirrors grid_zero.py's w5_loads_{ver} pattern) so
+    # "Agregar" can reset the picker by rendering a fresh widget instance
+    # next run — writing directly to an already-instantiated widget's
+    # session_state key raises StreamlitAPIException.
+    catalog_options = {f"{c['name']} ({c['nameplate_kw']} kW)": c for c in COMMON_LOADS_CATALOG_V1}
+    catalog_ver = st.session_state.get(f"{key_prefix}_catalog_ver", 0)
+    col_pick, col_add = st.columns([4, 1])
+    with col_pick:
+        picked_labels = st.multiselect(
+            "Agregar cargas comunes",
+            list(catalog_options.keys()),
+            key=f"{key_prefix}_catalog_pick_{catalog_ver}",
+            label_visibility="collapsed",
+        )
+    with col_add:
+        if st.button("+ Agregar", key=f"{key_prefix}_catalog_add", disabled=not picked_labels, use_container_width=True):
+            _append_loads([
+                {
+                    "Descripción": catalog_options[lbl]["name"],
+                    "Cantidad": 1,
+                    "Potencia (kW)": catalog_options[lbl]["nameplate_kw"],
+                    "Categoría": CATEGORY_LABELS_ES[catalog_options[lbl]["category"]],
+                }
+                for lbl in picked_labels
+            ])
+            st.session_state[f"{key_prefix}_catalog_ver"] = catalog_ver + 1
+            st.rerun()
+
+    st.divider()
+
+    # ── Block 2: Importar desde tablero eléctrico (imagen o PDF) ────────────
+    st.markdown("##### Importar desde tablero eléctrico")
+    with st.expander("Imagen o PDF del tablero", expanded=False):
+        st.caption(
+            "Sube una imagen o PDF del tablero eléctrico. La IA extrae nombre, cantidad y "
+            "potencia nominal, y clasifica cada carga en una de las 5 categorías (editable en "
+            "la tabla final) — no estima horas de uso."
+        )
+        uploaded_tablero = st.file_uploader(
+            "Imagen (JPG/PNG) o PDF del tablero",
+            type=["jpg", "jpeg", "png", "pdf"],
+            key=f"{key_prefix}_tablero_file",
+            label_visibility="collapsed",
+        )
+        if st.button("Extraer cargas del tablero", key=f"{key_prefix}_tablero_extract", disabled=not uploaded_tablero):
+            with st.spinner("Analizando tablero con IA…"):
+                try:
+                    from calculations.tablero_parser import parse_tablero_off_grid
+                    extracted = parse_tablero_off_grid(uploaded_tablero.read(), uploaded_tablero.type)
+                    _append_loads(_classified_rows(extracted))
+                    st.success(f"{len(extracted)} circuitos extraídos. Revisa y ajusta la tabla final abajo.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al analizar el tablero: {e}")
+
+    # ── Block 3: Pegar tabla de cargas (texto) ───────────────────────────────
+    st.markdown("##### Pegar tabla de cargas (texto)")
+    with st.expander("Texto copiado de Excel/Word/diseño existente", expanded=False):
+        st.caption(
+            "Pega una tabla copiada de Excel, Word o un diseño eléctrico existente. La IA extrae "
+            "nombre, cantidad y potencia de diseño, y clasifica cada carga — cualquier columna de "
+            "'factor de demanda' o 'carga simultánea' presente en el texto se ignora, porque este "
+            "dimensionador calcula sus propios factores de demanda por categoría más adelante (Paso 6)."
+        )
+        paste_ver = st.session_state.get(f"{key_prefix}_paste_ver", 0)
+        pasted_text = st.text_area(
+            "Texto pegado", height=160, key=f"{key_prefix}_paste_text_{paste_ver}",
+            placeholder="Circuito\tDescripción\tPotencia de diseño (W)\tFactor de demanda\t...\n1\tTomacorriente para microondas\t800\t100%\t...",
+            label_visibility="collapsed",
+        )
+        if st.button("Extraer cargas del texto", key=f"{key_prefix}_paste_extract", disabled=not pasted_text.strip()):
+            with st.spinner("Analizando texto con IA…"):
+                try:
+                    from calculations.tablero_parser import parse_tablero_text_off_grid
+                    extracted = parse_tablero_text_off_grid(pasted_text)
+                    _append_loads(_classified_rows(extracted))
+                    # Versioned key (not a direct session_state write) so the
+                    # text area clears on rerun — Streamlit forbids setting a
+                    # widget-bound key's value after that widget has already
+                    # been instantiated in the same run.
+                    st.session_state[f"{key_prefix}_paste_ver"] = paste_ver + 1
+                    st.success(f"{len(extracted)} circuitos extraídos. Revisa y ajusta la tabla final abajo.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al analizar el texto: {e}")
+
+    st.divider()
+
+    # ── Final: resulting load list, fed by any/all of the methods above ─────
+    st.markdown("##### Lista de cargas")
+    st.caption(
+        "Ingresa, revisa o ajusta cada carga aquí — nombre, cantidad, potencia nominal y "
+        "categoría. **No se pide horas de uso**: el sistema estima el consumo diario real según "
+        "el tipo de carga (ver Paso 5)."
+    )
+    loads_ver = st.session_state.get(f"{key_prefix}_loads_ver", 0)
+    base_loads = st.session_state.get(f"{key_prefix}_loads_data", current.get("loads_display") or _DEFAULT_LOADS)
+    for row in base_loads:
+        row.setdefault("Categoría", _CATEGORY_AUTO_LABEL)
+
+    # Explicit height sized to the full row count (header + one row each,
+    # ~38px/row) so the table never clips rows behind an internal scrollbar —
+    # only the page itself scrolls, not a nested viewport inside the table.
+    # Floored at 200px so an empty/short table still has comfortable room
+    # for the "+ add row" affordance.
+    editor_height = max(200, int(38 * (len(base_loads) + 1) + 3))
+
+    edited_loads = st.data_editor(
+        pd.DataFrame(base_loads),
+        column_config={
+            "Descripción": st.column_config.TextColumn("Descripción", width="large"),
+            "Cantidad": st.column_config.NumberColumn(min_value=1, step=1, format="%d", width="small"),
+            "Potencia (kW)": st.column_config.NumberColumn(min_value=0.0, format="%.2f", width="small"),
+            "Categoría": st.column_config.SelectboxColumn(
+                options=_CATEGORY_SELECT_OPTIONS, width="medium", required=True,
+                help="Deja en '(Automático)' para que la IA clasifique el tipo de carga en el Paso 5, "
+                     "o elige manualmente si ya sabes a cuál de las 5 categorías pertenece.",
+            ),
+        },
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        height=editor_height,
+        key=f"{key_prefix}_loads_{loads_ver}",
+    )
+    loads_data = edited_loads.to_dict("records")
+    st.session_state[f"{key_prefix}_loads_data"] = loads_data
+
+    return int(num_bedrooms), home_class, loads_data
+
+
+def _loads_to_taxonomy_list(loads_data: list[dict]) -> list[dict]:
+    """Converts an edited loads table (Descripción/Cantidad/Potencia (kW)/
+    Categoría dicts) into build_load_profile()'s expected input shape —
+    shared by critical loads and (new) main-panel loads, both of which use
+    the identical table format via _render_loads_block()."""
+    return [
+        {
+            "name": r.get("Descripción", ""),
+            "quantity": int(r.get("Cantidad") or 1),
+            "nameplate_kw": float(r.get("Potencia (kW)") or 0),
+            "category": _CATEGORY_LABEL_TO_KEY.get(r.get("Categoría")),
+        }
+        for r in loads_data
+        if r.get("Descripción")
+    ]
+
+
 def step4_loads() -> dict | None:
     """Loads table (name + qty + nameplate kW, no hours), general-use profile, autonomy, voltage."""
     st.markdown("### Paso 4 — Cargas eléctricas y perfil de consumo general")
@@ -93,165 +338,17 @@ def step4_loads() -> dict | None:
 
     st.divider()
     st.markdown("### Cargas eléctricas")
-
-    # ── Subsection A: general-use aggregate (behavior_driven) ───────────────
-    st.markdown("##### Uso general")
-    st.caption(
-        "Cubre iluminación y el consumo de fondo de tomacorrientes — lo que está siempre "
-        "conectado (computadora, router, reloj, cargadores). **No cubre electrodomésticos** "
-        "(microondas, TV, lavadora, cafetera, plantilla): esos se listan abajo y se dimensionan "
-        "por separado. Aplica tanto para viviendas (usa dormitorios) como para negocios pequeños "
-        "(usa oficinas u otros espacios equivalentes)."
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        num_bedrooms = st.number_input(
-            "Habitaciones / espacios", min_value=1, max_value=15,
-            value=int(current.get("num_bedrooms") or 3), key="w4og_bedrooms",
-            help="Para una vivienda: número de dormitorios. Para un negocio: número de oficinas "
-                 "u otros espacios equivalentes. Se usa como el multiplicador directo del consumo "
-                 "general (Paso 5): kWh/día/espacio × espacios.",
-        )
-    with col2:
-        class_label = st.selectbox(
-            "Nivel de uso general", list(_HOME_CLASS_LABELS.keys()),
-            index=list(_HOME_CLASS_LABELS.values()).index(current.get("home_class", "standard")),
-            key="w4og_class",
-        )
-        home_class = _HOME_CLASS_LABELS[class_label]
-
-    # Visible explanation with a concrete kWh/day example per tier — kWh/day alone
-    # isn't a tangible unit for most customers, so tie it to a fixed reference
-    # space count and pull rates straight from the benchmark table (never
-    # hardcoded here) so the copy can't drift out of sync with the calculation.
-    n = _USAGE_LEVEL_EXAMPLE_SPACES
-    st.markdown("\n".join(
-        f"- **{label}** ({BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key]:.1f} kWh/día/espacio) — "
-        f"{_USAGE_LEVEL_DESCRIPTIONS[label]} "
-        f"*Ej.: {n} espacios ≈ {BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key] * n:.1f} kWh/día.*"
-        for label, key in _HOME_CLASS_LABELS.items()
-    ))
-
-    st.divider()
-
-    # ── Subsection B: individually-sized loads ───────────────────────────────
-    st.markdown("##### Cargas individuales")
-    st.caption(
-        "Ingresa nombre, cantidad y potencia nominal de cada carga que necesita dimensionamiento "
-        "individual: refrigerador/bombas, A/C, electrodomésticos (microondas, TV, lavadora, "
-        "cafetera, plantilla), cargas discrecionales (EV, piscina, riego) y calentadores/cocinas "
-        "a gas. **No se pide horas de uso** — el sistema estima el consumo diario real según el "
-        "tipo de carga (ver Paso 5)."
-    )
-
-    # ── Import desde tablero (photo/PDF, no hours asked — see module docstring) ──
-    with st.expander("📋 Importar desde tablero eléctrico", expanded=False):
-        st.caption(
-            "Sube una imagen o PDF del tablero eléctrico. La IA extrae nombre, cantidad y "
-            "potencia nominal — no estima horas de uso ni categoriza (eso ocurre en el Paso 5)."
-        )
-        uploaded_tablero = st.file_uploader(
-            "Imagen (JPG/PNG) o PDF del tablero",
-            type=["jpg", "jpeg", "png", "pdf"],
-            key="w4og_tablero_file",
-        )
-        if uploaded_tablero and st.button("⚡ Extraer cargas del tablero", key="w4og_tablero_extract"):
-            with st.spinner("Analizando tablero con IA…"):
-                try:
-                    from calculations.tablero_parser import parse_tablero_off_grid
-                    extracted = parse_tablero_off_grid(uploaded_tablero.read(), uploaded_tablero.type)
-                    new_rows = [
-                        {"Descripción": r["Descripción"], "Cantidad": r["Cantidad"],
-                         "Potencia (kW)": r["Potencia (kW)"], "Categoría": _CATEGORY_AUTO_LABEL}
-                        for r in extracted
-                    ]
-                    st.session_state["w4og_loads_data"] = (
-                        st.session_state.get("w4og_loads_data", []) + new_rows
-                    )
-                    st.session_state["w4og_loads_ver"] = st.session_state.get("w4og_loads_ver", 0) + 1
-                    st.success(f"{len(extracted)} circuitos extraídos. Revisa y ajusta la tabla abajo.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al analizar el tablero: {e}")
-
-    # ── Add from common-loads catalog ────────────────────────────────────────
-    # The multiselect uses a versioned key (mirrors grid_zero.py's w5_loads_{ver}
-    # pattern) so "Agregar" can reset the picker by rendering a fresh widget
-    # instance next run — writing directly to an already-instantiated widget's
-    # session_state key raises StreamlitAPIException, which is what a first
-    # version of this control did.
-    catalog_options = {f"{c['name']} ({c['nameplate_kw']} kW)": c for c in COMMON_LOADS_CATALOG_V1}
-    catalog_ver = st.session_state.get("w4og_catalog_ver", 0)
-    col_pick, col_add = st.columns([4, 1])
-    with col_pick:
-        picked_labels = st.multiselect(
-            "Agregar cargas comunes",
-            list(catalog_options.keys()),
-            key=f"w4og_catalog_pick_{catalog_ver}",
-            help="Cada carga trae potencia típica y categoría precargadas — ambas editables después de agregar.",
-        )
-    with col_add:
-        st.markdown("<div style='height:1.7rem;'></div>", unsafe_allow_html=True)
-        if st.button("+ Agregar", key="w4og_catalog_add", disabled=not picked_labels, use_container_width=True):
-            new_rows = [
-                {
-                    "Descripción": catalog_options[lbl]["name"],
-                    "Cantidad": 1,
-                    "Potencia (kW)": catalog_options[lbl]["nameplate_kw"],
-                    "Categoría": CATEGORY_LABELS_ES[catalog_options[lbl]["category"]],
-                }
-                for lbl in picked_labels
-            ]
-            st.session_state["w4og_loads_data"] = (
-                st.session_state.get("w4og_loads_data", []) + new_rows
-            )
-            st.session_state["w4og_loads_ver"] = st.session_state.get("w4og_loads_ver", 0) + 1
-            st.session_state["w4og_catalog_ver"] = catalog_ver + 1
-            st.rerun()
-
-    loads_ver = st.session_state.get("w4og_loads_ver", 0)
-    base_loads = st.session_state.get("w4og_loads_data", current.get("loads_display") or _DEFAULT_LOADS)
-    for row in base_loads:
-        row.setdefault("Categoría", _CATEGORY_AUTO_LABEL)
-
-    edited_loads = st.data_editor(
-        pd.DataFrame(base_loads),
-        column_config={
-            "Descripción": st.column_config.TextColumn("Descripción", width="large"),
-            "Cantidad": st.column_config.NumberColumn(min_value=1, step=1, format="%d", width="small"),
-            "Potencia (kW)": st.column_config.NumberColumn(min_value=0.0, format="%.2f", width="small"),
-            "Categoría": st.column_config.SelectboxColumn(
-                options=_CATEGORY_SELECT_OPTIONS, width="medium", required=True,
-                help="Deja en '(Automático)' para que la IA clasifique el tipo de carga en el Paso 5, "
-                     "o elige manualmente si ya sabes a cuál de las 5 categorías pertenece.",
-            ),
-        },
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        key=f"w4og_loads_{loads_ver}",
-    )
-    loads_data = edited_loads.to_dict("records")
-    st.session_state["w4og_loads_data"] = loads_data
+    num_bedrooms, home_class, loads_data = _render_loads_block("w4og", current)
 
     def _build_consumption_result() -> dict:
         return {
             **current,
-            "num_bedrooms": int(num_bedrooms),
+            "num_bedrooms": num_bedrooms,
             "home_class": home_class,
             "autonomy_days": float(autonomy_days),
             "voltage_v": voltage_v,
             "loads_display": loads_data,  # keeps the Categoría column round-trippable across reruns
-            "loads": [
-                {
-                    "name": r.get("Descripción", ""),
-                    "quantity": int(r.get("Cantidad") or 1),
-                    "nameplate_kw": float(r.get("Potencia (kW)") or 0),
-                    "category": _CATEGORY_LABEL_TO_KEY.get(r.get("Categoría")),
-                }
-                for r in loads_data
-                if r.get("Descripción")
-            ],
+            "loads": _loads_to_taxonomy_list(loads_data),
         }
 
     st.divider()
@@ -284,31 +381,43 @@ def step4_loads() -> dict | None:
 
 # ── Step 5 — Perfil de demanda calculado ─────────────────────────────────────
 
-def step5_demand() -> dict | None:
-    """Runs build_load_profile(), shows the confidence-tagged breakdown, allows manual override."""
-    st.markdown("### Paso 5 — Perfil de demanda diaria")
+def _render_demand_profile_block(
+    key_prefix: str,
+    loads: list[dict],
+    num_bedrooms: int,
+    home_class: str,
+    lat: float | None,
+    lon: float | None,
+    show_charts: bool = True,
+) -> tuple[dict | None, float]:
+    """
+    Runs build_load_profile() and renders the confidence-tagged breakdown
+    table (+ optional category/hourly charts) under session-state keys
+    namespaced by `key_prefix` — extracted from step5_demand() so it can
+    render twice on the same page: once for critical/backup loads
+    (key_prefix="w5og", show_charts=True — unchanged keys, no session state
+    migration needed for existing drafts), once for a Hybrid system's
+    separate main-panel loads (a different key_prefix, show_charts=False to
+    keep that secondary block compact — the category/hourly-shape charts
+    add real value for backup design decisions but aren't needed just to
+    get a whole-home kWh baseline for the savings estimate).
 
-    current = st.session_state.get("wizard_consumption", {})
-    loads = current.get("loads", [])
-    site = st.session_state.get("wizard_site", {})
-    lat, lon = site.get("lat"), site.get("lon")
+    Returns (profile, total_kwh_day) — profile is None until the engineer
+    clicks "Calcular perfil de consumo" for the first time.
+    """
+    profile = st.session_state.get(f"{key_prefix}_profile")
 
-    profile = st.session_state.get("w5og_profile") or current.get("profile")
-
-    if st.button("🔄 Calcular perfil de consumo", key="w5og_calc"):
+    if st.button("Calcular perfil de consumo", key=f"{key_prefix}_calc"):
         with st.spinner("Clasificando cargas y calculando consumo diario…"):
             from calculations.load_profile_off_grid import build_load_profile
             profile = build_load_profile(
-                loads,
-                num_bedrooms=current.get("num_bedrooms", 3),
-                home_class=current.get("home_class", "standard"),
-                lat=lat, lon=lon,
+                loads, num_bedrooms=num_bedrooms, home_class=home_class, lat=lat, lon=lon,
             )
-            st.session_state["w5og_profile"] = profile
+            st.session_state[f"{key_prefix}_profile"] = profile
 
     if not profile:
         st.info("Haz clic en 'Calcular perfil de consumo' para continuar.")
-        return None
+        return None, 0.0
 
     rows = []
     for line in profile["lines"]:
@@ -334,7 +443,7 @@ def step5_demand() -> dict | None:
         rows.append({
             "Carga": "Cargas generales (uso general agregado)",
             "Categoría": "behavior_driven",
-            "Cant.": current.get("num_bedrooms", 0),
+            "Cant.": num_bedrooms,
             "kWh/día": agg["kwh_day"],
             "Fuente": badge,
             "_color": color,
@@ -342,6 +451,10 @@ def step5_demand() -> dict | None:
         })
 
     df = pd.DataFrame(rows)
+    # Explicit height sized to the full row count (~38px/row + header) so the
+    # table never clips rows behind an internal scrollbar — same fix as Step
+    # 4's loads table, floored at 200px for short lists.
+    table_height = max(200, int(38 * (len(rows) + 1) + 3))
     edited = st.data_editor(
         df.drop(columns=["_color"]),
         column_config={
@@ -357,7 +470,8 @@ def step5_demand() -> dict | None:
         },
         use_container_width=True,
         hide_index=True,
-        key="w5og_table",
+        height=table_height,
+        key=f"{key_prefix}_table",
     )
 
     default_count = sum(1 for r in rows if r["Fuente"] == _CONFIDENCE_BADGES["default_assumed"][0])
@@ -368,11 +482,14 @@ def step5_demand() -> dict | None:
         )
 
     total_kwh_day = round(edited["kWh/día"].sum(), 2)
-    st.metric("Consumo diario total estimado", f"{total_kwh_day:,.2f} kWh/día")
+    _metric_card("Consumo diario total estimado", f"{total_kwh_day:,.2f} kWh/día")
 
-    if total_kwh_day > 0:
+    if show_charts and total_kwh_day > 0:
         st.markdown("##### Consumo por categoría")
-        st.caption("Cómo se distribuye el consumo diario estimado entre las 5 categorías de carga.")
+        st.caption(
+            "Cómo se distribuye el consumo diario estimado entre las categorías de carga presentes "
+            "en esta lista — una categoría sin cargas de ese tipo simplemente no muestra barra."
+        )
         cat_totals = edited.groupby("Categoría")["kWh/día"].sum().sort_values()
         import plotly.graph_objects as go
         fig = go.Figure(go.Bar(
@@ -396,8 +513,8 @@ def step5_demand() -> dict | None:
             "carga tiende a consumir durante el día. No se usa para el dimensionamiento del sistema "
             "(ese cálculo sigue siendo determinístico, por categoría, en kWh/día)."
         )
-        shape_key = "w5og_hourly_shape"
-        if st.button("🎨 Generar perfil horario ilustrativo", key="w5og_hourly_btn"):
+        shape_key = f"{key_prefix}_hourly_shape"
+        if st.button("Generar perfil horario ilustrativo", key=f"{key_prefix}_hourly_btn"):
             with st.spinner("Generando perfil horario con IA…"):
                 from calculations.load_profile_off_grid import estimate_hourly_shape_illustrative
                 load_names = [r["Carga"] for r in rows if r["Categoría"] != "behavior_driven"] or None
@@ -430,6 +547,29 @@ def step5_demand() -> dict | None:
             )
             st.plotly_chart(hourly_fig, use_container_width=True)
 
+    return profile, total_kwh_day
+
+
+def step5_demand() -> dict | None:
+    """Off-Grid Step 5: critical-load demand profile only (thin wrapper over
+    _render_demand_profile_block()). Hybrid overrides this in wizard/hybrid.py
+    to also render a main-panel profile block when applicable."""
+    st.markdown("### Paso 5 — Perfil de demanda diaria")
+
+    current = st.session_state.get("wizard_consumption", {})
+    loads = current.get("loads", [])
+    site = st.session_state.get("wizard_site", {})
+    lat, lon = site.get("lat"), site.get("lon")
+
+    profile, total_kwh_day = _render_demand_profile_block(
+        "w5og", loads, current.get("num_bedrooms", 3), current.get("home_class", "standard"), lat, lon,
+    )
+
+    # Atrás/Siguiente render unconditionally — profile being None (not yet
+    # calculated) only disables Siguiente, it doesn't strand the engineer
+    # with no way back to Step 4 (a real bug: returning early here before
+    # ever rendering the nav row left "Calcular perfil de consumo" as the
+    # only clickable thing on the page on a fresh Step 5 visit).
     st.divider()
     col_back, _, col_next = st.columns([1, 3, 1])
     with col_back:
@@ -446,7 +586,7 @@ def step5_demand() -> dict | None:
             _autosave()
             st.rerun()
     with col_next:
-        if st.button("Siguiente →", key="w5og_next", type="primary", disabled=(total_kwh_day <= 0)):
+        if st.button("Siguiente →", key="w5og_next", type="primary", disabled=(profile is None or total_kwh_day <= 0)):
             result = {
                 **current,
                 "profile": profile,
@@ -472,6 +612,7 @@ def _og_scenario_projection(
     battery_voltage_v: float,
     battery_capacity_kwh: float,
     daily_kwh_kwp: list[float] | None = None,
+    battery_count_override: int | None = None,
 ) -> dict:
     """
     Per-scenario projection for the Opción 1/2 cards: what a given array
@@ -488,14 +629,27 @@ def _og_scenario_projection(
     "Aprovechamiento solar" number as the auto scenarios instead of an
     approximation — omitted (utilization_pct=None) if the series isn't
     available (e.g. an older draft that never fetched it).
+
+    `battery_count_override`, when given, replaces size_battery_bank()'s
+    auto-computed count — Opción 2 (manual) lets the engineer pick the
+    battery count directly instead of only the array, the same freedom
+    already given for panels-per-string/strings.
     """
     from calculations.sizing_off_grid import size_battery_bank
     derating = 1 - 0.20  # matches size_array()'s default system_losses_pct
     daily_generation = round(combo["system_kw"] * avg_peak_sun_hours * derating, 2)
-    bank = size_battery_bank(
-        daily_kwh=daily_generation, autonomy_days=autonomy_days, dod_pct=dod_pct,
-        battery_voltage_v=battery_voltage_v, battery_capacity_kwh=battery_capacity_kwh,
-    )
+    if battery_count_override is not None:
+        total_kwh_installed = round(battery_count_override * battery_capacity_kwh, 2)
+        bank = {
+            "battery_count": battery_count_override,
+            "total_kwh_installed": total_kwh_installed,
+            "discharge_pct": round(daily_generation / total_kwh_installed * 100, 2) if total_kwh_installed > 0 else 0.0,
+        }
+    else:
+        bank = size_battery_bank(
+            daily_kwh=daily_generation, autonomy_days=autonomy_days, dod_pct=dod_pct,
+            battery_voltage_v=battery_voltage_v, battery_capacity_kwh=battery_capacity_kwh,
+        )
     margin_kwh = round(max(0, daily_generation - daily_kwh), 2)
 
     utilization_pct = None
@@ -589,7 +743,10 @@ def step6_equipment() -> dict | None:
     from database.equipment_db import (
         list_panels, list_inverters, list_batteries, list_charge_controllers, list_monitoring_devices,
     )
-    from calculations.sizing_off_grid import size_battery_bank, check_split_phase, generate_reliability_scenarios
+    from calculations.sizing_off_grid import (
+        check_split_phase, generate_reliability_scenarios, compute_ac_breaker_summary,
+    )
+    from calculations.load_profile_off_grid import compute_demand_load
     from calculations.mppt import check_charge_controller_design_multi
 
     current = st.session_state.get("wizard_equipment", {})
@@ -659,6 +816,8 @@ def step6_equipment() -> dict | None:
             f"Tipo: {inverter.get('type', '—')}",
             f"Voltaje de salida: {inverter.get('output_v', '—')} V",
             f"Fase: {inverter.get('phase', '—')}",
+            f"Corriente AC salida: {inverter.get('ac_output_current_a') or '— (estimada de kW/V)'} A",
+            f"Corriente AC entrada máx.: {inverter.get('ac_input_current_max_a') or '—'} A",
             f"Garantía: {inverter.get('warranty_yr', '—')} años",
         ])
         split_phase = check_split_phase(inverter, consumption.get("voltage_v", 120))
@@ -705,6 +864,37 @@ def step6_equipment() -> dict | None:
     daily_kwh = consumption.get("daily_kwh", 0)
     pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
     avg_peak_sun_hours = (sum(pvgis_monthly) / 12 / 30.4) if pvgis_monthly else 4.5
+
+    # ── Hybrid bill-reduction estimate (no-op for Off-Grid) ─────────────────
+    # Only meaningful when the system is actually grid-tied with a known
+    # tariff (wizard/hybrid.py's Step 4) — Off-Grid never sets grid_connected
+    # or utility, so this stays disabled there with zero behavior change.
+    # daytime_fraction uses the same 0.45 fallback wizard/grid_zero.py
+    # defaults to before its own AI estimate runs — reusing that estimator
+    # here (it needs a loads list + location) is a reasonable next
+    # refinement, not required for a first, honestly-approximate number.
+    hybrid_savings_enabled = bool(consumption.get("grid_connected")) and bool(consumption.get("utility"))
+    whole_home_avg_kwh_month = 0.0
+    if hybrid_savings_enabled:
+        main_panel = consumption.get("main_panel")
+        if consumption.get("panel_scope") == "secondary" and main_panel:
+            whole_home_avg_kwh_month = float(main_panel.get("avg_kwh_month") or 0)
+        else:
+            whole_home_avg_kwh_month = daily_kwh * 30.4
+        hybrid_savings_enabled = whole_home_avg_kwh_month > 0
+
+    def _scenario_savings_pct(system_kw: float, daily_generation_kwh: float | None = None) -> float | None:
+        if not hybrid_savings_enabled:
+            return None
+        from calculations.sizing_off_grid import estimate_hybrid_savings_pct
+        if daily_generation_kwh is None:
+            daily_generation_kwh = system_kw * avg_peak_sun_hours * (1 - 0.20)
+        result = estimate_hybrid_savings_pct(
+            daily_generation_kwh=daily_generation_kwh, critical_daily_kwh=daily_kwh,
+            whole_home_avg_kwh_month=whole_home_avg_kwh_month,
+            daytime_fraction=0.45, tariff_info=consumption["utility"],
+        )
+        return result["savings_pct"]
 
     # Real daily-resolution series for the Step 6 battery-SoC simulation
     # (calculations/sizing_off_grid.py: simulate_battery_soc()) — richer than
@@ -760,11 +950,24 @@ def step6_equipment() -> dict | None:
         st.session_state.pop("w6og_use_manual", None)
         st.session_state.pop("w6og_selected_scenario", None)
 
+    # Hybrid gets its own scenario tiers (calculations/sizing_off_grid.py:
+    # _HYBRID_RELIABILITY_SCENARIO_DEFS) — surplus beyond battery+critical
+    # loads AC-couples back to the main panel for Hybrid instead of being
+    # genuinely wasted, so scenarios 2/3 are pushed to a bigger array on
+    # purpose (real user feedback: without this, scenario 1 and 2 routinely
+    # landed on the exact same array, since Off-Grid's search only grows the
+    # array until the reliability target is cleared, and the smallest array
+    # often already clears both). Gated on grid_connected alone (not on
+    # whether savings can actually be computed yet) — the "more solar helps"
+    # property is true for any grid-tied system, independent of whether the
+    # utility/tariff form is filled in.
+    from calculations.sizing_off_grid import _HYBRID_RELIABILITY_SCENARIO_DEFS
+    scenario_defs = _HYBRID_RELIABILITY_SCENARIO_DEFS if consumption.get("grid_connected") else None
     scenarios = (
         generate_reliability_scenarios(
             panel, cc, battery, daily_kwh, pvgis_daily_series, autonomy_days,
             inverter_qty, float(inverter.get("kw") or 0), total_connected_load_kw,
-            _MAX_CHARGE_CONTROLLERS,
+            _MAX_CHARGE_CONTROLLERS, scenario_defs=scenario_defs,
         ) if pvgis_daily_series and len(pvgis_daily_series) >= 300 else []
     )
     using_manual = st.session_state.get("w6og_use_manual", False)
@@ -777,10 +980,14 @@ def step6_equipment() -> dict | None:
 
     # ── Opción 1 — Auto A/B/C scenarios, same UX as wizard/grid_zero.py's
     # Scenario 1 = "mínimo aceptable" (SoC mínimo ~20%, recarga completa la
-    # mayoría de los días); Scenario 2 = "recomendado" (~40%, casi todos los
-    # días); Scenario 3 = "máxima autonomía + crecimiento" (~50%, siempre,
-    # con una string extra de margen). MPPT/controlador es consecuencia del
-    # arreglo que resulta de cada búsqueda, nunca un objetivo en sí mismo.
+    # mayoría de los días); Scenario 2 = "recomendado" (~55%, casi todos los
+    # días); Scenario 3 = "máxima autonomía + crecimiento" (~75%, siempre,
+    # con una string extra de margen). Percentages match
+    # calculations/sizing_off_grid.py's _RELIABILITY_SCENARIO_DEFS — see its
+    # comment for why they're spaced this wide (avoiding scenarios 1/2
+    # rounding up to the identical battery bank). MPPT/controlador es
+    # consecuencia del arreglo que resulta de cada búsqueda, nunca un
+    # objetivo en sí mismo.
     st.markdown("#### Opción 1 — Configuración automática")
     st.caption(
         "Cada escenario fija un SoC mínimo objetivo (qué tan profundo se descarga la batería en un día "
@@ -791,6 +998,14 @@ def step6_equipment() -> dict | None:
         "Escenario 3 también revisa la potencia del inversor: si la carga conectada ya usa la mayor parte "
         "de su capacidad, duplica los inversores para dejar margen de crecimiento futuro."
     )
+    if consumption.get("grid_connected"):
+        st.caption(
+            "🏠 Sistema híbrido: los Escenarios 2 y 3 apuntan a un arreglo más grande a propósito — el "
+            "excedente que no usan las cargas críticas ni la batería no se pierde, se acopla en AC hacia "
+            "el tablero principal para reducir la factura (ver 'Reducción de factura estimada' en cada "
+            "tarjeta). El '☀️ Aprovechamiento solar' de abajo mide solo la porción que pasa por la "
+            "batería — un número más bajo aquí no significa energía desperdiciada en un sistema híbrido."
+        )
 
     if scenarios:
         scenario_table = [{
@@ -813,6 +1028,7 @@ def step6_equipment() -> dict | None:
             "Baterías": s["battery"]["battery_count"],
             "Capacidad batería (kWh)": s["battery"]["total_kwh_installed"],
             "SoC mínimo real": f"{s['battery']['min_soc_actual_pct']:.0f}%",
+            **({"Reducción de factura": f"~{_scenario_savings_pct(s['system_kw']):.0f}%"} if hybrid_savings_enabled else {}),
             "Estado": "✅" if s["within_limits"] else "⚠️",
             "Notas": s["notes"],
         } for s in scenarios]
@@ -870,11 +1086,21 @@ def step6_equipment() -> dict | None:
                 # the surplus) — worth a visible flag, same 50% threshold and
                 # framing as wizard/grid_zero.py's "sistema sobredimensionado"
                 # note, so both wizards read consistently on this point.
+                # Suppressed for Hybrid (grid_connected): a low battery-side
+                # percentage there isn't waste, it's surplus AC-coupling to
+                # the main panel for bill reduction — see
+                # _HYBRID_RELIABILITY_SCENARIO_DEFS, which deliberately grows
+                # scenarios 2/3 for exactly this — "sobredimensionado" and
+                # "considera menos paneles" would directly contradict that.
                 oversized_note = (
                     f'<div style="margin-top:0.4rem;font-size:0.72rem;color:#92400e;">'
                     f'⚠️ Solo el {utilization_pct:.0f}% de la generación se aprovecha — arreglo '
                     f'sobredimensionado para esta batería/consumo.</div>'
-                    if utilization_pct < 50 else ""
+                    if utilization_pct < 50 and not consumption.get("grid_connected") else ""
+                )
+                savings_line = (
+                    f'💰 Reducción de factura estimada: <b>~{_scenario_savings_pct(s["system_kw"]):.0f}%</b><br>'
+                    if hybrid_savings_enabled else ""
                 )
                 ok_tag = "✅" if is_valid_s else "⚠️"
                 with col:
@@ -901,7 +1127,9 @@ def step6_equipment() -> dict | None:
                         f'🔌 Inversores: <b>{s["inverter_qty"]}</b> ({s["inverter_power_w"]:,} W)<br>'
                         f'🔋 Baterías: <b>{bank["battery_count"]}</b> ({bank["total_kwh_installed"]:.1f} kWh) '
                         f'— SoC mín. real: <b>{bank["min_soc_actual_pct"]:.0f}%</b><br>'
-                        f'☀️ Aprovechamiento solar: <b>{utilization_pct:.0f}%</b><br>'
+                        f'☀️ Aprovechamiento solar{" (batería)" if consumption.get("grid_connected") else ""}: '
+                        f'<b>{utilization_pct:.0f}%</b><br>'
+                        f'{savings_line}'
                         f'{cc_line}'
                         f'{growth_line}'
                         f'{inverter_growth_line}'
@@ -933,6 +1161,7 @@ def step6_equipment() -> dict | None:
     default_scenario = next((s for s in scenarios if s["scenario"] == "2"), None)
     default_series = default_scenario["panels_per_string"] if default_scenario else 1
     default_parallel = default_scenario["strings"] if default_scenario else 1
+    default_battery_count = default_scenario["battery"]["battery_count"] if default_scenario else 1
 
     left_col, right_col = st.columns([1, 1])
     with left_col:
@@ -940,6 +1169,12 @@ def step6_equipment() -> dict | None:
                                     value=default_series, step=1, key="w6og_m_series")
         m_strings = st.number_input("Strings en paralelo (total)", min_value=1, max_value=50,
                                      value=default_parallel, step=1, key="w6og_m_strings")
+        m_battery_count = st.number_input(
+            "Cantidad de baterías", min_value=1, max_value=50,
+            value=default_battery_count, step=1, key="w6og_m_battery_count",
+            help="Sobrescribe el cálculo automático (por días de autonomía) — fija un banco "
+                 "específico y compara cómo cambian autonomía y aprovechamiento solar.",
+        )
 
         m = check_charge_controller_design_multi(panel, cc, m_series, m_strings, _MAX_CHARGE_CONTROLLERS)
 
@@ -983,7 +1218,7 @@ def step6_equipment() -> dict | None:
             mp = _og_scenario_projection(
                 m, avg_peak_sun_hours, daily_kwh, autonomy_days, dod_pct,
                 battery["voltage_v"], battery["capacity_kwh"],
-                daily_kwh_kwp=pvgis_daily_series,
+                daily_kwh_kwp=pvgis_daily_series, battery_count_override=m_battery_count,
             )
             m_cover_line = (
                 '<span style="color:#166534;">✅ Cubre el consumo diario</span><br>' if mp["covers"] else
@@ -992,6 +1227,10 @@ def step6_equipment() -> dict | None:
             m_utilization_line = (
                 f'☀️ Aprovechamiento solar: <b>{mp["utilization_pct"]:.0f}%</b><br>'
                 if mp["utilization_pct"] is not None else ""
+            )
+            m_savings_line = (
+                f'💰 Reducción de factura estimada: <b>~{_scenario_savings_pct(m["system_kw"], mp["daily_generation"]):.0f}%</b><br>'
+                if hybrid_savings_enabled else ""
             )
             m_border = "#6366f1" if using_manual else "#d1d5db"
             m_bg = "#f5f3ff" if using_manual else "#f9fafb"
@@ -1007,6 +1246,7 @@ def step6_equipment() -> dict | None:
                 f'🔋 Baterías: <b>{mp["battery_count"]}</b> ({mp["battery_kwh"]:.1f} kWh)<br>'
                 f'{m_cover_line}'
                 f'{m_utilization_line}'
+                f'{m_savings_line}'
                 f'🎛️ Controladores: <b>{m["charge_controller_qty"]}</b>'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -1045,16 +1285,17 @@ def step6_equipment() -> dict | None:
         display_daily_generation = round(display_array_kw * avg_peak_sun_hours * derating, 2)
         is_valid = chosen["within_limits"]
         if chosen["scenario"] == "M":
-            # Manual mode has no min-SoC target of its own — battery bank is
-            # sized off THIS array's actual generation (autonomy_days-driven
-            # backup), same formula as always, so switching sliders still
-            # visibly changes the battery count. Inverter count also stays at
+            # Manual mode battery bank comes directly from the engineer's own
+            # "Cantidad de baterías" input (m_battery_count) — set in the
+            # Opción 2 UI above, still in scope here. Inverter count stays at
             # the base split-phase-driven value — manual mode has no
             # growth-headroom concept either.
-            battery_bank = size_battery_bank(
-                daily_kwh=display_daily_generation, autonomy_days=autonomy_days, dod_pct=dod_pct,
-                battery_voltage_v=battery["voltage_v"], battery_capacity_kwh=battery["capacity_kwh"],
-            )
+            total_kwh_installed = round(m_battery_count * battery["capacity_kwh"], 2)
+            battery_bank = {
+                "battery_count": m_battery_count,
+                "total_kwh_installed": total_kwh_installed,
+                "discharge_pct": round(display_daily_generation / total_kwh_installed * 100, 2) if total_kwh_installed > 0 else 0.0,
+            }
             if pvgis_daily_series and len(pvgis_daily_series) >= 300 and battery_bank["total_kwh_installed"] > 0:
                 from calculations.sizing_off_grid import simulate_battery_soc as _sim_soc
                 _m_gen = [v * display_array_kw * derating for v in pvgis_daily_series]
@@ -1135,7 +1376,7 @@ def step6_equipment() -> dict | None:
         )
 
         if not is_valid and not voc_ok and chosen.get("notes"):
-            st.caption(f"⚠️ {chosen['notes']}")
+            st.caption(chosen["notes"])
 
         # ── Margen de diseño — grouped with Validación del diseño (both are
         # electrical-limits checks against equipment ratings) instead of
@@ -1177,6 +1418,106 @@ def step6_equipment() -> dict | None:
         )
         st.plotly_chart(margin_fig, use_container_width=True)
         st.caption("Verde: margen cómodo (<80% del límite). Ámbar: 80–95%. Rojo: >95%, revisar diseño.")
+
+    # ── Resumen eléctrico — carga y protecciones ────────────────────────────
+    # Installed vs. demanded power (diversity/demand factors per the existing
+    # 6-category taxonomy — calculations/load_profile_off_grid.py
+    # compute_demand_load()), peak design current, and suggested AC Out / AC
+    # In breakers. Wizard-only engineering detail — not surfaced in the
+    # client-facing PDF. Doesn't depend on `chosen` being valid: it reads the
+    # load profile and the already-resolved final inverter selection, both
+    # available regardless of array/battery validity above.
+    st.divider()
+    st.markdown("#### Resumen eléctrico — carga y protecciones")
+    st.caption(
+        "Potencia instalada (suma de placa) frente a potencia demandada (con factores de "
+        "demanda por categoría) — sumar la placa de muchas cargas sobredimensiona el inversor "
+        "sin justificación real. Corriente pico y breaker de AC Out se calculan sobre la carga "
+        "demandada; el breaker de AC In (si aplica) se dimensiona con la corriente máxima de "
+        "passthrough del inversor, no con la demanda del sitio."
+    )
+
+    if profile.get("lines"):
+        demand = compute_demand_load(profile["lines"])
+        design_voltage_v = 240.0 if split_phase["requires_split_phase"] else float(consumption.get("voltage_v", 120))
+        ac_summary = compute_ac_breaker_summary(
+            demand["total_demand_kw"], design_voltage_v, inverter, final_inverter_qty,
+            grid_connected=bool(consumption.get("grid_connected")),
+        )
+        ac_out = ac_summary["ac_out"]
+        ac_in = ac_summary["ac_in"]
+        # kW, not A, here specifically — this chip sits next to "Instalada"
+        # (also kW) so the engineer can directly check the inverter's real
+        # ceiling against the worst-case installed load without converting
+        # units in their head. The AC Out card below keeps amps, since it's
+        # comparing against the design current (also amps) right next to it.
+        available_power_kw = ac_out["available_current_a"] * design_voltage_v / 1000
+
+        _chip_row([
+            f"🏗️ Instalada: <b>{demand['total_installed_kw']:.2f} kW</b>",
+            f"📊 Demandada: <b>{demand['total_demand_kw']:.2f} kW</b> ({demand['blended_factor'] * 100:.0f}%)",
+            f"🔌 Disponible inversor: <b>{available_power_kw:.2f} kW</b>"
+            + (" (estimado)" if ac_out["available_current_estimated"] else ""),
+            f"⚡ Corriente pico: <b>{ac_summary['peak_current_a']:.1f} A</b>",
+        ])
+
+        cat_table = [{
+            "Categoría": CATEGORY_LABELS_ES.get(c["category"], c["category"]),
+            "Instalada (kW)": c["installed_kw"],
+            "Factor de demanda": f"{c['factor_applied'] * 100:.0f}%",
+            "Demandada (kW)": c["demand_kw"],
+            "Método": "Mayor + resto diversificado" if c["method"] == "largest_plus_rest" else "Factor uniforme",
+        } for c in demand["categories"]]
+        st.dataframe(pd.DataFrame(cat_table), use_container_width=True, hide_index=True)
+        st.caption(
+            "⚠️ Factores de demanda v1 — primera aproximación, no calibrados contra instalaciones "
+            "reales. Corriente pico asume factor de potencia ≈1."
+        )
+
+        breaker_cols = st.columns(2) if ac_in else st.columns(1)
+        with breaker_cols[0]:
+            out_border = "#dc2626" if ac_out["exceeds_available"] else "#d1d5db"
+            estimated_note = (
+                ' <span style="color:#92400e;">(estimado de kW/V — no está en el datasheet)</span>'
+                if ac_out["available_current_estimated"] else ""
+            )
+            st.markdown(
+                f'<div style="border:2px solid {out_border};border-radius:8px;padding:0.65rem 0.8rem;'
+                f'background:#f9fafb;font-size:0.82rem;line-height:1.9;">'
+                f'<div style="font-weight:700;font-size:0.88rem;color:#1E2D54;">AC Out — salida del inversor</div>'
+                f'Corriente de diseño: <b>{ac_out["design_current_a"]:.1f} A</b> (demanda × 1.25)<br>'
+                f'Breaker sugerido (2 polos): <b>{ac_out["breaker_a"] or "fuera de rango (>200A)"} A</b><br>'
+                f'{"⚠️" if ac_out["exceeds_available"] else "✅"} Disponible del inversor: '
+                f'<b>{ac_out["available_current_a"]:.1f} A</b>{estimated_note}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if ac_out["exceeds_available"]:
+                st.warning(
+                    "⚠️ La corriente de diseño (demandada) supera lo que el inversor seleccionado "
+                    "puede entregar — revisa la selección o cantidad de inversores."
+                )
+
+        if ac_in:
+            with breaker_cols[1]:
+                st.markdown(
+                    f'<div style="border:2px solid #d1d5db;border-radius:8px;padding:0.65rem 0.8rem;'
+                    f'background:#f9fafb;font-size:0.82rem;line-height:1.9;">'
+                    f'<div style="font-weight:700;font-size:0.88rem;color:#1E2D54;">AC In — passthrough (red)</div>'
+                    f'Corriente máx. passthrough del inversor: <b>{ac_in["design_current_a"]:.1f} A</b><br>'
+                    f'Breaker sugerido (2 polos): <b>{ac_in["breaker_a"] or "fuera de rango (>200A)"} A</b><br>'
+                    f'<span style="font-size:0.72rem;color:#6b7280;">Dimensionado por la capacidad de passthrough '
+                    f'del inversor, no por la demanda del sitio.</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        elif bool(consumption.get("grid_connected")):
+            st.info(
+                "ℹ️ Este inversor no tiene registrada su corriente máxima de passthrough AC — "
+                "agrégala en Admin → Equipos (extraída del datasheet) para calcular el breaker de AC In."
+            )
+    else:
+        st.info("No hay líneas de carga del Paso 4/5 para calcular la demanda eléctrica.")
 
     st.divider()
     st.markdown("#### Dimensionamiento calculado")
@@ -1274,25 +1615,42 @@ def step6_equipment() -> dict | None:
         # because this is the step where the user can still act on it — pick a
         # bigger battery or a smaller array and watch the split change. Step 8
         # only echoes the resulting percentage as a summary KV.
-        st.markdown("##### Aprovechamiento de generación solar")
+        is_hybrid_grid = bool(consumption.get("grid_connected"))
+        st.markdown("##### Aprovechamiento de generación solar" + (" (banco de baterías)" if is_hybrid_grid else ""))
         if _step6_sim:
             util_pct = _step6_sim["utilization_pct"]
             used_kwh = round(_step6_sim["total_generation_kwh"] - _step6_sim["curtailed_kwh"])
             curtailed_kwh = round(_step6_sim["curtailed_kwh"])
-            st.caption(
-                "Del total generado en un año real de irradiancia, qué fracción se usa (consumo directo + "
-                "recarga de batería) frente a lo que se pierde porque la batería ya está llena y no hay red "
-                "a la cual exportar el excedente."
-            )
+            if is_hybrid_grid:
+                # "Curtailed" is the wrong word for a grid-tied system — this
+                # split is only about what the battery itself absorbs for
+                # critical-load backup. The rest isn't lost, it AC-couples to
+                # the main panel (see "Reducción de factura estimada" above),
+                # unlike true Off-Grid where there's genuinely no grid to
+                # send surplus to.
+                st.caption(
+                    "Del total generado en un año real de irradiancia, qué fracción pasa por la batería "
+                    "(consumo de cargas críticas + recarga) frente al resto — que no se pierde: se acopla "
+                    "en AC hacia el tablero principal para reducir la factura, no es un sistema aislado."
+                )
+            else:
+                st.caption(
+                    "Del total generado en un año real de irradiancia, qué fracción se usa (consumo directo + "
+                    "recarga de batería) frente a lo que se pierde porque la batería ya está llena y no hay red "
+                    "a la cual exportar el excedente."
+                )
             import plotly.graph_objects as go
             util_fig = go.Figure()
             util_fig.add_trace(go.Bar(
-                y=["Generación anual"], x=[used_kwh], name="Aprovechado", orientation="h",
-                marker_color=BRAND_GREEN, text=[f"{util_pct:.0f}% · {used_kwh:,} kWh"], textposition="inside",
+                y=["Generación anual"], x=[used_kwh], name="Batería/cargas críticas" if is_hybrid_grid else "Aprovechado",
+                orientation="h", marker_color=BRAND_GREEN,
+                text=[f"{util_pct:.0f}% · {used_kwh:,} kWh"], textposition="inside",
             ))
             util_fig.add_trace(go.Bar(
-                y=["Generación anual"], x=[curtailed_kwh], name="Curtailed (no aprovechado)", orientation="h",
-                marker_color="#d1d5db", text=[f"{100 - util_pct:.0f}% · {curtailed_kwh:,} kWh"], textposition="inside",
+                y=["Generación anual"], x=[curtailed_kwh],
+                name="Acoplado a red (ahorro)" if is_hybrid_grid else "Curtailed (no aprovechado)",
+                orientation="h", marker_color="#d1d5db",
+                text=[f"{100 - util_pct:.0f}% · {curtailed_kwh:,} kWh"], textposition="inside",
             ))
             util_fig.update_layout(
                 barmode="stack", height=130, margin=dict(t=10, b=10, l=10, r=10),
@@ -1300,7 +1658,12 @@ def step6_equipment() -> dict | None:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
             )
             st.plotly_chart(util_fig, use_container_width=True)
-            if util_pct < 50:
+            # "Sobredimensionado" is Off-Grid-only advice — for Hybrid a low
+            # battery-side percentage is expected and fine by design once
+            # scenarios 2/3 deliberately grow the array for AC-coupled
+            # savings (see _HYBRID_RELIABILITY_SCENARIO_DEFS); suggesting
+            # "menos paneles" here would directly contradict that intent.
+            if util_pct < 50 and not is_hybrid_grid:
                 st.warning(
                     f"⚠️ Solo el {util_pct:.0f}% de la generación anual se aprovecha — el arreglo está "
                     "sobredimensionado para esta batería/consumo. Considera una batería más grande o menos paneles."
@@ -1435,6 +1798,14 @@ def step6_equipment() -> dict | None:
             st.rerun()
     with col_next:
         if st.button("Siguiente →", key="w6og_next", type="primary", disabled=not can_continue):
+            hybrid_savings = None
+            if hybrid_savings_enabled:
+                from calculations.sizing_off_grid import estimate_hybrid_savings_pct
+                hybrid_savings = estimate_hybrid_savings_pct(
+                    daily_generation_kwh=display_daily_generation, critical_daily_kwh=daily_kwh,
+                    whole_home_avg_kwh_month=whole_home_avg_kwh_month,
+                    daytime_fraction=0.45, tariff_info=consumption["utility"],
+                )
             result = {
                 "panel_id": panel["id"], "panel": panel,
                 "inverter_id": inverter["id"], "inverter": inverter,
@@ -1451,6 +1822,7 @@ def step6_equipment() -> dict | None:
                 "array": {"array_kw": display_array_kw, "panel_count": actual_panel_count, "area_m2": display_area_m2, "daily_generation_kwh": display_daily_generation},
                 "battery_bank": battery_bank,
                 "split_phase": split_phase,
+                "hybrid_savings": hybrid_savings,
             }
             st.session_state["wizard_equipment"] = result
             return result
@@ -1781,6 +2153,19 @@ def step8_review(
     html += _kv("Aprovechamiento solar", f"{_og_sim['utilization_pct']:.0f}%" if _og_sim else "—")
     html += '</div>'
 
+    hybrid_savings = equipment.get("hybrid_savings")
+    if hybrid_savings:
+        html += _hr
+        html += f'<div style="{_sec}">Facturación estimada</div>'
+        html += f'<div style="{_row}">'
+        html += _kv("Factura actual", f"₡{hybrid_savings['old_bill_crc']:,.0f}/mes")
+        html += _kv("Factura estimada con solar", f"₡{hybrid_savings['new_bill_crc']:,.0f}/mes")
+        html += _kv(
+            "Reducción estimada", f"~{hybrid_savings['savings_pct']:.0f}%",
+            subtitle=f"₡{hybrid_savings['savings_crc']:,.0f}/mes", accent=True,
+        )
+        html += '</div>'
+
     html += _hr
     html += f'<div style="{_sec}">Costos del proyecto</div>'
     html += f'<div style="{_row}">'
@@ -1812,7 +2197,7 @@ def step8_review(
     # only "wizard_proposal_text" leaves the textarea visibly empty even though
     # generation succeeded (observed in testing). Assigning the widget key
     # before the rerun is what actually makes the new text appear.
-    if st.button("✨ Generar con IA", key="w8og_gen_intro"):
+    if st.button("Generar con IA", key="w8og_gen_intro"):
         from ai.proposal_writer import generate_intro
 
         with st.spinner("Redactando párrafo introductorio…"):
@@ -1856,7 +2241,7 @@ def step8_review(
             _autosave()
             st.rerun()
     with col_gen:
-        if st.button("📄 Generar PDF", key="w8og_generate", type="primary"):
+        if st.button("Generar PDF", key="w8og_generate", type="primary"):
             from wizard.state import get_company_info, get_bank_info
 
             company = get_company_info()
@@ -1920,6 +2305,7 @@ def step8_review(
                     "voltage_v": consumption.get("voltage_v", 120),
                     "utilization_pct": _og_sim["utilization_pct"] if _og_sim else battery_bank.get("utilization_pct"),
                 },
+                "hybrid_savings": equipment.get("hybrid_savings"),
                 "cost_per_wp": costs.get("cost_per_wp", 0),
                 "warranty_inverter_years": f"{inv_warranty} años",
                 "warranty_inverter_years_en": f"{inv_warranty} years",

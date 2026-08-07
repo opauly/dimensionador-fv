@@ -2,8 +2,23 @@ from __future__ import annotations
 """Wizard steps 1–3 shared across all system types. Phase 2."""
 import streamlit as st
 
-from config import BRAND_GREEN
+from config import BRAND_GREEN, BRAND_NAVY
 from wizard.state import autosave_if_possible as _autosave
+
+
+def _metric_card(label: str, value: str, sublabel: str | None = None) -> None:
+    """Plain bordered card for a quantity/insight — no pass/fail semantics.
+    Same style as wizard/off_grid.py's _metric_card(), ported here for visual
+    consistency (this module is shared by all three system types)."""
+    sub_html = f'<div style="font-size:0.75rem;color:#6b7280;margin-top:2pt;">{sublabel}</div>' if sublabel else ""
+    st.markdown(
+        f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.7rem 0.9rem;'
+        f'margin-bottom:0.5rem;min-height:5.5rem;">'
+        f'<div style="font-size:0.78rem;color:#6b7280;">{label}</div>'
+        f'<div style="font-size:1.4rem;font-weight:700;color:{BRAND_NAVY};margin-top:1pt;">{value}</div>'
+        f'{sub_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def step1_system_type() -> dict | None:
@@ -131,7 +146,7 @@ def step2_client() -> dict | None:
             else:
                 st.caption("No se encontraron clientes con ese nombre.")
         except Exception as e:
-            st.caption(f"⚠ No se pudo buscar clientes: {e}")
+            st.caption(f"No se pudo buscar clientes: {e}")
 
     # ── Previous proposals for selected client ────────────────────────────────
     if active_client_id or st.session_state.get("w2_name"):
@@ -151,8 +166,8 @@ def step2_client() -> dict | None:
                         p.get("quote_number"), p.get("created_at", ""), v["version_number"]
                     )
                     icons = (
-                        (" ✉️" if v.get("sent_to_client") else "")
-                        + (" 🔒" if v.get("locked") else "")
+                        (" [Enviada]" if v.get("sent_to_client") else "")
+                        + (" [Bloqueada]" if v.get("locked") else "")
                     )
                     label = f"{qn} — {p.get('system_type') or ''} — ${v.get('total_usd') or 0:,.0f}{icons}"
                     version_opts[label] = {"proposal_id": p["id"], "version_id": v["id"]}
@@ -184,7 +199,7 @@ def step2_client() -> dict | None:
                     on_change=_on_prev_prop,
                 )
         except Exception as e:
-            st.caption(f"⚠ Error cargando cotizaciones anteriores: {e}")
+            st.caption(f"Error cargando cotizaciones anteriores: {e}")
 
     st.divider()
 
@@ -284,7 +299,7 @@ def step3_site() -> dict | None:
 
     col_pvgis, _ = st.columns([2, 3])
     with col_pvgis:
-        if st.button("🌤 Obtener irradiancia solar (PVGIS)", key="w3_pvgis"):
+        if st.button("Obtener irradiancia solar (PVGIS)", key="w3_pvgis"):
             from calculations.pvgis import fetch_irradiance, fetch_daily_series, geocode_cr
 
             with st.spinner("Geocodificando y consultando PVGIS…"):
@@ -325,7 +340,11 @@ def step3_site() -> dict | None:
         yearly = pvgis_data.get("yearly_kwh_kwp", 0)
         avg_monthly = round(sum(monthly) / 12, 1) if monthly else 0
 
-        st.markdown(f"**Irradiancia promedio:** {avg_monthly} kWh/kWp/mes · Anual: {yearly:.0f} kWh/kWp")
+        m1, m2 = st.columns(2)
+        with m1:
+            _metric_card("Irradiancia promedio", f"{avg_monthly} kWh/kWp/mes")
+        with m2:
+            _metric_card("Irradiancia anual", f"{yearly:.0f} kWh/kWp")
 
         if monthly and len(monthly) == 12:
             import plotly.graph_objects as go
@@ -340,7 +359,10 @@ def step3_site() -> dict | None:
             ))
             fig.update_layout(
                 title="Irradiancia mensual (kWh/kWp)",
-                yaxis_title="kWh/kWp",
+                # Explicit headroom above the tallest bar — textposition="outside"
+                # doesn't auto-pad the y-axis, so without this the top label (the
+                # peak month, e.g. Marzo) gets clipped by the plot area's edge.
+                yaxis=dict(title="kWh/kWp", range=[0, max(monthly) * 1.18]),
                 height=260,
                 margin=dict(t=40, b=10, l=10, r=10),
             )

@@ -41,7 +41,7 @@ with st.sidebar:
     if _db_ok:
         st.success("● Supabase conectado", icon=None)
     else:
-        st.warning("⚠ Supabase no conectado")
+        st.warning("Supabase no conectado")
 
 st.markdown('<p class="page-header">Panel de Control</p>', unsafe_allow_html=True)
 st.markdown('<p class="page-sub">Herramienta de diseño solar — Pauly&Co</p>', unsafe_allow_html=True)
@@ -78,21 +78,21 @@ with col3:
 
 st.divider()
 
-if st.button("➕ Nueva cotización", type="primary"):
+if st.button("Nueva cotización", type="primary"):
     st.switch_page("pages/02_new_proposal.py")
 
 st.divider()
 st.markdown("#### Estado del proyecto")
 phases = [
-    ("Fase 0 — Fundación",        "✅ Completa"),
-    ("Fase 1 — Motor PDF",        "✅ Completa"),
-    ("Fase 2 — Asistente Grid Zero", "✅ Completa"),
-    ("Fase 3 — Gestión de cotizaciones", "✅ Completa"),
-    ("Fase 4 — Funciones AI",     "🔲 Pendiente"),
-    ("Fase 5 — Off-Grid + Híbrido", "🔲 Pendiente"),
-    ("Fase 6 — Módulo Proyectos", "🔲 Pendiente"),
-    ("Fase 7 — Admin + Pulido",   "🔲 Pendiente"),
-    ("Fase 8 — QA + Entrega",     "🔲 Pendiente"),
+    ("Fase 0 — Fundación",        "Completa"),
+    ("Fase 1 — Motor PDF",        "Completa"),
+    ("Fase 2 — Asistente Grid Zero", "Completa"),
+    ("Fase 3 — Gestión de cotizaciones", "Completa"),
+    ("Fase 4 — Funciones AI",     "Pendiente"),
+    ("Fase 5 — Off-Grid + Híbrido", "Pendiente"),
+    ("Fase 6 — Módulo Proyectos", "Pendiente"),
+    ("Fase 7 — Admin + Pulido",   "Pendiente"),
+    ("Fase 8 — QA + Entrega",     "Pendiente"),
 ]
 for name, status in phases:
     st.markdown(f"{status} {name}")

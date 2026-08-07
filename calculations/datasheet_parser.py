@@ -47,7 +47,7 @@ Field rules:
 """
 
 _INVERTER_PROMPT = """
-Extract technical specifications from this grid-tie solar inverter datasheet.
+Extract technical specifications from this solar inverter datasheet (grid-tie or hybrid).
 
 If the datasheet covers multiple power variants (e.g. 3.8 kW, 5 kW, 7.6 kW, 10 kW, 15 kW),
 return ALL variants as separate objects.
@@ -66,6 +66,8 @@ Return ONLY a JSON array — no markdown, no explanation:
     "mppt_channels": 2,
     "phase": "single",
     "output_v": 240,
+    "ac_output_current_a": 41.7,
+    "ac_input_current_max_a": null,
     "warranty_yr": 5
   }
 ]
@@ -79,6 +81,15 @@ Field rules:
 - mppt_channels: number of independent MPPT trackers (integer)
 - phase: "single" or "three"
 - output_v: nominal AC output voltage (V, integer)
+- ac_output_current_a: rated CONTINUOUS AC output current in Amps (float) — usually listed
+  directly on the datasheet (e.g. "Max continuous AC current" / "Corriente CA nominal");
+  do not derive it yourself from kw/output_v, use the printed spec. Null if not stated.
+- ac_input_current_max_a: for HYBRID inverters only — the maximum AC INPUT / passthrough
+  current in Amps (e.g. Victron's "Max input current" for the AC-in/charger/UPS relay,
+  sometimes shown per the model's own amp rating like "...50" in "48/5000/70-50"). This is
+  a separate spec from ac_output_current_a — it protects the grid/generator-facing input,
+  not the inverter's own output. Null for grid-tie string inverters and microinverters
+  (they have no AC input), and null for hybrid units where this isn't stated.
 - warranty_yr: standard product warranty in years (integer)
 - Use null for any field you cannot find with confidence
 - For multi-MPPT inverters, imax_mppt is the per-tracker value (not total)
@@ -152,3 +163,177 @@ def _parse_list_response(response, label: str) -> list[dict]:
     if not isinstance(data, list) or not data:
         raise ValueError(f"No se extrajeron {label} del datasheet.")
     return data
+
+
+_BATTERY_PROMPT = """
+Extract technical specifications from this battery datasheet.
+
+If the datasheet covers multiple capacity/voltage variants, return ALL as separate objects.
+
+Return ONLY a JSON array — no markdown, no explanation:
+[
+  {
+    "brand": "Pylontech",
+    "model": "US5000C",
+    "chemistry": "LiFePO4",
+    "capacity_kwh": 4.8,
+    "capacity_ah": 100,
+    "voltage_v": 48,
+    "dod_pct": 90,
+    "cycles": 6000,
+    "warranty_yr": 10
+  }
+]
+
+Field rules:
+- chemistry: battery chemistry as stated, e.g. "LiFePO4", "Li-ion", "Lead-acid", "AGM"
+- capacity_kwh: usable or nominal energy capacity in kWh (float) — use whichever the
+  datasheet states as the primary spec; if both usable and nominal are given, prefer usable
+- capacity_ah: capacity in Ah at nominal voltage (float)
+- voltage_v: nominal voltage in V (float)
+- dod_pct: the datasheet's own rated/recommended maximum depth of discharge in %
+  (integer, e.g. 90 for 90%) — use the printed spec, do not assume a generic value
+- cycles: rated cycle life at the datasheet's stated DoD (integer)
+- warranty_yr: product warranty in years (integer)
+- Use null for any field you cannot find with confidence
+"""
+
+
+def parse_battery_datasheet(pdf_bytes: bytes) -> list[dict]:
+    """
+    Extract battery specs from a PDF datasheet.
+
+    Returns a list of model dicts (one per capacity/voltage variant found).
+    Raises ValueError if no models extracted.
+    """
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=4096,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+                },
+                {"type": "text", "text": _BATTERY_PROMPT},
+            ],
+        }],
+    )
+    return _parse_list_response(response, "baterías")
+
+
+_CHARGE_CONTROLLER_PROMPT = """
+Extract technical specifications from this solar charge controller datasheet.
+
+If the datasheet covers multiple current/voltage variants (e.g. 100A, 150A, 200A), return
+ALL as separate objects.
+
+Return ONLY a JSON array — no markdown, no explanation:
+[
+  {
+    "brand": "Victron Energy",
+    "model": "SmartSolar MPPT 250/100",
+    "type": "MPPT",
+    "vin_max": 250,
+    "vout": 48,
+    "imax_in": 25,
+    "imax_out": 100
+  }
+]
+
+Field rules:
+- type: exactly "MPPT" or "PWM"
+- vin_max: maximum PV input voltage (open-circuit, Voc) in V
+- vout: nominal battery/output voltage in V (e.g. 12, 24, 48) — if the unit supports
+  multiple battery voltages, use the highest supported
+- imax_in: maximum PV input/short-circuit current in A, only if explicitly stated —
+  leave null rather than estimating it from vin_max/imax_out
+- imax_out: maximum battery charge current in A — for many controllers (e.g. Victron)
+  this is the second number in the model name, "250/100" = 100A
+- Use null for any field you cannot find with confidence
+"""
+
+
+def parse_charge_controller_datasheet(pdf_bytes: bytes) -> list[dict]:
+    """
+    Extract charge controller specs from a PDF datasheet.
+
+    Returns a list of model dicts (one per current/voltage variant found).
+    Raises ValueError if no models extracted.
+    """
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=4096,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+                },
+                {"type": "text", "text": _CHARGE_CONTROLLER_PROMPT},
+            ],
+        }],
+    )
+    return _parse_list_response(response, "controladores de carga")
+
+
+_MONITORING_PROMPT = """
+Extract product information from this monitoring/communication device datasheet
+(e.g. Victron Cerbo GX, Ekrano GX, or a similar system-monitoring gateway).
+
+If the datasheet covers multiple variants (e.g. "GX" vs "GX Touch"), return ALL as
+separate objects.
+
+Return ONLY a JSON array — no markdown, no explanation:
+[
+  {
+    "brand": "Victron Energy",
+    "model": "Cerbo GX",
+    "compatible_with": "Victron MultiPlus/Quattro inverters, MPPT charge controllers, Pylontech batteries via CAN-bus, VRM Portal"
+  }
+]
+
+Field rules:
+- compatible_with: short free-text summary of what this device connects to or works
+  with (inverters/chargers, communication protocols, compatible battery brands, cloud
+  monitoring platforms) — as described in the datasheet, not inferred
+- Use null for any field you cannot find with confidence
+"""
+
+
+def parse_monitoring_datasheet(pdf_bytes: bytes) -> list[dict]:
+    """
+    Extract monitoring device info from a PDF datasheet.
+
+    Returns a list of model dicts (one per variant found).
+    Raises ValueError if no models extracted.
+    """
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=4096,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+                },
+                {"type": "text", "text": _MONITORING_PROMPT},
+            ],
+        }],
+    )
+    return _parse_list_response(response, "equipos de monitoreo")
