@@ -143,8 +143,21 @@ def get_longest_outage_minutes(site_id: str, start: str | date, end: str | date,
 # ──────────────────────────────────────────────────────────────────
 # Report window assembly
 # ──────────────────────────────────────────────────────────────────
+MAX_CUSTOM_RANGE_DAYS = 31
+# Phase A cap (plan doc §21). Enforced here, not just in the UI that currently
+# calls this — a caller that skips the UI must not be able to skip the limit
+# either. Chosen for the daily bar/SOC charts' legibility, not for any data or
+# performance reason; a future "Overview" mode for longer windows renders
+# differently rather than raising this number (see plan doc §21, Phase B).
+
+
 def week_bounds(week_ending: str | date) -> tuple[date, date]:
     """The 7-day window ending on `week_ending`, inclusive both ends.
+
+    Still exactly what `monitoring`'s automatic weekly report uses — that
+    report's cadence is unchanged by the `vrm` custom-range work below callers
+    compute bounds themselves and pass them to `fetch_report_window`, and this
+    is how the fixed-week caller does it.
 
     Apps Script uses `start = today - 7` with both bounds inclusive, i.e. an
     8-day span. That is a real off-by-one in the original — a "weekly" report
@@ -157,19 +170,46 @@ def week_bounds(week_ending: str | date) -> tuple[date, date]:
     return end - timedelta(days=6), end
 
 
-def fetch_report_window(site_id: str, week_ending: str | date, schema: str) -> dict:
-    """Everything the weekly report needs, in one call.
+def fetch_report_window(site_id: str, start: str | date, end: str | date,
+                        schema: str) -> dict:
+    """Everything the report needs for an inclusive [start, end] window, in
+    one call.
 
-    Fetches the full 5-week span once and slices locally. The Apps Script
-    original re-queries Supabase five times (once per trend bucket) plus twice
-    more for the current and previous weeks — seven round trips where one does.
+    Both `monitoring`'s fixed weekly report and `vrm`'s operator-chosen custom
+    range go through this — the window itself has no opinion about who's
+    calling or how long it is. `monitoring`'s caller computes `(start, end)`
+    via `week_bounds()`; `vrm`'s caller passes whatever the operator picked.
+
+    Fetches the full required span once and slices locally, rather than the
+    Apps Script original's seven round trips (one per trend bucket, plus
+    current and previous week).
     """
     site = get_site(site_id, schema)
     if site is None:
         raise ValueError(f"No site {site_id!r} in schema {schema!r}")
 
-    start, end = week_bounds(week_ending)
-    span_start = start - timedelta(days=21)  # 4 weekly buckets total
+    start = date.fromisoformat(str(start))
+    end = date.fromisoformat(str(end))
+    if start > end:
+        raise ValueError(f"start ({start}) is after end ({end})")
+    num_days = (end - start).days + 1
+    if num_days > MAX_CUSTOM_RANGE_DAYS:
+        raise ValueError(
+            f"Report window is {num_days} days; the cap is "
+            f"{MAX_CUSTOM_RANGE_DAYS} (plan doc §21, Phase A). Longer windows "
+            "need the not-yet-built Overview mode, not a bigger version of "
+            "this report."
+        )
+
+    # The 4-week trend is always a fixed 4x7 days ending on `end`, regardless
+    # of how long [start, end] itself is — deliberate (plan doc §21): it stays
+    # useful context no matter what range the operator picked for the report.
+    trend_span_start = end - timedelta(days=27)
+    # "vs previous" compares against the same-length window immediately
+    # before `start` — generalized from the old hardcoded 7-day lookback, so
+    # a 20-day report compares against the 20 days before it, not last week.
+    previous_start = start - timedelta(days=num_days)
+    span_start = min(trend_span_start, previous_start)
 
     rows = get_energy_daily(site_id, span_start, end, schema)
     by_date = {r["date"]: r for r in rows}
@@ -183,7 +223,7 @@ def fetch_report_window(site_id: str, week_ending: str | date, schema: str) -> d
         return out
 
     current = slice_days(start, end)
-    previous = slice_days(start - timedelta(days=7), start - timedelta(days=1))
+    previous = slice_days(previous_start, start - timedelta(days=1))
 
     trend = []
     for i in range(3, -1, -1):
@@ -211,7 +251,7 @@ def fetch_report_window(site_id: str, week_ending: str | date, schema: str) -> d
         "longest_outage_minutes": get_longest_outage_minutes(site_id, start, end, schema),
         # A window can be short because the CSV didn't cover it or because
         # Node-RED missed days. The report must be able to say so rather than
-        # present 3 days of data as a week.
-        "expected_days": 7,
-        "missing_days": 7 - len(current),
+        # present 3 days of data as a full window.
+        "expected_days": num_days,
+        "missing_days": num_days - len(current),
     }

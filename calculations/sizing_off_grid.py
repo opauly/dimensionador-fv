@@ -334,10 +334,53 @@ def simulate_battery_soc(
 # without pretending a like-for-like scaling exists. Revisit these numbers
 # once real installed-site VRM data gives us actual outage tolerance to
 # calibrate against.
+#
+# min_soc_target_pct spacing was widened from the original (20/40/50) after
+# real usage showed scenarios 1 and 2 routinely landing on byte-identical
+# hardware — size_battery_for_min_soc() rounds usable capacity UP to whole
+# battery units (math.ceil), so two genuinely different targets collapse
+# onto the same battery count whenever both fall inside the same unit
+# bracket. Worked example that surfaced this (daily load ~5.5 kWh/día, 4.8
+# kWh battery units): 20% needed 6.9 kWh, 40% needed 9.2 kWh — both round up
+# to 2 batteries (9.6 kWh) even though the underlying targets differ by 2.3
+# kWh, because neither crosses the next 4.8 kWh boundary. No fixed set of
+# percentages can *guarantee* separation for every possible daily load/
+# battery-unit combination — the boundary a given project needs to clear is
+# itself a function of both — but wider gaps make a collision meaningfully
+# less likely across the typical small/medium off-grid residential range
+# this tool targets (checked against 4.6–5.75 kWh/día daily loads with 4.8
+# kWh battery units: 20/55/75 keeps all three scenarios on distinct battery
+# counts throughout that range, where 20/40/50 collided).
+#
+# Real tradeoff, not just a label change: scenario 2 ("Recomendado") now
+# targets a materially shallower daily cycle (45% DoD vs the old 60%), which
+# is gentler on the battery but generally recommends more battery capacity
+# by default than before — a real cost increase on the default "recommended"
+# quote, traded for scenarios that actually look different from each other.
 _RELIABILITY_SCENARIO_DEFS = [
     ("1", 20.0, 15, 0),
-    ("2", 40.0, 5, 0),
-    ("3", 50.0, 0, 1),
+    ("2", 55.0, 5, 0),
+    ("3", 75.0, 0, 1),
+]
+
+# Hybrid-only variant. Off-Grid's array search stops at the smallest array
+# that clears each scenario's reliability target — correct there, since
+# anything beyond battery+critical-load capacity is genuinely wasted (no
+# grid to send it to). Hybrid is different: surplus beyond battery+critical
+# loads AC-couples back to the main panel and offsets the rest of the site's
+# bill (see estimate_hybrid_savings_pct()), so a bigger array isn't wasted
+# the same way — it's more savings. Without a hybrid-specific push, scenarios
+# 1 and 2 routinely land on the exact same array (both reliability targets
+# were already cleared by the smallest array, so neither search had a reason
+# to grow further) — real user feedback, not a hypothetical. Scenario 2
+# ("Recomendado") gets +1 string beyond its reliability floor so it visibly
+# differs from scenario 1's bare minimum; scenario 3 keeps its already-larger
+# growth margin. Scenario 1 stays untouched (0 extra) — it's meant to read
+# as the genuine floor to compare everything else against.
+_HYBRID_RELIABILITY_SCENARIO_DEFS = [
+    ("1", 20.0, 15, 0),
+    ("2", 55.0, 5, 1),
+    ("3", 75.0, 0, 2),
 ]
 
 _RELIABILITY_SCENARIO_LABELS = {
@@ -366,6 +409,7 @@ def generate_reliability_scenarios(
     inverter_kw: float,
     total_connected_load_kw: float,
     max_cc: int = 4,
+    scenario_defs: list[tuple] | None = None,
 ) -> list[dict]:
     """
     Generates the 3 off-grid auto scenarios: each targets a minimum daily SoC
@@ -424,13 +468,14 @@ def generate_reliability_scenarios(
     """
     from calculations.mppt import find_array_for_reliability
 
+    defs = scenario_defs or _RELIABILITY_SCENARIO_DEFS
     battery_dod_pct = battery.get("dod_pct", 80)
     base_capacity_w = base_inverter_qty * inverter_kw * 1000
     load_ratio = (total_connected_load_kw * 1000 / base_capacity_w) if base_capacity_w > 0 else 0.0
     headroom_tight = load_ratio >= _INVERTER_HEADROOM_TRIGGER_PCT
 
     results = []
-    for label, min_soc_pct, max_unmet_days, growth_strings in _RELIABILITY_SCENARIO_DEFS:
+    for label, min_soc_pct, max_unmet_days, growth_strings in defs:
         bank = size_battery_for_min_soc(
             daily_kwh_consumption, min_soc_pct, autonomy_days,
             battery_dod_pct, battery["voltage_v"], battery["capacity_kwh"],
@@ -448,7 +493,14 @@ def generate_reliability_scenarios(
         bank["unmet_load_days"] = reliability["unmet_load_days"]
         bank["longest_low_soc_streak_days"] = reliability["longest_low_soc_streak_days"]
         bank["utilization_pct"] = reliability["utilization_pct"]
-        growth_added = label == "3" and headroom_tight
+        # growth_strings > 0, not label == "3": Off-Grid only ever puts
+        # growth on scenario 3, so this is unchanged there. Hybrid's own
+        # scenario_defs (_HYBRID_RELIABILITY_SCENARIO_DEFS) also puts growth
+        # on scenario 2, and it should get the same inverter-headroom check
+        # scenario 3 always did — sizing more panels for extra self-
+        # consumption while leaving zero room on the inverter would be the
+        # same false sense of security this check exists to catch.
+        growth_added = growth_strings > 0 and headroom_tight
         inv_qty = base_inverter_qty * 2 if growth_added else base_inverter_qty
         results.append({
             "scenario": label,
@@ -465,3 +517,192 @@ def generate_reliability_scenarios(
             **array_combo,
         })
     return results
+
+
+# ── AC breaker sizing (v1) ───────────────────────────────────────────────────
+# Suggests standard 2-pole breaker sizes for the inverter's AC Out (always)
+# and AC In / grid-passthrough (hybrid only) circuits, from the demand load
+# computed by calculations.load_profile_off_grid.compute_demand_load() and
+# the selected inverter's own rated AC current specs (ac_output_current_a /
+# ac_input_current_max_a, sourced from the datasheet parser).
+#
+# Deliberately the practical 2-pole stock list the business actually
+# specs/purchases from, not the full NEC 240.6(A) standard-size list (10A up
+# to 6000A, used by e.g. a reference NEC conductor/conduit workbook this was
+# checked against) — the two serve different purposes. This list is what
+# gets shown/quoted; nothing here needs the full code list since no
+# conductor/EGC/conduit sizing is being ported (that engine is a separate,
+# larger, not-yet-scheduled piece of work).
+BREAKER_SIZES_2POLE_V1 = [15, 20, 30, 40, 50, 60, 70, 90, 100, 125, 150, 175, 200]
+
+# Continuous-load factor (NEC 210.19(A)/215.2(A)-style 125%) applied to the
+# design current before rounding up to a standard breaker size.
+_CONTINUOUS_LOAD_FACTOR = 1.25
+
+
+def suggest_breaker_2pole(current_a: float) -> int | None:
+    """
+    Rounds a design current up to the nearest size in BREAKER_SIZES_2POLE_V1.
+    Returns None if current_a exceeds the largest listed size (200A) — the
+    caller should flag that as out of range for a standard 2-pole breaker
+    rather than silently pick something not on the practical stock list.
+    """
+    for size in BREAKER_SIZES_2POLE_V1:
+        if size >= current_a:
+            return size
+    return None
+
+
+def compute_peak_current_a(demand_kw: float, voltage_v: float) -> float:
+    """
+    Peak/design current at the design voltage (120V single-phase or 240V
+    split-phase — whichever the system's AC output uses). Assumes PF≈1: no
+    power-factor field exists on any equipment record yet, so this is a
+    documented simplification, not a precise electrical figure.
+    """
+    if voltage_v <= 0:
+        return 0.0
+    return round(demand_kw * 1000 / voltage_v, 2)
+
+
+def compute_ac_breaker_summary(
+    demand_kw: float,
+    voltage_v: float,
+    inverter: dict,
+    inverter_qty: int,
+    grid_connected: bool = False,
+) -> dict:
+    """
+    AC Out (always) and AC In (hybrid + grid_connected only) breaker
+    suggestions for Step 6's "Resumen eléctrico — carga y protecciones".
+
+    AC Out is sized off the DEMANDED load (peak_current_a × 1.25 continuous
+    factor) — this is a design/selection question — then checked against
+    what the selected inverter configuration can actually deliver
+    (ac_output_current_a × inverter_qty, falling back to a flagged
+    kw*1000/output_v estimate when the datasheet field is empty).
+
+    AC In is sized purely off the inverter's own rated max passthrough
+    current (ac_input_current_max_a × inverter_qty) — a grid-side protection
+    question answered by the equipment's own rating, not by site demand.
+    None if the inverter has no passthrough rating on file, or the system
+    isn't grid-connected (plain off-grid with no AC input in use).
+
+    Returns:
+        {
+          "peak_current_a": float,
+          "ac_out": {"design_current_a", "breaker_a", "available_current_a",
+                     "available_current_estimated", "exceeds_available"},
+          "ac_in": same shape, or None,
+        }
+    """
+    peak_current_a = compute_peak_current_a(demand_kw, voltage_v)
+    ac_out_design_a = round(peak_current_a * _CONTINUOUS_LOAD_FACTOR, 2)
+
+    rated_out_a = inverter.get("ac_output_current_a")
+    available_estimated = rated_out_a is None
+    if rated_out_a is None:
+        out_v = float(inverter.get("output_v") or voltage_v or 1)
+        rated_out_a = (float(inverter.get("kw") or 0) * 1000 / out_v) if out_v else 0.0
+    available_out_a = round(float(rated_out_a) * max(1, inverter_qty), 2)
+
+    ac_out = {
+        "design_current_a": ac_out_design_a,
+        "breaker_a": suggest_breaker_2pole(ac_out_design_a),
+        "available_current_a": available_out_a,
+        "available_current_estimated": available_estimated,
+        "exceeds_available": ac_out_design_a > available_out_a,
+    }
+
+    ac_in = None
+    if grid_connected:
+        rated_in_a = inverter.get("ac_input_current_max_a")
+        if rated_in_a:
+            ac_in_current_a = round(float(rated_in_a) * max(1, inverter_qty), 2)
+            ac_in = {
+                "design_current_a": ac_in_current_a,
+                "breaker_a": suggest_breaker_2pole(ac_in_current_a),
+                "available_current_a": ac_in_current_a,
+                "available_current_estimated": False,
+                "exceeds_available": False,
+            }
+
+    return {"peak_current_a": peak_current_a, "ac_out": ac_out, "ac_in": ac_in}
+
+
+# ── Hybrid bill-reduction estimate (v1) ──────────────────────────────────────
+def estimate_hybrid_savings_pct(
+    daily_generation_kwh: float,
+    critical_daily_kwh: float,
+    whole_home_avg_kwh_month: float,
+    daytime_fraction: float,
+    tariff_info: dict,
+) -> dict:
+    """
+    Hybrid bill-reduction estimate: how much of the whole home's monthly
+    bill the surplus solar (beyond what serves critical loads and charges
+    the battery that keeps them alive at night) offsets by AC-coupling back
+    to the main panel. Array/battery sizing itself is untouched by this —
+    it stays purely reliability-driven (see generate_reliability_scenarios())
+    — this is a read-out computed on top of whichever array a scenario
+    already lands on, never a second target the search chases.
+
+    Daily-resolution approximation, not hourly — no calibrated hourly load
+    curve exists in this codebase (see simulate_battery_soc()'s docstring),
+    so the split between "serves critical loads / charges the battery" and
+    "available to offset the rest of the house" is a daily-total split, not
+    a real simultaneity model. `critical_daily_kwh` (the reliability
+    scenario's own daily consumption figure) is netted out of
+    daily_generation_kwh BEFORE applying the same zero-export self-
+    consumption formula wizard/grid_zero.py's _scenario_projection() uses
+    for Grid Zero — without that netting step, the same solar kWh would be
+    counted twice: once as a whole-home daytime offset, again as the
+    battery charge that avoided a critical-load nighttime grid draw.
+
+    Args:
+        daily_generation_kwh: the scenario's own daily array generation
+            (already derated — e.g. a reliability scenario's own daily
+            generation figure, not system_kw × sun hours recomputed here).
+        critical_daily_kwh: critical-load daily consumption (Step 5's
+            total_kwh_day for the critical-loads profile) — the portion of
+            generation already "spoken for" by the backup design.
+        whole_home_avg_kwh_month: the site's total monthly consumption —
+            either the critical-load profile's own daily_kwh × 30.4 (panel
+            scope "primary": critical loads ARE the whole site) or the
+            main panel's own avg_kwh_month (panel scope "secondary").
+        daytime_fraction: same AI-estimated fraction Grid Zero uses — share
+            of whole-home consumption that happens during solar hours.
+        tariff_info: dict shape calculations/tariff_calculator.py:
+            estimate_bill_crc() expects (access_charge_crc, bomberos_pct,
+            iva_threshold_kwh, tiers).
+
+    Returns:
+        {
+          "gen_available_kwh_day": float,   # generation left over after critical-load service, per day
+          "self_consumed_kwh_month": float,
+          "old_bill_crc": float, "new_bill_crc": float,
+          "savings_crc": float, "savings_pct": float,
+        }
+    """
+    from calculations.tariff_calculator import estimate_bill_crc
+
+    gen_available_kwh_day = max(0.0, daily_generation_kwh - critical_daily_kwh)
+    gen_available_kwh_month = gen_available_kwh_day * 30.4
+
+    daytime_kwh_month = whole_home_avg_kwh_month * daytime_fraction
+    self_consumed_kwh_month = min(gen_available_kwh_month, daytime_kwh_month)
+    grid_kwh_month = max(0.0, whole_home_avg_kwh_month - self_consumed_kwh_month)
+
+    old_bill = estimate_bill_crc(whole_home_avg_kwh_month, tariff_info)
+    new_bill = estimate_bill_crc(grid_kwh_month, tariff_info)
+    savings_crc = max(0.0, old_bill - new_bill)
+    savings_pct = round(savings_crc / old_bill * 100, 1) if old_bill > 0 else 0.0
+
+    return {
+        "gen_available_kwh_day": round(gen_available_kwh_day, 2),
+        "self_consumed_kwh_month": round(self_consumed_kwh_month, 1),
+        "old_bill_crc": round(old_bill),
+        "new_bill_crc": round(new_bill),
+        "savings_crc": round(savings_crc),
+        "savings_pct": savings_pct,
+    }

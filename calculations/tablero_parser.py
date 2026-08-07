@@ -243,3 +243,112 @@ def parse_tablero_off_grid(file_bytes: bytes, media_type: str) -> list[dict]:
         raise ValueError("No se encontraron cargas activas en el tablero.")
 
     return result
+
+
+# ── Off-Grid text-paste variant ──────────────────────────────────────────────
+# Same output shape and "no hours, no demand factor" scope as
+# parse_tablero_off_grid() above, but for text pasted directly into the
+# wizard (e.g. copied from a circuit-schedule spreadsheet or an existing
+# electrical design) instead of an uploaded image/PDF. AI rather than plain
+# text-splitting because pasted-table formatting is unpredictable — tab-
+# separated from Excel, space-aligned from a PDF-to-text conversion, commas,
+# or a loose list of lines — the same reasoning that justifies vision
+# extraction for photographed tableros applies here to inconsistent text
+# layout. Deliberately drops any "factor de demanda"/"carga simultánea"
+# column present in the source: this tool computes its own demand factors
+# downstream (calculations/load_profile_off_grid.py compute_demand_load()),
+# per taxonomy category — importing someone else's ad-hoc per-circuit factor
+# alongside that would silently mix two different demand models.
+
+_PROMPT_TEXT_OFF_GRID = """
+Extract electrical circuits/loads from this pasted text — likely copied from a
+spreadsheet, Word table, or an existing panel-schedule design (Costa Rica).
+The format is unpredictable: it may be tab-separated, space-aligned,
+comma-separated, or a loose list of lines like "2x Aire acondicionado 1500W".
+
+For each real circuit/load return ONLY:
+- Descripción: short human-readable load name (Spanish, capitalize)
+- Cantidad: quantity (1 unless the text explicitly groups identical loads)
+- Potencia (kW): nameplate/design power in kW — convert from W if needed (divide by 1000)
+
+Do NOT extract or use any "factor de demanda" / "demand factor" / "carga
+simultánea estimada" / percentage columns even if present in the pasted
+text — this tool computes its own demand factors separately, downstream.
+Only the raw installed/nameplate ("potencia de diseño") power per circuit
+matters here.
+
+Rules:
+- Skip header rows, TOTAL/subtotal rows, and circuit-number-only columns
+- Skip rows with 0 W or blank descriptions
+- Keep descriptions concise (e.g. "Tomacorrientes de cocina" not the full row text)
+- If the same load type repeats across circuits with identical power, you may
+  merge them into one row with Cantidad > 1, but only if merging doesn't lose
+  meaningfully different circuits (when in doubt, keep separate rows)
+
+Pasted text:
+---
+{text}
+---
+
+Return ONLY a JSON array with no markdown fences:
+[
+  {{"Descripción": "Tomacorriente para microondas", "Cantidad": 1, "Potencia (kW)": 0.8}},
+  {{"Descripción": "Iluminación principal", "Cantidad": 1, "Potencia (kW)": 1.15}}
+]
+"""
+
+
+def parse_tablero_text_off_grid(text: str) -> list[dict]:
+    """
+    Extract installed electrical loads from pasted plain text, for the
+    Off-Grid/Hybrid wizard — name/quantity/nameplate power only, no hours,
+    no imported demand factor (see module note above).
+
+    Args:
+        text: Raw pasted text — any delimiter/layout.
+
+    Returns:
+        List of load dicts: [{"Descripción", "Cantidad", "Potencia (kW)"}, ...]
+
+    Raises:
+        ValueError: If the text is empty or no loads are extracted.
+        anthropic.APIError: On API errors.
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Pega el texto de la tabla de cargas antes de extraer.")
+
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model=_MODEL,
+        max_tokens=2048,
+        messages=[{"role": "user", "content": _PROMPT_TEXT_OFF_GRID.format(text=text)}],
+    )
+
+    out = response.content[0].text.strip()
+    if out.startswith("```"):
+        parts = out.split("```")
+        out = parts[1].lstrip("json").strip() if len(parts) > 1 else out
+
+    loads = json.loads(out)
+
+    if not isinstance(loads, list) or not loads:
+        raise ValueError("No se extrajeron cargas del texto pegado.")
+
+    result = []
+    for row in loads:
+        kw = float(row.get("Potencia (kW)") or 0)
+        if kw <= 0:
+            continue
+        result.append({
+            "Descripción":   str(row.get("Descripción", "Carga")),
+            "Cantidad":      int(row.get("Cantidad") or 1),
+            "Potencia (kW)": round(kw, 2),
+        })
+
+    if not result:
+        raise ValueError("No se encontraron cargas activas en el texto pegado.")
+
+    return result

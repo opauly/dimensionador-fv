@@ -14,7 +14,7 @@ Plan and design notes: victron-monitor/docs/vrm-report-v1-implementation-plan.md
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 import pandas as pd
 import streamlit as st
@@ -22,12 +22,42 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from config import BRAND_GREEN, BRAND_GREEN_LIGHT, COUNTRIES  # noqa: E402
+from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY, COUNTRIES  # noqa: E402
 from database import vrm_report_db as rdb  # noqa: E402
 from victron import ingest, vrm_csv, weekly_report as wr  # noqa: E402
+from victron import report_svg as rsvg  # noqa: E402
 from victron import savings as vrm_savings  # noqa: E402
 
 st.set_page_config(page_title="VRM Monitor — Pauly&Co Solar", layout="wide")
+
+# ══════════════════════════════════════════════════════════════════
+# Small visual-insight components — same style as wizard/off_grid.py's
+# _metric_card()/_chip_row() (CONTEXT.md 2026-08-03), so the operator's quick
+# look here reads like the proposal wizard's review step instead of the bare
+# st.metric row it replaces. Kept local rather than imported: those are
+# private, wizard-scoped helpers for an unrelated feature.
+# ══════════════════════════════════════════════════════════════════
+def _metric_card(label: str, value: str, sublabel: str | None = None,
+                 color: str = BRAND_NAVY) -> None:
+    sub_html = (f'<div style="font-size:0.75rem;color:#6b7280;margin-top:2pt;">'
+               f'{sublabel}</div>' if sublabel else "")
+    st.markdown(
+        f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.7rem 0.9rem;'
+        f'margin-bottom:0.5rem;min-height:5.5rem;">'
+        f'<div style="font-size:0.78rem;color:#6b7280;">{label}</div>'
+        f'<div style="font-size:1.4rem;font-weight:700;color:{color};margin-top:1pt;">{value}</div>'
+        f'{sub_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _chip_row(chips: list[str]) -> None:
+    spans = "".join(
+        f'<span style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:4px;'
+        f'padding:2px 9px;font-size:0.8rem;">{c}</span>' for c in chips)
+    st.markdown(f'<div style="display:flex;gap:0.5rem;flex-wrap:wrap;'
+               f'margin:0.4rem 0 0.9rem;">{spans}</div>', unsafe_allow_html=True)
+
 
 SYSTEM_TYPES = ["hybrid", "off_grid", "grid_zero"]
 LANGS = {"es": "Español", "en": "English"}
@@ -114,7 +144,7 @@ def tab_sites() -> None:
     else:
         st.info("Todavía no hay sitios. Se crean automáticamente al cargar un CSV.")
 
-    with st.expander("➕ Crear o actualizar un sitio manualmente"):
+    with st.expander("Crear o actualizar un sitio manualmente"):
         st.caption(
             "No es obligatorio: la pestaña **Cargar** crea el cliente y el sitio "
             "a partir del CSV. Esto sirve para corregir datos después."
@@ -226,7 +256,7 @@ def tab_upload() -> None:
     lng = b.number_input("Longitud", value=0.0, format="%.6f", key="up_lng")
     with c:
         st.write("")
-        if st.button("🌍 Buscar por coordenadas", key="up_revgeo",
+        if st.button("Buscar por coordenadas", key="up_revgeo",
                      help="Completa Ubicación, Zona horaria y País a partir "
                           "de Latitud/Longitud — cualquier país."):
             if not lat and not lng:
@@ -312,7 +342,7 @@ def tab_upload() -> None:
     if up is None:
         return
 
-    if st.button("🔍 Procesar y previsualizar", type="primary"):
+    if st.button("Procesar y previsualizar", type="primary"):
         if not cust_name.strip() or not site_name.strip():
             st.error("Indicá cliente y sitio antes de procesar.")
             return
@@ -367,15 +397,15 @@ def tab_upload() -> None:
     )
     _og_note = " (hipotético — sitio off-grid)" if meta["system_type"] == "off_grid" else ""
     if meta["country"] == "CR":
-        st.caption(f"💰 Ahorro estimado: automático, promedio de tarifas ARESEP T-RE{_og_note}.")
+        st.caption(f"Ahorro estimado: automático, promedio de tarifas ARESEP T-RE{_og_note}.")
     elif meta["savings_rate"]:
         st.caption(
-            f"💰 Ahorro estimado: tarifa fija "
+            f"Ahorro estimado: tarifa fija "
             f"{vrm_savings.format_money(meta['savings_rate'], meta['savings_currency'])}"
             f"/kWh{_og_note}."
         )
     else:
-        st.caption("💰 Ahorro estimado: no se mostrará (país no-CR sin tarifa configurada).")
+        st.caption("Ahorro estimado: no se mostrará (país no-CR sin tarifa configurada).")
 
     for w in parsed["warnings"]:
         st.warning(w)
@@ -396,7 +426,7 @@ def tab_upload() -> None:
             "generación."
         )
 
-    if st.button("💾 Importar a la base de datos", type="primary"):
+    if st.button("Importar a la base de datos", type="primary"):
         with st.spinner("Escribiendo…"):
             try:
                 cust = ingest.upsert_customer(meta["customer"])
@@ -434,7 +464,7 @@ def tab_upload() -> None:
 # Tab 3 — Reporte
 # ══════════════════════════════════════════════════════════════════
 def tab_report() -> None:
-    st.markdown("### Reporte semanal")
+    st.markdown("### Reporte")
     st.caption(
         "El mismo generador sirve para los dos esquemas: `vrm` (clientes "
         "externos, desde CSV) y `monitoring` (sitios propios con Cerbo GX y "
@@ -461,27 +491,74 @@ def tab_report() -> None:
 
     st.caption(f"Datos disponibles: **{dates[0]} → {dates[-1]}** ({len(dates)} días)")
 
-    a, b = st.columns([1, 2])
-    # Only dates that actually have data — a free date input would happily
-    # produce an empty report for a week nobody has data for.
-    week_ending = a.selectbox("Semana que termina el", list(reversed(dates)))
-    opts = b.multiselect("Incluir", ["Narrativa (IA)", "Clima (Open-Meteo)"],
-                         default=["Narrativa (IA)", "Clima (Open-Meteo)"])
-
-    start = (date.fromisoformat(week_ending) - timedelta(days=6)).isoformat()
-    covered = [d for d in dates if start <= d <= week_ending]
-    if len(covered) < 7:
-        st.warning(
-            f"La semana {start} → {week_ending} tiene {len(covered)} de 7 días "
-            "con datos. El reporte se genera igual, pero los totales no son "
-            "comparables con una semana completa."
+    min_d, max_d = date.fromisoformat(dates[0]), date.fromisoformat(dates[-1])
+    valid = True
+    if schema == rdb.MONITORING:
+        # Unchanged: monitoring's report stays a fixed automatic 7-day
+        # window, picked by its end date only — this is the UI that was
+        # already calibrated against the reference PDF. A calendar rather
+        # than a dropdown of exact dates — monitoring data is written daily
+        # by Node-RED, so gap days inside the picked week are rare, and the
+        # coverage warning below still catches it when one shows up.
+        a, b = st.columns([1, 2])
+        week_ending = a.date_input("Semana que termina el", value=max_d,
+                                   min_value=min_d, max_value=max_d).isoformat()
+        opts = b.multiselect("Incluir", ["Narrativa (IA)", "Clima (Open-Meteo)"],
+                             default=["Narrativa (IA)", "Clima (Open-Meteo)"])
+        start, end = rdb.week_bounds(week_ending)
+        start, end = start.isoformat(), end.isoformat()
+        covered = [d for d in dates if start <= d <= end]
+        if len(covered) < 7:
+            st.warning(
+                f"La semana {start} → {end} tiene {len(covered)} de 7 días "
+                "con datos. El reporte se genera igual, pero los totales no "
+                "son comparables con una semana completa."
+            )
+    else:
+        # vrm: operator picks any [start, end] up to MAX_CUSTOM_RANGE_DAYS, one
+        # calendar with range selection bounded to the site's real data span.
+        # A calendar can't restrict individual days to only the ones with
+        # data the way the old date-dropdowns did, but a sparse or fully
+        # empty pick is already handled below (coverage warning) and in the
+        # generate handler (caught exception) — so that's not a new gap
+        # (plan doc §21, Phase A).
+        default_start = dates[max(0, len(dates) - 7)]
+        picked = st.date_input(
+            "Rango del reporte", value=(date.fromisoformat(default_start), max_d),
+            min_value=min_d, max_value=max_d,
         )
+        opts = st.multiselect("Incluir", ["Narrativa (IA)", "Clima (Open-Meteo)"],
+                              default=["Narrativa (IA)", "Clima (Open-Meteo)"])
 
-    if st.button("📄 Generar reporte", type="primary"):
+        if not isinstance(picked, tuple) or len(picked) != 2:
+            st.info("Elegí una fecha de inicio y una de fin en el calendario.")
+            valid = False
+            start = end = None
+        else:
+            start, end = (d.isoformat() for d in picked)
+            num_days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
+            if num_days > rdb.MAX_CUSTOM_RANGE_DAYS:
+                st.error(
+                    f"El rango elegido es de {num_days} días; el máximo para "
+                    f"este reporte es {rdb.MAX_CUSTOM_RANGE_DAYS}. Elegí un "
+                    "rango más corto."
+                )
+                valid = False
+            else:
+                covered = [d for d in dates if start <= d <= end]
+                if len(covered) < num_days:
+                    st.warning(
+                        f"El rango {start} → {end} tiene {len(covered)} de "
+                        f"{num_days} días con datos. El reporte se genera "
+                        "igual, pero los totales no son comparables con un "
+                        "rango completo."
+                    )
+
+    if valid and st.button("Generar reporte", type="primary"):
         with st.spinner("Generando…"):
             try:
                 data = wr.build_report_data(
-                    site_id, week_ending, schema,
+                    site_id, start, end, schema,
                     with_narrative="Narrativa (IA)" in opts,
                     with_weather="Clima (Open-Meteo)" in opts,
                 )
@@ -491,7 +568,7 @@ def tab_report() -> None:
                 return
         st.session_state["vrm_report"] = {
             "pdf": pdf, "data": data,
-            "name": f"Weekly Report - {data['siteName']} - {data['endStr']}.pdf",
+            "name": f"Report - {data['siteName']} - {data['endStr']}.pdf",
         }
 
     rep = st.session_state.get("vrm_report")
@@ -499,14 +576,62 @@ def tab_report() -> None:
         return
 
     d = rep["data"]
+    tot = d["totals"]
+    n = len(d["dailyGrouped"])
     st.divider()
+
+    _, _, score_text_color = rsvg.score_colors(d["avgHealth"])
     a, b, c, e = st.columns(4)
-    a.metric("Generación solar", f"{d['totals']['pv']:.1f} kWh")
-    b.metric("Consumo", f"{d['totals']['load']:.1f} kWh")
-    c.metric("Independencia", f"{d['gridIndependencePct']}%")
-    e.metric("Salud", f"{d['avgHealth']}/100", d["healthStatus"])
+    with a:
+        _metric_card("Generación solar", f"{tot['pv']:.1f} kWh")
+    with b:
+        _metric_card("Consumo", f"{tot['load']:.1f} kWh")
+    with c:
+        _metric_card("Independencia", f"{d['gridIndependencePct']}%")
+    with e:
+        _metric_card("Salud", f"{d['avgHealth']}/100", d["healthStatus"],
+                     color=score_text_color)
+
+    oc = tot["outageCount"]
+    _chip_row([
+        f"⚙️ <b>{d['systemType']}</b>",
+        f"📅 <b>{n}/{n + d['missingDays']}</b> días con datos",
+        f"🔋 <b style='color:{d['battStressColor']}'>{d['battStressLabel']}</b> "
+        f"({d['batteryCycles']} cyc)",
+        f"⚡ <b style='color:{d['gridQualityColor']}'>{d['gridQualityStatus']}</b> "
+        f"({d['gridQualityScore']}/100)",
+        (f"🔌 <b>{oc}</b> cortes ({tot['outageMinutes']} min)" if oc > 0
+         else "🔌 <b>Sin cortes</b>"),
+    ])
+
     st.caption(f"Periodo {d['startStr']} → {d['endStr']} · "
-               f"{len(d['dailyGrouped'])} días · esquema `{d['schema']}`")
+               f"{n} días · esquema `{d['schema']}`")
+
+    total_energy = tot["pv"] + tot["grid"] + tot["discharge"]
+    if total_energy > 0:
+        import plotly.graph_objects as go
+        mix_fig = go.Figure()
+        for label, kwh, color in [
+            ("Solar", tot["pv"], rsvg.GREEN),
+            ("Batería", tot["discharge"], rsvg.BLUE),
+            ("Red", tot["grid"], rsvg.MINT),
+        ]:
+            pct = kwh / total_energy * 100
+            mix_fig.add_trace(go.Bar(
+                y=["Energía"], x=[kwh], name=label, orientation="h",
+                marker_color=color, text=[f"{pct:.0f}% · {kwh:.0f} kWh"],
+                textposition="inside",
+            ))
+        mix_fig.update_layout(
+            barmode="stack", height=150,
+            # t/b give the legend row and the x-axis title their own space —
+            # at the old t=10/b=10 both collided with the plot (legend into
+            # the bar, "kWh" into the tick labels below it).
+            margin=dict(t=40, b=40, l=10, r=10),
+            xaxis_title="kWh", showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, x=0),
+        )
+        st.plotly_chart(mix_fig, use_container_width=True)
 
     # `weatherErrors` only has entries when the site HAS coordinates and the
     # fetch still failed — distinct from simply not having lat/long, which the
@@ -520,6 +645,14 @@ def tab_report() -> None:
             "coordenadas). El PDF se generó igual, sin ese bloque. "
             f"Detalle: {d['weatherErrors'][-1]}"
         )
+    # Same thresholds the PDF itself uses (High stress tier, Poor/Irregular
+    # grid quality) — an operator scanning this panel should catch these
+    # before opening the PDF, not just when reading it line by line.
+    if d["battStressLabel"] in ("Alto estrés", "High stress"):
+        st.warning(f"🔋 Estrés de batería alto: {d['batteryCycles']} ciclos en {n} días.")
+    if d["gridQualityScore"] < 70:
+        st.warning(f"⚡ Calidad de red baja: {d['gridQualityScore']}/100 "
+                   f"({d['gridQualityStatus']}).")
 
     st.download_button("⬇️ Descargar PDF", data=rep["pdf"],
                        file_name=rep["name"], mime="application/pdf",
@@ -534,7 +667,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-t1, t2, t3 = st.tabs(["🏠 Sitios", "📤 Cargar CSV", "📄 Reporte"])
+t1, t2, t3 = st.tabs(["Sitios", "Cargar CSV", "Reporte"])
 with t1:
     tab_sites()
 with t2:

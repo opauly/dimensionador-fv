@@ -31,6 +31,14 @@ EN = {
     "alarmEpisodes": "Total Alarm Episodes",
     "outages": "Grid Outages",
     "noOutagesShort": "No outages",
+    # Outages come only from the device's own Grid alarm flag — a brief
+    # frequency/voltage excursion the device didn't treat as a full loss
+    # won't set it, even though it's exactly what tanks the Grid Quality
+    # score below. Shown on the Grid Outages KPI card itself (the number a
+    # reader sees first) when that happens, so "No outages" doesn't read as a
+    # clean bill of health. Kept short — this sits in the KPI card's one-line
+    # sub-label slot, which has no wrap or truncation.
+    "outagesGridQualityNote": "See Grid Quality",
     "minutes": "minutes",
     "days": "days",
     "kwh": "kWh",
@@ -124,6 +132,7 @@ ES = dict(EN, **{
     "alarmEpisodes": "Total de Episodios de Alarma",
     "outages": "Cortes de Red",
     "noOutagesShort": "Sin cortes",
+    "outagesGridQualityNote": "Ver Calidad de Red",
     "minutes": "minutos",
     "days": "días",
     "energyMix": "De dónde vino su energía",
@@ -197,6 +206,69 @@ ES = dict(EN, **{
 
 TRANSLATIONS = {"en": EN, "es": ES}
 
+# Keys whose EN/ES text hardcodes "week"/"semana" and must read correctly for
+# a `vrm` custom-range report of any length (plan doc §21, Phase A). The
+# 4-week trend chart's own keys (fourWeekChart, sub4Week, trendNote) are
+# deliberately absent — that chart is always a fixed 4x7-day view regardless
+# of the report's own window, so its wording never changes.
+_PERIOD_OVERRIDES_EN = {
+    "reportTitle": "Energy Report",
+    "reportSubtitle": "Reporte de energía",
+    "healthScore": "Health Score",
+    "sectionEvents": "Events this period",
+    "lowestSoc": "Lowest SOC of the period",
+    "weatherTitle": "Weather this period",
+    "socTimeline": "Battery SOC this period",
+    "subDaily": "Compares daily solar production against household "
+                "consumption for each day in this period.",
+    "subBattery": "Tracks how well your batteries charged and discharged "
+                  "throughout this period.",
+    "subEvents": "Logs grid outages and alarm events recorded by the system "
+                 "during this period.",
+    "subWeather": "Local weather conditions for this period — cloud cover "
+                  "and rain directly reduce solar output.",
+    "savingsThisWeek": "This period",
+    "subSavings": "Estimated electricity cost avoided this period by using "
+                  "solar instead of buying from the grid.",
+    "narrativeUnavailable": "Narrative unavailable for this period.",
+}
+_PERIOD_OVERRIDES_ES = {
+    "reportTitle": "Reporte de Energía",
+    "reportSubtitle": "Energy report",
+    "healthScore": "Puntaje de Salud",
+    "sectionEvents": "Eventos del período",
+    "lowestSoc": "SOC Mínimo del Período",
+    "weatherTitle": "Clima del período",
+    "socTimeline": "SOC de la batería en este período",
+    "subDaily": "Compara la producción solar diaria contra el consumo de la "
+                "propiedad para cada día de este período.",
+    "subBattery": "Indica qué tan bien cargaron y descargaron sus baterías "
+                  "durante este período.",
+    "subEvents": "Registra los cortes de red y eventos de alarma detectados "
+                 "por el sistema durante este período.",
+    "subWeather": "Condiciones climáticas locales de este período — la "
+                  "nubosidad y la lluvia reducen directamente la producción "
+                  "solar.",
+    "savingsThisWeek": "Este período",
+    "subSavings": "Estimado del costo eléctrico evitado en este período al "
+                  "usar energía solar en vez de comprarla a la red.",
+    "narrativeUnavailable": "Resumen no disponible para este período.",
+}
+_PERIOD_OVERRIDES = {"en": _PERIOD_OVERRIDES_EN, "es": _PERIOD_OVERRIDES_ES}
 
-def get(lang: str) -> dict:
-    return TRANSLATIONS.get((lang or "en").lower(), EN)
+
+def get(lang: str, num_days: int = 7) -> dict:
+    """Translation dict for `lang`, worded for a window of `num_days`.
+
+    `num_days == 7` (the only value `monitoring` ever passes, and the common
+    case for `vrm`) returns the original dict unchanged — same object
+    identity even — so the already-verified 7-day report is byte-for-byte
+    unaffected. Any other length swaps in period-neutral wording so a 20-day
+    `vrm` report doesn't call itself "weekly".
+    """
+    lang = (lang or "en").lower()
+    base = TRANSLATIONS.get(lang, EN)
+    if num_days == 7:
+        return base
+    overrides = _PERIOD_OVERRIDES.get(lang, _PERIOD_OVERRIDES_EN)
+    return {**base, **overrides}

@@ -559,7 +559,7 @@ def main() -> None:
 
 def _render_test_pdf_panel() -> None:
     """Discreet dev tool: generate a sample PDF per system type without going through the wizard."""
-    with st.expander("🧪 Generar PDF de prueba", expanded=False):
+    with st.expander("Generar PDF de prueba", expanded=False):
         from proposals.generator import generate_pdf, MARIA_JOSE_DATA, JORGE_RAMIREZ_DATA, HYBRID_DATA
 
         sample_data = {

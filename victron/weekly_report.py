@@ -120,21 +120,23 @@ def generate_narrative(stats: dict, lang: str) -> str:
     A missing key or an API error returns a placeholder rather than raising:
     the report is the deliverable, and losing one paragraph must not lose it.
     """
-    t = report_i18n.get(lang)
+    t = report_i18n.get(lang, stats["totalDays"])
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return t["narrativeNoKey"]
 
+    period_label = "week" if stats["totalDays"] <= 8 else f"{stats['totalDays']}-day period"
     prompt = (
-        "You are writing the weekly insights paragraph for a residential "
-        f"solar+battery monitoring report. {t['narrativeLang']}"
+        "You are writing the insights paragraph for a residential "
+        f"solar+battery monitoring report covering a {period_label}. "
+        f"{t['narrativeLang']}"
         "\n\nWrite exactly 2 short paragraphs (60-90 words total). Plain prose "
         "only - no headers, no bullets, no markdown."
         " Warm, professional tone. Be specific with numbers. Lead with the most "
-        "meaningful story of the week."
+        f"meaningful story of the {period_label}."
         " If the battery kept the home running during outages, say so. End with "
         "one forward-looking sentence if warranted."
-        "\n\nThis week's data:"
+        f"\n\nThis {period_label}'s data:"
         f"\n- Site: {stats['site']}"
         f"\n- Solar generated: {stats['pv']} kWh"
         f"\n- Total consumption: {stats['load']} kWh"
@@ -142,7 +144,7 @@ def generate_narrative(stats: dict, lang: str) -> str:
         f"\n- Grid independence: {stats['gridIndependencePct']}%"
         f"\n- Health score: {stats['healthScore']}/100 ({stats['healthStatus']})"
         f"\n- Lowest battery SOC: {stats['minSoc']}%"
-        f"\n- Battery cycles this week: {stats['batteryCycles']}"
+        f"\n- Battery cycles this {period_label}: {stats['batteryCycles']}"
         f"\n- Days battery reached full charge: {stats['daysFullCharge']} of {stats['totalDays']}"
         f"\n- Grid outages: {stats['outageCount']} ({stats['outageMinutes']} minutes total)"
         f"\n- Longest single outage: {stats['longestOutageMinutes']} minutes"
@@ -199,11 +201,17 @@ def _minmax(rows: list[dict], key: str) -> tuple[float | None, float | None]:
     return (min(vals), max(vals)) if vals else (None, None)
 
 
-def build_report_data(site_id: str, week_ending: str | date, schema: str,
+def build_report_data(site_id: str, start: str | date, end: str | date, schema: str,
                       with_narrative: bool = True,
                       with_weather: bool = True) -> dict:
-    """Everything the template needs. Port of `weeklyReport()`'s computation."""
-    window = db.fetch_report_window(site_id, week_ending, schema)
+    """Everything the template needs. Port of `weeklyReport()`'s computation.
+
+    `(start, end)` is an inclusive window of any length up to
+    `db.MAX_CUSTOM_RANGE_DAYS` — `monitoring` callers pass `db.week_bounds()`
+    to keep the fixed 7-day cadence unchanged; `vrm` callers may pass any
+    operator-chosen range (plan doc §21, Phase A).
+    """
+    window = db.fetch_report_window(site_id, start, end, schema)
     site = window["site"]
     days = window["days"]
     if not days:
@@ -214,7 +222,7 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
 
     lang = (site.get("report_language") or "en").lower()
     lang = "es" if lang == "es" else "en"
-    t = report_i18n.get(lang)
+    t = report_i18n.get(lang, len(days))
     system_type = site.get("system_type") or "hybrid"
 
     totals = {
@@ -310,8 +318,15 @@ def build_report_data(site_id: str, week_ending: str | date, schema: str,
     gq_color = S.GREEN if gq >= 90 else (S.AMBER if gq >= 70 else S.RED)
 
     # ── Battery stress, using the site's own thresholds ───────────
+    # `battery_cycles` is a total over the whole window, not a rate — a
+    # 30-day custom range naturally accumulates ~4x the cycles a 7-day one
+    # does for the exact same daily usage pattern. These thresholds (and any
+    # site override) were set assuming a week, so they scale with the
+    # window's length; at exactly 7 days this is a no-op.
+    week_scale = len(days) / 7
     thr = {"batteryCyclesHigh": 10.0, "batteryCyclesMid": 7.0}
     thr.update(site.get("health_thresholds") or {})
+    thr = {k: v * week_scale for k, v in thr.items()}
     if battery_cycles > thr["batteryCyclesHigh"]:
         stress = "Alto estrés" if lang == "es" else "High stress"
     elif battery_cycles > thr["batteryCyclesMid"]:
@@ -424,6 +439,10 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
          "valueColor": S.AMBER if oc > 0 else "#222"},
         {"label": t["alarmEpisodes"], "value": str(d["alarmEpisodesTotal"])},
     ]
+    # A poor Grid Quality score alongside a clean outage count is flagged on
+    # the Grid Outages KPI card itself (report_svg.kpi_svg) rather than here —
+    # that's the number a reader sees first, so the pointer belongs there,
+    # not in a second row an operator could easily miss further down the page.
     # Only on sites configured as exporting. On a site that never feeds back, an
     # always-zero row is noise; on one that does, omitting it hides a large part
     # of its grid interaction.
@@ -556,8 +575,8 @@ def render_pdf(d: dict) -> bytes:
     return HTML(string=render_html(d)).write_pdf()
 
 
-def generate(site_id: str, week_ending: str | date, schema: str,
+def generate(site_id: str, start: str | date, end: str | date, schema: str,
              with_narrative: bool = True, with_weather: bool = True) -> bytes:
-    return render_pdf(build_report_data(site_id, week_ending, schema,
+    return render_pdf(build_report_data(site_id, start, end, schema,
                                         with_narrative=with_narrative,
                                         with_weather=with_weather))

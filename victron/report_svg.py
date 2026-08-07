@@ -81,7 +81,12 @@ SUB_MAX_CHARS = int((IW - 2 * IPAD) / 3.1)
 # Per-class widths in em, calibrated against Arial in the reference PDF
 # ("59.57 – 60.68 Hz" measures 74.7pt at 9.81pt → ~0.476 em/char average).
 _W_NARROW = set("iljItfr.,:;'`|!()[]{}-· ")
-_W_WIDE = set("mwMW@%")
+# Em/en dash glyphs render close to a full em wide — well past a lowercase
+# letter's default estimate. Missing this undercounts any row value that uses
+# one as a separator (e.g. "no outages — see Grid Quality"), which is exactly
+# the kind of underestimate that lets row_fits() say "fits" when the real
+# WeasyPrint render overlaps the label.
+_W_WIDE = set("mwMW@%—–")
 
 
 def text_width(s: str, size: float, bold: bool = False) -> float:
@@ -247,7 +252,14 @@ def wow_pct(curr, prev) -> int | None:
 def kpi_svg(d: dict, t: dict) -> str:
     score_color, badge_bg, badge_text = score_colors(d["avgHealth"])
     tot = d["totals"]
-    outage_bg = "#FEF7EC" if tot["outageCount"] > 0 else BG_GREY
+    # Outages come only from the device's own Grid alarm flag, which can miss
+    # a real disturbance the device didn't treat as a full loss — Grid
+    # Quality is computed independently, from frequency/voltage extremes, and
+    # can be poor even when the outage count reads zero. This is the card a
+    # reader looks at first, so the flag belongs on it directly rather than
+    # in a separate row elsewhere that's easy to miss.
+    flag_grid_quality = tot["outageCount"] == 0 and d["gridQualityScore"] < 90
+    outage_bg = "#FEF7EC" if (tot["outageCount"] > 0 or flag_grid_quality) else BG_GREY
 
     def rect(x, bg):
         return (f"<rect x='{x}' y='0' width='{_f(CW)}' height='{CH}' rx='8' "
@@ -292,9 +304,10 @@ def kpi_svg(d: dict, t: dict) -> str:
     best = d.get("bestDay")
     best_sub = f"Best: {_f(best['pv'])} {t['kwh']}" if best else "Best: —"
     gi_sub = f"{tot['daysSelfSufficient']}/{len(d['dailyGrouped'])} {t['days']}"
-    outage_sub = (f"{tot['outageMinutes']} {t['minutes']}"
-                  if tot["outageCount"] > 0 else t["noOutagesShort"])
-    outage_col = AMBER if tot["outageCount"] > 0 else GREEN
+    outage_sub = (f"{tot['outageMinutes']} {t['minutes']}" if tot["outageCount"] > 0
+                  else t["outagesGridQualityNote"] if flag_grid_quality
+                  else t["noOutagesShort"])
+    outage_col = AMBER if (tot["outageCount"] > 0 or flag_grid_quality) else GREEN
 
     status_label = t["healthStatus"].get(d["healthStatus"], d["healthStatus"])
 
@@ -338,7 +351,14 @@ def kpi_svg(d: dict, t: dict) -> str:
 # Daily solar vs. consumption bars
 # ══════════════════════════════════════════════════════════════════
 def bar_chart_svg(d: dict, t: dict) -> str:
-    BAR_H_MAX, BAR_W, BAR_GAP, SVG_W, BAR_LPAD = 78, 10, 3, 520, 46
+    # SVG_W matches PW, the width every other block in the report uses — it
+    # used to be its own narrower 520, which (combined with BAR_LPAD reserving
+    # space only on the left) made this one chart sit visibly off-centre
+    # against the rest of the page. BAR_RPAD gives the plot a right-hand
+    # margin so it no longer runs bars flush to the edge while every other
+    # block breathes.
+    BAR_H_MAX, SVG_W, BAR_LPAD, BAR_RPAD = 78, PW, 46, 24
+    PREF_BAR_W, PREF_BAR_GAP = 10, 3
     sub_lines = wrap_svg_lines(t["subDaily"], int((SVG_W - 22) / 3.2))
     hdr_h = 16 + len(sub_lines) * 10
     top_y = hdr_h + 6
@@ -347,7 +367,19 @@ def bar_chart_svg(d: dict, t: dict) -> str:
 
     days = d["dailyGrouped"]
     n = len(days)
-    slot_w = (SVG_W - BAR_LPAD) / max(n, 1)
+    plot_w = SVG_W - BAR_LPAD - BAR_RPAD
+    slot_w = plot_w / max(n, 1)
+    # A pair of bars at the fixed size needs 2*PREF_BAR_W+PREF_BAR_GAP px;
+    # beyond ~20 days that no longer fits in one slot and neighbouring days'
+    # bars start to overlap. Shrink both together to keep exactly filling the
+    # slot. At n<=~20 (every length this chart was validated at) this is a
+    # no-op — same BAR_W/BAR_GAP as before Phase A.
+    if slot_w >= 2 * PREF_BAR_W + PREF_BAR_GAP:
+        BAR_W, BAR_GAP = PREF_BAR_W, PREF_BAR_GAP
+    else:
+        BAR_GAP = max(1.0, slot_w * 0.15)
+        BAR_W = max(2.0, (slot_w - BAR_GAP) / 2)
+    label_idx = _label_indices(n)
     vals = [float(r.get("pv_kwh") or 0) for r in days] + \
            [float(r.get("load_kwh") or 0) for r in days]
     # ceil to the next 10, matching the original's Math.ceil(max/10)*10.
@@ -362,11 +394,11 @@ def bar_chart_svg(d: dict, t: dict) -> str:
     for li, line in enumerate(sub_lines):
         s += (f"<text x='11' y='{12 + (li + 1) * 10}' font-size='7' fill='#bbb'>"
               f"{esc(line)}</text>")
-    s += _two_bar_legend(SVG_W - 20, t["labelConsumption"], MINT, t)
+    s += _two_bar_legend(SVG_W - BAR_RPAD, t["labelConsumption"], MINT, t)
 
     for val in (0, round(y_max / 2), y_max):
         gy = base_y - round(val / y_max * BAR_H_MAX)
-        s += (f"<line x1='{BAR_LPAD}' y1='{gy}' x2='{SVG_W}' y2='{gy}' "
+        s += (f"<line x1='{BAR_LPAD}' y1='{gy}' x2='{SVG_W - BAR_RPAD}' y2='{gy}' "
               f"stroke='{LINE}' stroke-width='0.5'/>")
         s += (f"<text x='{BAR_LPAD - 3}' y='{gy + 3}' text-anchor='end' "
               f"font-size='7' fill='#bbb'>{val} kWh</text>")
@@ -375,11 +407,13 @@ def bar_chart_svg(d: dict, t: dict) -> str:
         cx = BAR_LPAD + slot_w * i + slot_w / 2
         pv_h, load_h = bar_h(r.get("pv_kwh")), bar_h(r.get("load_kwh"))
         s += (f"<rect x='{_f(cx - BAR_W - BAR_GAP / 2)}' y='{_f(base_y - pv_h)}' "
-              f"width='{BAR_W}' height='{pv_h}' fill='{GREEN}' rx='1'/>"
+              f"width='{_f(BAR_W)}' height='{pv_h}' fill='{GREEN}' rx='1'/>"
               f"<rect x='{_f(cx + BAR_GAP / 2)}' y='{_f(base_y - load_h)}' "
-              f"width='{BAR_W}' height='{load_h}' fill='{MINT}' rx='1'/>"
-              f"<text x='{_f(cx)}' y='{svg_h - 4}' text-anchor='middle' "
-              f"font-size='8' fill='#aaa'>{esc(day_abbr(r['date'], t))}</text>")
+              f"width='{_f(BAR_W)}' height='{load_h}' fill='{MINT}' rx='1'/>")
+        if i in label_idx:
+            label = esc(_x_axis_label(r['date'], t, n))
+            s += (f"<text x='{_f(cx)}' y='{svg_h - 4}' text-anchor='middle' "
+                  f"font-size='8' fill='#aaa'>{label}</text>")
     return _svg(s, SVG_W, svg_h)
 
 
@@ -409,6 +443,49 @@ def day_abbr(iso_date: str, t: dict) -> str:
     return t["dayAbbr"][(d.weekday() + 1) % 7]
 
 
+def _x_axis_label(iso_date: str, t: dict, n_days: int) -> str:
+    """Daily bar/point x-axis label, adapted to how many days are on the
+    chart (plan doc §21, Phase A).
+
+    At up to 8 days — the validated 7-day report, with one day of slack — a
+    weekday abbreviation is unchanged from before this existed. Beyond that,
+    "Mon" repeating every 7 days is ambiguous with no way to tell which
+    Monday, so longer `vrm` custom ranges switch to a short date instead.
+    """
+    if n_days <= 8:
+        return day_abbr(iso_date, t)
+    d = date.fromisoformat(str(iso_date)[:10])
+    return f"{d.day:02d}/{d.month:02d}"
+
+
+def _label_indices(n_days: int) -> set[int]:
+    """Which day indices get an x-axis label, thinned so long ranges (up to
+    31 days) stay legible.
+
+    Every bar/point is always drawn — this only thins the *text* underneath,
+    which is what actually collides at high day counts. Targets roughly 8
+    evenly-spaced labels regardless of range length, so a 31-day chart stays
+    as readable as a 10-day one. At 8 or fewer days every index is returned,
+    which is every length the chart was validated at before this existed.
+
+    The last day is always included (an operator expects the chart's right
+    edge to be dated), but only added on top of the regular step if it's not
+    already close to the last regularly-spaced one — otherwise the two sit
+    a single slot apart and their text collides. When that happens the last
+    regular index is dropped in favour of the true last day rather than
+    showing both.
+    """
+    step = max(1, math.ceil(n_days / 8))
+    shown = set(range(0, n_days, step))
+    last = n_days - 1
+    if last not in shown:
+        prev = max(shown)
+        if last - prev < step / 2:
+            shown.discard(prev)
+        shown.add(last)
+    return shown
+
+
 # ══════════════════════════════════════════════════════════════════
 # Row 1 — energy mix donut + battery block
 # ══════════════════════════════════════════════════════════════════
@@ -419,6 +496,24 @@ def _seg(pct: float, prev_sum: float) -> str:
     ln = pct / 100 * C_CIRC
     off = (C_CIRC / 4) - (prev_sum / 100 * C_CIRC)
     return f"stroke-dasharray='{ln:.1f} {C_CIRC:.1f}' stroke-dashoffset='{off:.1f}'"
+
+
+_DONUT_CWID = 4.6  # approx px/char at font-size 9, same pattern as _two_bar_legend's CWID at font-size 7
+
+
+def _donut_dx(card_w: float, legend_rows: list[tuple], t: dict) -> float:
+    """Left offset for the donut, chosen so donut+legend sit centered in a
+    card of width `card_w` instead of hugging the left edge.
+
+    A fixed offset either wastes space or crowds the numbers depending on the
+    site (72.6% · 435.4 kWh vs 5.2% · 8.8 kWh render at very different
+    widths), so this sizes the gap to the actual longest value string on this
+    card rather than guessing one constant for every site.
+    """
+    max_value_w = max(len(f"{pctd}% · {_f(kwh)} {t['kwh']}")
+                      for _, _, pctd, kwh in legend_rows) * _DONUT_CWID
+    content_w = 80 + 55 + max_value_w  # 80: donut-to-legend gap; 55: label-to-value gap
+    return max(8.0, (card_w - content_w) / 2)
 
 
 def row1_svg(d: dict, t: dict, batt_rows: list[dict],
@@ -432,11 +527,17 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict],
     bd = _f(tot["discharge"] / total_energy * 100) if total_energy else "0.0"
     gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
 
+    legend_rows = [
+        (t["labelSolar"], GREEN, sd, tot["pv"]),
+        (t["labelBattery"], BLUE, bd, tot["discharge"]),
+        (t["labelGrid"], MINT, gd, tot["grid"]),
+    ]
+
     batt_h = measure_info_block(batt_rows, t["subBattery"])
     em_sub = wrap_svg_lines(t["subEnergyMix"], int((IW - 2 * IPAD) / 3.4))
     em_head_h = 16 + len(em_sub) * 9 + 12
     row1_h = max(batt_h, em_head_h + 72 + 8)
-    DX = 8
+    DX = _donut_dx(IW, legend_rows, t)
     DY = max(em_head_h, (row1_h - 72) / 2)
     LX = DX + 80
 
@@ -463,11 +564,7 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict],
           f"<text x='36' y='50' text-anchor='middle' font-size='8' fill='#999'>solar</text>"
           f"</g>")
 
-    for i, (lbl, col, pctd, kwh) in enumerate([
-        (t["labelSolar"], GREEN, sd, tot["pv"]),
-        (t["labelBattery"], BLUE, bd, tot["discharge"]),
-        (t["labelGrid"], MINT, gd, tot["grid"]),
-    ]):
+    for i, (lbl, col, pctd, kwh) in enumerate(legend_rows):
         cy = DY + 22 + i * 20
         s += (f"<circle cx='{LX + 4}' cy='{cy}' r='4' fill='{col}'/>"
               f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
@@ -499,11 +596,15 @@ def energy_mix_full_svg(d: dict, t: dict) -> str:
     grid_pct = max(0, 100 - solar_pct)
     sd = _f(tot["pv"] / total_energy * 100) if total_energy else "0.0"
     gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
+    legend_rows = [
+        (t["labelSolar"], GREEN, sd, tot["pv"]),
+        (t["labelGrid"], MINT, gd, tot["grid"]),
+    ]
 
     em_sub = wrap_svg_lines(t["subEnergyMix"], int((PW - 2 * IPAD) / 3.4))
     em_head_h = 16 + len(em_sub) * 9 + 12
     h = em_head_h + 72 + 8
-    DX = 8
+    DX = _donut_dx(PW, legend_rows, t)
     DY = em_head_h
     LX = DX + 80
 
@@ -525,10 +626,7 @@ def energy_mix_full_svg(d: dict, t: dict) -> str:
           f"<text x='36' y='50' text-anchor='middle' font-size='8' fill='#999'>solar</text>"
           f"</g>")
 
-    for i, (lbl, col, pctd, kwh) in enumerate([
-        (t["labelSolar"], GREEN, sd, tot["pv"]),
-        (t["labelGrid"], MINT, gd, tot["grid"]),
-    ]):
+    for i, (lbl, col, pctd, kwh) in enumerate(legend_rows):
         cy = DY + 22 + i * 20
         s += (f"<circle cx='{LX + 4}' cy='{cy}' r='4' fill='{col}'/>"
               f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
@@ -735,14 +833,27 @@ def soc_chart_svg(d: dict, t: dict) -> str:
     if min_line:
         s += f"<path d='{min_line}' fill='none' stroke='{GREEN}' stroke-width='1.5'/>"
 
+    # Annotating every day under 40% reads fine for a 7-day report, where a
+    # dip is the exception. Over a longer custom range, a site whose battery
+    # is simply configured to run down toward its floor every day (e.g. a
+    # 25% minimum-SOC setting) hits that "low" threshold daily — the
+    # annotation stops flagging an outlier and just repeats the same number
+    # under every point. Calling out only the period's actual lowest point(s)
+    # keeps the one number worth noticing instead of drowning it in copies of
+    # the everyday baseline.
+    period_min = min((float(r["min_soc"]) for r in days if r.get("min_soc") is not None),
+                     default=None)
+    label_idx = _label_indices(n)
     for i, r in enumerate(days):
         x = SPAD + i * sw
         mp = r.get("min_soc") if r.get("min_soc") is not None else 0
         dy = sy(mp)
-        s += (f"<circle cx='{x:.1f}' cy='{dy:.1f}' r='2.5' fill='{GREEN}'/>"
-              f"<text x='{x:.1f}' y='{SH - 5}' text-anchor='middle' "
-              f"font-size='7.5' fill='#aaa'>{esc(day_abbr(r['date'], t))}</text>")
-        if float(mp) < 40:
+        s += f"<circle cx='{x:.1f}' cy='{dy:.1f}' r='2.5' fill='{GREEN}'/>"
+        if i in label_idx:
+            s += (f"<text x='{x:.1f}' y='{SH - 5}' text-anchor='middle' "
+                  f"font-size='7.5' fill='#aaa'>"
+                  f"{esc(_x_axis_label(r['date'], t, n))}</text>")
+        if float(mp) < 40 and period_min is not None and float(mp) == period_min:
             s += (f"<text x='{x + 4:.1f}' y='{dy - 4:.1f}' font-size='7' "
                   f"fill='{AMBER}'>{_f(mp, 0)}%</text>")
     return _svg(s, SW, SH)

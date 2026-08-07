@@ -138,7 +138,7 @@ def _render_bill_section() -> None:
         st.session_state.pop("w5_bill_meta", None)
         return
 
-    if st.button("🔍 Extraer historial de consumo", key="w5_bill_extract"):
+    if st.button("Extraer historial de consumo", key="w5_bill_extract"):
         with st.spinner("Analizando facturas…"):
             from calculations.bill_parser import parse_bill_pdf
             all_history = []
@@ -196,7 +196,7 @@ def _render_bill_section() -> None:
                 "Al aplicar se reemplazarán."
             )
 
-        if st.button("✅ Aplicar al historial de 12 meses", key="w5_bill_apply", type="primary"):
+        if st.button("Aplicar al historial de 12 meses", key="w5_bill_apply", type="primary"):
             with st.spinner("Estimando meses faltantes con IA…"):
                 from calculations.bill_parser import build_12_month_grid
                 utility = st.session_state.get("wizard_utility", {})
@@ -238,14 +238,14 @@ def _render_loads_section() -> None:
     st.markdown("**Cargas eléctricas instaladas**")
 
     # ── Tablero import ────────────────────────────────────────────────────────
-    with st.expander("📋 Importar desde tablero eléctrico", expanded=False):
+    with st.expander("Importar desde tablero eléctrico", expanded=False):
         st.caption("Sube una imagen o PDF del tablero eléctrico. La IA extrae los circuitos y estima horas de uso.")
         uploaded_tablero = st.file_uploader(
             "Imagen (JPG/PNG) o PDF del tablero",
             type=["jpg", "jpeg", "png", "pdf"],
             key="w5_tablero_file",
         )
-        if uploaded_tablero and st.button("⚡ Extraer cargas del tablero", key="w5_tablero_extract"):
+        if uploaded_tablero and st.button("Extraer cargas del tablero", key="w5_tablero_extract"):
             with st.spinner("Analizando tablero con IA…"):
                 try:
                     from calculations.tablero_parser import parse_tablero
@@ -476,7 +476,10 @@ def step5_consumption() -> dict | None:
             ))
             fig.update_layout(
                 title="Consumo mensual (kWh)",
-                yaxis_title="kWh",
+                # Explicit headroom above the tallest bar — textposition="outside"
+                # doesn't auto-pad the y-axis, so without this the peak month's
+                # label gets clipped by the plot area's edge.
+                yaxis=dict(title="kWh", range=[0, max(v or 0 for v in kwh_values) * 1.18]),
                 height=240,
                 margin=dict(t=40, b=10, l=10, r=10),
             )
@@ -760,7 +763,7 @@ def step6_equipment() -> dict | None:
     location = site.get("city") or "Costa Rica"
 
     st.divider()
-    if st.button("⚡ Calcular configuración MPPT", key="w6_calc_mppt"):
+    if st.button("Calcular configuración MPPT", key="w6_calc_mppt"):
         with st.spinner("Estimando autoconsumo con IA…"):
             fraction, ai_note_new = _estimate_daytime_fraction_ai(loads, location)
             st.session_state["w6_coverage_ai"] = {"fraction": fraction, "note": ai_note_new}
@@ -1044,7 +1047,7 @@ def step6_equipment() -> dict | None:
         _mppt_param_row("Vmp total", f"{chosen['vmp_total']} V", vmp_ok, f"{vmin_mppt:.0f}–{vmax_mppt:.0f} V")
         _mppt_param_row("Corriente por MPPT", f"{chosen['imp_per_mppt']} A", imp_ok, f"≤ {imax_mppt:.0f} A")
         if not is_chosen_valid and chosen.get("notes"):
-            st.caption(f"⚠️ {chosen['notes']}")
+            st.caption(chosen["notes"])
 
         # ── Margen de diseño — grouped with Validación (both are electrical-
         # limits checks). Only Voc and Corriente reduce to a single "% of a
@@ -1832,7 +1835,7 @@ def step8_review() -> None:
     # See the twin block in wizard/off_grid.py: the button writes session_state
     # and reruns so the text_area below picks up the new value (Streamlit
     # forbids mutating a widget's value after instantiation).
-    if st.button("✨ Generar con IA", key="w8_gen_intro"):
+    if st.button("Generar con IA", key="w8_gen_intro"):
         from ai.proposal_writer import generate_intro
 
         with st.spinner("Redactando párrafo introductorio…"):
@@ -1890,7 +1893,7 @@ def step8_review() -> None:
             st.rerun()
 
     with col_pdf:
-        if st.button("📄 Generar PDF", key="w8_gen", type="primary"):
+        if st.button("Generar PDF", key="w8_gen", type="primary"):
             company = get_company_info()
             bank = get_bank_info()
 
@@ -2063,7 +2066,7 @@ def step8_review() -> None:
         st.success("✅ Versión bloqueada. Esta copia es inmutable.")
         lc1, lc2, lc3 = st.columns(3)
         with lc1:
-            if st.button("📋 Nueva versión", key="w8_new_version"):
+            if st.button("Nueva versión", key="w8_new_version"):
                 try:
                     from database.proposals_db import create_version, get_version as _gv
                     from wizard.state import load_draft, clear_wizard_state
@@ -2080,7 +2083,7 @@ def step8_review() -> None:
                 except Exception as e:
                     st.error(f"Error creando nueva versión: {e}")
         with lc2:
-            if st.button("📤 Marcar como enviada", key="w8_mark_sent"):
+            if st.button("Marcar como enviada", key="w8_mark_sent"):
                 try:
                     from database.proposals_db import mark_version_sent
                     mark_version_sent(version_id)
@@ -2088,7 +2091,7 @@ def step8_review() -> None:
                 except Exception as e:
                     st.error(f"Error: {e}")
         with lc3:
-            if st.button("📋 Ir a cotizaciones", key="w8_go_proposals"):
+            if st.button("Ir a cotizaciones", key="w8_go_proposals"):
                 st.switch_page("pages/01_proposals.py")
 
     elif version_id:
@@ -2104,7 +2107,7 @@ def step8_review() -> None:
         )
         lk_col, _ = st.columns([2, 4])
         with lk_col:
-            if st.button("🔒 Bloquear versión / Lock version", key="w8_lock"):
+            if st.button("Bloquear versión / Lock version", key="w8_lock"):
                 try:
                     from database.proposals_db import lock_version as _lock_v
                     _lock_v(version_id, version_note or None)

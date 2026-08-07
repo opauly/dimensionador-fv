@@ -91,6 +91,7 @@
       <th>Capacidad de<br>batería @10h (kWh)</th>
       <th>Descarga máxima<br>de batería</th>
       <th>Aprovechamiento<br>solar</th>
+      {% if hybrid_savings %}<th>Reducción<br>de factura</th>{% endif %}
       <th class="th-wp">Precio<br>$/Wp</th>
     </tr>
   </thead>
@@ -102,10 +103,17 @@
       <td>{{ technical.battery_kwh }}</td>
       <td>{{ technical.discharge_pct }}</td>
       <td>{{ technical.utilization_pct }}</td>
+      {% if hybrid_savings %}<td>~{{ hybrid_savings.savings_pct }}</td>{% endif %}
       <td class="td-wp">{{ cost_per_wp }}</td>
     </tr>
   </tbody>
 </table>
+{% if hybrid_savings %}
+<div class="coverage-note" style="margin-top:-4pt;">
+  Factura eléctrica estimada sin solar: {{ hybrid_savings.old_bill_crc }}/mes · con solar: {{ hybrid_savings.new_bill_crc }}/mes
+  ({{ hybrid_savings.savings_crc }}/mes de ahorro estimado).
+</div>
+{% endif %}
 
 <!-- ── COBERTURA MENSUAL (gráfico SVG en línea) ──────────────────────────── -->
 {% if coverage_chart_svg %}

@@ -127,6 +127,39 @@ APPLIANCE_USE_KWH_DAY_V1: dict[str, float] = {
     "lavadora": 0.50, "washer": 0.50,
     "secadora": 1.50, "dryer": 1.50,
     "licuadora": 0.05, "blender": 0.05,
+    # Kitchen small-appliance receptacle circuit (NEC 210.11(C)(1)-style) —
+    # not one named appliance but a rotating mix of countertop devices
+    # (tostadora, licuadora, cafetera) plugged in over the day. Estimated
+    # closer to the lighter end of this table (similar order of magnitude to
+    # microondas/cafetera individually) since the circuit is rarely loaded
+    # continuously — v1, not yet calibrated, same caveat as every other
+    # figure in this table.
+    "tomacorriente de cocina": 0.45, "tomacorrientes de cocina": 0.45,
+    "tomacorriente cocina": 0.45, "tomacorrientes cocina": 0.45,
+    # Electric instant/point-of-use water heater ("ducha eléctrica" /
+    # "calentador de paso") — the overwhelmingly common water-heating fixture
+    # in Costa Rican homes, NOT a gas unit. Bare "calentador de agua" (no
+    # "a gas"/"gas" qualifier) must resolve here, not to ignition_only —
+    # see the ignition_only note below and _CLASSIFY_PROMPT for why this
+    # was a real misclassification, not just a naming edge case. High
+    # instantaneous power (commonly 3500-6000 W) but brief per-use duration
+    # (~10-15 min shower) — estimated at one bathroom's typical daily use.
+    "calentador de agua": 1.00, "ducha eléctrica": 1.00, "ducha electrica": 1.00,
+    "calentador de paso": 1.00, "calentador eléctrico": 1.00, "calentador electrico": 1.00,
+    # Combo washer+dryer unit ("centro de lavado") — both functions in one
+    # machine, used together per cycle. Estimated as lavadora + secadora
+    # combined (this table's own values for each function separately).
+    "centro de lavado": 2.00, "lavado y secado": 2.00,
+    # Electric oven — baking, similar usage-intensity basis to "cocina
+    # eléctrica" above (often the same kitchen circuit/appliance in practice).
+    "horno de cocina": 0.70, "horno eléctrico": 0.70, "horno electrico": 0.70,
+    # Garbage disposal — high-power motor (~500-1000 W) but seconds-to-a-
+    # couple-minutes per use, several times/day. Small total energy, same
+    # order of magnitude as licuadora (another brief high-power motor use).
+    "triturador de alimentos": 0.05, "triturador de basura": 0.05, "disposal": 0.05,
+    # Range hood / grease extractor fan — runs during cooking, moderate fan
+    # motor, cumulative ~20-40 min/day across meals.
+    "extractor de grasa": 0.12, "campana extractora": 0.12, "extractor de cocina": 0.12,
 }
 _APPLIANCE_USE_DEFAULT_KWH_DAY_V1 = 0.30  # unmatched appliance — flagged default_assumed
 
@@ -231,6 +264,28 @@ _PRECLASSIFIED_V1: dict[str, str] = {
     "pantalla": "appliance", "licuadora": "appliance", "cafetera": "appliance",
     "plantilla eléctrica": "appliance", "plantilla electrica": "appliance",
     "plantilla": "appliance", "cocina eléctrica": "appliance", "cocina electrica": "appliance",
+    # Kitchen receptacle circuits are a real exception to the generic
+    # "tomacorriente(s)" → behavior_driven rule above: NEC 210.11(C)(1)-style
+    # "small appliance circuits" are dedicated to countertop appliances
+    # (tostadora, licuadora, cafetera) switched on to do a task, not the
+    # always-on background plug load (router, cargadores) the Uso General
+    # aggregate models — a kitchen receptacle circuit behaves like the other
+    # "appliance" entries above, not like a bedroom/living-room outlet.
+    "tomacorriente de cocina": "appliance", "tomacorrientes de cocina": "appliance",
+    "tomacorriente cocina": "appliance", "tomacorrientes cocina": "appliance",
+    # Electric instant/point-of-use water heater ("ducha eléctrica" /
+    # "calentador de paso") — bare "calentador de agua" (no "a gas"/"gas"
+    # qualifier) is the overwhelmingly common case in Costa Rica and must
+    # land here, NOT in ignition_only below. The longer, explicit
+    # "calentador de agua a gas" phrase still wins for genuine gas units —
+    # both entries are in this same "specific" priority group, sorted
+    # longest-first, so the more specific phrase is checked before this one.
+    "calentador de agua": "appliance", "ducha eléctrica": "appliance", "ducha electrica": "appliance",
+    "calentador de paso": "appliance", "calentador eléctrico": "appliance", "calentador electrico": "appliance",
+    "centro de lavado": "appliance", "lavado y secado": "appliance",
+    "horno de cocina": "appliance", "horno eléctrico": "appliance", "horno electrico": "appliance",
+    "triturador de alimentos": "appliance", "triturador de basura": "appliance", "disposal": "appliance",
+    "extractor de grasa": "appliance", "campana extractora": "appliance", "extractor de cocina": "appliance",
     "aire acondicionado": "climate_driven", "a/c": "climate_driven", "ac": "climate_driven",
     "minisplit": "climate_driven", "split": "climate_driven", "calefacción": "climate_driven",
     "deshumidificador": "climate_driven",
@@ -238,9 +293,33 @@ _PRECLASSIFIED_V1: dict[str, str] = {
     "jacuzzi": "discretionary", "spa": "discretionary", "hidromasaje": "discretionary",
     "bomba de piscina": "discretionary", "piscina": "discretionary",
     "riego": "discretionary", "irrigación": "discretionary",
+    # Gas units — deliberately just the control/ignition circuit's negligible
+    # electrical draw, NOT the appliance's heating output (that comes from
+    # gas). Requires an explicit "a gas" — see the "calentador de agua"
+    # (electric) entries above for the far more common non-gas case.
     "calentador de agua a gas": "ignition_only", "cocina a gas": "ignition_only",
     "secadora a gas": "ignition_only",
 }
+
+# Precomputed once, longest-key-first within each group, so a specific
+# phrase always outranks a shorter keyword it happens to contain — e.g.
+# "secadora a gas" (ignition_only) must win over the shorter "secadora"
+# (appliance) it contains, the same way estimate_appliance_use() below
+# already sorts APPLIANCE_USE_KWH_DAY_V1 longest-first for "plantilla
+# eléctrica" vs bare "plantilla". Split into two groups (everything else,
+# then behavior_driven) because behavior_driven's generic receptacle/
+# lighting keywords ("tomacorriente", "iluminación") must always be
+# checked last regardless of length — Costa Rican circuit schedules often
+# name a receptacle by what plugs into it ("Tomacorriente para
+# microondas"), and the generic keyword must not shadow the specific one.
+_PRECLASSIFIED_SPECIFIC_V1 = sorted(
+    ((k, v) for k, v in _PRECLASSIFIED_V1.items() if v != "behavior_driven"),
+    key=lambda kv: -len(kv[0]),
+)
+_PRECLASSIFIED_GENERIC_V1 = sorted(
+    ((k, v) for k, v in _PRECLASSIFIED_V1.items() if v == "behavior_driven"),
+    key=lambda kv: -len(kv[0]),
+)
 
 _MODEL = "claude-haiku-4-5-20251001"
 
@@ -261,8 +340,8 @@ Categories:
 - behavior_driven: lighting and always-on receptacle background load ONLY (general outlets, computer, router, clock, phone chargers). Do NOT put task appliances here.
 - climate_driven: A/C, space heating, dehumidifier
 - discretionary: EV charger, pool/jacuzzi/spa equipment, irrigation — occupant-choice driven
-- ignition_only: gas water heater, gas stove, gas dryer control circuits (negligible electrical draw)
-- appliance: appliances switched on to perform a task — microwave, electric hotplate/cooktop, coffee maker, TV, washing machine, dryer, blender, toaster, iron
+- ignition_only: ONLY when the name explicitly says gas/LP ("a gas", "gas", "LP") — gas water heater, gas stove, gas dryer control circuits (negligible electrical draw). A water heater with NO gas/LP wording is electric (very common in Costa Rica as a "ducha eléctrica"/"calentador de paso" point-of-use heater) and must NOT go here — classify it as appliance instead.
+- appliance: appliances switched on to perform a task — microwave, electric hotplate/cooktop, coffee maker, TV, washing machine, dryer, blender, toaster, iron, electric water heater/shower (no gas wording), oven, garbage disposal, range hood/grease extractor
 
 Load name: "{name}"
 
@@ -271,6 +350,23 @@ Answer with only one of: fixed_cycling, behavior_driven, climate_driven, discret
 
 def _normalize(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
+
+
+def _keyword_matches(keyword: str, text: str) -> bool:
+    """
+    Word-boundary match, not a raw substring check — a short/generic key
+    like "ac" (meant for the "A/C" shorthand) is otherwise a substring of
+    completely unrelated Spanish words: "tomacorriente" and "iluminación"
+    both contain the letters "ac" consecutively with no boundary around
+    them, so a plain `"ac" in key` check silently misclassifies any
+    receptacle/lighting circuit as climate_driven. Same false-positive risk
+    already called out for DISCRETIONARY_DEFAULTS_V1's keyword lists (bare
+    "ev" matching inside "nevera") — this generalizes that same protection
+    to every keyword table in this module. Multi-word phrases ("bomba de
+    agua") still match correctly since \\b also sits at whitespace/word
+    boundaries, not just string edges.
+    """
+    return re.search(r"\b" + re.escape(keyword) + r"\b", text) is not None
 
 
 def _get_classification_cache() -> dict[str, str]:
@@ -318,11 +414,27 @@ def classify_load_category(load_name: str) -> str:
     requirement. Falls back to 'behavior_driven' (the most common, most
     benign-to-overestimate-slightly category) if the AI call fails or
     returns something outside the enum.
+
+    Two-pass keyword match, not a single pass in dict order: Costa Rican
+    circuit schedules commonly name a receptacle by what plugs into it
+    ("Tomacorriente para microondas"), so the generic "tomacorriente"
+    keyword (behavior_driven) and a specific one ("microondas", appliance)
+    are both substrings of the same name. Checking behavior_driven's generic
+    receptacle/lighting keywords first would swallow the specific match
+    every time — a microwave circuit would silently read as background plug
+    load, with 0 kWh/día in build_load_profile() (its energy goes to the
+    aggregate instead of its own appliance estimate) and no watts wrong, but
+    a real, silent misclassification. Specific categories are checked first;
+    the generic behavior_driven markers only apply when nothing more
+    specific matched.
     """
     key = _normalize(load_name)
 
-    for known, category in _PRECLASSIFIED_V1.items():
-        if known in key:
+    for known, category in _PRECLASSIFIED_SPECIFIC_V1:
+        if _keyword_matches(known, key):
+            return category
+    for known, category in _PRECLASSIFIED_GENERIC_V1:
+        if _keyword_matches(known, key):
             return category
 
     cache = _get_classification_cache()
@@ -670,6 +782,114 @@ def estimate_climate_driven(
 
     kwh_day = round(quantity * connected_power_kw * hours * _AC_DUTY_CYCLE_V1, 2)
     return {"kwh_day": kwh_day, "confidence": confidence, "source_detail": source_detail}
+
+
+# ── Power demand factors (v1) ────────────────────────────────────────────────
+# A different question from every kWh/día estimator above: those answer "how
+# much energy does this load use per day"; this answers "how much of its
+# installed (nameplate) power is actually drawing at the same instant as
+# everything else" — the number that should drive inverter sizing and AC
+# breaker selection, not the raw Σ nameplate. Summing nameplate power across
+# a load list with many circuits systematically overstates simultaneous draw,
+# the same failure mode the kWh taxonomy above was built to fix for energy —
+# this is the power-side equivalent, reusing the same 6-category taxonomy
+# rather than inventing a second classification system.
+#
+# Two factor shapes, chosen per category by how loads in it actually behave:
+#   - Flat: one factor applied to the category's total installed power.
+#     Fits categories where individual loads are small and diversity comes
+#     from how many happen to be on, not from any one dominant item.
+#   - Largest-plus-rest: the single largest line in the category counts at
+#     100% (the one most likely to be running), the rest of the category's
+#     installed power gets a lower factor. Mirrors the NEC Table 220.55-style
+#     "largest + diversified remainder" method used for multiple appliances/
+#     motors that rarely all peak together — fits categories with a few
+#     distinct, individually significant loads.
+#
+# v1, first-pass values — NOT yet calibrated against real installs, same
+# caveat as every other _V1 table in this module. Must be visibly flagged in
+# the UI, engineer-overridable, never presented as more precise than it is.
+
+DEMAND_FACTOR_FIXED_CYCLING_V1 = 0.95  # always-ready, short/near-random duty cycles
+DEMAND_FACTOR_BEHAVIOR_V1 = 0.70       # lighting + receptacles: not every fixture/outlet fires at once
+DEMAND_FACTOR_IGNITION_V1 = 1.0        # negligible magnitude regardless — no diversity needed
+
+# category -> factor applied to the REST of that category's installed power,
+# after its single largest line is counted at 100%.
+DEMAND_CLUSTER_REST_FACTOR_V1: dict[str, float] = {
+    "appliance": 0.55,        # kitchen/laundry tasks — rarely several run together
+    "climate_driven": 0.65,   # multiple A/C units can coincide on hot afternoons
+    "discretionary": 0.80,    # big standalone loads (EV/pool/jacuzzi), least likely to cancel out
+}
+
+DEMAND_METHOD_FLAT = "flat"
+DEMAND_METHOD_CLUSTER = "largest_plus_rest"
+
+_DEMAND_FLAT_FACTORS_V1: dict[str, float] = {
+    "fixed_cycling": DEMAND_FACTOR_FIXED_CYCLING_V1,
+    "behavior_driven": DEMAND_FACTOR_BEHAVIOR_V1,
+    "ignition_only": DEMAND_FACTOR_IGNITION_V1,
+}
+
+
+def compute_demand_load(lines: list[dict]) -> dict:
+    """
+    Translates installed (nameplate) power into demanded (design) power per
+    category, from the same `lines` list build_load_profile() returns —
+    each line already carries `category`, `quantity`, `connected_power_kw`.
+
+    Returns:
+        {
+          "categories": [ {category, installed_kw, demand_kw,
+                            factor_applied, method}, ... ], sorted by
+                         installed_kw descending — only categories actually
+                         present in `lines`,
+          "total_installed_kw": float,
+          "total_demand_kw": float,
+          "blended_factor": float,  # total_demand_kw / total_installed_kw
+        }
+    """
+    by_cat: dict[str, list[float]] = {}
+    for line in lines:
+        cat = line.get("category")
+        kw = float(line.get("connected_power_kw") or 0) * int(line.get("quantity") or 1)
+        by_cat.setdefault(cat, []).append(kw)
+
+    categories = []
+    total_installed = 0.0
+    total_demand = 0.0
+    for cat, kws in by_cat.items():
+        installed = round(sum(kws), 3)
+        if cat in _DEMAND_FLAT_FACTORS_V1:
+            factor = _DEMAND_FLAT_FACTORS_V1[cat]
+            demand = round(installed * factor, 3)
+            method = DEMAND_METHOD_FLAT
+        elif cat in DEMAND_CLUSTER_REST_FACTOR_V1:
+            rest_factor = DEMAND_CLUSTER_REST_FACTOR_V1[cat]
+            largest = max(kws) if kws else 0.0
+            rest = installed - largest
+            demand = round(largest + rest * rest_factor, 3)
+            factor = round(demand / installed, 3) if installed > 0 else rest_factor
+            method = DEMAND_METHOD_CLUSTER
+        else:
+            # No factor table for this category (shouldn't happen — every
+            # CATEGORIES entry is covered above) — never silently drop load,
+            # same principle the kWh estimators use for unclassifiable input.
+            factor, demand, method = 1.0, installed, DEMAND_METHOD_FLAT
+
+        categories.append({
+            "category": cat, "installed_kw": installed, "demand_kw": demand,
+            "factor_applied": factor, "method": method,
+        })
+        total_installed += installed
+        total_demand += demand
+
+    return {
+        "categories": sorted(categories, key=lambda c: -c["installed_kw"]),
+        "total_installed_kw": round(total_installed, 3),
+        "total_demand_kw": round(total_demand, 3),
+        "blended_factor": round(total_demand / total_installed, 3) if total_installed > 0 else 0.0,
+    }
 
 
 # ── Main entry point ─────────────────────────────────────────────────────────

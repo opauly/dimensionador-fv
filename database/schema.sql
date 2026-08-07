@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS panels (
     warranty_product_yr int NOT NULL DEFAULT 12,
     warranty_power_yr   int NOT NULL DEFAULT 25,
     cost_usd        numeric,
+    cost_iva_rate   numeric NOT NULL DEFAULT 0,  -- fraction, e.g. 0.13 = 13%
     datasheet_path  text,
     notes           text,
     created_at      timestamptz DEFAULT now()
@@ -38,8 +39,11 @@ CREATE TABLE IF NOT EXISTS inverters (
     mppt_channels   int,
     phase           text CHECK (phase IN ('single', 'three')),
     output_v        numeric,
+    ac_output_current_a    numeric,  -- rated continuous AC output current (A), from datasheet
+    ac_input_current_max_a numeric,  -- max AC passthrough/charger input current (A), hybrid only
     warranty_yr     int NOT NULL DEFAULT 5,
     cost_usd        numeric,
+    cost_iva_rate   numeric NOT NULL DEFAULT 0,
     datasheet_path  text,
     notes           text,
     created_at      timestamptz DEFAULT now()
@@ -57,6 +61,7 @@ CREATE TABLE IF NOT EXISTS batteries (
     cycles          int,
     warranty_yr     int NOT NULL DEFAULT 10,
     cost_usd        numeric,
+    cost_iva_rate   numeric NOT NULL DEFAULT 0,
     notes           text,
     created_at      timestamptz DEFAULT now()
 );
@@ -71,6 +76,7 @@ CREATE TABLE IF NOT EXISTS charge_controllers (
     imax_in         numeric NOT NULL,
     imax_out        numeric NOT NULL,
     cost_usd        numeric,
+    cost_iva_rate   numeric NOT NULL DEFAULT 0,
     notes           text,
     created_at      timestamptz DEFAULT now()
 );
@@ -81,6 +87,8 @@ CREATE TABLE IF NOT EXISTS monitoring_devices (
     model           text NOT NULL,
     compatible_with text,
     cost_usd        numeric,
+    cost_iva_rate   numeric NOT NULL DEFAULT 0,
+    notes           text,
     created_at      timestamptz DEFAULT now()
 );
 

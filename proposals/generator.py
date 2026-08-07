@@ -358,6 +358,7 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
     es = (language == "es")
     tech = data["technical"]
     co = data["company"]
+    hybrid_savings = data.get("hybrid_savings")
 
     cost_items_fmt = []
     for ci in data["cost_items"]:
@@ -392,6 +393,14 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
             # against (see wizard/off_grid.py: _og_monthly_coverage_and_sim()).
             "utilization_pct":        _pct(tech["utilization_pct"], 0) if tech.get("utilization_pct") is not None else "—",
         },
+        # Hybrid only — Off-Grid has no grid bill to compare against, so this
+        # stays None there (guarded in the template with {% if hybrid_savings %}).
+        "hybrid_savings": {
+            "old_bill_crc":  _crc(hybrid_savings["old_bill_crc"]),
+            "new_bill_crc":  _crc(hybrid_savings["new_bill_crc"]),
+            "savings_crc":   _crc(hybrid_savings["savings_crc"]),
+            "savings_pct":   _pct(hybrid_savings["savings_pct"], 0),
+        } if hybrid_savings else None,
         "cost_per_wp":            f"{data['cost_per_wp']:.2f}",
         "warranty_inverter_years": data.get("warranty_inverter_years" if es else "warranty_inverter_years_en", "5 años"),
         "warranty_battery_years":  data.get("warranty_battery_years" if es else "warranty_battery_years_en", "10 años"),
@@ -598,6 +607,9 @@ def build_from_wizard_blob(
             # so the template renders "—" instead of a fake 0%.
             "self_consumption_pct": (equipment.get("projection") or {}).get("self_consumption_pct"),
         },
+        # Hybrid only — set by wizard/off_grid.py Step 6 when grid-connected
+        # with a known tariff; None (and unused) for Off-Grid/Grid Zero.
+        "hybrid_savings": equipment.get("hybrid_savings"),
         "cost_per_wp":               cost_per_wp,
         "warranty_inverter_years":   f"{inv_warranty} años",
         "warranty_inverter_years_en": f"{inv_warranty} years",
