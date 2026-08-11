@@ -212,7 +212,7 @@ def step4_loads() -> dict | None:
         "Las cargas que este sistema debe mantener energizadas durante un corte — dimensionan la "
         "batería y el arreglo para autonomía real, simulada día por día (Paso 6)."
     )
-    num_bedrooms, home_class, loads_data = off_grid._render_loads_block("w4og", current)
+    loads_data = off_grid._render_loads_block("w4og", current)
 
     if grid_connected:
         st.divider()
@@ -260,11 +260,9 @@ def step4_loads() -> dict | None:
                         "distinto — útil cuando el sitio aún no tiene factura (p. ej. una casa no "
                         "construida, solo con planos eléctricos)."
                     )
-                    mp_num_bedrooms, mp_home_class, mp_loads_data = off_grid._render_loads_block("w4h_mp", mp_current)
+                    mp_loads_data = off_grid._render_loads_block("w4h_mp", mp_current)
                     main_panel_result = {
                         "mode": "loads",
-                        "num_bedrooms": mp_num_bedrooms,
-                        "home_class": mp_home_class,
                         "loads_display": mp_loads_data,
                         "loads": off_grid._loads_to_taxonomy_list(mp_loads_data),
                         # profile/avg_kwh_month computed in Step 5 once build_load_profile() runs
@@ -278,8 +276,6 @@ def step4_loads() -> dict | None:
             "grid_connected": grid_connected,
             "autonomy_days": float(autonomy_days),
             "voltage_v": voltage_v,
-            "num_bedrooms": num_bedrooms,
-            "home_class": home_class,
             "loads_display": loads_data,
             "loads": off_grid._loads_to_taxonomy_list(loads_data),
             "utility": utility,
@@ -288,7 +284,7 @@ def step4_loads() -> dict | None:
         }
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w4h_back"):
             st.session_state["wizard_consumption"] = _build_consumption_result()
@@ -317,21 +313,22 @@ def step5_demand() -> dict | None:
     lat, lon = site.get("lat"), site.get("lon")
 
     st.markdown("##### Cargas críticas (respaldo)")
-    profile, total_kwh_day = off_grid._render_demand_profile_block(
-        "w5og", loads, current.get("num_bedrooms", 3), current.get("home_class", "standard"), lat, lon,
+    profile, total_kwh_day, total_kwh_day_diversified = off_grid._render_demand_profile_block(
+        "w5og", loads, lat, lon, diversified_used_downstream=True,
     )
 
     main_panel = current.get("main_panel")
     mp_profile = main_panel.get("profile") if main_panel else None
     mp_daily_kwh = 0.0
+    mp_daily_kwh_diversified = 0.0
     mp_loads_mode = bool(main_panel and main_panel.get("mode") == "loads")
     if mp_loads_mode:
         st.divider()
         st.markdown("##### Tablero principal")
-        mp_profile, mp_daily_kwh = off_grid._render_demand_profile_block(
-            "w5h_mp", main_panel.get("loads", []),
-            main_panel.get("num_bedrooms", 3), main_panel.get("home_class", "standard"),
-            lat, lon, show_charts=False,
+        mp_profile, mp_daily_kwh, mp_daily_kwh_diversified = off_grid._render_demand_profile_block(
+            "w5h_mp", main_panel.get("loads", []), lat, lon,
+            show_category_chart=True, show_hourly_chart=False,
+            diversified_used_downstream=True,
         )
 
     # Atrás/Siguiente render unconditionally — neither profile being None
@@ -341,18 +338,22 @@ def step5_demand() -> dict | None:
     can_continue = profile is not None and total_kwh_day > 0 and (not mp_loads_mode or mp_profile is not None)
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w5h_back"):
             st.session_state["wizard_consumption"] = _build_step5_result(
-                current, profile, total_kwh_day, main_panel, mp_profile, mp_daily_kwh,
+                current, profile, total_kwh_day, total_kwh_day_diversified,
+                main_panel, mp_profile, mp_daily_kwh, mp_daily_kwh_diversified,
             )
             st.session_state["wizard_step"] = 4
             _autosave()
             st.rerun()
     with col_next:
         if st.button("Siguiente →", key="w5h_next", type="primary", disabled=not can_continue):
-            result = _build_step5_result(current, profile, total_kwh_day, main_panel, mp_profile, mp_daily_kwh)
+            result = _build_step5_result(
+                current, profile, total_kwh_day, total_kwh_day_diversified,
+                main_panel, mp_profile, mp_daily_kwh, mp_daily_kwh_diversified,
+            )
             st.session_state["wizard_consumption"] = result
             return result
 
@@ -360,15 +361,19 @@ def step5_demand() -> dict | None:
 
 
 def _build_step5_result(
-    current: dict, profile: dict, total_kwh_day: float,
-    main_panel: dict | None, mp_profile: dict | None, mp_daily_kwh: float,
+    current: dict, profile: dict, total_kwh_day: float, total_kwh_day_diversified: float,
+    main_panel: dict | None, mp_profile: dict | None, mp_daily_kwh: float, mp_daily_kwh_diversified: float,
 ) -> dict:
-    result = {**current, "profile": profile, "daily_kwh": total_kwh_day}
+    result = {
+        **current, "profile": profile,
+        "daily_kwh": total_kwh_day, "daily_kwh_diversified": total_kwh_day_diversified,
+    }
     if main_panel and main_panel.get("mode") == "loads":
         result["main_panel"] = {
             **main_panel,
             "profile": mp_profile,
             "avg_kwh_month": round(mp_daily_kwh * 30.4, 1),
+            "avg_kwh_month_diversified": round(mp_daily_kwh_diversified * 30.4, 1),
         }
     return result
 

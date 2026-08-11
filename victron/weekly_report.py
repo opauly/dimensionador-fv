@@ -40,6 +40,29 @@ _SYSTEM_EFF = 0.80          # same derating the original uses
 _FALLBACK_PEAK_SUN_HRS = 4.5  # CR average, used when weather is unavailable
 _NARRATIVE_MODEL = "claude-sonnet-4-6"
 
+# Costa Rica has two well-defined seasons that don't shift year to year —
+# unlike temperate latitudes there's no ambiguity to hedge on. Every real
+# site today is Costa Rica (plan doc), so this is the one place worth
+# hardcoding a country's actual calendar rather than leaving the model to
+# guess it: it once guessed "dry season approaching" for an August report —
+# the real dry season is Dec-Apr, half a year off.
+_CR_DRY_MONTHS = {12, 1, 2, 3, 4}
+
+
+def _season_context(country: str | None, period_end: date, lang: str) -> str | None:
+    """A grounded season fact for the narrative prompt, or None when we don't
+    have a reliable calendar for this country — never left for the model to
+    infer from general knowledge, which is exactly how the wrong-season claim
+    happened."""
+    if country != "CR":
+        return None
+    dry = period_end.month in _CR_DRY_MONTHS
+    if lang == "es":
+        return ("Costa Rica está en temporada seca (diciembre-abril)" if dry
+                else "Costa Rica está en temporada lluviosa (mayo-noviembre)")
+    return ("Costa Rica is in its dry season (Dec-Apr)" if dry
+            else "Costa Rica is in its rainy season (May-Nov)")
+
 
 # ══════════════════════════════════════════════════════════════════
 # Weather
@@ -134,10 +157,15 @@ def generate_narrative(stats: dict, lang: str) -> str:
         "only - no headers, no bullets, no markdown."
         " Warm, professional tone. Be specific with numbers. Lead with the most "
         f"meaningful story of the {period_label}."
-        " If the battery kept the home running during outages, say so. End with "
-        "one forward-looking sentence if warranted."
+        " If the battery kept the home running during outages, say so."
+        " A forward-looking closing sentence is welcome, but only restate a "
+        "fact given below (e.g. the season named, if one is given) or a trend "
+        "visible in these numbers — never invent a date, a transition month, "
+        "or any other detail not explicitly given, even one that sounds "
+        "plausible. If a season is given, do not guess when it changes."
         f"\n\nThis {period_label}'s data:"
         f"\n- Site: {stats['site']}"
+        f"\n- Report period: {stats['periodStart']} to {stats['periodEnd']}"
         f"\n- Solar generated: {stats['pv']} kWh"
         f"\n- Total consumption: {stats['load']} kWh"
         f"\n- Grid consumption: {stats['grid']} kWh"
@@ -154,6 +182,8 @@ def generate_narrative(stats: dict, lang: str) -> str:
         f"\n- Best production day: {stats['bestDay']} kWh"
         f"\n- Worst production day: {stats['worstDay']} kWh"
     )
+    if stats.get("seasonContext"):
+        prompt += f"\n- Season: {stats['seasonContext']}"
     # Only for sites that feed back. Without this the narrative can describe a
     # heavily exporting week purely in terms of what was consumed, which reads
     # as though the surplus went nowhere.
@@ -340,6 +370,9 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         narrative = generate_narrative({
             "site": site["display_name"], "pv": f"{totals['pv']:.1f}",
             "load": f"{totals['load']:.1f}", "grid": f"{totals['grid']:.1f}",
+            "periodStart": window["period_start"], "periodEnd": window["period_end"],
+            "seasonContext": _season_context(site.get("country"),
+                                            date.fromisoformat(window["period_end"]), lang),
             "gridIndependencePct": grid_independence,
             "healthScore": avg_health, "healthStatus": health_status,
             "minSoc": min_soc, "batteryCycles": battery_cycles,

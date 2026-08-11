@@ -8,7 +8,7 @@ from proposals.generator import _site_location
 from config import BRAND_GREEN, BRAND_GREEN_LIGHT, BRAND_NAVY
 
 from calculations.load_profile_off_grid import (
-    CATEGORY_LABELS_ES, COMMON_LOADS_CATALOG_V1, BEHAVIOR_KWH_PER_BEDROOM_DAY_V1, classify_load_category,
+    CATEGORY_LABELS_ES, COMMON_LOADS_CATALOG_V1, classify_load_category,
 )
 
 _CATEGORY_AUTO_LABEL = "(Automático)"
@@ -25,37 +25,12 @@ _CATEGORY_SELECT_OPTIONS = [_CATEGORY_AUTO_LABEL] + list(CATEGORY_LABELS_ES.valu
 # texto) plus the editor's own "+" row control, a seed example isn't needed.
 _DEFAULT_LOADS: list[dict] = []
 
-_HOME_CLASS_LABELS = {
-    "Básica": "basic",
-    "Estándar": "standard",
-    "Premium": "premium",
-}
-
-# Applies to homes (dormitorios) and small businesses (oficinas/espacios) alike —
-# "espacio" is deliberately generic rather than "dormitorio" so off-grid/hybrid
-# quotes for commercial sites don't read as residential-only.
-# Describes ONLY lighting + always-on receptacle load. Electrodomésticos
-# (microondas, TV, lavadora, cafetera, plantilla) are no longer covered here —
-# they're listed individually below and sized on their own. Keep this text in
-# sync with BEHAVIOR_KWH_PER_BEDROOM_DAY_V1's scope or the two will drift.
-_USAGE_LEVEL_DESCRIPTIONS = {
-    "Básica": "iluminación LED puntual y pocos tomacorrientes en uso (cargadores, reloj).",
-    "Estándar": "iluminación completa y tomacorrientes de uso continuo (computadora, router, cargadores).",
-    "Premium": "iluminación amplia y varios equipos siempre conectados (computadoras, router, equipo de red).",
-}
-_USAGE_LEVEL_EXAMPLE_SPACES = 3  # reference count used in the visible kWh/day examples below
-
 _CONFIDENCE_BADGES = {
     "measured": ("📏 Medido", "#166534"),
     "api_calculated": ("🌐 API climática", "#1d4ed8"),
     "benchmark": ("📊 Tabla de referencia", "#6b7280"),
     "user_confirmed": ("✅ Confirmado por cliente", "#166534"),
     "default_assumed": ("⚠️ Estimado genérico", "#b45309"),
-    # Peak-watts-only line: its energy is already inside the "Uso general"
-    # aggregate, so kWh/día shows 0 by design. Deliberately NOT reusing
-    # default_assumed — that badge drives the "revísalas antes de continuar"
-    # warning, and there's nothing to review here.
-    "power_only": ("⚡ Solo potencia (W)", "#1d4ed8"),
 }
 
 # Distinct color per load category for the Step 5 consumption-by-category chart.
@@ -71,26 +46,28 @@ _CATEGORY_CHART_COLORS = {
 
 # ── Step 4 — Cargas eléctricas y perfil de consumo general ───────────────────
 
-def _render_loads_block(key_prefix: str, current: dict) -> tuple[int, str, list[dict]]:
+def _render_loads_block(key_prefix: str, current: dict) -> list[dict]:
     """
-    Renders the full loads-input UI — Uso general aggregate config, cargas
-    comunes catálogo picker, tablero-image import, paste-text import, and
-    the final editable table — under session-state keys namespaced by
-    `key_prefix`. Extracted from step4_loads() (previously hardcoded to
-    "w4og_*") so it can render twice on the same Step 4 page: once for
-    critical/backup loads (key_prefix="w4og", unchanged keys — no session
-    state migration needed for existing drafts), once for a Hybrid system's
-    separate main-panel loads (a different key_prefix, e.g. "w4h_mp") —
-    two independent tables that never read or write each other's state.
+    Renders the full loads-input UI — cargas comunes catálogo picker,
+    tablero-image import, paste-text import, and the final editable table —
+    under session-state keys namespaced by `key_prefix`. Extracted from
+    step4_loads() (previously hardcoded to "w4og_*") so it can render twice
+    on the same Step 4 page: once for critical/backup loads (key_prefix=
+    "w4og", unchanged keys — no session state migration needed for existing
+    drafts), once for a Hybrid system's separate main-panel loads (a
+    different key_prefix, e.g. "w4h_mp") — two independent tables that never
+    read or write each other's state.
 
     `current` is the previously-saved sub-dict for THIS specific block
-    (num_bedrooms/home_class/loads_display) — callers scope this themselves
-    (wizard_consumption itself for critical loads, a nested sub-dict for the
-    main panel), so the two blocks stay fully independent.
+    (loads_display) — callers scope this themselves (wizard_consumption
+    itself for critical loads, a nested sub-dict for the main panel), so the
+    two blocks stay fully independent.
 
-    Returns (num_bedrooms, home_class, loads_data) — loads_data is the raw
-    edited table (list of {"Descripción","Cantidad","Potencia (kW)","Categoría"}
-    dicts), same shape callers already turn into a "loads" list today.
+    Returns loads_data — the raw edited table (list of {"Descripción",
+    "Cantidad","Potencia (kW)","Categoría"} dicts), same shape callers
+    already turn into a "loads" list today. Per-line demand factor and
+    duty-hours overrides (v3) live on Step 5's results table instead of
+    here — category isn't known until classification runs there.
     """
     def _append_loads(new_rows: list[dict]) -> None:
         """Shared by every import method (catálogo/tablero/texto) — always
@@ -117,48 +94,11 @@ def _render_loads_block(key_prefix: str, current: dict) -> tuple[int, str, list[
             })
         return rows
 
-    # ── Block 1: Uso general (aggregate) + cargas comunes (catálogo) ────────
-    # Grouped together as the "no AI needed" input block — both are plain
-    # dropdown/picker interactions. Blocks 2 and 3 below are the AI-parsed
-    # import methods (tablero image/PDF, pasted text); the resulting table
-    # always comes last, fed by whichever combination of these was used.
-    st.markdown("##### Uso general")
-    st.caption(
-        "Cubre iluminación y el consumo de fondo de tomacorrientes — lo que está siempre "
-        "conectado (computadora, router, reloj, cargadores). **No cubre electrodomésticos** "
-        "(microondas, TV, lavadora, cafetera, plantilla): esos se listan abajo y se dimensionan "
-        "por separado. Aplica tanto para viviendas (usa dormitorios) como para negocios pequeños "
-        "(usa oficinas u otros espacios equivalentes)."
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        num_bedrooms = st.number_input(
-            "Habitaciones / espacios", min_value=1, max_value=15,
-            value=int(current.get("num_bedrooms") or 3), key=f"{key_prefix}_bedrooms",
-            help="Para una vivienda: número de dormitorios. Para un negocio: número de oficinas "
-                 "u otros espacios equivalentes. Se usa como el multiplicador directo del consumo "
-                 "general (Paso 5): kWh/día/espacio × espacios.",
-        )
-    with col2:
-        class_label = st.selectbox(
-            "Nivel de uso general", list(_HOME_CLASS_LABELS.keys()),
-            index=list(_HOME_CLASS_LABELS.values()).index(current.get("home_class", "standard")),
-            key=f"{key_prefix}_class",
-        )
-        home_class = _HOME_CLASS_LABELS[class_label]
-
-    # Visible explanation with a concrete kWh/day example per tier — kWh/day alone
-    # isn't a tangible unit for most customers, so tie it to a fixed reference
-    # space count and pull rates straight from the benchmark table (never
-    # hardcoded here) so the copy can't drift out of sync with the calculation.
-    n = _USAGE_LEVEL_EXAMPLE_SPACES
-    st.markdown("\n".join(
-        f"- **{label}** ({BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key]:.1f} kWh/día/espacio) — "
-        f"{_USAGE_LEVEL_DESCRIPTIONS[label]} "
-        f"*Ej.: {n} espacios ≈ {BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[key] * n:.1f} kWh/día.*"
-        for label, key in _HOME_CLASS_LABELS.items()
-    ))
-
+    # ── Block 1: Cargas comunes (catálogo) ──────────────────────────────────
+    # The "no AI needed" input block — a plain dropdown/picker interaction.
+    # Blocks 2 and 3 below are the AI-parsed import methods (tablero image/
+    # PDF, pasted text); the resulting table always comes last, fed by
+    # whichever combination of these was used.
     st.markdown("##### Cargas comunes")
     st.caption(
         "Agrega cargas típicas desde el catálogo — potencia y categoría ya vienen precargadas, "
@@ -256,8 +196,8 @@ def _render_loads_block(key_prefix: str, current: dict) -> tuple[int, str, list[
     st.markdown("##### Lista de cargas")
     st.caption(
         "Ingresa, revisa o ajusta cada carga aquí — nombre, cantidad, potencia nominal y "
-        "categoría. **No se pide horas de uso**: el sistema estima el consumo diario real según "
-        "el tipo de carga (ver Paso 5)."
+        "categoría. El sistema estima horas de uso y factor de demanda según el tipo de carga; "
+        "ambos son editables en el Paso 5."
     )
     loads_ver = st.session_state.get(f"{key_prefix}_loads_ver", 0)
     base_loads = st.session_state.get(f"{key_prefix}_loads_data", current.get("loads_display") or _DEFAULT_LOADS)
@@ -292,7 +232,7 @@ def _render_loads_block(key_prefix: str, current: dict) -> tuple[int, str, list[
     loads_data = edited_loads.to_dict("records")
     st.session_state[f"{key_prefix}_loads_data"] = loads_data
 
-    return int(num_bedrooms), home_class, loads_data
+    return loads_data
 
 
 def _loads_to_taxonomy_list(loads_data: list[dict]) -> list[dict]:
@@ -313,7 +253,7 @@ def _loads_to_taxonomy_list(loads_data: list[dict]) -> list[dict]:
 
 
 def step4_loads() -> dict | None:
-    """Loads table (name + qty + nameplate kW, no hours), general-use profile, autonomy, voltage."""
+    """Loads table (name + qty + nameplate kW, no hours), autonomy, voltage."""
     st.markdown("### Paso 4 — Cargas eléctricas y perfil de consumo general")
 
     current = st.session_state.get("wizard_consumption", {})
@@ -338,13 +278,11 @@ def step4_loads() -> dict | None:
 
     st.divider()
     st.markdown("### Cargas eléctricas")
-    num_bedrooms, home_class, loads_data = _render_loads_block("w4og", current)
+    loads_data = _render_loads_block("w4og", current)
 
     def _build_consumption_result() -> dict:
         return {
             **current,
-            "num_bedrooms": num_bedrooms,
-            "home_class": home_class,
             "autonomy_days": float(autonomy_days),
             "voltage_v": voltage_v,
             "loads_display": loads_data,  # keeps the Categoría column round-trippable across reruns
@@ -352,7 +290,7 @@ def step4_loads() -> dict | None:
         }
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w4og_back"):
             # Persist the table exactly like "Siguiente" does before leaving
@@ -384,70 +322,86 @@ def step4_loads() -> dict | None:
 def _render_demand_profile_block(
     key_prefix: str,
     loads: list[dict],
-    num_bedrooms: int,
-    home_class: str,
     lat: float | None,
     lon: float | None,
-    show_charts: bool = True,
-) -> tuple[dict | None, float]:
+    show_category_chart: bool = True,
+    show_hourly_chart: bool = True,
+    diversified_used_downstream: bool = False,
+) -> tuple[dict | None, float, float]:
     """
     Runs build_load_profile() and renders the confidence-tagged breakdown
     table (+ optional category/hourly charts) under session-state keys
     namespaced by `key_prefix` — extracted from step5_demand() so it can
     render twice on the same page: once for critical/backup loads
-    (key_prefix="w5og", show_charts=True — unchanged keys, no session state
+    (key_prefix="w5og", both charts on — unchanged keys, no session state
     migration needed for existing drafts), once for a Hybrid system's
-    separate main-panel loads (a different key_prefix, show_charts=False to
-    keep that secondary block compact — the category/hourly-shape charts
-    add real value for backup design decisions but aren't needed just to
-    get a whole-home kWh baseline for the savings estimate).
+    separate main-panel loads (a different key_prefix). The category chart
+    is useful for both blocks (helps the engineer sanity-check where a
+    panel's consumption actually comes from); the AI-illustrative hourly
+    chart stays off for the main panel by default — it's a heavier/costlier
+    visual aid whose main value is backup-design timing, less relevant to a
+    panel that's just feeding a whole-home savings estimate.
 
-    Returns (profile, total_kwh_day) — profile is None until the engineer
-    clicks "Calcular perfil de consumo" for the first time.
+    diversified_used_downstream: whether THIS caller's own Step 6 actually
+    consumes total_kwh_day_diversified for sizing — off_grid.py's own Step 6
+    doesn't (leave False), hybrid.py's does (critical_daily_kwh and the main
+    panel's avg_kwh_month both come from the diversified figure — see
+    wizard/design_scenarios_test.py). Only changes the caption/help text
+    below so it doesn't claim "informational only" for a caller where the
+    number is in fact load-bearing.
+
+    "Horas/día" and "Factor demanda (%)" are editable per line (v3) — unlike
+    "kWh/día" (already directly editable, takes effect immediately in the
+    displayed total), these two feed build_load_profile()/compute_demand_load()
+    on the NEXT "Recalcular" click, not live — Horas/día changes energy for
+    EVERY category through that recompute (not just behavior_driven), and
+    Factor demanda has no effect on THIS page at all (it only matters to
+    Step 6's peak-demand calc), so neither has anything to compute live
+    against.
+
+    Returns (profile, total_kwh_day, total_kwh_day_diversified) — profile is
+    None until the engineer clicks "Calcular perfil de consumo" for the first
+    time. total_kwh_day_diversified is profile["total_kwh_day_diversified"]
+    as of the last calculate/recalculate (not live against in-progress
+    Horas/día or Factor demanda edits, same as total_kwh_day already isn't
+    for those two columns — see the "Horas/día"/"Factor demanda (%)" note
+    above).
     """
     profile = st.session_state.get(f"{key_prefix}_profile")
 
     if st.button("Calcular perfil de consumo", key=f"{key_prefix}_calc"):
         with st.spinner("Clasificando cargas y calculando consumo diario…"):
             from calculations.load_profile_off_grid import build_load_profile
-            profile = build_load_profile(
-                loads, num_bedrooms=num_bedrooms, home_class=home_class, lat=lat, lon=lon,
-            )
+            profile = build_load_profile(loads, lat=lat, lon=lon)
             st.session_state[f"{key_prefix}_profile"] = profile
 
     if not profile:
         st.info("Haz clic en 'Calcular perfil de consumo' para continuar.")
-        return None, 0.0
+        return None, 0.0, 0.0
+
+    from calculations.load_profile_off_grid import default_demand_factor_pct
 
     rows = []
     for line in profile["lines"]:
         badge, color = _CONFIDENCE_BADGES.get(line["confidence"], (line["confidence"], "#6b7280"))
+        # .get() with a computed fallback, not line[...] — a draft saved
+        # before the v3 per-line rewrite has lines without these two keys at
+        # all, not just None values, and must render/recalculate cleanly
+        # rather than KeyError on first reopen.
+        factor = line.get("demand_factor_pct")
+        if factor is None:
+            factor = default_demand_factor_pct(line["category"])
         rows.append({
             "Carga": line["load_name"],
             "Categoría": line["category"],
             "Cant.": line["quantity"],
+            "Horas/día": line.get("duty_hours_day"),
             "kWh/día": line["estimated_kwh_day"],
+            "Factor demanda (%)": round(factor * 100, 1),
+            "Energía (kWh/día)": round(line["estimated_kwh_day"] * factor, 2),
             "Fuente": badge,
             "_color": color,
             "Detalle": line["source_detail"],
-        })
-    if profile.get("behavior_aggregate"):
-        agg = profile["behavior_aggregate"]
-        badge, color = _CONFIDENCE_BADGES.get(agg["confidence"], (agg["confidence"], "#6b7280"))
-        # "Cant." shows num_bedrooms (espacios) — the actual multiplier behind kWh/día —
-        # not agg["load_count"] (how many *individually listed* loads happened to be
-        # tagged behavior_driven, often 0 since lighting/outlets are rarely itemized).
-        # Showing load_count here previously made the row read as "0 units × rate =
-        # kWh", which looks like a bug even though the aggregate is intentionally
-        # always applied regardless of load_count (see build_load_profile()).
-        rows.append({
-            "Carga": "Cargas generales (uso general agregado)",
-            "Categoría": "behavior_driven",
-            "Cant.": num_bedrooms,
-            "kWh/día": agg["kwh_day"],
-            "Fuente": badge,
-            "_color": color,
-            "Detalle": agg["source_detail"],
         })
 
     df = pd.DataFrame(rows)
@@ -461,9 +415,33 @@ def _render_demand_profile_block(
             "Carga": st.column_config.TextColumn(disabled=True, width="medium"),
             "Categoría": st.column_config.TextColumn(disabled=True, width="small"),
             "Cant.": st.column_config.NumberColumn(disabled=True, width="small"),
+            "Horas/día": st.column_config.NumberColumn(
+                min_value=0.0, max_value=24.0, format="%.1f", width="small",
+                help="Cuando no se ajusta, muestra las horas equivalentes implícitas en el estimado "
+                     "de esa categoría — edítalo y usa 'Recalcular con cambios' abajo para forzar "
+                     "kWh/día = potencia × horas × cantidad.",
+            ),
             "kWh/día": st.column_config.NumberColumn(
                 min_value=0.0, format="%.2f", width="small",
-                help="Editable — ajusta manualmente si el ingeniero tiene mejor información.",
+                help="Editable directamente — sobreescribe el estimado (incluyendo Horas/día) de inmediato.",
+            ),
+            "Factor demanda (%)": st.column_config.NumberColumn(
+                min_value=0.0, max_value=150.0, format="%.0f", width="small",
+                help="Fracción de la potencia instalada de esta línea que se considera simultánea "
+                     "(usada en el Paso 6) — usa 'Recalcular con cambios' abajo para aplicarlo.",
+            ),
+            "Energía (kWh/día)": st.column_config.NumberColumn(
+                disabled=True, format="%.2f", width="small",
+                help=(
+                    "kWh/día × Factor demanda — la energía diversificada de esta línea, descontando "
+                    "que no toda la potencia instalada se usa a la vez. Esta es la base del "
+                    "dimensionamiento de batería/PV en el Paso 6."
+                    if diversified_used_downstream else
+                    "kWh/día × Factor demanda — la energía diversificada de esta línea, descontando "
+                    "que no toda la potencia instalada se usa a la vez. Informativo por ahora: el "
+                    "total de kWh/día arriba (sin diversificar) sigue siendo la base del "
+                    "dimensionamiento de batería/PV en el Paso 6."
+                ),
             ),
             "Fuente": st.column_config.TextColumn(disabled=True, width="medium"),
             "Detalle": st.column_config.TextColumn(disabled=True, width="large"),
@@ -474,6 +452,46 @@ def _render_demand_profile_block(
         key=f"{key_prefix}_table",
     )
 
+    if st.button("Recalcular con cambios", key=f"{key_prefix}_recalc"):
+        with st.spinner("Recalculando…"):
+            from calculations.load_profile_off_grid import build_load_profile
+            edited_rows = edited.to_dict("records")
+            updated_loads = []
+            for orig, line, row in zip(loads, profile["lines"], edited_rows):
+                # Horas/día only counts as an engineer override if it's
+                # ALREADY confirmed (a prior recalc already set it — keep it
+                # an override even if unchanged this click) or it actually
+                # CHANGED from the current default. Every row's cell always
+                # shows a number (default or prior override), so comparing
+                # against the confidence flag — not just the number — avoids
+                # two opposite bugs: (a) flagging every untouched default row
+                # as CONFIDENCE_USER_CONFIRMED on every click (misleading
+                # provenance, hides real defaults from the "revísalas antes
+                # de continuar" warning), and (b) silently reverting an
+                # already-confirmed override back to the default on a SECOND
+                # recalc click where that cell just wasn't retyped.
+                # No longer restricted to behavior_driven — every category
+                # accepts a duty-hours override now (see build_load_profile()).
+                new_hours = row.get("Horas/día")
+                already_confirmed = line.get("confidence") == "user_confirmed"
+                duty_hours_override = (
+                    float(new_hours)
+                    if (
+                        new_hours is not None
+                        and (already_confirmed or float(new_hours) != (line.get("duty_hours_day") or 0))
+                    )
+                    else None
+                )
+                updated_loads.append({
+                    **orig,
+                    "category": line["category"],
+                    "demand_factor_pct": float(row["Factor demanda (%)"]) / 100.0,
+                    "duty_hours_day": duty_hours_override,
+                })
+            profile = build_load_profile(updated_loads, lat=lat, lon=lon)
+            st.session_state[f"{key_prefix}_profile"] = profile
+            st.rerun()
+
     default_count = sum(1 for r in rows if r["Fuente"] == _CONFIDENCE_BADGES["default_assumed"][0])
     if default_count:
         st.warning(
@@ -482,31 +500,44 @@ def _render_demand_profile_block(
         )
 
     total_kwh_day = round(edited["kWh/día"].sum(), 2)
-    _metric_card("Consumo diario total estimado", f"{total_kwh_day:,.2f} kWh/día")
+    total_energy_diversified = round(edited["Energía (kWh/día)"].sum(), 2)
+    diversified_note = (
+        "usado en el Paso 6 (batería/PV se dimensionan con esta cifra)."
+        if diversified_used_downstream else
+        "informativo, no usado en el dimensionamiento aún."
+    )
+    _metric_card(
+        "Consumo diario total estimado", f"{total_kwh_day:,.2f} kWh/día",
+        sublabel=f"Diversificado (× factor demanda): {total_energy_diversified:,.2f} kWh/día — {diversified_note}",
+    )
 
-    if show_charts and total_kwh_day > 0:
+    if (show_category_chart or show_hourly_chart) and total_kwh_day > 0:
+        import plotly.graph_objects as go
+        cat_totals = edited.groupby("Categoría")["kWh/día"].sum().sort_values()
+
+    if show_category_chart and total_kwh_day > 0:
         st.markdown("##### Consumo por categoría")
         st.caption(
             "Cómo se distribuye el consumo diario estimado entre las categorías de carga presentes "
-            "en esta lista — una categoría sin cargas de ese tipo simplemente no muestra barra."
+            "en esta lista — una categoría sin cargas de ese tipo simplemente no aparece en el anillo."
         )
-        cat_totals = edited.groupby("Categoría")["kWh/día"].sum().sort_values()
-        import plotly.graph_objects as go
-        fig = go.Figure(go.Bar(
-            x=cat_totals.values,
-            y=[CATEGORY_LABELS_ES.get(k, k) for k in cat_totals.index],
-            orientation="h",
-            marker_color=[_CATEGORY_CHART_COLORS.get(k, "#9ca3af") for k in cat_totals.index],
-            text=[f"{v:.2f} kWh/día" for v in cat_totals.values],
+        fig = go.Figure(go.Pie(
+            labels=[CATEGORY_LABELS_ES.get(k, k) for k in cat_totals.index],
+            values=cat_totals.values,
+            hole=0.55,
+            marker=dict(colors=[_CATEGORY_CHART_COLORS.get(k, "#9ca3af") for k in cat_totals.index]),
+            texttemplate="%{value:.2f} kWh/día",
             textposition="outside",
         ))
         fig.update_layout(
-            xaxis=dict(title="kWh/día", range=[0, cat_totals.max() * 1.25]),
-            height=220,
-            margin=dict(t=10, b=10, l=10, r=10),
+            height=340,
+            margin=dict(t=40, b=70, l=40, r=40),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
         )
         st.plotly_chart(fig, use_container_width=True)
 
+    if show_hourly_chart and total_kwh_day > 0:
         st.markdown("##### Perfil horario ilustrativo (IA)")
         st.caption(
             "⚠️ Ilustrativo únicamente — generado por IA para ayudar a visualizar cuándo cada tipo de "
@@ -547,7 +578,7 @@ def _render_demand_profile_block(
             )
             st.plotly_chart(hourly_fig, use_container_width=True)
 
-    return profile, total_kwh_day
+    return profile, total_kwh_day, profile.get("total_kwh_day_diversified", total_kwh_day)
 
 
 def step5_demand() -> dict | None:
@@ -561,9 +592,7 @@ def step5_demand() -> dict | None:
     site = st.session_state.get("wizard_site", {})
     lat, lon = site.get("lat"), site.get("lon")
 
-    profile, total_kwh_day = _render_demand_profile_block(
-        "w5og", loads, current.get("num_bedrooms", 3), current.get("home_class", "standard"), lat, lon,
-    )
+    profile, total_kwh_day, total_kwh_day_diversified = _render_demand_profile_block("w5og", loads, lat, lon)
 
     # Atrás/Siguiente render unconditionally — profile being None (not yet
     # calculated) only disables Siguiente, it doesn't strand the engineer
@@ -571,7 +600,7 @@ def step5_demand() -> dict | None:
     # ever rendering the nav row left "Calcular perfil de consumo" as the
     # only clickable thing on the page on a fresh Step 5 visit).
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w5og_back"):
             # Same fix as Step 4's Atrás: persist the calculated profile
@@ -581,6 +610,7 @@ def step5_demand() -> dict | None:
                 **current,
                 "profile": profile,
                 "daily_kwh": total_kwh_day,
+                "daily_kwh_diversified": total_kwh_day_diversified,
             }
             st.session_state["wizard_step"] = 4
             _autosave()
@@ -591,6 +621,7 @@ def step5_demand() -> dict | None:
                 **current,
                 "profile": profile,
                 "daily_kwh": total_kwh_day,
+                "daily_kwh_diversified": total_kwh_day_diversified,
             }
             st.session_state["wizard_consumption"] = result
             return result
@@ -1451,7 +1482,18 @@ def step6_equipment() -> dict | None:
         # ceiling against the worst-case installed load without converting
         # units in their head. The AC Out card below keeps amps, since it's
         # comparing against the design current (also amps) right next to it.
-        available_power_kw = ac_out["available_current_a"] * design_voltage_v / 1000
+        #
+        # NOT ac_out["available_current_a"] * design_voltage_v: that current
+        # is the inverter's own rated output current AT ITS OWN output_v
+        # (e.g. 41.67A @ 120V = 5kW/unit) with inverter_qty already
+        # multiplied in — re-multiplying by design_voltage_v (240V for a
+        # split-phase service) double-counts the qty and reports 2x the real
+        # available power (a 2x5kW split-phase pair showed 20kW instead of
+        # 10kW — caught 2026-08 via the static-model test page, same bug,
+        # ported unchanged from here). Nameplate kW x qty is unambiguous
+        # regardless of parallel-same-phase vs. split-phase master/slave
+        # topology, unlike the current figure.
+        available_power_kw = float(inverter.get("kw") or 0) * final_inverter_qty
 
         _chip_row([
             f"🏗️ Instalada: <b>{demand['total_installed_kw']:.2f} kW</b>",
@@ -1464,11 +1506,11 @@ def step6_equipment() -> dict | None:
         cat_table = [{
             "Categoría": CATEGORY_LABELS_ES.get(c["category"], c["category"]),
             "Instalada (kW)": c["installed_kw"],
-            "Factor de demanda": f"{c['factor_applied'] * 100:.0f}%",
+            "Factor de demanda (prom.)": f"{c['factor_applied'] * 100:.0f}%",
             "Demandada (kW)": c["demand_kw"],
-            "Método": "Mayor + resto diversificado" if c["method"] == "largest_plus_rest" else "Factor uniforme",
         } for c in demand["categories"]]
         st.dataframe(pd.DataFrame(cat_table), use_container_width=True, hide_index=True)
+        st.caption("Factor de demanda editable por línea en el Paso 5 — esta columna muestra el promedio ponderado por categoría.")
         st.caption(
             "⚠️ Factores de demanda v1 — primera aproximación, no calibrados contra instalaciones "
             "reales. Corriente pico asume factor de potencia ≈1."
@@ -1739,9 +1781,6 @@ def step6_equipment() -> dict | None:
             raw_cat_kwh: dict[str, float] = {}
             for line in profile.get("lines", []):
                 raw_cat_kwh[line["category"]] = raw_cat_kwh.get(line["category"], 0) + line["estimated_kwh_day"]
-            if profile.get("behavior_aggregate"):
-                agg = profile["behavior_aggregate"]
-                raw_cat_kwh["behavior_driven"] = raw_cat_kwh.get("behavior_driven", 0) + agg["kwh_day"]
             raw_total = sum(raw_cat_kwh.values())
             if raw_total > 0:
                 scale = daily_kwh / raw_total
@@ -1790,7 +1829,7 @@ def step6_equipment() -> dict | None:
 
     st.divider()
     can_continue = bool(chosen) and is_valid
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w6og_back"):
             st.session_state["wizard_step"] = 5
@@ -1979,7 +2018,7 @@ def step7_costs() -> dict | None:
         st.caption(f"${cost_per_wp:.2f}/Wp")
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w7og_back"):
             st.session_state["wizard_step"] = 6
@@ -2214,7 +2253,22 @@ def step8_review(
                 "inverter_model": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
                 "battery_count": battery_bank.get("battery_count", 0),
                 "battery_kwh": battery_bank.get("total_kwh_installed", 0),
-                "autonomy_days": consumption.get("autonomy_days", 0),
+                # Off-grid and hybrid answer different questions here (see
+                # ai/proposal_writer.py's _FACT_LABELS_ES comment) — off-grid's
+                # battery is sized against full sunless days (Step 4's "Días de
+                # autonomía" slider), hybrid's against nights of backed-up load
+                # while the grid is down (battery_bank["backup_nights"], only
+                # present on the static-model's hybrid tiers; legacy-engine
+                # hybrid designs have neither, and correctly show nothing
+                # rather than a stale/invented figure).
+                "autonomy_days": (
+                    consumption.get("autonomy_days", 0)
+                    if meta.get("system_type") == "off_grid" else 0
+                ),
+                "backup_nights": (
+                    battery_bank.get("backup_nights", 0)
+                    if meta.get("system_type") != "off_grid" else 0
+                ),
                 "daily_generation_kwh": array.get("daily_generation_kwh", 0),
                 "daily_consumption_kwh": consumption.get("daily_kwh", 0),
             }
@@ -2234,7 +2288,7 @@ def step8_review(
     st.session_state["wizard_proposal_text"] = proposal_text
 
     st.divider()
-    col_back, _, col_gen = st.columns([1, 3, 1])
+    col_back, _, col_gen = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w8og_back"):
             st.session_state["wizard_step"] = 7

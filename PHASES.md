@@ -590,6 +590,58 @@ CREATE TABLE public.maintenance_visits (
 
 ---
 
+## Phase 11 — Design Calibration from Fleet Data (4–6 days, spans both products)
+
+**Goal:** the sizing constants behind Off-Grid/Hybrid proposals stop being judgement calls and become measurements, refreshed as monitored sites accumulate history. Every new export makes the next proposal better.
+
+The first pass was done by hand in Aug 2026 across 9 sites and is written up in [`docs/design-calibration-2026-08.md`](docs/design-calibration-2026-08.md) — that document is the specification for this phase. It already contains the method, the derived constants, the back-test, and (most valuable) the list of traps that produce plausible wrong answers.
+
+### Why this phase exists
+
+`calculations/sizing_off_grid.py`'s tier tables (`_HYBRID_DESIGN_TIERS`, `_OFF_GRID_DESIGN_TIERS`) originally encoded engineering judgement. The 2026-08 calibration found the judgement was off in ways nobody could have spotted without field data: batteries oversized ~2–3×, PV sized past what a non-exporting site can absorb, and `backup_autonomy_hours` modelling an outage profile that does not occur. Those fixes are now in the code with the evidence in comments — but they came from a one-off analysis that will go stale, and re-doing it by hand each time does not scale.
+
+### Where this sits relative to other phases
+
+- Off the critical path, like Phases 9 and 10. Trigger by data availability, not sequence.
+- Depends on `victron/vrm_csv.py` (exists) and the `monitoring.sites` design columns (exist: `pv_kwp`, `battery_nominal_kwh`, `battery_dod_pct`, added by migrations 017–019).
+- Related to Phase 10 but distinct: Phase 10 answers *"who needs a visit"*; this answers *"what should we quote next time"*. They share `monitoring.sites` as the anchor entity and would sit in the same nav tab.
+- **Blocked in practice by data, not code**: VRM retains 1-minute data only ~6 months, so the low-irradiance months (Sep–Nov) can't be exported at full resolution until a December run. See the doc's §1 for the workarounds.
+
+### Scope
+
+**Ingestion**
+- Batch-parse a folder of VRM exports through the existing `parse_export()`, joining to `monitoring.sites` on the filename slug (the `<site-slug> <type>.csv` convention already works).
+- Persist per-day rows to `vrm.energy_daily` / `monitoring.energy_daily` so calibration reads the database rather than a folder of CSVs.
+- Support a coarser (hourly) archive alongside the 1-min recent window — the only way to reach Sep–Nov.
+
+**Exclusion rules — enforced, not optional** (doc §8)
+- drop partial days; drop all-signal-null days (gateway offline ≠ zero generation)
+- drop idle sites (<0.2 cycles/day) from battery calibration
+- drop faulty arrays (peak <600 W/kWp) from PV calibration
+
+**Metrics** — per site: peak W/kWp, PR vs PVGIS (mean and p98), cycles/day, min-SoC distribution, night-load fraction, cycling window ÷ night load, PV coverage, rolling multi-day minimum yield, delivered vs design coverage.
+
+**Triage** — classify each site as `well-matched` / `over-built` / `under-built` / `array-fault` / `monitoring-gap` using the discriminators in doc §2, especially **peak W/kWp vs mean PR** (capability vs delivery — conflating them misclassified three healthy arrays on the first pass).
+
+**Calibration output**
+- Proposed constants, each with the observed range and the site count behind it.
+- **Never auto-applied.** Produces a diff against the shipped tiers for an engineer to accept or reject — a fleet of 9 with one broken array cannot be trusted to rewrite the quoting engine unattended.
+- Version each accepted set so a quote can record which calibration produced it.
+
+**Back-test gate** — before a constant set can be accepted: re-run it against installed systems and confirm T2 lands near what is actually on the roof at sites that work, tier monotonicity holds at every site, and no working site is flagged as needing more equipment than it has.
+
+### UI
+
+New tab under Projects (alongside Phase 10's register): fleet scorecard, per-site triage with its evidence, and the proposed-constants diff with accept/reject. Read-only until an engineer accepts.
+
+### Validation
+
+- Reproduce the Aug 2026 numbers from the same 9 exports (doc §3/§4 are the fixture).
+- Confirm triage flags villalobos as `array-fault`, karen as `monitoring-gap`, guarda as `over-built`, casona as `well-matched` — the four cases that broke naive versions of each rule.
+- Confirm the back-test gate rejects a deliberately bad constant set.
+
+---
+
 ## Future — Victron weekly-report tariff savings (separate product, not scheduled)
 
 **Goal:** the Victron weekly PDF + email show an **estimated savings** figure for the customer, instead of the current "coming soon" placeholder.
@@ -655,6 +707,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 9 is off this critical path entirely.** It belongs to Victron Monitor, a separate product sharing this repo and Supabase project — not a step in the solar tool's proposal/projects/admin roadmap. Trigger it by business need (onboarding the first external Victron Monitor customer), not by sequence.
 
 **Phase 10 is also off this critical path.** It spans both products (extends `monitoring.sites`, adds new `public` schema tables) and its UI hangs off the Projects nav item without depending on Phase 6 being built. Trigger it whenever you're ready to retire the manual maintenance spreadsheet.
+
+**Phase 11 (Design Calibration) is off the critical path too**, and is gated by *data* rather than by other phases — VRM's ~6-month retention of 1-minute data means the low-irradiance months only become exportable in a December run. The first calibration was already done by hand (see [`docs/design-calibration-2026-08.md`](docs/design-calibration-2026-08.md)) and its results are live in the tier tables, so this phase is about making that repeatable, not about unblocking proposals.
 
 ---
 

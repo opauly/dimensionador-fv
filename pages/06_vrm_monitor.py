@@ -133,7 +133,9 @@ def tab_sites() -> None:
             "Instalación VRM": s.get("vrm_installation_id") or "—",
             "Tipo": s.get("system_type"),
             "kWp": s.get("pv_kwp"),
-            "Batería kWh": s.get("battery_usable_kwh"),
+            "Batería nominal kWh": s.get("battery_nominal_kwh"),
+            "DoD %": s.get("battery_dod_pct"),
+            "Batería utilizable kWh": s.get("battery_usable_kwh"),
             "Idioma": s.get("report_language"),
             "País": s.get("country") or "CR",
             "Tarifa ahorro": (f"{s['savings_rate']} {s['savings_currency']}"
@@ -153,10 +155,22 @@ def tab_sites() -> None:
             a, b = st.columns(2)
             cust_name = a.text_input("Cliente", placeholder="Vista Atenas")
             site_name = b.text_input("Sitio", placeholder="2 Floor Pool")
-            a, b, c = st.columns(3)
+            a, b, c, d = st.columns(4)
             pv_kwp = a.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, value=0.0)
-            batt = b.number_input("Batería utilizable (kWh)", min_value=0.0, step=0.1, value=0.0)
-            stype = c.selectbox("Tipo de sistema", SYSTEM_TYPES)
+            batt_nominal = b.number_input(
+                "Batería nominal (kWh)", min_value=0.0, step=0.1, value=0.0,
+                help="Capacidad de placa/datasheet — la que viene impresa en la ficha "
+                     "técnica de la batería, antes de aplicar DoD.",
+            )
+            batt_dod = c.number_input(
+                "DoD (%)", min_value=0.0, max_value=100.0, step=1.0, value=0.0,
+                help="Profundidad de descarga del datasheet (p. ej. 97% para LiFePO4 "
+                     "típico). Utilizable = nominal × DoD/100 se calcula solo.",
+            )
+            stype = d.selectbox("Tipo de sistema", SYSTEM_TYPES)
+            batt = round(batt_nominal * batt_dod / 100, 2) if batt_nominal and batt_dod else None
+            if batt:
+                st.caption(f"Batería utilizable: **{batt:.2f} kWh**")
             a, b, c = st.columns(3)
             lang = a.selectbox("Idioma del reporte", list(LANGS), format_func=LANGS.get)
             location = b.text_input("Ubicación", placeholder="Atenas, Alajuela")
@@ -186,7 +200,11 @@ def tab_sites() -> None:
                         ingest.upsert_site(
                             cust["id"], site_id, site_name.strip(),
                             pv_kwp=pv_kwp or None,
-                            battery_usable_kwh=batt or None,
+                            battery_nominal_kwh=batt_nominal or None,
+                            battery_dod_pct=batt_dod or None,
+                            # battery_usable_kwh is a generated column
+                            # (migration 019) — Postgres computes it from the
+                            # two fields above and rejects a direct write.
                             system_type=stype, report_language=lang,
                             location=location or None, timezone=tz or "America/Costa_Rica",
                             # Weather (and therefore the performance ratio) needs
@@ -231,12 +249,22 @@ def tab_upload() -> None:
     a, b = st.columns(2)
     cust_name = a.text_input("Cliente", key="up_cust", placeholder="Vista Atenas")
     site_name = b.text_input("Sitio", key="up_site", placeholder="2 Floor Pool")
-    a, b, c, d = st.columns(4)
+    a, b, c, d, e = st.columns(5)
     pv_kwp = a.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, key="up_kwp")
-    batt = b.number_input("Batería utilizable (kWh)", min_value=0.0, step=0.1, key="up_batt")
-    stype = c.selectbox("Tipo de sistema", SYSTEM_TYPES, key="up_type")
-    lang = d.selectbox("Idioma del reporte", list(LANGS), format_func=LANGS.get,
+    batt_nominal = b.number_input(
+        "Batería nominal (kWh)", min_value=0.0, step=0.1, key="up_batt_nominal",
+        help="Capacidad de placa/datasheet, antes de aplicar DoD.",
+    )
+    batt_dod = c.number_input(
+        "DoD (%)", min_value=0.0, max_value=100.0, step=1.0, key="up_batt_dod",
+        help="Profundidad de descarga del datasheet. Utilizable = nominal × DoD/100.",
+    )
+    stype = d.selectbox("Tipo de sistema", SYSTEM_TYPES, key="up_type")
+    lang = e.selectbox("Idioma del reporte", list(LANGS), format_func=LANGS.get,
                        key="up_lang")
+    batt = round(batt_nominal * batt_dod / 100, 2) if batt_nominal and batt_dod else None
+    if batt:
+        st.caption(f"Batería utilizable: **{batt:.2f} kWh**")
 
     # Location drives the Open-Meteo call, which in turn drives the weather
     # block AND the expected-output figure behind the performance ratio.
@@ -364,7 +392,9 @@ def tab_upload() -> None:
         st.session_state["vrm_parsed_meta"] = {
             "customer": cust_name.strip(), "site": site_name.strip(),
             "filename": up.name, "pv_kwp": pv_kwp or None,
-            "battery_usable_kwh": batt or None, "system_type": stype,
+            "battery_nominal_kwh": batt_nominal or None,
+            "battery_dod_pct": batt_dod or None,
+            "battery_usable_kwh": batt, "system_type": stype,
             "report_language": lang,
             "location": location or None, "timezone": tz or "America/Costa_Rica",
             # 0,0 is Null Island, not "unknown" — store NULL so the report can
@@ -432,7 +462,12 @@ def tab_upload() -> None:
                 cust = ingest.upsert_customer(meta["customer"])
                 site_id = ingest.make_site_id(cust["slug"], meta["site"])
                 fields = {"pv_kwp": meta["pv_kwp"],
-                          "battery_usable_kwh": meta["battery_usable_kwh"],
+                          "battery_nominal_kwh": meta["battery_nominal_kwh"],
+                          "battery_dod_pct": meta["battery_dod_pct"],
+                          # battery_usable_kwh is a generated column
+                          # (migration 019) — not written directly, only used
+                          # above as an argument to vrm_csv.parse_export()
+                          # for the energy_daily.battery_kwh_snapshot value.
                           "system_type": meta["system_type"],
                           "report_language": meta["report_language"],
                           "location": meta["location"],

@@ -324,6 +324,61 @@ def check_charge_controller_design_multi(
     return m
 
 
+def find_array_for_target_kw(
+    panel: dict,
+    charge_controller: dict,
+    target_system_kw: float,
+    max_cc: int = 4,
+    max_strings: int = 60,
+) -> dict | None:
+    """
+    Finds the smallest array (fewest parallel strings) whose system_kw meets
+    or exceeds target_system_kw — the non-iterative counterpart to
+    find_array_for_reliability() below, used by the static design-tier model
+    (calculations/sizing_off_grid.py: generate_design_scenarios()) instead of
+    an iterative day-by-day reliability search.
+
+    Series count uses the same convention as the rest of this module: fixed
+    at the value that maximizes Voc within vin_max (minimizes DC current/
+    cabling losses). Only strings in parallel are searched, paralleling more
+    charge controllers (up to max_cc) as current demands it.
+
+    Returns the smallest combo with system_kw >= target_system_kw. If
+    target_system_kw can't be reached within max_strings/max_cc, returns the
+    largest combo that was still reachable instead of None, so the caller
+    always gets *a* design to evaluate — its own system_kw vs. the target
+    (checked by the caller) is what surfaces the shortfall, not a bare
+    failure. Returns None only if no series count exists at all (panel Voc
+    alone exceeds vin_max).
+    """
+    voc = float(panel["voc"])
+    vin_max = float(charge_controller["vin_max"])
+    if voc <= 0:
+        return None
+    max_series = int(vin_max / voc)
+    if max_series < 1:
+        return None
+
+    chosen_series = None
+    for series in range(max_series, 0, -1):
+        if check_charge_controller_design_multi(panel, charge_controller, series, 1, max_cc):
+            chosen_series = series
+            break
+    if chosen_series is None:
+        return None
+
+    last_valid = None
+    for n_strings in range(1, max_strings + 1):
+        combo = check_charge_controller_design_multi(panel, charge_controller, chosen_series, n_strings, max_cc)
+        if combo is None:
+            break  # exceeded max_cc — return whatever was still valid
+        last_valid = combo
+        if combo["system_kw"] >= target_system_kw:
+            return combo
+
+    return last_valid
+
+
 def find_array_for_reliability(
     panel: dict,
     charge_controller: dict,

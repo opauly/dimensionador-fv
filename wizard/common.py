@@ -58,7 +58,7 @@ def step1_system_type() -> dict | None:
         language = lang_options[lang_label]
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w1_back"):
             st.session_state["wizard_step"] = 1
@@ -224,7 +224,7 @@ def step2_client() -> dict | None:
         st.caption("* El nombre del cliente es requerido.")
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Cotizaciones", key="w2_back"):
             st.switch_page("pages/01_proposals.py")
@@ -371,7 +371,7 @@ def step3_site() -> dict | None:
         st.info("Haz clic en 'Obtener irradiancia solar' para cargar datos de PVGIS.")
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w3_back"):
             st.session_state["wizard_step"] = 2

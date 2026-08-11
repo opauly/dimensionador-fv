@@ -22,14 +22,18 @@ agreement table: `victron-monitor/docs/vrm-report-v1-implementation-plan.md` §7
 Three traps that this module exists to avoid, all of which produce
 plausible-looking wrong numbers rather than errors:
 
-1. **Outages are `Grid alarm` transitions, not inverter state.** The skill's
-   `find_outages()` flags "system is inverting" as an island event. At an ESS
-   site that is normal self-consumption — on the reference export it flagged
-   95% of the period (49 events, 111,258 minutes) where Node-RED correctly
-   reported zero. See `_grid_outages()`.
-2. **`Grid alarm` is text in the CSV** (`Grid ok` / `Grid lost`), while
-   Node-RED reads the numeric D-Bus value. `pd.to_numeric()` on it yields an
-   all-NaN series, i.e. silently "no outages ever".
+1. **Outages are AC-input voltage absence, not inverter state and not
+   `Grid alarm`.** The skill's `find_outages()` flags "system is inverting" as
+   an island event; at an ESS site that is normal self-consumption (95% of the
+   reference period, 49 events, 111,258 minutes). But `Grid alarm` — the
+   signal this module used until the voltage rewrite — is the opposite failure:
+   flat `Grid ok` across all 9 reference exports even while the AC input reads
+   0.00 V for hours, i.e. silently "no outages ever". Voltage is the signal
+   that matches reality and cross-validates across sites on one feeder. See
+   `_grid_outages()`.
+2. **VRM emits an all-NaN row on each exact hour boundary.** Any state machine
+   over these files must let NaN inherit the previous state; treating it as a
+   reading splits one long event into 59.9-minute pieces. See `_grid_outages()`.
 3. **Duplicate column names are real data, not noise.** A site with two solar
    chargers repeats all 48 `Solar Charger::` names. Selecting by name returns
    only the first, so per-charger yield silently halves. See `_pick_all()`.
@@ -298,6 +302,17 @@ def validate_export(raw: pd.DataFrame, tidied: pd.DataFrame,
         )
     if tidied["grid_w"].notna().sum() == 0:
         warnings.append("No grid power data — grid import will be reported as zero.")
+    # Outages are detected from AC-input voltage (see _grid_outages). A site
+    # that clearly uses the grid but never reports input voltage would report
+    # zero outages with no other sign that detection was impossible — the exact
+    # silent failure the voltage rewrite exists to remove.
+    if (tidied["grid_w"].notna().sum()
+            and int(tidied[["grid_v_l1", "grid_v_l2"]].notna().sum().sum()) == 0):
+        warnings.append(
+            "No AC input voltage in this export — outages cannot be detected "
+            "and will read as zero. Include 'Input voltage phase 1' (VE.Bus "
+            "System) in the VRM export to get outage reporting."
+        )
     return warnings
 
 
@@ -325,35 +340,85 @@ def _min_max_nonzero(series: pd.Series) -> tuple[float | None, float | None]:
     return float(s.min()), float(s.max())
 
 
-def _grid_outages(raw: pd.DataFrame) -> pd.DataFrame:
-    """Grid outages from `Grid alarm` transitions, matching Node-RED.
+# AC-input voltage above this means the grid (or a running genset) is present.
+# Well below any nominal supply, well above the 0.00 V a disconnected input
+# reads. A brownout deep enough for the inverter to drop the input still counts
+# as an outage — that is what the customer experiences.
+_GRID_PRESENT_V = 30.0
+# A site whose AC input is essentially never energised is off-grid, or
+# genset-only: absence is its normal state, not an outage.
+_GRID_SITE_MIN_V = 50.0
+_GRID_SITE_MIN_SHARE = 0.05
+# Sub-2-minute dropouts are recloser operations, not outages worth reporting.
+_MIN_OUTAGE_MIN = 2.0
 
-    The flow's `Grid Lost` node starts an outage on 0 → ≥1 and ends it on
-    ≥1 → 0. The CSV encodes the same signal as text, so state is derived by
-    comparing against the known-good values rather than by casting to a number.
+
+def _grid_outages(tidied: pd.DataFrame) -> pd.DataFrame:
+    """Grid outages from AC-input voltage absence.
+
+    `Grid alarm` is NOT usable for this, despite being the signal Node-RED
+    reads. It is flat (`Grid ok`) across every export checked — 9 sites x ~161
+    days — including stretches where the AC input sits at 0.00 V for hours
+    while the battery carries the load. Read literally it reports zero outages
+    forever, which is what the weekly report was showing for sites that in fact
+    lose grid 4-12 times a month.
+
+    Voltage absence is the reliable signal, and it cross-validates: sibling
+    sites on one feeder (the three Vista Atenas meters; the Rebeca Ruiz
+    cluster) show identical outage timestamps to the second, while an event
+    local to a single site appears only there.
+
+    Two traps this function exists to avoid, both of which produce
+    plausible-looking wrong numbers rather than errors:
+
+    1. **VRM emits an all-NaN row at each exact hour boundary.** Treating "no
+       reading" as "grid present" ends the run there, chopping one outage into
+       59.9-minute pieces — one 33-hour event became 33 hourly ones. NaN rows
+       therefore inherit the previous known state rather than clearing it.
+    2. **Duration is summed from real sample spacing, clipped at MAX_GAP_S**,
+       not taken as end-minus-start. A logging hole inside an outage would
+       otherwise be counted as outage time, inflating it without evidence. The
+       gap leading into the first absent sample is included, so an outage is
+       measured from the last moment the grid was known good.
+
+    Takes the tidied frame (not `raw`): voltage is normalised to numeric there,
+    and phase 2 is absent on single-phase sites.
     """
-    cols = _pick_all(raw, "System overview", "Grid alarm")
-    if not cols:
-        return pd.DataFrame(columns=["start", "end", "minutes"])
+    empty = pd.DataFrame(columns=["start", "end", "minutes"])
+    if tidied.empty or not {"grid_v_l1", "grid_v_l2"} <= set(tidied.columns):
+        return empty
 
-    state = cols[0].dropna()
-    if state.empty:
-        return pd.DataFrame(columns=["start", "end", "minutes"])
+    vmax = tidied[["grid_v_l1", "grid_v_l2"]].max(axis=1)
+    logged = vmax.notna()
+    if not logged.any():
+        return empty
 
-    lost = (~state.astype(str).str.strip().str.lower().isin(_OK_VALUES)).astype(int)
-    edges = lost.diff().fillna(0)
-    starts = list(lost.index[edges == 1])
-    ends = list(lost.index[edges == -1])
+    present = vmax > _GRID_PRESENT_V
+    # Off-grid and genset-only sites. Reporting their whole history as one
+    # continuous outage would be worse than reporting none.
+    if (float(vmax.max()) < _GRID_SITE_MIN_V
+            or float(present[logged].mean()) < _GRID_SITE_MIN_SHARE):
+        return empty
+
+    # Trap 1: NaN inherits the previous state. bfill covers an export whose
+    # first row is one of those hour-boundary NaNs. Carried as float, not
+    # bool-with-NaN: masking a bool series yields object dtype, whose ffill
+    # pandas deprecates (and which silently downcasts).
+    state = (present.astype(float).where(logged)
+             .ffill().bfill().fillna(1.0) > 0.5)
+
+    # Trap 2: real elapsed time between samples, not wall-clock span.
+    dt = pd.Series(tidied.index, index=tidied.index).diff()
+    dt = dt.dt.total_seconds().fillna(0.0).clip(upper=MAX_GAP_S)
 
     rows = []
-    for start in starts:
-        later = [e for e in ends if e > start]
-        # An outage still open at the end of the export is measured to the last
-        # sample rather than dropped — dropping it would under-report a real,
-        # ongoing failure.
-        end = later[0] if later else lost.index[-1]
-        rows.append({"start": start, "end": end,
-                     "minutes": round((end - start).total_seconds() / 60.0, 1)})
+    for _, block in tidied.groupby((state != state.shift()).cumsum()):
+        if bool(state.loc[block.index[0]]):
+            continue  # grid present through this block
+        minutes = float(dt.loc[block.index].sum()) / 60.0
+        if minutes >= _MIN_OUTAGE_MIN:
+            rows.append({"start": block.index[0], "end": block.index[-1],
+                         "minutes": round(minutes, 1)})
     return pd.DataFrame(rows, columns=["start", "end", "minutes"])
 
 
@@ -434,7 +499,7 @@ def to_energy_daily_rows(raw: pd.DataFrame, tidied: pd.DataFrame, site_id: str,
     travel alongside so a partial first/last day can be excluded from a report
     without having to re-derive that from the row itself.
     """
-    outages = _grid_outages(raw)
+    outages = _grid_outages(tidied)
     if not outages.empty:
         outages["day"] = outages["start"].dt.date
     yields = _pick_all(raw, *YIELD_TODAY)
@@ -554,7 +619,7 @@ def parse_export(source, site_id: str, filename: str = "",
         "rows": rows,
         "alarm_events": alarm_events(raw, site_id),
         "unscored_alarms": unscored,
-        "outages": _grid_outages(raw).to_dict("records"),
+        "outages": _grid_outages(tidied).to_dict("records"),
         "missing_signals": missing,
         "warnings": warnings,
     }

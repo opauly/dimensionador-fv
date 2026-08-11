@@ -43,18 +43,17 @@ CATEGORIES = [
 #
 # Now: behavior_driven = lighting + receptacle background load only (the
 # always-on plug side of a house — computadora, router, reloj, cargadores),
-# still sized as ONE per-espacio aggregate. Anything the occupant switches on
-# to do a task (microondas, plantilla, cafetera, TV, lavadora, licuadora) is
-# category 6 and gets itemized with its own kWh/día AND its own watts.
-# BEHAVIOR_KWH_PER_BEDROOM_DAY_V1 was recalibrated downward to match — see the
-# comment there before touching either table.
+# sized per line via duty-hours (see BEHAVIOR_DUTY_HOURS_DAY_V1). Anything
+# the occupant switches on to do a task (microondas, plantilla, cafetera, TV,
+# lavadora, licuadora) is category 6 and gets itemized with its own kWh/día
+# AND its own watts, same as behavior_driven lines now that the aggregate
+# model is gone (v3, 2026-08-07).
 
 CONFIDENCE_MEASURED = "measured"            # real submetered data (not wired up yet)
 CONFIDENCE_API = "api_calculated"           # derived from real location data via a documented formula
 CONFIDENCE_BENCHMARK = "benchmark"          # industry-standard lookup table, not location-specific
 CONFIDENCE_USER_CONFIRMED = "user_confirmed"  # customer answered an intake question directly
 CONFIDENCE_DEFAULT = "default_assumed"      # no better source — must stand out in the UI
-CONFIDENCE_POWER_ONLY = "power_only"        # line contributes peak W only; its kWh lives in the behavior_driven aggregate
 
 # Spanish display labels for the 5 categories — used by the wizard's manual
 # category-override selector, so the engineer can correct a classification
@@ -76,15 +75,9 @@ CATEGORY_LABELS_ES: dict[str, str] = {
 #
 # Appliances (category "appliance") carry BOTH their own kWh/día — from
 # APPLIANCE_USE_KWH_DAY_V1 — and their own watts, so they size panels, battery
-# and inverter alike. They are deliberately NOT part of the "Uso general"
-# aggregate anymore (see the CATEGORIES note above).
-#
-# The two "Iluminación" entries are the one remaining behavior_driven exception:
-# their ENERGY stays inside the per-espacio aggregate (listing them changes no
-# kWh), but they still emit a line carrying real watts, because the aggregate is
-# a pure kWh/día figure with no wattage attached and Step 6's inverter-headroom
-# check sums watts across profile lines. The wizard labels those lines
-# "⚡ Solo potencia (W)" with kWh/día = 0 so the zero reads as intentional.
+# and inverter alike. The two "Iluminación" entries below get the same
+# treatment now (own kWh/día via BEHAVIOR_DUTY_HOURS_DAY_V1, own watts) —
+# there's no longer a separate zero-energy "watts-only" case for any category.
 COMMON_LOADS_CATALOG_V1: list[dict] = [
     {"name": "Refrigerador",         "nameplate_kw": 0.50, "category": "fixed_cycling"},
     {"name": "Congelador",           "nameplate_kw": 0.30, "category": "fixed_cycling"},
@@ -106,7 +99,7 @@ COMMON_LOADS_CATALOG_V1: list[dict] = [
     {"name": "Pantalla TV",          "nameplate_kw": 0.045, "category": "appliance"},
     {"name": "Lavadora",             "nameplate_kw": 0.50, "category": "appliance"},
     {"name": "Licuadora",            "nameplate_kw": 0.40, "category": "appliance"},
-    # Watts-only: energy stays in the "Uso general" aggregate.
+    # Uso general — own kWh/día via BEHAVIOR_DUTY_HOURS_DAY_V1, own watts.
     {"name": "Iluminación exterior", "nameplate_kw": 0.10, "category": "behavior_driven"},
     {"name": "Iluminación interior", "nameplate_kw": 0.02, "category": "behavior_driven"},
 ]
@@ -174,30 +167,36 @@ APPLIANCE_BENCHMARKS_KWH_DAY_V1: dict[str, float] = {
 }
 _APPLIANCE_DEFAULT_KWH_DAY_V1 = 1.0  # unmatched fixed/cycling load — flagged default_assumed
 
-# ── Category 2: behavior-driven — aggregate, not per-line (v2) ──────────────
-# kWh/day per espacio, tiered by home class. All loads classified
-# behavior_driven collapse into ONE aggregate figure using this table, rather
-# than being sized individually — the taxonomy doc is explicit that
-# NEC-style per-circuit demand figures are code-minimum wiring safety
-# numbers, not energy estimates, and overstate real use by ~3x.
+# ── Category 2: behavior-driven — per-line duty hours (v3) ──────────────────
+# v3 (2026-08-07, on user direction): replaced the v2 per-espacio aggregate
+# (num_bedrooms × flat kWh/día/espacio) with a per-line estimate — each
+# behavior_driven load gets its own daily energy from
+# connected_power_kw × duty_hours_day × quantity, same formula shape as
+# every other category's line-level estimate, rather than a single lump
+# figure the whole house shared regardless of what was actually listed.
 #
-# v2 (2026-07-28) — RECALIBRATED DOWN from v1's 1.5/2.5/4.0 because the scope
-# of this category shrank: it used to cover appliances too (its own tier text
-# said "TV, computadora, lavadora, cocina eléctrica ocasional"), which now live
-# in category "appliance" and are itemized. What remains here is ONLY lighting
-# plus the always-on receptacle background load — computadora, router, reloj,
-# cargadores. Leaving v1's numbers in place after moving appliances out would
-# double-count them, which is the whole reason these dropped.
+# The aggregate model broke down specifically when a home's loads were split
+# across two independent tables (critical/backup panel vs. main panel, for
+# Hybrid systems) — each table computed its own "espacios" aggregate with no
+# way to tell whether the two were meant to partition the house (no overlap)
+# or both represent the whole house (redundant), and nothing in the UI or
+# code disambiguated it. Per-line duty hours sidesteps the question entirely:
+# each line's energy depends only on that line's own inputs, so there's
+# nothing to double-count or drop across a table split.
 #
-# ⚠️ These two tables are coupled: raising APPLIANCE_USE_KWH_DAY_V1 coverage
-# (moving more load types into category 6) means this table should come down
-# again, and vice versa. Don't tune one without checking the other.
-BEHAVIOR_KWH_PER_BEDROOM_DAY_V1: dict[str, float] = {
-    "basic": 0.5,
-    "standard": 0.8,
-    "premium": 1.3,
+# Matched the same way as APPLIANCE_USE_KWH_DAY_V1 — longest-key-first
+# keyword lookup — via estimate_behavior_duty_hours() below.
+BEHAVIOR_DUTY_HOURS_DAY_V1: dict[str, float] = {
+    "iluminación exterior": 6.0, "iluminacion exterior": 6.0,
+    "iluminación interior": 4.5, "iluminacion interior": 4.5,
+    "iluminación": 5.0, "iluminacion": 5.0, "luces": 5.0,
+    "tomacorriente de telecomunicaciones": 24.0, "tomacorrientes de telecomunicaciones": 24.0,
+    "tomacorriente": 3.0, "tomacorrientes": 3.0,  # general/background receptacle use
+    "computadora": 6.0, "computador": 6.0, "laptop": 6.0,
+    "router": 24.0, "módem": 24.0, "modem": 24.0,  # always on
+    "reloj": 24.0, "cargadores": 2.0, "cargador": 2.0,
 }
-_DEFAULT_HOME_CLASS = "standard"
+_BEHAVIOR_DUTY_HOURS_DEFAULT_V1 = 3.0  # unmatched behavior_driven load — flagged default_assumed
 
 # ── Category 5: ignition-only (v1) ──────────────────────────────────────────
 IGNITION_KWH_DAY_V1 = 0.08
@@ -249,8 +248,7 @@ _PRECLASSIFIED_V1: dict[str, str] = {
     "bomba de agua": "fixed_cycling", "bomba de pozo": "fixed_cycling",
     # behavior_driven = lighting + the always-on receptacle background load.
     # Computadora/router/reloj stay here deliberately: they're plug loads that
-    # sit on continuously, which is exactly what "tomacorrientes" means in the
-    # per-espacio aggregate — not task appliances the occupant switches on.
+    # sit on continuously — not task appliances the occupant switches on.
     "iluminación": "behavior_driven", "iluminacion": "behavior_driven", "luces": "behavior_driven",
     "tomacorriente": "behavior_driven", "tomacorrientes": "behavior_driven",
     "iluminación exterior": "behavior_driven", "iluminacion exterior": "behavior_driven",
@@ -323,14 +321,12 @@ _PRECLASSIFIED_GENERIC_V1 = sorted(
 
 _MODEL = "claude-haiku-4-5-20251001"
 
-# Fallback when the AI classifier fails or returns something unrecognized.
-# Deliberately "appliance", NOT "behavior_driven" (which it was before the
-# 2026-07-28 scope split): behavior_driven lines now contribute 0 kWh because
-# their energy lives in the per-espacio aggregate, so falling back there would
-# make an unclassifiable load silently vanish from the sizing. "appliance"
-# instead gives it _APPLIANCE_USE_DEFAULT_KWH_DAY_V1 flagged
+# Fallback when the AI classifier fails or returns something unrecognized —
+# "appliance" gives the load _APPLIANCE_USE_DEFAULT_KWH_DAY_V1 flagged
 # CONFIDENCE_DEFAULT, which surfaces in the wizard's "revísalas antes de
-# continuar" banner — visible and reviewable rather than a silent zero.
+# continuar" banner. (Both "appliance" and "behavior_driven" now produce a
+# real, visible-if-default estimate rather than a silent zero — this choice
+# is no longer load-bearing the way it was before the v3 per-line rewrite.)
 _CLASSIFY_FALLBACK = "appliance"
 
 _CLASSIFY_PROMPT = """Classify this Costa Rican residential electrical load name into EXACTLY ONE of these 5 categories. Respond with ONLY the category key, nothing else.
@@ -411,8 +407,7 @@ def classify_load_category(load_name: str) -> str:
     (Supabase app_settings), and only calls AI (constrained to the enum) for
     a genuinely new name — result is cached afterward so the same name never
     risks a different answer on a later run, per the doc's determinism
-    requirement. Falls back to 'behavior_driven' (the most common, most
-    benign-to-overestimate-slightly category) if the AI call fails or
+    requirement. Falls back to _CLASSIFY_FALLBACK if the AI call fails or
     returns something outside the enum.
 
     Two-pass keyword match, not a single pass in dict order: Costa Rican
@@ -422,9 +417,9 @@ def classify_load_category(load_name: str) -> str:
     are both substrings of the same name. Checking behavior_driven's generic
     receptacle/lighting keywords first would swallow the specific match
     every time — a microwave circuit would silently read as background plug
-    load, with 0 kWh/día in build_load_profile() (its energy goes to the
-    aggregate instead of its own appliance estimate) and no watts wrong, but
-    a real, silent misclassification. Specific categories are checked first;
+    load and get behavior_driven's duty-hours estimate instead of its own
+    appliance benchmark, a real, silent misclassification even though both
+    now produce a non-zero kWh/día. Specific categories are checked first;
     the generic behavior_driven markers only apply when nothing more
     specific matched.
     """
@@ -643,17 +638,56 @@ def estimate_discretionary(load_name: str, user_answer_kwh_day: float | None = N
     }
 
 
-def estimate_behavior_aggregate(num_bedrooms: int, home_class: str = _DEFAULT_HOME_CLASS) -> dict:
+def estimate_behavior_duty_hours(load_name: str) -> tuple[float, bool]:
     """
-    ALL loads classified behavior_driven collapse into this one aggregate —
-    not sized per individual load line — per the taxonomy doc.
+    Default daily duty-hours for a behavior_driven line, by keyword —
+    longest-key-first so "iluminación exterior" wins over bare "iluminación",
+    same pattern as estimate_appliance_use(). Returns (hours, matched) so the
+    caller can flag an unmatched name as default_assumed rather than
+    benchmark confidence.
     """
-    per_bedroom = BEHAVIOR_KWH_PER_BEDROOM_DAY_V1.get(home_class, BEHAVIOR_KWH_PER_BEDROOM_DAY_V1[_DEFAULT_HOME_CLASS])
-    kwh_day = round(per_bedroom * max(1, num_bedrooms), 2)
+    key = _normalize(load_name)
+    match = next(
+        (v for k, v in sorted(BEHAVIOR_DUTY_HOURS_DAY_V1.items(), key=lambda kv: -len(kv[0])) if _keyword_matches(k, key)),
+        None,
+    )
+    if match is not None:
+        return match, True
+    return _BEHAVIOR_DUTY_HOURS_DEFAULT_V1, False
+
+
+def estimate_behavior_line(
+    load_name: str, quantity: int, connected_power_kw: float, duty_hours_day: float | None = None,
+) -> dict:
+    """
+    Category 2 — lighting + always-on receptacle background load, sized per
+    line (v3 — see BEHAVIOR_DUTY_HOURS_DAY_V1 above for why this replaced
+    the old per-espacio aggregate).
+
+    duty_hours_day: engineer override (from the wizard's editable column) —
+    when given, used as-is at CONFIDENCE_USER_CONFIRMED. When None, the
+    default is looked up by keyword (estimate_behavior_duty_hours()).
+    """
+    if duty_hours_day is not None:
+        kwh_day = round(connected_power_kw * duty_hours_day * quantity, 2)
+        return {
+            "kwh_day": kwh_day,
+            "duty_hours_day": duty_hours_day,
+            "confidence": CONFIDENCE_USER_CONFIRMED,
+            "source_detail": f"{connected_power_kw} kW × {duty_hours_day} h/día × {quantity} (horas ajustadas por el ingeniero)",
+        }
+
+    hours, matched = estimate_behavior_duty_hours(load_name)
+    kwh_day = round(connected_power_kw * hours * quantity, 2)
     return {
         "kwh_day": kwh_day,
-        "confidence": CONFIDENCE_BENCHMARK,
-        "source_detail": f"{per_bedroom} kWh/día/espacio × {num_bedrooms} espacios (nivel '{home_class}', tabla v1)",
+        "duty_hours_day": hours,
+        "confidence": CONFIDENCE_BENCHMARK if matched else CONFIDENCE_DEFAULT,
+        "source_detail": (
+            f"{connected_power_kw} kW × {hours} h/día × {quantity} (tabla de uso general v1)"
+            if matched else
+            f"{connected_power_kw} kW × {hours} h/día × {quantity} (sin coincidencia — default {_BEHAVIOR_DUTY_HOURS_DEFAULT_V1} h/día)"
+        ),
     }
 
 
@@ -784,7 +818,7 @@ def estimate_climate_driven(
     return {"kwh_day": kwh_day, "confidence": confidence, "source_detail": source_detail}
 
 
-# ── Power demand factors (v1) ────────────────────────────────────────────────
+# ── Power demand factors (v2 — per line) ─────────────────────────────────────
 # A different question from every kWh/día estimator above: those answer "how
 # much energy does this load use per day"; this answers "how much of its
 # installed (nameplate) power is actually drawing at the same instant as
@@ -792,97 +826,80 @@ def estimate_climate_driven(
 # breaker selection, not the raw Σ nameplate. Summing nameplate power across
 # a load list with many circuits systematically overstates simultaneous draw,
 # the same failure mode the kWh taxonomy above was built to fix for energy —
-# this is the power-side equivalent, reusing the same 6-category taxonomy
-# rather than inventing a second classification system.
+# this is the power-side equivalent.
 #
-# Two factor shapes, chosen per category by how loads in it actually behave:
-#   - Flat: one factor applied to the category's total installed power.
-#     Fits categories where individual loads are small and diversity comes
-#     from how many happen to be on, not from any one dominant item.
-#   - Largest-plus-rest: the single largest line in the category counts at
-#     100% (the one most likely to be running), the rest of the category's
-#     installed power gets a lower factor. Mirrors the NEC Table 220.55-style
-#     "largest + diversified remainder" method used for multiple appliances/
-#     motors that rarely all peak together — fits categories with a few
-#     distinct, individually significant loads.
+# v2 (2026-08-07, on user direction): replaced the old category-level
+# flat/"largest+rest" dispatch with one editable factor PER LINE — matches
+# a real NEC-style circuit schedule (each circuit gets its own demand factor,
+# not a factor shared by every circuit of the same type) and lets the
+# engineer override any single line without changing every other line in its
+# category. DEMAND_FACTOR_DEFAULTS_V1 below is only a starting value shown
+# in the wizard's editable column — compute_demand_load() always reads each
+# line's OWN factor (falling back to this table only when a line genuinely
+# has none set, e.g. an old saved draft from before this field existed).
 #
 # v1, first-pass values — NOT yet calibrated against real installs, same
-# caveat as every other _V1 table in this module. Must be visibly flagged in
-# the UI, engineer-overridable, never presented as more precise than it is.
-
-DEMAND_FACTOR_FIXED_CYCLING_V1 = 0.95  # always-ready, short/near-random duty cycles
-DEMAND_FACTOR_BEHAVIOR_V1 = 0.70       # lighting + receptacles: not every fixture/outlet fires at once
-DEMAND_FACTOR_IGNITION_V1 = 1.0        # negligible magnitude regardless — no diversity needed
-
-# category -> factor applied to the REST of that category's installed power,
-# after its single largest line is counted at 100%.
-DEMAND_CLUSTER_REST_FACTOR_V1: dict[str, float] = {
-    "appliance": 0.55,        # kitchen/laundry tasks — rarely several run together
-    "climate_driven": 0.65,   # multiple A/C units can coincide on hot afternoons
-    "discretionary": 0.80,    # big standalone loads (EV/pool/jacuzzi), least likely to cancel out
+# caveat as every other _V1 table in this module.
+DEMAND_FACTOR_DEFAULTS_V1: dict[str, float] = {
+    "fixed_cycling": 0.95,     # always-ready, short/near-random duty cycles
+    "behavior_driven": 0.70,   # lighting + receptacles: not every fixture/outlet fires at once
+    "ignition_only": 1.0,      # negligible magnitude regardless — no diversity needed
+    "appliance": 0.55,         # kitchen/laundry tasks — rarely several run together
+    "climate_driven": 0.65,    # multiple A/C units can coincide on hot afternoons
+    "discretionary": 0.80,     # big standalone loads (EV/pool/jacuzzi), least likely to cancel out
 }
+_DEMAND_FACTOR_DEFAULT_FALLBACK = 0.70  # unclassifiable/unknown category — never silently drop load
 
-DEMAND_METHOD_FLAT = "flat"
-DEMAND_METHOD_CLUSTER = "largest_plus_rest"
 
-_DEMAND_FLAT_FACTORS_V1: dict[str, float] = {
-    "fixed_cycling": DEMAND_FACTOR_FIXED_CYCLING_V1,
-    "behavior_driven": DEMAND_FACTOR_BEHAVIOR_V1,
-    "ignition_only": DEMAND_FACTOR_IGNITION_V1,
-}
+def default_demand_factor_pct(category: str | None) -> float:
+    return DEMAND_FACTOR_DEFAULTS_V1.get(category, _DEMAND_FACTOR_DEFAULT_FALLBACK)
 
 
 def compute_demand_load(lines: list[dict]) -> dict:
     """
-    Translates installed (nameplate) power into demanded (design) power per
-    category, from the same `lines` list build_load_profile() returns —
-    each line already carries `category`, `quantity`, `connected_power_kw`.
+    Translates installed (nameplate) power into demanded (design) power,
+    summing PER LINE — each line carries `category`, `quantity`,
+    `connected_power_kw`, and its own `demand_factor_pct` (set by
+    build_load_profile(); falls back to default_demand_factor_pct(category)
+    for older lines saved before this field existed).
 
     Returns:
         {
           "categories": [ {category, installed_kw, demand_kw,
-                            factor_applied, method}, ... ], sorted by
-                         installed_kw descending — only categories actually
-                         present in `lines`,
+                            factor_applied}, ... ] — factor_applied is that
+                         category's blended (demand/installed) ratio across
+                         its lines, sorted by installed_kw descending, only
+                         categories actually present in `lines`,
           "total_installed_kw": float,
           "total_demand_kw": float,
           "blended_factor": float,  # total_demand_kw / total_installed_kw
         }
     """
-    by_cat: dict[str, list[float]] = {}
+    by_cat: dict[str, dict[str, float]] = {}
+    total_installed = 0.0
+    total_demand = 0.0
     for line in lines:
         cat = line.get("category")
         kw = float(line.get("connected_power_kw") or 0) * int(line.get("quantity") or 1)
-        by_cat.setdefault(cat, []).append(kw)
+        factor = line.get("demand_factor_pct")
+        factor = float(factor) if factor is not None else default_demand_factor_pct(cat)
+        demand = kw * factor
 
-    categories = []
-    total_installed = 0.0
-    total_demand = 0.0
-    for cat, kws in by_cat.items():
-        installed = round(sum(kws), 3)
-        if cat in _DEMAND_FLAT_FACTORS_V1:
-            factor = _DEMAND_FLAT_FACTORS_V1[cat]
-            demand = round(installed * factor, 3)
-            method = DEMAND_METHOD_FLAT
-        elif cat in DEMAND_CLUSTER_REST_FACTOR_V1:
-            rest_factor = DEMAND_CLUSTER_REST_FACTOR_V1[cat]
-            largest = max(kws) if kws else 0.0
-            rest = installed - largest
-            demand = round(largest + rest * rest_factor, 3)
-            factor = round(demand / installed, 3) if installed > 0 else rest_factor
-            method = DEMAND_METHOD_CLUSTER
-        else:
-            # No factor table for this category (shouldn't happen — every
-            # CATEGORIES entry is covered above) — never silently drop load,
-            # same principle the kWh estimators use for unclassifiable input.
-            factor, demand, method = 1.0, installed, DEMAND_METHOD_FLAT
-
-        categories.append({
-            "category": cat, "installed_kw": installed, "demand_kw": demand,
-            "factor_applied": factor, "method": method,
-        })
-        total_installed += installed
+        entry = by_cat.setdefault(cat, {"installed_kw": 0.0, "demand_kw": 0.0})
+        entry["installed_kw"] += kw
+        entry["demand_kw"] += demand
+        total_installed += kw
         total_demand += demand
+
+    categories = [
+        {
+            "category": cat,
+            "installed_kw": round(v["installed_kw"], 3),
+            "demand_kw": round(v["demand_kw"], 3),
+            "factor_applied": round(v["demand_kw"] / v["installed_kw"], 3) if v["installed_kw"] > 0 else 0.0,
+        }
+        for cat, v in by_cat.items()
+    ]
 
     return {
         "categories": sorted(categories, key=lambda c: -c["installed_kw"]),
@@ -896,21 +913,33 @@ def compute_demand_load(lines: list[dict]) -> dict:
 
 def build_load_profile(
     loads: list[dict],
-    num_bedrooms: int,
-    home_class: str = _DEFAULT_HOME_CLASS,
     lat: float | None = None,
     lon: float | None = None,
     discretionary_answers: dict[str, float] | None = None,
 ) -> dict:
     """
     loads: [{"name": str, "quantity": int, "nameplate_kw": float,
-             "category": str | None}, ...] — no usage-hours field, per the
-           doc's core premise that customers don't have that data reliably.
+             "category": str | None, "demand_factor_pct": float | None,
+             "duty_hours_day": float | None}, ...].
            "category" is optional: if the engineer has already picked one of
            CATEGORIES (e.g. via the wizard's manual override selector, or a
            row added from COMMON_LOADS_CATALOG_V1), it's used as-is and
            classify_load_category() (the AI call) is skipped entirely for
            that line — cheaper and removes any classification uncertainty.
+           "demand_factor_pct" is optional (None -> default_demand_factor_pct
+           (category) is used) — an engineer override of how much of this
+           line's installed power draws simultaneously with everything else
+           (peak-side, read later by compute_demand_load(), not used here).
+           "duty_hours_day" is optional, for EVERY category (not just
+           behavior_driven) — when given, it's an explicit engineer override
+           that replaces whatever category-specific estimator would have run
+           with a plain connected_power_kw × duty_hours_day × quantity
+           calculation. When omitted, each category still uses its own
+           specialized estimator (benchmark table, degree-day model, etc.) as
+           before, and the line reports a BACKED-OUT duty_hours_day (that
+           estimator's own kwh_day ÷ power ÷ quantity) purely for display —
+           so the wizard's Horas/día column never shows a bare gap, without
+           pretending every category is secretly hours-based internally.
     discretionary_answers: optional {load_name: kwh_day} already extracted
            from intake-question answers (AI's role stops at extraction, see
            estimate_discretionary docstring).
@@ -918,15 +947,20 @@ def build_load_profile(
     Returns:
         {
           "lines": [ {load_name, category, quantity, connected_power_kw,
-                      estimated_kwh_day, confidence, source_detail}, ... ],
-          "behavior_aggregate": {kwh_day, confidence, source_detail} — always
-                      present (see note below), never None,
+                      estimated_kwh_day, demand_factor_pct, duty_hours_day,
+                      confidence, source_detail}, ... ] — duty_hours_day is
+                      None only when connected_power_kw is 0 (division has
+                      nothing to back out from),
           "total_kwh_day": float,
+          "total_kwh_day_diversified": float,  # sum(estimated_kwh_day *
+                      # demand_factor_pct) — this is what battery/PV sizing
+                      # (generate_design_scenarios[_hybrid]()) is fed, not
+                      # the raw total, since not every line's duty-hours
+                      # window actually coincides with every other line's.
         }
     """
     discretionary_answers = discretionary_answers or {}
     lines: list[dict] = []
-    behavior_load_count = 0
 
     for load in loads:
         name = load["name"]
@@ -935,46 +969,38 @@ def build_load_profile(
 
         override = load.get("category")
         category = override if override in CATEGORIES else classify_load_category(name)
+        demand_factor_pct = load.get("demand_factor_pct")
+        demand_factor_pct = float(demand_factor_pct) if demand_factor_pct is not None else default_demand_factor_pct(category)
+        duty_override = load.get("duty_hours_day")
 
         if category == "behavior_driven":
-            # Energy still comes from the single aggregate below, never per-line
-            # (see estimate_behavior_aggregate() and the taxonomy doc). But the
-            # line IS emitted, carrying estimated_kwh_day=0.0 and its real
-            # connected_power_kw — because peak watts and energy size different
-            # things. The aggregate is a pure kWh/día figure with no wattage
-            # attached, so before this a listed 1500 W microwave contributed
-            # 0 W to Step 6's inverter-headroom check (which sums
-            # connected_power_kw across profile lines). Emitting a zero-energy
-            # line lets the inverter see the real connected load without
-            # double-counting the kWh. Engineers can still override the 0 in
-            # Step 5's editable kWh/día column if a given site genuinely needs
-            # that load itemized instead of aggregated.
-            behavior_load_count += 1
-            lines.append({
-                "load_name": name,
-                "category": category,
-                "quantity": qty,
-                "connected_power_kw": kw,
-                "estimated_kwh_day": 0.0,
-                "confidence": CONFIDENCE_POWER_ONLY,
-                "source_detail": (
-                    "Energía ya incluida en 'Uso general' (agregado por espacio) — "
-                    "esta línea solo aporta potencia (W) al dimensionamiento del inversor"
-                ),
-            })
-            continue
-        elif category == "fixed_cycling":
-            est = estimate_fixed_cycling(name, qty)
-        elif category == "appliance":
-            est = estimate_appliance_use(name, qty)
-        elif category == "ignition_only":
-            est = estimate_ignition_only(qty)
-        elif category == "discretionary":
-            est = estimate_discretionary(name, discretionary_answers.get(name))
-        elif category == "climate_driven":
-            est = estimate_climate_driven(qty, kw, lat, lon)
+            est = estimate_behavior_line(name, qty, kw, duty_override)
+            duty_hours_day = est["duty_hours_day"]
         else:
-            est = {"kwh_day": 0.0, "confidence": CONFIDENCE_DEFAULT, "source_detail": "Categoría desconocida"}
+            if category == "fixed_cycling":
+                base_est = estimate_fixed_cycling(name, qty)
+            elif category == "appliance":
+                base_est = estimate_appliance_use(name, qty)
+            elif category == "ignition_only":
+                base_est = estimate_ignition_only(qty)
+            elif category == "discretionary":
+                base_est = estimate_discretionary(name, discretionary_answers.get(name))
+            elif category == "climate_driven":
+                base_est = estimate_climate_driven(qty, kw, lat, lon)
+            else:
+                base_est = {"kwh_day": 0.0, "confidence": CONFIDENCE_DEFAULT, "source_detail": "Categoría desconocida"}
+
+            if duty_override is not None and kw > 0:
+                kwh_day_val = round(kw * duty_override * qty, 2)
+                est = {
+                    "kwh_day": kwh_day_val,
+                    "confidence": CONFIDENCE_USER_CONFIRMED,
+                    "source_detail": f"{kw} kW × {duty_override} h/día × {qty} (horas ajustadas por el ingeniero)",
+                }
+                duty_hours_day = duty_override
+            else:
+                est = base_est
+                duty_hours_day = round(est["kwh_day"] / (kw * qty), 2) if kw > 0 and qty > 0 else None
 
         lines.append({
             "load_name": name,
@@ -982,26 +1008,16 @@ def build_load_profile(
             "quantity": qty,
             "connected_power_kw": kw,
             "estimated_kwh_day": est["kwh_day"],
+            "demand_factor_pct": round(demand_factor_pct, 3),
+            "duty_hours_day": duty_hours_day,
             "confidence": est["confidence"],
             "source_detail": est["source_detail"],
         })
 
-    # Always computed, regardless of whether any load was actually classified
-    # behavior_driven — every house has general lighting/outlet consumption
-    # whether or not the customer thought to list it as a "load". An earlier
-    # version only included this when behavior_load_count > 0, which silently
-    # dropped general-use consumption entirely for any load list that didn't
-    # happen to mention lighting/outlets (a common omission) — a real
-    # undercount, not just a missing line item.
-    agg = estimate_behavior_aggregate(num_bedrooms, home_class)
-    behavior_aggregate = {
-        "category": "behavior_driven",
-        "load_count": behavior_load_count,
-        "kwh_day": agg["kwh_day"],
-        "confidence": agg["confidence"],
-        "source_detail": agg["source_detail"],
-    }
+    total = round(sum(l["estimated_kwh_day"] for l in lines), 2)
+    # Diversified per spec: not every line's duty-hours window coincides with
+    # every other line's — same demand_factor_pct already used for peak kW
+    # (compute_demand_load()), applied here to the daily energy total instead.
+    total_diversified = round(sum(l["estimated_kwh_day"] * l["demand_factor_pct"] for l in lines), 2)
 
-    total = round(sum(l["estimated_kwh_day"] for l in lines) + behavior_aggregate["kwh_day"], 2)
-
-    return {"lines": lines, "behavior_aggregate": behavior_aggregate, "total_kwh_day": total}
+    return {"lines": lines, "total_kwh_day": total, "total_kwh_day_diversified": total_diversified}

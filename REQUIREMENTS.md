@@ -812,6 +812,25 @@ Each active project has a maintenance contract (annual visit, extra cost). A sim
 
 This keeps the Projects module useful years after installation.
 
+### 11.8 Design calibration from fleet data (future — PHASES.md Phase 11)
+
+Sizing constants for Off-Grid/Hybrid proposals are derived from **measured performance of installed systems**, not judgement alone, and are refreshed as monitored sites accumulate history.
+
+First calibration completed Aug 2026 (9 sites, ~183 usable days each). Method, evidence, derived constants and open assumptions: [`docs/design-calibration-2026-08.md`](docs/design-calibration-2026-08.md). Its results are already live in `calculations/sizing_off_grid.py`'s tier tables.
+
+**What it produces**
+- Per-site metrics: peak W/kWp, performance ratio vs PVGIS, equivalent cycles/day, min-SoC distribution, night-load fraction, PV coverage, multi-day low-sun derate.
+- A triage verdict per site — `well-matched` / `over-built` / `under-built` / `array-fault` / `monitoring-gap` — separating **design** problems from **asset-health** problems. These are routinely confused: an array can be healthy but heavily curtailed (over-built), or capable at peak yet under-delivering daily (fault).
+- Proposed tier constants, each with the observed range and site count behind it.
+
+**Non-negotiable rules**
+- **Constants are never auto-applied.** The tool proposes a diff against the shipped tiers; an engineer accepts or rejects. A small fleet containing any faulty asset cannot be allowed to rewrite the quoting engine unattended.
+- **A back-test gate must pass before acceptance**: candidate constants, re-run against installed systems, must land near what is actually on the roof at sites that work, keep tier ordering monotonic, and never flag a working site as under-equipped.
+- **Excluded from calibration**: partial days; all-signal-null days (a gateway outage is not zero generation); idle sites (<0.2 cycles/day) for battery constants; faulty arrays (peak <600 W/kWp) for PV constants.
+- **Provenance is recorded** — each accepted constant set is versioned so a proposal can state which calibration produced its numbers.
+
+**Known data constraint.** VRM retains 1-minute data for only ~6 months, so the lowest-irradiance months (Sep–Nov in Costa Rica) are unavailable at full resolution outside a December export window. Seasonal derates are therefore modelled from PVGIS shape rather than measured, and must be labelled as such wherever they influence a quote.
+
 ---
 
 ## 12. Resolved Design Decisions Summary
@@ -885,6 +904,7 @@ This keeps the Projects module useful years after installation.
 - Proposal status Kanban
 - Equipment price history
 - Maintenance service tracking
+- Design calibration from fleet data (§11.8)
 - Multi-user auth (Supabase Auth + RLS)
 - Multi-page proposal document (cover + tech overview)
 - On-Grid (net metering) system type

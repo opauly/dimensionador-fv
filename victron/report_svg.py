@@ -302,7 +302,8 @@ def kpi_svg(d: dict, t: dict) -> str:
     gi_pct = wow_pct(d["gridIndependencePct"], prev_gi)
 
     best = d.get("bestDay")
-    best_sub = f"Best: {_f(best['pv'])} {t['kwh']}" if best else "Best: —"
+    best_sub = (f"{t['bestDayLabel']}: {_f(best['pv'])} {t['kwh']}"
+               if best else f"{t['bestDayLabel']}: —")
     gi_sub = f"{tot['daysSelfSufficient']}/{len(d['dailyGrouped'])} {t['days']}"
     outage_sub = (f"{tot['outageMinutes']} {t['minutes']}" if tot["outageCount"] > 0
                   else t["outagesGridQualityNote"] if flag_grid_quality

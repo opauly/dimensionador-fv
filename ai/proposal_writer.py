@@ -3,10 +3,20 @@ from __future__ import annotations
 
 # Facts the model is allowed to mention, in the order they read naturally in a
 # proposal. Keys absent from system_params are simply skipped, which is what
-# lets one prompt serve both wizards: Grid Zero passes savings/ROI and no
-# battery; Off-Grid passes battery/autonomy and no savings. Anything not listed
-# here is never shown to the model, so internal fields can't leak into a
-# client-facing PDF.
+# lets one prompt serve all three wizards: Grid Zero passes savings/ROI and no
+# battery; Off-Grid passes battery/autonomy_days and no savings; Hybrid passes
+# battery/backup_nights and savings. Anything not listed here is never shown
+# to the model, so internal fields can't leak into a client-facing PDF.
+#
+# autonomy_days and backup_nights are deliberately separate facts, not one
+# shared "autonomy" field: they answer different design questions
+# (off-grid's battery is sized against full days of zero generation;
+# hybrid's is sized against nights of backed-up load while the grid is
+# down) and conflating them let a hybrid proposal go out with a
+# vague/invented autonomy claim when neither figure was actually available
+# to the model (caught 2026-08 on a real client PDF — the model wrote
+# "aproximadamente medio día de autonomía" despite the fact not being in
+# its list at all, a direct violation of the "NO inventes" rule below).
 _FACT_LABELS_ES: list[tuple[str, str]] = [
     ("client_name",           "Cliente"),
     ("location",              "Ubicación"),
@@ -19,6 +29,7 @@ _FACT_LABELS_ES: list[tuple[str, str]] = [
     ("battery_count",         "Cantidad de baterías"),
     ("battery_kwh",           "Capacidad del banco (kWh)"),
     ("autonomy_days",         "Días de autonomía"),
+    ("backup_nights",         "Noches de respaldo ante corte de red"),
     ("daily_generation_kwh",  "Generación diaria estimada (kWh/día)"),
     ("daily_consumption_kwh", "Consumo diario estimado (kWh/día)"),
     ("savings_year1_usd",     "Ahorro estimado año 1 (USD)"),

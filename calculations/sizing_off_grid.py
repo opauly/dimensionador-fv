@@ -27,6 +27,7 @@ report ~20-22 m² for this panel — flag to the user before treating 16 m² as 
 """
 from __future__ import annotations
 import math
+from dataclasses import dataclass
 
 
 def size_battery_bank(
@@ -240,6 +241,14 @@ def simulate_battery_soc(
         unmet_load_days: days the battery would have been driven below its
             hard DoD floor — a real load-shedding/blackout risk, not just a
             healthy-cycling miss. This is what scenario search gates on.
+        unserved_energy_kwh: the actual kWh shortfall summed across every
+            unmet_load_day (floor_kwh - soc_kwh before the day gets clamped
+            at the floor) — a day count alone can't distinguish a 0.1 kWh
+            near-miss from a 5 kWh real shortfall; this is the energy-side
+            complement used by run_daily_energy_balance_check() below.
+        days_at_reserve_floor: days ending below `target_min_soc_pct` (the
+            scenario's softer reserve/preference line, not the hard DoD
+            floor) — the day-count companion to longest_low_soc_streak_days.
         longest_low_soc_streak_days: longest consecutive run of days ending
             below `target_min_soc_pct` (the scenario's preference line, not
             the hard floor) — informational: extended shallow operation
@@ -257,7 +266,8 @@ def simulate_battery_soc(
     if capacity_kwh <= 0 or not daily_generation_kwh:
         return {
             "min_soc_actual_pct": 0.0, "days_full_pct": 0.0,
-            "unmet_load_days": len(daily_generation_kwh or []), "longest_low_soc_streak_days": 0,
+            "unmet_load_days": len(daily_generation_kwh or []), "unserved_energy_kwh": 0.0,
+            "days_at_reserve_floor": len(daily_generation_kwh or []), "longest_low_soc_streak_days": 0,
             "daily_charge_in_kwh": [0.0] * len(daily_generation_kwh or []),
             "utilization_pct": 0.0, "total_generation_kwh": 0.0, "curtailed_kwh": 0.0,
         }
@@ -270,6 +280,8 @@ def simulate_battery_soc(
     min_soc_kwh = soc_kwh
     days_full = 0
     unmet_load_days = 0
+    unserved_energy_kwh = 0.0
+    days_at_reserve_floor = 0
     low_streak = current_streak = 0
     daily_charge_in_kwh = []
     total_generation_kwh = 0.0
@@ -292,10 +304,12 @@ def simulate_battery_soc(
         soc_kwh -= daily_kwh_consumption
         if soc_kwh < floor_kwh:
             unmet_load_days += 1
+            unserved_energy_kwh += floor_kwh - soc_kwh  # deficit BEFORE the clamp below — the real shortfall
             soc_kwh = floor_kwh  # can't physically go lower — real systems load-shed instead
         min_soc_kwh = min(min_soc_kwh, soc_kwh)
 
         if soc_kwh < target_kwh:
+            days_at_reserve_floor += 1
             current_streak += 1
             low_streak = max(low_streak, current_streak)
         else:
@@ -306,6 +320,8 @@ def simulate_battery_soc(
         "min_soc_actual_pct": round(max(0.0, min_soc_kwh / capacity_kwh * 100), 1),
         "days_full_pct": round(days_full / n_days * 100, 1),
         "unmet_load_days": unmet_load_days,
+        "unserved_energy_kwh": round(unserved_energy_kwh, 2),
+        "days_at_reserve_floor": days_at_reserve_floor,
         "longest_low_soc_streak_days": low_streak,
         "utilization_pct": round((1 - curtailed_kwh / total_generation_kwh) * 100, 1) if total_generation_kwh > 0 else 0.0,
         "total_generation_kwh": round(total_generation_kwh, 1),
@@ -316,6 +332,106 @@ def simulate_battery_soc(
         # which aggregates this into a real "recarga de batería" series
         # instead of a flat max(0, generation-consumption) approximation.
         "daily_charge_in_kwh": daily_charge_in_kwh,
+    }
+
+
+# ── Non-authoritative verification pass (v1) ─────────────────────────────────
+# Authority split, confirmed with Oscar (2026-08-06 — same conversation as
+# _OFF_GRID_DESIGN_TIERS below): the static design-tier model DECIDES the
+# quoted equipment. This function only checks the ALREADY-SELECTED design
+# against a real reference year and raises a flag — it never resizes the
+# array/battery and never picks a different scenario. Called after
+# generate_design_scenarios()/_hybrid(), not instead of it.
+#
+# Deliberately does not expose a reliability %, loss-of-load HOURS, event
+# counts, or any statistical/probabilistic claim (median/P25 autonomy,
+# equivalent-full-cycles, hourly dispatch) — explicitly out of scope per the
+# same conversation ("what I would remove from scope"): the daily-resolution
+# PVGIS series behind simulate_battery_soc() doesn't support those claims,
+# and a quoting tool doesn't need them. Only a qualitative status plus the
+# handful of numbers a designer would actually check by hand.
+#
+# Thresholds below are v1 policy, not physics — same "first pass, tune later"
+# caveat as every other _V1 constant in this module.
+_YELLOW_STREAK_DAYS_THRESHOLD = 3     # several consecutive low-SoC days
+_YELLOW_RESERVE_FLOOR_DAYS_THRESHOLD = 10  # repeatedly touching the reserve across the year
+_RED_UNMET_DAYS_THRESHOLD = 5         # more than a handful of real shortfall days/year
+_RED_UNSERVED_ENERGY_KWH_THRESHOLD = 5.0   # cumulative shortfall big enough to matter, not a rounding artifact
+
+
+def run_daily_energy_balance_check(
+    daily_generation_kwh: list[float],
+    daily_kwh_consumption: float,
+    capacity_kwh: float,
+    battery_dod_pct: float,
+    reserve_soc_pct: float,
+    round_trip_eff: float = _BATTERY_ROUND_TRIP_EFFICIENCY,
+) -> dict:
+    """
+    Runs simulate_battery_soc() against an already-selected design and
+    classifies the result as green/yellow/red per the rules above — the
+    quoting tool's only reliability-adjacent claim, and a qualitative one.
+
+    reserve_soc_pct is the design's own chosen reserve (off-grid: the tier's
+    reserve_soc_pct; hybrid: same field, ESS-reserve meaning) — passed
+    straight through as simulate_battery_soc()'s target_min_soc_pct.
+
+    Returns:
+        {
+          "status": "green" | "yellow" | "red",
+          "minimum_soc_pct": float,
+          "days_at_reserve_floor": int,
+          "longest_reserve_floor_streak_days": int,
+          "unmet_load_days": int,
+          "unserved_energy_kwh": float,
+          "energy_served_pct": float,
+          "notes": [str, ...],
+        }
+    """
+    sim = simulate_battery_soc(
+        daily_generation_kwh, daily_kwh_consumption, capacity_kwh, battery_dod_pct, reserve_soc_pct, round_trip_eff,
+    )
+    n_days = len(daily_generation_kwh) or 1
+    annual_consumption_kwh = daily_kwh_consumption * n_days
+    energy_served_pct = (
+        round(max(0.0, 1 - sim["unserved_energy_kwh"] / annual_consumption_kwh) * 100, 2)
+        if annual_consumption_kwh > 0 else 100.0
+    )
+
+    notes: list[str] = []
+    if sim["unmet_load_days"] > 0:
+        material = (
+            sim["unmet_load_days"] >= _RED_UNMET_DAYS_THRESHOLD
+            or sim["unserved_energy_kwh"] >= _RED_UNSERVED_ENERGY_KWH_THRESHOLD
+        )
+        status = "red" if material else "yellow"
+        notes.append(
+            f"{sim['unmet_load_days']} día(s)/año con energía no servida "
+            f"({sim['unserved_energy_kwh']} kWh/año) en el año de referencia simulado."
+        )
+    elif (
+        sim["longest_low_soc_streak_days"] >= _YELLOW_STREAK_DAYS_THRESHOLD
+        or sim["days_at_reserve_floor"] >= _YELLOW_RESERVE_FLOOR_DAYS_THRESHOLD
+    ):
+        status = "yellow"
+        notes.append(
+            f"La batería opera en o por debajo de la reserva configurada en "
+            f"{sim['days_at_reserve_floor']} día(s)/año del año simulado "
+            f"(racha más larga: {sim['longest_low_soc_streak_days']} días consecutivos)."
+        )
+    else:
+        status = "green"
+        notes.append("El banco de baterías no cruza la reserva configurada en el año de referencia simulado.")
+
+    return {
+        "status": status,
+        "minimum_soc_pct": sim["min_soc_actual_pct"],
+        "days_at_reserve_floor": sim["days_at_reserve_floor"],
+        "longest_reserve_floor_streak_days": sim["longest_low_soc_streak_days"],
+        "unmet_load_days": sim["unmet_load_days"],
+        "unserved_energy_kwh": sim["unserved_energy_kwh"],
+        "energy_served_pct": energy_served_pct,
+        "notes": notes,
     }
 
 
@@ -706,3 +822,949 @@ def estimate_hybrid_savings_pct(
         "savings_crc": round(savings_crc),
         "savings_pct": savings_pct,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Static design-tier scenario model (v2 — replaces the iterative reliability
+# search above as the live Step 6 driver; see generate_design_scenarios()
+# further down in this module once built).
+#
+# Authority split, confirmed with Oscar (2026-08-06):
+#   - This static model DECIDES the quoted equipment: load energy, coincident
+#     peak, reserve SoC, PV design factor, worst-month PVGIS adequacy,
+#     inverter headroom and equipment compatibility.
+#   - The legacy day-by-day simulation (simulate_battery_soc(), further up in
+#     this module) is demoted to a non-authoritative verification pass run
+#     AFTER a design is selected — it may raise a green/yellow/red flag on
+#     the chosen design, but it never resizes the array/battery or picks a
+#     different scenario. See run_daily_energy_balance_check() (planned).
+#   - find_array_for_reliability()'s "grow the array until N days/year clear
+#     a reliability target" search is retired from the sizing path for the
+#     same reason: it would silently compete with the static factors above
+#     for authority over the quoted array size. Kept in place, unused by the
+#     new path, during the migration.
+#   - No generator/genset modeling, no loss-of-load-hours, no unmet-load-day
+#     counts, no statistical outage-starting-SoC distribution — the daily
+#     PVGIS series this tool has doesn't support those claims. Reliability is
+#     expressed qualitatively per tier (see label/description), not as a %.
+#
+# The tables below are engineering POLICY, not physics — each numeric field
+# is a defensible default picked from the middle/conservative end of a wider
+# acceptable range (documented per-field), meant to be reviewed and tuned,
+# not treated as a derived constant.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class OffGridDesignTier:
+    """One design tier's static sizing policy for an off-grid system."""
+    key: str
+    label: str
+    # Lower operational/emergency SoC boundary — NOT a normal daily cycling
+    # target. Actual daily cycling depth is an emergent result of load, PV,
+    # battery size and weather; this is the floor the design should avoid
+    # crossing except under an explicit emergency strategy.
+    reserve_soc_pct: float
+    # Days of average daily consumption the battery alone must be able to
+    # cover, independent of same-day PV production.
+    autonomy_days: float
+    # Initial PV sizing check: E_PV,target = E_load × pv_design_factor.
+    # Verified against PVGIS afterward, not treated as sufficient on its own.
+    pv_design_factor: float
+    # Which PVGIS monthly figure the design factor gets verified against —
+    # "average_month" (annual average) or "worst_month" (lowest-yield month
+    # in the monthly series).
+    solar_resource_basis: str
+    # Target ceiling for coincident peak load as a % of inverter continuous
+    # rating — leaves headroom for surge/starting currents and future loads.
+    inverter_loading_target_pct: float
+    # Client-stated expected future increase in daily energy and peak demand,
+    # % — reported as expansion readiness, not auto-applied to equipment size.
+    growth_energy_pct: float
+    growth_peak_pct: float
+    # "none" | "one" | "two" — number of MPPT/string expansion provisions
+    # reserved in the design (spare charge-controller input / string slot),
+    # reported as expansion readiness alongside the growth %s above.
+    expansion_provision: str
+
+
+# ── Calibration, 2026-08 ────────────────────────────────────────────────────
+# Values below are derived from 12 months of VRM data across 9 installed sites
+# (Feb-Aug 2026 usable; VRM only retains 1-minute data ~6 months). Full method,
+# evidence and caveats: docs/design-calibration-2026-08.md
+#
+# PROVISIONAL. Off-grid rests on 3 sites, one of which (roberto-villalobos)
+# has an array delivering ~70-75% of nameplate capability, so its outcomes
+# cannot be read as a verdict on its design. These constants are therefore
+# NOT fitted to off-grid outcomes; they are derived from the physics measured
+# on healthy hybrid arrays (PV capability, low-sun run statistics, load shape)
+# plus an explicit no-grid-backstop margin. See the doc's "Open assumptions".
+#
+# reserve_soc_pct: 25/35/50 — T1/T3 aligned with the hybrid tiers (engineer
+#   decision, 2026-08), T2 trimmed from 40 to 35 after back-testing showed it
+#   costs zero real protection (see below), but this does NOT mean the same
+#   thing as on a hybrid and the difference matters. On a hybrid this is a
+#   real inverter setting: the pack stops there and the grid takes over.
+#   Off-grid systems have no min-SoC setting at all — nothing enforces this
+#   line, and a bad enough week will discharge straight through it. Here it
+#   is purely SIZING HEADROOM: capacity that is bought and deliberately not
+#   planned into the autonomy figure.
+#
+#   What it buys is FAULT TOLERANCE, not weather margin — weather is already
+#   covered on the PV side (at 3.0x coverage a 3-day low-sun run at the
+#   measured 67% derate still delivers ~2.0x load). The one real failure in
+#   the fleet was karen-montealegre-guarda hitting 5% SoC during a 3-day TOTAL
+#   PV outage (0.00 kWh/day — an equipment fault, not clouds); its 2.76 days
+#   to empty were not enough. T2's 35% reserve still gives 4.29 days to the
+#   hard floor (guarda's daily load, 4.97 kWh battery units) — identical to
+#   40%, because both round up to the same 3-unit bank. T3's 50% is kept
+#   (not trimmed to 40%) precisely because at 40% it collapses onto the same
+#   bank as T2 for that load — 45%+ is where a 4th unit actually buys T3 real
+#   extra autonomy over T2.
+#
+#   Cost of the choice, stated plainly: T2 lands at 4.11x nominal per kWh/day
+#   of load and T3 at 5.48x, against an installed fleet spanning 1.79-3.19x.
+#   Every off-grid quote is therefore larger than anything currently in
+#   service. That is a deliberate service-response decision (remote sites,
+#   slow visits), not a value fitted to observed outcomes.
+#
+#   UI note: labelling this "reserva SoC" on an off-grid quote implies a
+#   setting the client does not have. Prefer wording like "margen ante falla
+#   de FV (dias)" — describe the days-to-empty it buys, not a SoC floor.
+# autonomy_days: 2.0/2.25/2.5 days of usable energy. Observed installed
+#   usable-kWh per kWh/day of load: 1.70 (villalobos, stressed - but see the
+#   array caveat), 2.21 (karen, never stressed), 3.03 (guarda, only failed
+#   during a 3-day PV fault).
+# pv_design_factor: 3.0/3.25/3.5 x daily load, measured as delivered coverage
+#   from a HEALTHY array (kWp x PVGIS_annual x 0.88). Sites in service run
+#   3.11-4.19. This is ~2.2x the hybrid factor, which is the point: at 3.0x,
+#   a 3-day low-sun run (67% of mean yield, measured) still delivers 2.0x
+#   load, so the battery only has to cover nightly cycling rather than the
+#   whole run. Below ~1.5x the same run runs a real deficit.
+_OFF_GRID_DESIGN_TIERS: list[OffGridDesignTier] = [
+    OffGridDesignTier(
+        key="1", label="Mínimo aceptable",
+        reserve_soc_pct=25.0, autonomy_days=2.0, pv_design_factor=3.00,
+        solar_resource_basis="average_month", inverter_loading_target_pct=85.0,
+        growth_energy_pct=0.0, growth_peak_pct=0.0, expansion_provision="none",
+    ),
+    OffGridDesignTier(
+        key="2", label="Recomendado",
+        reserve_soc_pct=35.0, autonomy_days=2.25, pv_design_factor=3.25,
+        solar_resource_basis="worst_month", inverter_loading_target_pct=75.0,
+        growth_energy_pct=15.0, growth_peak_pct=15.0, expansion_provision="one",
+    ),
+    OffGridDesignTier(
+        key="3", label="Máxima autonomía + crecimiento",
+        reserve_soc_pct=50.0, autonomy_days=2.5, pv_design_factor=3.50,
+        solar_resource_basis="worst_month", inverter_loading_target_pct=68.0,
+        growth_energy_pct=27.0, growth_peak_pct=27.0, expansion_provision="two",
+    ),
+]
+
+
+@dataclass(frozen=True)
+class HybridDesignTier:
+    """One design tier's static sizing policy for a hybrid (solar->battery->grid) system."""
+    key: str
+    label: str
+    # Victron-ESS-style "minimum SoC unless grid fails": the SoC floor
+    # reserved from normal grid-connected self-consumption cycling, released
+    # for use only during an outage (subject to the configured emergency
+    # behavior). Same mechanism as reserve_soc_pct above, different consumer.
+    reserve_soc_pct: float
+    # Nights of the backed-up load the usable battery window must carry.
+    #
+    # This REPLACED backup_autonomy_hours (was 6/12/36 h). The hours model
+    # sized for N hours of uninterrupted drain, a scenario the fleet data says
+    # does not occur: PV recharges the bank every day an outage runs. During a
+    # 33-hour island at vista-atenas-lp-m3 the pack never dropped below 72%
+    # SoC — it drained overnight and recovered to 100% by midday, still with
+    # no grid. The binding case is therefore ONE NIGHT of load, not N hours.
+    # See docs/design-calibration-2026-08.md §"Why backup hours was wrong".
+    backup_nights: float
+    # Nights of the SERVED night load (critical + shiftable) that the daily
+    # cycling window — the range above the reserve line — must carry.
+    #
+    # This is the layer that actually decides hybrid battery size, and it is
+    # directly measurable on installed systems as
+    #     (nominal x (100 - reserve_soc) / 100) / night_load_kwh
+    # Fleet: rebeca-ruiz-casona 0.97 (best performer), apartamento 1.34,
+    # vista-atenas-lp-m1 1.54, m2 1.77, m3 2.91 (over-built, idles at 0.50
+    # cycles/day). Tier values span the working part of that range.
+    cycling_nights: float
+    # "critical" | "critical_plus_comfort" | "whole_building" — which loads
+    # the backup figure above is computed against.
+    battery_basis: str
+    # Target PV coverage: (kWp x PVGIS_annual_daily x PR) / daily load.
+    # Replaced the old pv_sizing_objective string + hardcoded margins, which
+    # could not express "how much PV is too much" — the thing the data is
+    # clearest about (see the exporting/non-exporting note below).
+    pv_coverage: float
+    # Target ceiling for backed-up coincident peak as a % of the inverter's
+    # STANDALONE/islanded continuous rating — checked separately from the
+    # grid-connected/passthrough rating (see the dual inverter-mode check).
+    inverter_islanded_loading_target_pct: float
+    growth_energy_pct: float
+    growth_peak_pct: float
+    expansion_provision: str
+
+
+# ── Calibration, 2026-08 ────────────────────────────────────────────────────
+# Derived from 5 clean hybrid sites x ~183 usable days each.
+# Full evidence: docs/design-calibration-2026-08.md
+#
+# reserve_soc_pct: 25/35/45 (engineer decision, 2026-08). T1 sits on the
+#   observed configured floor (25%, casona). T2's 35% has NO installed system
+#   running at it — the fleet's real configured floors are 25% (casona, which
+#   already imports 22% from grid, i.e. mildly under-batteried even there) and
+#   38-40% (the three Vista meters, comfortable) — 35% is a deliberate
+#   interpolation between them, not a measured value, chosen because T2 is the
+#   default/recommended sale and the safer end of that gap. T3's 45% is ABOVE
+#   anything in the fleet: a deliberate product choice for the maximum-
+#   resilience tier (more energy held back for an outage), not a measured
+#   value. Note the cost: a higher reserve shrinks the daily cycling window,
+#   so the same cycling_nights needs a bigger bank, and the battery is
+#   exercised less (fleet cycles/day falls off above ~40% reserve). Was
+#   20/45/67 before calibration, 25/40/50 immediately after it.
+# backup_nights: 1.0/1.5/2.0 — nights of CRITICAL load the full DoD window
+#   must carry with the grid down. Rarely the binding layer (see cycling_nights)
+#   but it is the resilience promise the tier makes to the client.
+# cycling_nights: 1.0/1.25/1.6 — the layer that actually sets hybrid battery
+#   size. Measured directly on installed systems as window/night-load:
+#   casona 0.97 (best performer in the fleet, 0.70 cycles/day, one day below
+#   20% SoC in 183), apartamento 1.34, m1 1.54, m2 1.77, m3 2.91 (over-built,
+#   idles at 0.50 cycles/day). T1 sits at the proven-tight end, T3 below the
+#   point where the battery stops being exercised.
+# pv_coverage: 1.3/1.5/1.7. Sites in service run 1.32-2.14. Above ~1.7 the
+#   extra array is not harvested unless the site EXPORTS: casona and
+#   apartamento have the identical 0.42 kWp per kWh/day, but casona sends 49%
+#   to the grid and returns PR 0.93 while apartamento, with no export path,
+#   returns 0.48. vista-atenas-lp-m1 at 2.14 coverage harvests no more than
+#   m3 at 1.32. For an exporting site these ceilings do not apply — surplus
+#   is monetised rather than curtailed.
+_HYBRID_DESIGN_TIERS: list[HybridDesignTier] = [
+    HybridDesignTier(
+        key="1", label="Mínimo aceptable",
+        reserve_soc_pct=25.0, backup_nights=1.0, cycling_nights=1.0,
+        battery_basis="critical", pv_coverage=1.30,
+        inverter_islanded_loading_target_pct=85.0,
+        growth_energy_pct=0.0, growth_peak_pct=0.0, expansion_provision="none",
+    ),
+    HybridDesignTier(
+        key="2", label="Recomendado",
+        reserve_soc_pct=35.0, backup_nights=1.5, cycling_nights=1.25,
+        battery_basis="critical_plus_comfort", pv_coverage=1.50,
+        inverter_islanded_loading_target_pct=75.0,
+        growth_energy_pct=15.0, growth_peak_pct=15.0, expansion_provision="one",
+    ),
+    HybridDesignTier(
+        key="3", label="Máxima autonomía + crecimiento",
+        reserve_soc_pct=45.0, backup_nights=2.0, cycling_nights=1.6,
+        battery_basis="whole_building", pv_coverage=1.70,
+        inverter_islanded_loading_target_pct=68.0,
+        growth_energy_pct=27.0, growth_peak_pct=27.0, expansion_provision="two",
+    ),
+]
+
+# Performance ratio of a healthy array against PVGIS, used to convert a target
+# PV coverage into kWp. Measured: rebeca-ruiz-casona runs 0.93 of PVGIS while
+# exporting 49% of its output (so it is essentially uncurtailed and the figure
+# is a true capability reading); vista-atenas-lp-m3 returns 0.93 of intent.
+# 0.88 carries a small margin for soiling and degradation over the design life.
+_HEALTHY_ARRAY_PR = 0.88
+
+# Fraction of daily load that lands between 18:00 and 06:00, used when the
+# caller does not supply a measured value. Fleet median is 40% (range 17-54%
+# across 9 sites), so this is a real default rather than a guess — but it is
+# the dominant battery-sizing input, and a site with an unusual profile (a
+# daytime-heavy commercial load, say) should override it.
+_NIGHT_LOAD_FRACTION_DEFAULT = 0.40
+
+# Fraction of its own mean yield a healthy array still delivers across a
+# multi-day low-sun run — the off-grid design case, and measurable from
+# grid-tied sites because it is a weather property, not a topology one.
+# 1-in-50 values from 3 healthy arrays, Feb-Aug 2026.
+_LOW_SUN_DERATE = {1: 0.50, 2: 0.63, 3: 0.67, 5: 0.72, 7: 0.74}
+
+# PV coverage a site with no export path can actually absorb. Beyond this the
+# MPPT throttles once the battery is full and the load is served, so the extra
+# array never becomes kWh. vista-atenas-lp-m1 sits at 2.14x coverage and
+# harvests no more than vista-atenas-lp-m3 at 1.32x.
+_NON_EXPORTING_COVERAGE_CEILING = 1.75
+
+# Recharge headroom: what the array has left after serving the daytime load,
+# divided by the energy needed to refill that night's discharge. Below 1.0 the
+# bank cannot get back to full on a typical day, so it starts each night lower
+# than the design assumes; the site then leans on the grid (hybrid) or drifts
+# down across consecutive days (off-grid).
+#
+# This is a TIMING check, not an energy one. On pure energy the recharge is
+# nearly free — the battery returns what it took, minus round-trip losses of
+# roughly 4% of daily load — and the 1.3-1.7x coverage already absorbs that.
+# What the coverage factor does NOT guarantee is that the surplus lands inside
+# the solar window, alongside the daytime load, in the same day.
+#
+# Fleet (hybrid): rebeca-ruiz-apartamento sits at 0.61 and NEVER reached float
+# in 183 days while importing 26% from the grid — the clearest case. m1/m2 sit
+# at 1.43 (float ~70% of days, ~10% grid), m3 at 2.14 (89%, 2.3% grid).
+# Off-grid roberto-villalobos is 0.98, right on the line.
+#
+# PROVISIONAL: 5 hybrid sites cannot place this threshold precisely, and the
+# metric deliberately does not explain every case — rebeca-ruiz-casona has
+# ample headroom (2.17) yet still imports 22%, because its constraint is
+# battery size, not recharge capability. The two failure modes are separate
+# and both are reported.
+_RECHARGE_HEADROOM_MIN = 1.0
+_RECHARGE_HEADROOM_COMFORTABLE = 1.4
+
+
+
+# Typical LiFePO4 round-trip efficiency and typical off-grid inverter
+# (DC->AC + AC->DC charging) conversion efficiency — used only as the default
+# arguments to generate_design_scenarios() below; neither is read from the
+# battery/inverter catalog because those tables don't carry an explicit
+# efficiency field today.
+_BATTERY_ROUND_TRIP_EFF_DEFAULT = 0.95
+_INVERTER_CONVERSION_EFF_DEFAULT = 0.96
+
+_DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+
+def _monthly_to_daily_specific_yield(monthly_kwh_kwp: list[float]) -> list[float]:
+    """PVGIS's 12 monthly kWh/kWp TOTALS -> 12 average daily kWh/kWp/day figures."""
+    return [m / d for m, d in zip(monthly_kwh_kwp, _DAYS_IN_MONTH)]
+
+
+def generate_design_scenarios(
+    panel: dict,
+    charge_controller: dict,
+    battery: dict,
+    inverter: dict,
+    daily_kwh_consumption: float,
+    peak_demand_kw: float,
+    monthly_kwh_kwp: list[float],
+    inverter_qty: int = 1,
+    max_cc: int = 4,
+    battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT,
+    inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+    tiers: list[OffGridDesignTier] | None = None,
+) -> list[dict]:
+    """
+    Static design-tier scenario generator — the v2 replacement for
+    generate_reliability_scenarios() as Step 6's live driver (see the module
+    comment above _OFF_GRID_DESIGN_TIERS for the authority split with the
+    legacy day-by-day simulation, which this function does NOT call).
+
+    Sizes each of the 3 design tiers independently from static policy
+    factors instead of an iterative reliability search:
+      1. Battery — usable capacity down to the tier's reserve SoC must cover
+         `autonomy_days` of average consumption, after round-trip and
+         inverter conversion losses. The usable-DoD window is capped at the
+         battery's own rated dod_pct if that's tighter than the reserve-SoC
+         window (whichever constraint is stricter wins, same principle used
+         elsewhere in this module).
+      2. PV array — sized to a target daily energy (daily_kwh_consumption *
+         pv_design_factor), converted to a target kW via PVGIS's own daily
+         specific yield for either the annual average or the worst month
+         (per tier's solar_resource_basis). PVGIS's monthly_kwh_kwp already
+         has the API's configured system loss baked in, so no extra
+         derating is applied here on top of it. Both bases are reported
+         regardless of which one the tier is anchored to, so "meets worst
+         month" is always visible even for tiers sized off the average.
+      3. Inverter — peak_demand_kw checked against inverter_qty * inverter
+         continuous rating * the tier's loading-target ceiling. If it
+         doesn't clear, the qty that WOULD clear it is reported — equipment
+         selection stays a human decision, nothing here auto-resizes it.
+
+    Returns one dict per tier (in tier order). No unmet-load-day count, no
+    reliability %, no generator/genset logic — every field here is either a
+    static input, a derived design number, or a pass/fail against this
+    tier's own policy ceiling.
+    """
+    from calculations.mppt import find_array_for_target_kw
+
+    defs = tiers or _OFF_GRID_DESIGN_TIERS
+    daily_yields = _monthly_to_daily_specific_yield(monthly_kwh_kwp)
+    avg_daily_yield = sum(daily_yields) / len(daily_yields)
+    worst_month_idx = min(range(len(daily_yields)), key=lambda i: daily_yields[i])
+    worst_daily_yield = daily_yields[worst_month_idx]
+
+    battery_dod_pct = float(battery.get("dod_pct") or 80)
+    battery_capacity_kwh = float(battery["capacity_kwh"])
+    inverter_kw = float(inverter["kw"])
+
+    results = []
+    for tier in defs:
+        # ── 1. Battery ──────────────────────────────────────────────────
+        dod_usable_pct = min(100.0 - tier.reserve_soc_pct, battery_dod_pct)
+        usable_kwh_needed = daily_kwh_consumption * tier.autonomy_days
+        nominal_kwh_needed = usable_kwh_needed / (
+            (dod_usable_pct / 100.0) * battery_round_trip_eff * inverter_eff
+        )
+        battery_count = max(1, math.ceil(nominal_kwh_needed / battery_capacity_kwh))
+        total_kwh_installed = round(battery_count * battery_capacity_kwh, 2)
+        battery_bank = {
+            "battery_count": battery_count,
+            "total_kwh_installed": total_kwh_installed,
+            "reserve_soc_pct": tier.reserve_soc_pct,
+            "dod_usable_pct": round(dod_usable_pct, 1),
+            "usable_kwh_for_autonomy": round(usable_kwh_needed, 2),
+            "autonomy_days": tier.autonomy_days,
+            "capped_by_battery_dod_rating": battery_dod_pct < (100.0 - tier.reserve_soc_pct),
+        }
+
+        # ── 2. PV array ─────────────────────────────────────────────────
+        # Sized against ANNUAL average yield x the healthy-array PR, because
+        # that is how pv_design_factor was measured (delivered coverage =
+        # kWp x PVGIS_annual x 0.88 / load; sites in service run 3.11-4.19).
+        # Sizing the 3.0-3.5x factor against worst-month yield instead would
+        # apply the seasonal margin twice — the factor already contains it.
+        # Worst month is still checked below, but as an adequacy GATE (does
+        # the weakest month still cover daily consumption?) rather than as the
+        # sizing basis.
+        target_daily_kwh = daily_kwh_consumption * tier.pv_design_factor
+        deliverable_per_kw = avg_daily_yield * _HEALTHY_ARRAY_PR
+        target_system_kw = (target_daily_kwh / deliverable_per_kw
+                            if deliverable_per_kw > 0 else 0.0)
+
+        array = find_array_for_target_kw(panel, charge_controller, target_system_kw, max_cc=max_cc)
+        if array is None:
+            results.append({
+                "scenario": tier.key,
+                "label": tier.label,
+                "error": "No existe una combinación serie/paralelo válida para este panel + controlador.",
+            })
+            continue
+
+        avg_daily_generation = round(array["system_kw"] * deliverable_per_kw, 2)
+        worst_daily_generation = round(array["system_kw"] * worst_daily_yield * _HEALTHY_ARRAY_PR, 2)
+        basis_generation = worst_daily_generation if tier.solar_resource_basis == "worst_month" else avg_daily_generation
+        # The gate that actually matters off-grid: in the weakest month, does
+        # the array still out-produce the daily load? Falling below 1.0 here
+        # means the bank drains a little every day of that month with no grid
+        # to make it up — the failure mode roberto-villalobos lives in
+        # (delivered coverage 1.03x, 7 days below 20% SoC).
+        worst_month_load_coverage = (worst_daily_generation / daily_kwh_consumption
+                                     if daily_kwh_consumption > 0 else None)
+        pv_check = {
+            "target_daily_kwh": round(target_daily_kwh, 2),
+            "pv_coverage_target": tier.pv_design_factor,
+            "pv_coverage_actual": (round(avg_daily_generation / daily_kwh_consumption, 2)
+                                   if daily_kwh_consumption > 0 else None),
+            "assumed_array_pr": _HEALTHY_ARRAY_PR,
+            "solar_resource_basis": tier.solar_resource_basis,
+            "target_system_kw": round(target_system_kw, 2),
+            "avg_month_daily_generation_kwh": avg_daily_generation,
+            "worst_month_daily_generation_kwh": worst_daily_generation,
+            "worst_month_index": worst_month_idx,
+            "worst_month_load_coverage": (round(worst_month_load_coverage, 2)
+                                          if worst_month_load_coverage is not None else None),
+            "worst_month_covers_load": bool(
+                worst_month_load_coverage is not None and worst_month_load_coverage >= 1.0),
+            "meets_target_daily_kwh": basis_generation >= target_daily_kwh * 0.98,  # 2% rounding tolerance
+        }
+
+        # ── 3. Inverter ─────────────────────────────────────────────────
+        available_kw = inverter_kw * inverter_qty
+        loading_pct = round(peak_demand_kw / available_kw * 100, 1) if available_kw > 0 else None
+        within_inverter_target = loading_pct is not None and loading_pct <= tier.inverter_loading_target_pct
+        inverter_qty_recommended = (
+            math.ceil(peak_demand_kw / (inverter_kw * tier.inverter_loading_target_pct / 100.0))
+            if inverter_kw > 0 else None
+        )
+        inverter_check = {
+            "inverter_qty": inverter_qty,
+            "available_kw": round(available_kw, 2),
+            "loading_pct": loading_pct,
+            "loading_target_pct": tier.inverter_loading_target_pct,
+            "within_target": within_inverter_target,
+            "inverter_qty_recommended": inverter_qty_recommended,
+        }
+
+        results.append({
+            "scenario": tier.key,
+            "label": tier.label,
+            "battery": battery_bank,
+            "pv": pv_check,
+            "inverter": inverter_check,
+            "array": array,
+            "expansion_provision": tier.expansion_provision,
+            "growth_energy_pct": tier.growth_energy_pct,
+            "growth_peak_pct": tier.growth_peak_pct,
+            # meets_target_daily_kwh folded in: an array that misses its own
+            # tier's PV target (e.g. capped by max_cc) is not a working design,
+            # even if the equipment combo itself is electrically valid and the
+            # inverter clears its loading target. worst_month_covers_load is
+            # deliberately NOT included here — T1 is sized against the average
+            # month by design (solar_resource_basis), so failing worst-month
+            # coverage there is expected policy, not a broken design; it stays
+            # its own dedicated warning instead.
+            "within_limits": (
+                bool(array.get("within_limits"))
+                and within_inverter_target
+                and pv_check["meets_target_daily_kwh"]
+            ),
+        })
+
+    return results
+
+
+def generate_design_scenarios_hybrid(
+    panel: dict,
+    charge_controller: dict,
+    battery: dict,
+    inverter: dict,
+    critical_daily_kwh: float,
+    critical_peak_kw: float,
+    whole_home_daily_kwh: float,
+    whole_home_peak_kw: float,
+    monthly_kwh_kwp: list[float],
+    inverter_qty: int = 1,
+    max_cc: int = 4,
+    battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT,
+    inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+    daytime_fraction: float = 0.45,
+    shiftable_daily_kwh: float | None = None,
+    ac_output_v: float = 240.0,
+    night_load_fraction: float | None = None,
+    site_exports_to_grid: bool = False,
+    tiers: list[HybridDesignTier] | None = None,
+) -> list[dict]:
+    """
+    Static design-tier scenario generator for hybrid (solar->battery->grid)
+    systems — the hybrid counterpart to generate_design_scenarios() above.
+    Same authority split: this decides the quoted equipment, the legacy
+    day-by-day simulation (if run at all) only flags concerns afterward.
+
+    Recalibrated 2026-08 against 12 months of VRM data from 5 clean hybrid
+    sites. Method, evidence and caveats: docs/design-calibration-2026-08.md
+
+    Battery — two capacities computed INDEPENDENTLY, then the larger wins
+    (per spec: sizing self-consumption first and growing it to meet backup
+    is just an indirect way of arriving at the backup requirement; both
+    numbers should stand on their own):
+      - C_backup: capacity between the tier's reserve_soc_pct and the
+        battery's own absolute DoD floor, sized to carry `backup_nights` x
+        ONE NIGHT of the critical load.
+        This used to be `backup_autonomy_hours` x the average hourly rate,
+        i.e. N hours of uninterrupted drain. The fleet data says that case
+        does not occur: PV recharges the bank every day an outage runs, so
+        the binding constraint is a single night. Measured outages are p90
+        ~60-75 min, worst ~5 h; and during a 33-hour island at
+        vista-atenas-lp-m3 the pack never went below 72% SoC because it
+        recovered to 100% by midday with the grid still down.
+      - C_daily_shift: capacity ABOVE the reserve line, sized to cover
+        shiftable_daily_kwh (the non-critical, non-daytime portion of whole-
+        home consumption — defaults to (whole_home_daily_kwh -
+        critical_daily_kwh) * (1 - daytime_fraction) if not given explicitly).
+      - C_selected = max(C_backup, C_daily_shift); battery_count derived from it.
+
+    night_load_fraction: share of the day's load falling 18:00-06:00. This is
+    the dominant battery-sizing input and varies 17-54% across the fleet, so
+    pass a measured value when one exists; otherwise
+    _NIGHT_LOAD_FRACTION_DEFAULT (0.40, the fleet median) is used and the
+    result reports which was applied.
+
+    PV — sized from the tier's `pv_coverage` against ANNUAL AVERAGE yield:
+        target_kW = coverage x daily_load / (annual_daily_yield x PR)
+    with PR = _HEALTHY_ARRAY_PR. Worst-month is reported as supporting
+    adequacy info, not the driving constraint (annual self-consumption is
+    what matters for a grid-connected system).
+
+    site_exports_to_grid: when False (the default, and the common case here),
+    PV above roughly 1.7x coverage is simply not harvested — the MPPT throttles
+    once the battery is full and the load is served, so the extra array is
+    wasted capex. The scenario reports `pv_surplus_warning` when a tier's
+    coverage exceeds what a non-exporting site can absorb. When the site does
+    export, that ceiling does not apply and no warning is raised.
+
+    Inverter — TWO separately-checked operating modes, since grid-connected
+    passthrough and standalone/islanded output are different electrical
+    questions for a hybrid unit:
+      - Islanded: critical_peak_kw against inverter_qty * inverter.kw *
+        the tier's inverter_islanded_loading_target_pct — this is the
+        resilience-critical check (what the inverter must supply alone
+        during an outage).
+      - Grid-connected: whole_home_peak_kw's current against the inverter's
+        own rated ac_input_current_max_a (passthrough/transfer current) —
+        only checked if that field is filled in the catalog; reported as
+        `validated: False` rather than silently passing if it's missing.
+
+    `battery_basis` (critical/critical_plus_comfort/whole_building) is
+    reported per-tier but does NOT yet change which loads are counted here —
+    this v1 always sizes off critical_daily_kwh/critical_peak_kw regardless
+    of tier. Swapping in a broader load set for tiers 2/3 needs a load-
+    selection UI that doesn't exist yet; tracked as a follow-up, not silently
+    approximated here.
+    """
+    from calculations.mppt import find_array_for_target_kw
+
+    defs = tiers or _HYBRID_DESIGN_TIERS
+    daily_yields = _monthly_to_daily_specific_yield(monthly_kwh_kwp)
+    avg_daily_yield = sum(daily_yields) / len(daily_yields)
+    worst_month_idx = min(range(len(daily_yields)), key=lambda i: daily_yields[i])
+    worst_daily_yield = daily_yields[worst_month_idx]
+
+    battery_dod_pct = float(battery.get("dod_pct") or 80)
+    battery_capacity_kwh = float(battery["capacity_kwh"])
+    inverter_kw = float(inverter["kw"])
+    abs_floor_pct = 100.0 - battery_dod_pct
+
+    if shiftable_daily_kwh is None:
+        non_critical_daily_kwh = max(0.0, whole_home_daily_kwh - critical_daily_kwh)
+        shiftable_daily_kwh = non_critical_daily_kwh * (1.0 - daytime_fraction)
+
+    night_frac = (_NIGHT_LOAD_FRACTION_DEFAULT if night_load_fraction is None
+                  else float(night_load_fraction))
+    night_frac = min(max(night_frac, 0.05), 0.95)
+    # One night of the backed-up load — the real backup design case.
+    critical_night_kwh = critical_daily_kwh * night_frac
+
+    results = []
+    prev_battery_count = 0
+    for tier in defs:
+        # ── 1. Battery: backup layer and self-consumption layer, independently ──
+        # The Victron setting is "minimum SoC UNLESS GRID FAILS": during an
+        # outage the reserve is released and the pack may discharge all the
+        # way to its real cutoff. So the backup layer gets the FULL usable
+        # window (the battery's own DoD), not the thin slice between the
+        # reserve line and the floor.
+        #
+        # Sizing backup against (reserve - floor) was wrong and the back-test
+        # caught it: rebeca-ruiz-casona, the best-performing site in the
+        # fleet, came out 2.67x larger than what is actually installed and
+        # working. It also re-created the tier inversion, because a lower
+        # tier's thinner reserve shrinks that denominator faster than its
+        # smaller backup_nights shrinks the numerator. Against the full DoD
+        # window both layers grow monotonically with tier, so the inversion
+        # cannot occur by construction.
+        backup_usable_pct = float(battery_dod_pct)
+        # Daily cycling happens above the reserve line — that window is what
+        # has to absorb the shiftable load without touching the reserve.
+        self_consumption_usable_pct = max(0.0, 100.0 - tier.reserve_soc_pct)
+
+        energy_critical_during_outage = critical_night_kwh * tier.backup_nights
+        eff = battery_round_trip_eff * inverter_eff
+
+        backup_infeasible = backup_usable_pct <= 0.0
+        c_backup = (
+            energy_critical_during_outage / ((backup_usable_pct / 100.0) * eff)
+            if not backup_infeasible else None
+        )
+        # The nightly cycling layer serves the WHOLE backed-up night, not just
+        # the non-critical shiftable part: with the grid present the critical
+        # loads still draw from the battery overnight. Sizing this off
+        # shiftable_daily_kwh alone under-counted the real nightly draw.
+        served_night_kwh = critical_night_kwh + shiftable_daily_kwh
+        c_daily_shift = (
+            (tier.cycling_nights * served_night_kwh)
+            / ((self_consumption_usable_pct / 100.0) * eff)
+            if self_consumption_usable_pct > 0 else None
+        )
+
+        candidates = [c for c in (c_backup, c_daily_shift) if c is not None]
+        if not candidates:
+            results.append({
+                "scenario": tier.key,
+                "label": tier.label,
+                "error": "Reserva de SoC incompatible con el DoD de la batería seleccionada.",
+            })
+            continue
+
+        c_selected_nominal = max(candidates)
+        driven_by = "backup" if c_backup is not None and c_backup >= (c_daily_shift or 0) else "daily_shift"
+        battery_count = max(1, math.ceil(c_selected_nominal / battery_capacity_kwh))
+        total_kwh_installed = round(battery_count * battery_capacity_kwh, 2)
+        # A lower tier's thinner reserve_soc_pct eats into backup_usable_pct's
+        # own denominator (reserve_soc_pct - abs_floor_pct) faster than its
+        # smaller backup_nights shrinks the numerator, so a "cheaper"
+        # tier can mathematically demand a BIGGER battery than the tier above
+        # it for some batteries' DoD — a real interaction between the tier
+        # table and whatever battery is selected, not a rounding artifact.
+        # Deliberately NOT clamped up to match the previous tier: doing so
+        # would silently inflate a higher tier's quote to cover a lower
+        # tier's own blown-up number. Flagged instead so the engineer sees it.
+        tier_inversion_warning = battery_count < prev_battery_count
+        prev_battery_count = battery_count
+        battery_bank = {
+            "battery_count": battery_count,
+            "total_kwh_installed": total_kwh_installed,
+            "tier_inversion_warning": tier_inversion_warning,
+            "reserve_soc_pct": tier.reserve_soc_pct,
+            "backup_usable_pct": round(backup_usable_pct, 1),
+            "self_consumption_usable_pct": round(self_consumption_usable_pct, 1),
+            "c_backup_kwh": round(c_backup, 2) if c_backup is not None else None,
+            "c_daily_shift_kwh": round(c_daily_shift, 2) if c_daily_shift is not None else None,
+            "driven_by": driven_by,
+            "backup_infeasible_with_this_battery": backup_infeasible,
+            "backup_nights": tier.backup_nights,
+            "cycling_nights": tier.cycling_nights,
+            "critical_night_kwh": round(critical_night_kwh, 2),
+            "served_night_kwh": round(served_night_kwh, 2),
+            "night_load_fraction": round(night_frac, 3),
+            "night_load_fraction_source": ("measured" if night_load_fraction is not None
+                                           else "fleet_default"),
+            "battery_basis": tier.battery_basis,
+            "shiftable_daily_kwh": round(shiftable_daily_kwh, 2),
+        }
+
+        # ── 2. PV array — annual average is the driving basis for hybrid ──
+        # Coverage is expressed against the load the system actually serves
+        # (critical + shiftable), converted to kW through the healthy-array PR
+        # rather than assuming the array delivers PVGIS in full.
+        baseline_daily_kwh = critical_daily_kwh + shiftable_daily_kwh
+        target_daily_kwh = baseline_daily_kwh * tier.pv_coverage
+        deliverable_per_kw = avg_daily_yield * _HEALTHY_ARRAY_PR
+        target_system_kw = (target_daily_kwh / deliverable_per_kw
+                            if deliverable_per_kw > 0 else 0.0)
+
+        array = find_array_for_target_kw(panel, charge_controller, target_system_kw, max_cc=max_cc)
+        if array is None:
+            results.append({
+                "scenario": tier.key,
+                "label": tier.label,
+                "error": "No existe una combinación serie/paralelo válida para este panel + controlador.",
+            })
+            continue
+
+        # Generation figures use the healthy-array PR too: quoting raw
+        # kW x PVGIS overstates what a real array delivers by 7-12%.
+        avg_daily_generation = round(array["system_kw"] * deliverable_per_kw, 2)
+        worst_daily_generation = round(array["system_kw"] * worst_daily_yield * _HEALTHY_ARRAY_PR, 2)
+        actual_coverage = (avg_daily_generation / baseline_daily_kwh
+                           if baseline_daily_kwh > 0 else None)
+        # Above ~1.7x coverage a non-exporting site cannot absorb the surplus:
+        # once the battery is full and the load is served the MPPT throttles,
+        # so the extra array is capex that never turns into kWh. Measured:
+        # vista-atenas-lp-m1 at 2.14x coverage harvests no more than
+        # vista-atenas-lp-m3 at 1.32x.
+        pv_surplus_warning = bool(
+            not site_exports_to_grid
+            and actual_coverage is not None
+            and actual_coverage > _NON_EXPORTING_COVERAGE_CEILING
+        )
+        # Recharge timing: after serving the daytime load, is the leftover
+        # generation enough to put back what the night took? See
+        # _RECHARGE_HEADROOM_MIN — this is what the coverage factor alone does
+        # not guarantee.
+        daytime_load_kwh = baseline_daily_kwh * (1.0 - night_frac)
+        recharge_needed_kwh = served_night_kwh / eff if eff > 0 else 0.0
+        recharge_surplus_kwh = avg_daily_generation - daytime_load_kwh
+        recharge_headroom = (recharge_surplus_kwh / recharge_needed_kwh
+                             if recharge_needed_kwh > 0 else None)
+
+        pv_check = {
+            "pv_coverage_target": tier.pv_coverage,
+            "pv_coverage_actual": round(actual_coverage, 2) if actual_coverage is not None else None,
+            "assumed_array_pr": _HEALTHY_ARRAY_PR,
+            "daytime_load_kwh": round(daytime_load_kwh, 2),
+            "recharge_needed_kwh": round(recharge_needed_kwh, 2),
+            "recharge_surplus_kwh": round(recharge_surplus_kwh, 2),
+            "recharge_headroom": (round(recharge_headroom, 2)
+                                  if recharge_headroom is not None else None),
+            "recharge_ok": bool(recharge_headroom is not None
+                                and recharge_headroom >= _RECHARGE_HEADROOM_MIN),
+            "recharge_comfortable": bool(recharge_headroom is not None
+                                         and recharge_headroom >= _RECHARGE_HEADROOM_COMFORTABLE),
+            "target_daily_kwh": round(target_daily_kwh, 2),
+            "target_system_kw": round(target_system_kw, 2),
+            "avg_month_daily_generation_kwh": avg_daily_generation,
+            "worst_month_daily_generation_kwh": worst_daily_generation,
+            "worst_month_index": worst_month_idx,
+            "worst_month_adequacy_pct": (
+                round(worst_daily_generation / target_daily_kwh * 100, 1) if target_daily_kwh > 0 else None
+            ),
+            "meets_target_daily_kwh": avg_daily_generation >= target_daily_kwh * 0.98,
+            "site_exports_to_grid": site_exports_to_grid,
+            "pv_surplus_warning": pv_surplus_warning,
+        }
+
+        # ── 3. Inverter — islanded (resilience) and grid-connected (passthrough) ──
+        available_islanded_kw = inverter_kw * inverter_qty
+        islanded_loading_pct = (
+            round(critical_peak_kw / available_islanded_kw * 100, 1) if available_islanded_kw > 0 else None
+        )
+        within_islanded = (
+            islanded_loading_pct is not None
+            and islanded_loading_pct <= tier.inverter_islanded_loading_target_pct
+        )
+        islanded_qty_recommended = (
+            math.ceil(critical_peak_kw / (inverter_kw * tier.inverter_islanded_loading_target_pct / 100.0))
+            if inverter_kw > 0 else None
+        )
+
+        rated_passthrough_a = inverter.get("ac_input_current_max_a")
+        grid_connected_check = {"validated": False}
+        if rated_passthrough_a:
+            passthrough_available_a = round(float(rated_passthrough_a) * inverter_qty, 1)
+            whole_home_peak_a = round(whole_home_peak_kw * 1000 / ac_output_v, 1)
+            grid_connected_check = {
+                "validated": True,
+                "whole_home_peak_a": whole_home_peak_a,
+                "passthrough_available_a": passthrough_available_a,
+                "within_target": whole_home_peak_a <= passthrough_available_a,
+            }
+
+        inverter_check = {
+            "inverter_qty": inverter_qty,
+            "islanded": {
+                "available_kw": round(available_islanded_kw, 2),
+                "loading_pct": islanded_loading_pct,
+                "loading_target_pct": tier.inverter_islanded_loading_target_pct,
+                "within_target": within_islanded,
+                "inverter_qty_recommended": islanded_qty_recommended,
+            },
+            "grid_connected": grid_connected_check,
+        }
+
+        # meets_target_daily_kwh folded in for the same reason as the off-grid
+        # generator above: a PV array that misses its own tier's target (e.g.
+        # capped by max_cc) is not a working design. pv_surplus_warning is
+        # deliberately excluded — an oversized/uncurtailed array is a cost
+        # concern, not a "this design doesn't work" one, and already has its
+        # own dedicated warning.
+        within_limits = (
+            bool(array.get("within_limits"))
+            and within_islanded
+            and grid_connected_check.get("within_target", True) is not False
+            and pv_check["meets_target_daily_kwh"]
+        )
+
+        results.append({
+            "scenario": tier.key,
+            "label": tier.label,
+            "battery": battery_bank,
+            "pv": pv_check,
+            "inverter": inverter_check,
+            "array": array,
+            "expansion_provision": tier.expansion_provision,
+            "growth_energy_pct": tier.growth_energy_pct,
+            "growth_peak_pct": tier.growth_peak_pct,
+            "within_limits": within_limits,
+        })
+    return results
+
+
+# ── Growth / expansion readiness (v1) ────────────────────────────────────────
+# Per spec: "a 25% growth allowance does not necessarily mean every component
+# is oversized by 25%" — so this does NOT pre-oversize anything. It answers,
+# for an ALREADY-SELECTED tier, two separate questions: does the quoted
+# battery/inverter already cover the tier's own stated growth_*_pct (energy
+# for battery, peak for inverter), and if not, how many more units would it
+# take — by rerunning the SAME formula the tier was sized with against the
+# grown load, then diffing against what's actually quoted. PV/charge-
+# controller string headroom is read from the tier's own expansion_provision
+# (already reflected in the array generate_design_scenarios() picked).
+# Busbar rating and physical installation space aren't tracked anywhere in
+# the equipment catalog — reported as needing manual review, not fabricated.
+_SPARE_STRINGS_BY_PROVISION = {"none": 0, "one": 1, "two": 2}
+
+
+def assess_growth_readiness(
+    tier_result: dict,
+    battery_capacity_kwh: float,
+    battery_dod_pct: float,
+    inverter_kw: float,
+    daily_kwh_consumption: float,
+    peak_demand_kw: float,
+    battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT,
+    inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+) -> dict:
+    """Off-grid growth-readiness report for one tier_result from generate_design_scenarios()."""
+    battery = tier_result["battery"]
+    inverter = tier_result["inverter"]
+    growth_energy_pct = tier_result.get("growth_energy_pct", 0.0)
+    growth_peak_pct = tier_result.get("growth_peak_pct", growth_energy_pct)
+
+    grown_daily_kwh = daily_kwh_consumption * (1 + growth_energy_pct / 100.0)
+    dod_usable_pct = min(100.0 - battery["reserve_soc_pct"], battery_dod_pct)
+    grown_usable_kwh = grown_daily_kwh * battery["autonomy_days"]
+    grown_nominal_kwh = grown_usable_kwh / ((dod_usable_pct / 100.0) * battery_round_trip_eff * inverter_eff)
+    grown_battery_count = max(1, math.ceil(grown_nominal_kwh / battery_capacity_kwh))
+    additional_battery_units = max(0, grown_battery_count - battery["battery_count"])
+
+    grown_peak_kw = peak_demand_kw * (1 + growth_peak_pct / 100.0)
+    grown_inverter_qty = (
+        math.ceil(grown_peak_kw / (inverter_kw * inverter["loading_target_pct"] / 100.0)) if inverter_kw > 0 else inverter["inverter_qty"]
+    )
+    additional_inverter_qty = max(0, grown_inverter_qty - inverter["inverter_qty"])
+
+    return {
+        "growth_energy_pct": growth_energy_pct,
+        "growth_peak_pct": growth_peak_pct,
+        "additional_battery_units_needed": additional_battery_units,
+        "additional_inverter_qty_needed": additional_inverter_qty,
+        "spare_pv_strings_provisioned": _SPARE_STRINGS_BY_PROVISION.get(tier_result.get("expansion_provision"), 0),
+        "busbar_physical_space_note": (
+            "No verificable con los datos del catálogo actual — revisión manual del ingeniero en sitio."
+        ),
+    }
+
+
+def assess_growth_readiness_hybrid(
+    tier_result: dict,
+    battery_capacity_kwh: float,
+    battery_dod_pct: float,
+    inverter_kw: float,
+    critical_daily_kwh: float,
+    critical_peak_kw: float,
+    battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT,
+    inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+) -> dict:
+    """
+    Hybrid growth-readiness report — reuses generate_design_scenarios_hybrid()'s
+    own C_backup/C_daily_shift split against the grown critical load and the
+    tier's own shiftable_daily_kwh (not re-derived, since the daytime_fraction
+    default it depends on isn't available here), then diffs against what's
+    quoted. Inverter check applies growth_peak_pct to the backed-up/islanded
+    peak specifically — the resilience-critical operating mode.
+    """
+    battery = tier_result["battery"]
+    inverter = tier_result["inverter"]
+    growth_energy_pct = tier_result.get("growth_energy_pct", 0.0)
+    growth_peak_pct = tier_result.get("growth_peak_pct", growth_energy_pct)
+
+    grown_critical_daily_kwh = critical_daily_kwh * (1 + growth_energy_pct / 100.0)
+    # Same windows generate_design_scenarios_hybrid() sizes with: backup gets
+    # the full DoD (the reserve is released when the grid fails), daily
+    # cycling gets the range above the reserve line.
+    backup_usable_pct = float(battery_dod_pct)
+    self_consumption_usable_pct = max(0.0, 100.0 - battery["reserve_soc_pct"])
+    eff = battery_round_trip_eff * inverter_eff
+
+    # Same night-load basis the tier was sized with (see backup_nights), so
+    # the growth delta is a like-for-like re-run rather than a second model.
+    grown_critical_night_kwh = grown_critical_daily_kwh * battery["night_load_fraction"]
+    grown_energy_critical_during_outage = grown_critical_night_kwh * battery["backup_nights"]
+    c_backup = (
+        grown_energy_critical_during_outage / ((backup_usable_pct / 100.0) * eff) if backup_usable_pct > 0 else None
+    )
+    grown_served_night_kwh = grown_critical_night_kwh + battery["shiftable_daily_kwh"]
+    c_daily_shift = (
+        (battery["cycling_nights"] * grown_served_night_kwh)
+        / ((self_consumption_usable_pct / 100.0) * eff)
+        if self_consumption_usable_pct > 0 else None
+    )
+    candidates = [c for c in (c_backup, c_daily_shift) if c is not None]
+    grown_battery_count = max(1, math.ceil(max(candidates) / battery_capacity_kwh)) if candidates else battery["battery_count"]
+    additional_battery_units = max(0, grown_battery_count - battery["battery_count"])
+
+    grown_critical_peak_kw = critical_peak_kw * (1 + growth_peak_pct / 100.0)
+    islanded_target_pct = inverter["islanded"]["loading_target_pct"]
+    grown_inverter_qty = (
+        math.ceil(grown_critical_peak_kw / (inverter_kw * islanded_target_pct / 100.0)) if inverter_kw > 0 else inverter["inverter_qty"]
+    )
+    additional_inverter_qty = max(0, grown_inverter_qty - inverter["inverter_qty"])
+
+    return {
+        "growth_energy_pct": growth_energy_pct,
+        "growth_peak_pct": growth_peak_pct,
+        "additional_battery_units_needed": additional_battery_units,
+        "additional_inverter_qty_needed": additional_inverter_qty,
+        "spare_pv_strings_provisioned": _SPARE_STRINGS_BY_PROVISION.get(tier_result.get("expansion_provision"), 0),
+        "busbar_physical_space_note": (
+            "No verificable con los datos del catálogo actual — revisión manual del ingeniero en sitio."
+        ),
+    }
+
+    return results

@@ -74,7 +74,7 @@ def step4_utility() -> dict | None:
         st.warning("No hay tarifas registradas para esta distribuidora.")
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w4_back"):
             st.session_state["wizard_step"] = 3
@@ -496,7 +496,7 @@ def step5_consumption() -> dict | None:
     )
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w5_back"):
             st.session_state["wizard_step"] = 4
@@ -1232,7 +1232,7 @@ def step6_equipment() -> dict | None:
 
     # ── Navigation ─────────────────────────────────────────────────────────────
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w6_back"):
             st.session_state["wizard_step"] = 5
@@ -1551,7 +1551,7 @@ def step7_costs() -> dict | None:
     )
 
     st.divider()
-    col_back, _, col_next = st.columns([1, 3, 1])
+    col_back, _, col_next = st.columns([1.6, 1.8, 1.6])
     with col_back:
         if st.button("← Atrás", key="w7_back"):
             st.session_state["wizard_step"] = 6
@@ -1885,7 +1885,7 @@ def step8_review() -> None:
 
     # ── Generate PDF ─────────────────────────────────────────────────────────
     st.divider()
-    col_back, _, col_pdf = st.columns([1, 3, 2])
+    col_back, _, col_pdf = st.columns([1.6, 1.5, 1.9])
     with col_back:
         if st.button("← Atrás", key="w8_back"):
             st.session_state["wizard_step"] = 7
