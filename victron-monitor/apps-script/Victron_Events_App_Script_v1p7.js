@@ -419,6 +419,7 @@ const TRANSLATIONS = {
     value:               "Value",
     date:                "Date",
     pvGenerated:         "Solar Generated",
+    bestDayLabel:        "Best",
     totalConsumption:    "Total Consumption",
     gridConsumption:     "Grid Consumption",
     gridIndependence:    "Grid Independence",
@@ -509,6 +510,7 @@ const TRANSLATIONS = {
     value:               "Valor",
     date:                "Fecha",
     pvGenerated:         "Energía Solar Generada",
+    bestDayLabel:        "Mejor",
     totalConsumption:    "Consumo Total",
     gridConsumption:     "Consumo de Red",
     gridIndependence:    "Independencia de Red",
@@ -584,6 +586,29 @@ const TRANSLATIONS = {
   }
 };
 
+// Costa Rica has two well-defined seasons that don't shift year to year —
+// unlike temperate latitudes there's no ambiguity to hedge on. Every site
+// today is Costa Rica, so this is the one place worth hardcoding a country's
+// actual calendar rather than leaving the model to guess it: it once guessed
+// "dry season approaching" for an August report — the real dry season is
+// Dec-Apr, half a year off (synced from the VRM report fix, 2026-08).
+var CR_DRY_MONTHS_ = [12, 1, 2, 3, 4];
+
+// A grounded season fact for the narrative prompt, or null when we don't have
+// a reliable calendar for this country — never left for the model to infer
+// from general knowledge, which is exactly how the wrong-season claim
+// happened. `periodEnd` is a Date; `country` is the site's country code.
+function seasonContext_(country, periodEnd, lang) {
+  if (country !== "CR") return null;
+  var dry = CR_DRY_MONTHS_.indexOf(periodEnd.getMonth() + 1) !== -1;
+  if (lang === "es") {
+    return dry ? "Costa Rica está en temporada seca (diciembre-abril)"
+               : "Costa Rica está en temporada lluviosa (mayo-noviembre)";
+  }
+  return dry ? "Costa Rica is in its dry season (Dec-Apr)"
+             : "Costa Rica is in its rainy season (May-Nov)";
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Claude API — generate a short narrative summary of the week
 // Requires ANTHROPIC_API_KEY in Script Properties.
@@ -604,9 +629,15 @@ function generateWeeklyNarrative(stats, lang) {
     "You are writing the weekly insights paragraph for a residential solar+battery monitoring report. " + langInstruction +
     "\n\nWrite exactly 2 short paragraphs (60-90 words total). Plain prose only - no headers, no bullets, no markdown." +
     " Warm, professional tone. Be specific with numbers. Lead with the most meaningful story of the week." +
-    " If the battery kept the home running during outages, say so. End with one forward-looking sentence if warranted." +
+    " If the battery kept the home running during outages, say so." +
+    " A forward-looking closing sentence is welcome, but only restate a fact" +
+    " given below (e.g. the season named, if one is given) or a trend visible" +
+    " in these numbers — never invent a date, a transition month, or any other" +
+    " detail not explicitly given, even one that sounds plausible. If a season" +
+    " is given, do not guess when it changes." +
     "\n\nThis week's data:" +
     "\n- Site: " + stats.site +
+    "\n- Report period: " + stats.periodStart + " to " + stats.periodEnd +
     "\n- Solar generated: " + stats.pv + " kWh" +
     "\n- Total consumption: " + stats.load + " kWh" +
     "\n- Grid consumption: " + stats.grid + " kWh" +
@@ -627,7 +658,8 @@ function generateWeeklyNarrative(stats, lang) {
       " If weather affected generation, mention it." +
       "\n- Solar performance ratio: " + stats.solarPerformancePct + "% of expected"
     ) : "") +
-    "\n- Grid quality: " + stats.gridQualityScore + "/100 (" + stats.gridQualityStatus + ")";
+    "\n- Grid quality: " + stats.gridQualityScore + "/100 (" + stats.gridQualityStatus + ")" +
+    (stats.seasonContext ? "\n- Season: " + stats.seasonContext : "");
 
   try {
     const response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
@@ -912,6 +944,8 @@ function weeklyReport(siteId) {
   // ── Generate AI narrative ────────────────────────────────────────
   const narrative = generateWeeklyNarrative({
     site: site, pv: totals.pv.toFixed(1), load: totals.load.toFixed(1),
+    periodStart: startStr, periodEnd: endStr,
+    seasonContext: seasonContext_(siteRow.country, end, lang),
     grid: totals.grid.toFixed(1), gridIndependencePct: gridIndependencePct,
     healthScore: avgHealth, healthStatus: healthStatus, minSoc: minSoc,
     batteryCycles: batteryCycles, daysFullCharge: totals.daysFullCharge,
@@ -1045,14 +1079,19 @@ function buildReportHtml(d) {
   // ── Bar chart SVG ─────────────────────────────────────────────────
   // Title + description live INSIDE the SVG (like every other block) so they render
   // at the same scale/font as the other block descriptions, not as mismatched HTML.
-  const BAR_H_MAX = 78, BAR_W = 10, BAR_GAP = 3, SVG_W = 520;
+  // SVG_W matches PW (530), the width every other block uses, and BAR_RPAD gives the
+  // plot a right-hand margin — it used to be its own narrower 520 with padding only
+  // on the left (for the y-axis labels), which ran bars flush to the edge and made
+  // this one chart sit visibly off-centre against the rest of the page (synced from
+  // the VRM report fix, 2026-08).
+  const BAR_H_MAX = 78, BAR_W = 10, BAR_GAP = 3, SVG_W = 530, BAR_RPAD = 24;
   const BAR_LPAD = 46; // room for "80 kWh"-style y-axis labels
   const barSubLines = wrapSvgLines(t.subDaily, Math.floor((SVG_W - 22) / 3.2));
   const BAR_HDR_H = 16 + barSubLines.length * 10; // title + wrapped description
   const chartTopY = BAR_HDR_H + 6;                // y of the top (max) gridline
   const baseYbar = chartTopY + BAR_H_MAX;
   const SVG_H = baseYbar + 18;                     // + day-label row
-  const n = d.dailyGrouped.length, slotW = (SVG_W - BAR_LPAD) / Math.max(n, 1);
+  const n = d.dailyGrouped.length, slotW = (SVG_W - BAR_LPAD - BAR_RPAD) / Math.max(n, 1);
   const allVals = [];
   d.dailyGrouped.forEach(function(r) { allVals.push(Number(r.pv_kWh||0)); allVals.push(Number(r.load_kWh||0)); });
   const maxVal = Math.max.apply(null, allVals.length ? allVals : [1]) || 1;
@@ -1065,10 +1104,10 @@ function buildReportHtml(d) {
   barSubLines.forEach(function(line, li) {
     svgRects += "<text x='11' y='" + (12+(li+1)*10) + "' font-size='7' fill='#bbb'>" + line + "</text>";
   });
-  svgRects += twoBarLegend(SVG_W - 20, d.lang==="es"?"Consumo":"Consumption", "#C8DDD5");
+  svgRects += twoBarLegend(SVG_W - BAR_RPAD, d.lang==="es"?"Consumo":"Consumption", "#C8DDD5");
   [0, Math.round(yMax/2), yMax].forEach(function(val) {
     const gy = baseYbar - Math.round(val/yMax*BAR_H_MAX);
-    svgRects += "<line x1='" + BAR_LPAD + "' y1='" + gy + "' x2='" + SVG_W + "' y2='" + gy + "' stroke='#EAEDEB' stroke-width='0.5'/>";
+    svgRects += "<line x1='" + BAR_LPAD + "' y1='" + gy + "' x2='" + (SVG_W-BAR_RPAD) + "' y2='" + gy + "' stroke='#EAEDEB' stroke-width='0.5'/>";
     svgRects += "<text x='" + (BAR_LPAD-3) + "' y='" + (gy+3) + "' text-anchor='end' font-size='7' fill='#bbb'>" + val + " kWh</text>";
   });
   d.dailyGrouped.forEach(function(r, i) {
@@ -1127,7 +1166,7 @@ function buildReportHtml(d) {
   const prevGI = d.prevTotals && d.prevTotals.load > 0
     ? (100 - (d.prevTotals.grid / d.prevTotals.load) * 100) : null;
   const giPct  = wowPct(d.gridIndependencePct, prevGI);
-  const bestDaySub = "Best: " + (d.bestDay ? d.bestDay.pv.toFixed(1) + " " + t.kwh : "—");
+  const bestDaySub = t.bestDayLabel + ": " + (d.bestDay ? d.bestDay.pv.toFixed(1) + " " + t.kwh : "—");
   const giSub = d.totals.daysSelfSufficient + "/" + d.dailyGrouped.length + " " + t.days;
 
   const x2 = CW + GAP, x3 = (CW+GAP)*2, x4 = (CW+GAP)*3;
@@ -1267,7 +1306,21 @@ function buildReportHtml(d) {
   const emSubLines = wrapSvgLines(t.subEnergyMix, Math.floor((IW - 2*IPAD) / 3.4));
   const emHeadH = 16 + emSubLines.length * 9 + 12; // title + subtitle lines + gap before donut
   const ROW1_H = Math.max(BATT_H, emHeadH + 72 + 8);
-  const DX = 8, DY = Math.max(emHeadH, (ROW1_H - 72) / 2); // below the header, centered if room
+  // Left offset for the donut, chosen so donut+legend sit centered in the card
+  // instead of hugging the left edge at a fixed DX=8 — a fixed offset either
+  // wastes space or crowds the numbers depending on the site (72.6% · 435.4
+  // kWh vs 5.2% · 8.8 kWh render at very different widths), so this sizes the
+  // gap to the actual longest value string on this card (synced from the VRM
+  // report fix, 2026-08).
+  const donutCwid = 4.6; // approx px/char at font-size 9
+  const legendValues = [
+    solarPctD + "% · " + d.totals.pv.toFixed(1) + " " + t.kwh,
+    battPctD + "% · " + d.totals.discharge.toFixed(1) + " " + t.kwh,
+    gridPctD + "% · " + d.totals.grid.toFixed(1) + " " + t.kwh
+  ];
+  const maxValueW = Math.max.apply(null, legendValues.map(function(s) { return s.length; })) * donutCwid;
+  const DX = Math.max(8, (IW - (80 + 55 + maxValueW)) / 2);
+  const DY = Math.max(emHeadH, (ROW1_H - 72) / 2); // below the header, centered if room
   const LX = DX + 80; // legend text x start
   const battX = IW + GAP;
 
@@ -1397,12 +1450,21 @@ function buildReportHtml(d) {
       });
       if (bp && bpR) sc += "<path d='" + bp + bpR + "Z' fill='#1FAE6E' fill-opacity='0.12'/>";
       if (ml) sc += "<path d='" + ml + "' fill='none' stroke='#1FAE6E' stroke-width='1.5'/>";
+      // Annotating every day under 40% reads fine when a dip is the exception,
+      // but a site whose battery is simply configured to run down toward a
+      // low floor every day hits that threshold daily — the annotation stops
+      // flagging an outlier and just repeats the same number under every
+      // point. Calling out only the week's actual lowest point(s) keeps the
+      // one number worth noticing instead of drowning it in copies of the
+      // everyday baseline (synced from the VRM report fix, 2026-08).
+      const socVals = d.dailyGrouped.map(function(r) { return r.min_soc; }).filter(function(v) { return v != null; });
+      const periodMinSoc = socVals.length ? Math.min.apply(null, socVals) : null;
       d.dailyGrouped.forEach(function(r, i) {
         const x3 = SPAD + i*sw3, mp = r.min_soc!=null?r.min_soc:0;
         const dy3 = sY(mp);
         sc += "<circle cx='" + x3.toFixed(1) + "' cy='" + dy3.toFixed(1) + "' r='2.5' fill='#1FAE6E'/>";
         sc += "<text x='" + x3.toFixed(1) + "' y='" + (SH-5) + "' text-anchor='middle' font-size='7.5' fill='#aaa'>" + dayAbbr[new Date(r.date+"T12:00:00").getDay()] + "</text>";
-        if (mp < 40) sc += "<text x='" + (x3+4).toFixed(1) + "' y='" + (dy3-4).toFixed(1) + "' font-size='7' fill='#D4860F'>" + mp + "%</text>";
+        if (mp < 40 && periodMinSoc != null && mp === periodMinSoc) sc += "<text x='" + (x3+4).toFixed(1) + "' y='" + (dy3-4).toFixed(1) + "' font-size='7' fill='#D4860F'>" + mp + "%</text>";
       });
       return "<div style='margin-top:10px;'><svg width='100%' viewBox='0 0 " + SW + " " + SH + "' xmlns='http://www.w3.org/2000/svg'>" + sc + "</svg></div>";
     })() +
