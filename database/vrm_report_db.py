@@ -144,11 +144,122 @@ def get_longest_outage_minutes(site_id: str, start: str | date, end: str | date,
 # Report window assembly
 # ──────────────────────────────────────────────────────────────────
 MAX_CUSTOM_RANGE_DAYS = 31
-# Phase A cap (plan doc §21). Enforced here, not just in the UI that currently
-# calls this — a caller that skips the UI must not be able to skip the limit
-# either. Chosen for the daily bar/SOC charts' legibility, not for any data or
-# performance reason; a future "Overview" mode for longer windows renders
-# differently rather than raising this number (see plan doc §21, Phase B).
+# Phase A cap (plan doc §21) — the Detallado/daily-report boundary. Past this,
+# `fetch_report_window` sets `is_overview` instead of raising (plan doc §22):
+# the cap became a mode boundary, not a hard stop, once the Overview report
+# existed to render the longer side of it. Still enforced here, not just in
+# the UI that calls this — a caller that skips the UI must not be able to
+# skip the boundary either. Chosen for the daily bar/SOC charts' legibility,
+# not for any data or performance reason.
+MAX_OVERVIEW_RANGE_DAYS = 183
+# Phase B's real ceiling (plan doc §22, locked with the user 2026-08-15;
+# ~6 months). Overview mode has no upper bound of its own otherwise — this is
+# where a pick actually gets rejected now, in the same place the old
+# MAX_CUSTOM_RANGE_DAYS check used to raise.
+
+
+def bucket_days(rows: list[dict], start: date, end: date,
+                bucket_len_days: int) -> list[dict]:
+    """Groups `rows` (already-fetched `energy_daily` rows) into consecutive
+    `bucket_len_days`-day buckets spanning `[start, end]` inclusive, walking
+    forward from `start`. The final bucket is clipped to `end`, so it's
+    shorter than `bucket_len_days` whenever the span isn't an exact multiple
+    — expected for the Overview report's monthly buckets over an arbitrary
+    range (plan doc §22).
+
+    The fixed 4-week trend (`fetch_report_window` below) calls this with a
+    28-day span and `bucket_len_days=7`, which divides evenly into 4 buckets
+    identical to what used to be a separate anchored-from-`end` loop —
+    forward-from-`start` and anchored-from-`end` coincide exactly whenever
+    the span is a whole multiple of the bucket size, so this one function
+    serves both without the trend needing special-cased logic.
+
+    Each bucket: `{label, start, end, days, pv, load, grid, discharge,
+    min_soc, max_soc}`. `days` counts how many of the bucket's calendar days
+    actually have a row — a bucket can be short because the site's data
+    doesn't cover it, the same "don't silently show a partial period as a
+    full one" rule the rest of this module follows. `min_soc`/`max_soc` are
+    named to match `energy_daily`'s own columns on purpose (the min of the
+    bucket's daily `min_soc` values, the max of its daily `max_soc` values)
+    — the SOC chart can swap its per-day source for a per-bucket one without
+    also renaming the fields it reads. `grid`/`discharge` (summed
+    `grid_kwh`/`battery_discharge_kwh`) exist so the grid-independence and
+    battery-cycling trend can derive per-bucket figures with the exact same
+    formula `weekly_report.py` already uses for the period totals, rather
+    than a second definition (plan doc §22).
+    """
+    by_date = {r["date"]: r for r in rows}
+    buckets = []
+    b_start = start
+    while b_start <= end:
+        b_end = min(b_start + timedelta(days=bucket_len_days - 1), end)
+        day, bucket_rows = b_start, []
+        while day <= b_end:
+            row = by_date.get(day.isoformat())
+            if row is not None:
+                bucket_rows.append(row)
+            day += timedelta(days=1)
+        min_socs = [float(r["min_soc"]) for r in bucket_rows if r.get("min_soc") is not None]
+        max_socs = [float(r["max_soc"]) for r in bucket_rows if r.get("max_soc") is not None]
+        buckets.append({
+            "label": b_start.isoformat()[5:],
+            "start": b_start.isoformat(),
+            "end": b_end.isoformat(),
+            "days": len(bucket_rows),
+            "pv": round(sum(float(r.get("pv_kwh") or 0) for r in bucket_rows), 1),
+            "load": round(sum(float(r.get("load_kwh") or 0) for r in bucket_rows), 1),
+            "grid": round(sum(float(r.get("grid_kwh") or 0) for r in bucket_rows), 1),
+            "discharge": round(sum(float(r.get("battery_discharge_kwh") or 0)
+                                   for r in bucket_rows), 1),
+            "min_soc": min(min_socs) if min_socs else None,
+            "max_soc": max(max_socs) if max_socs else None,
+        })
+        b_start = b_end + timedelta(days=1)
+    return buckets
+
+
+def bucket_health_days(rows: list[dict], start: date, end: date,
+                       bucket_len_days: int) -> list[dict]:
+    """Same boundary-walking as `bucket_days()`, over `daily_health` rows
+    instead of `energy_daily` ones — a separate function because the two
+    tables have no shared row shape and `daily_health` needs its own
+    dedup-by-date rule before aggregating (plan doc §22).
+
+    A site can have more than one `daily_health` row per date (different
+    `dump_type`s), so each bucket first keeps only the highest-scoring row
+    per date — identical to the whole-period average's own dedup in
+    `weekly_report.py` — then averages `health_score` across the kept rows.
+
+    Each bucket: `{label, start, end, days, health_score}`. `health_score`
+    is `None` for a bucket with no health rows at all, rather than 0 — a
+    missing score must not read as a scored zero.
+    """
+    by_date: dict[str, dict] = {}
+    for r in rows:
+        d0 = r["date"]
+        if d0 not in by_date or (float(r.get("health_score") or 0)
+                                 > float(by_date[d0].get("health_score") or 0)):
+            by_date[d0] = r
+
+    buckets = []
+    b_start = start
+    while b_start <= end:
+        b_end = min(b_start + timedelta(days=bucket_len_days - 1), end)
+        day, scores = b_start, []
+        while day <= b_end:
+            row = by_date.get(day.isoformat())
+            if row is not None and row.get("health_score") is not None:
+                scores.append(float(row["health_score"]))
+            day += timedelta(days=1)
+        buckets.append({
+            "label": b_start.isoformat()[5:],
+            "start": b_start.isoformat(),
+            "end": b_end.isoformat(),
+            "days": len(scores),
+            "health_score": round(sum(scores) / len(scores)) if scores else None,
+        })
+        b_start = b_end + timedelta(days=1)
+    return buckets
 
 
 def week_bounds(week_ending: str | date) -> tuple[date, date]:
@@ -193,13 +304,16 @@ def fetch_report_window(site_id: str, start: str | date, end: str | date,
     if start > end:
         raise ValueError(f"start ({start}) is after end ({end})")
     num_days = (end - start).days + 1
-    if num_days > MAX_CUSTOM_RANGE_DAYS:
+    if num_days > MAX_OVERVIEW_RANGE_DAYS:
         raise ValueError(
             f"Report window is {num_days} days; the cap is "
-            f"{MAX_CUSTOM_RANGE_DAYS} (plan doc §21, Phase A). Longer windows "
-            "need the not-yet-built Overview mode, not a bigger version of "
-            "this report."
+            f"{MAX_OVERVIEW_RANGE_DAYS} (plan doc §22, Phase B)."
         )
+    # Past MAX_CUSTOM_RANGE_DAYS this is an Overview report, not a bigger
+    # Detallado one (plan doc §22) — auto, no operator toggle. `monitoring`'s
+    # caller always passes a 7-day window via week_bounds(), so this is never
+    # True for that schema in practice.
+    is_overview = num_days > MAX_CUSTOM_RANGE_DAYS
 
     # The 4-week trend is always a fixed 4x7 days ending on `end`, regardless
     # of how long [start, end] itself is — deliberate (plan doc §21): it stays
@@ -225,25 +339,17 @@ def fetch_report_window(site_id: str, start: str | date, end: str | date,
     current = slice_days(start, end)
     previous = slice_days(previous_start, start - timedelta(days=1))
 
-    trend = []
-    for i in range(3, -1, -1):
-        b_end = end - timedelta(days=7 * i)
-        b_start = b_end - timedelta(days=6)
-        bucket = slice_days(b_start, b_end)
-        trend.append({
-            "label": b_start.isoformat()[5:],
-            "start": b_start.isoformat(),
-            "end": b_end.isoformat(),
-            "days": len(bucket),
-            "pv": round(sum(float(r.get("pv_kwh") or 0) for r in bucket), 1),
-            "load": round(sum(float(r.get("load_kwh") or 0) for r in bucket), 1),
-        })
+    # Always a fixed 4x7 days ending on `end`, regardless of how long
+    # [start, end] itself is (plan doc §21) — trend_span_start is 27 days
+    # before `end`, so this always divides evenly into 4 weekly buckets.
+    trend = bucket_days(rows, trend_span_start, end, 7)
 
     return {
         "schema": schema,
         "site": site,
         "period_start": start.isoformat(),
         "period_end": end.isoformat(),
+        "is_overview": is_overview,
         "days": current,
         "previous_days": previous,
         "trend": trend,

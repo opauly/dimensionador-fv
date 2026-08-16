@@ -84,8 +84,16 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
   all sites' data. Fine for the current internally-owned sites; must be fixed (per-site
   RLS + per-device JWT provisioning) before onboarding paying external customers.
   Planned in PHASES.md as a future phase.
-- **Planned — weekly-report tariff savings (not built yet):** the weekly PDF + email
-  will show an **estimated savings** figure. Agreed approach:
+- **Weekly-report tariff savings — superseded, built a different way (resolved
+  2026-07-29, this note corrected 2026-08-16).** The JS-in-Apps-Script port sketched
+  below never happened. Instead, real savings shipped directly in the Python VRM report
+  (`victron/savings.py`, plan doc §15 in
+  [`victron-monitor/docs/vrm-report-v1-implementation-plan.md`](victron-monitor/docs/vrm-report-v1-implementation-plan.md))
+  — a CR blended-tariff average or a configured flat rate per site, never a fabricated
+  number. Once Phase 12 (below) retires Apps Script's own report generation entirely,
+  this becomes fully moot: every weekly report, `monitoring` or `vrm`, renders through
+  the one Python path that already has real savings. Original sketch kept below only as
+  a record of the path *not* taken, not as a live plan:
   - Port the CR bill formula (`calculations/tariff_calculator.py` → `estimate_bill_crc`)
     to JS **inside the Apps Script** — the formula shape is duplicated, but the *rates*
     stay single-sourced in Supabase and are what actually change.
@@ -99,11 +107,23 @@ infrastructure. Full details: [`victron-monitor/README.md`](victron-monitor/READ
   - Savings model (kept deliberately simple): `(weekly load − weekly grid import) ×
     effective ₡/kWh`, where the effective rate = `estimate_bill_crc(monthly-equivalent
     kWh) / kWh`.
-  - **Prerequisites before it can activate:** `SUPABASE_URL` + `SUPABASE_ANON_KEY` added
-    to the Apps Script Script Properties (the anon key currently lives only in Node-RED);
-    anon `SELECT` access to the public tariff tables; tariffs seeded for the relevant
-    distributors. Until then a "coming soon" placeholder ships in both the PDF (below the
-    4-week trend) and the email.
+- **Planned — retire Apps Script's scheduling, email, and PDF archiving (2026-08-16,
+  not built yet; see PHASES.md Phase 12).** `weeklyReport()`'s *rendering* is already
+  fully replaced by the Python path (§ above); what's left on Apps Script is purely the
+  automation shell around it — `createWeeklyReportTrigger()`'s Monday time-driven
+  trigger, `MailApp`/`buildEmailHtml()`, and the PDF's Drive archiving. `doPost` (the
+  Sheets backup write) and `saveDriveBackup()` — found, while scoping this, to run from
+  the *same* `doPost` handler right after the Sheets row write, not from `weeklyReport()`
+  — are explicitly **not** part of this and stay on Apps Script untouched. Decided with
+  the user: **Resend** for email (over Postmark/SES), **GitHub Actions** (`cron:`
+  scheduled workflow) over a Supabase Edge Function for scheduling — this app has no
+  deployed server today, so a local `cron`/`launchd` job was ruled out as a reliability
+  regression (nothing sends if the Mac is asleep Monday morning). A new
+  `monitoring.report_log` table was also agreed, since Apps Script's `Logger.log()`
+  disappears once execution ends and an unattended job needs somewhere to say what
+  happened. Full scope, build order, and the code this was grounded in (line numbers for
+  `runAllWeeklyReports()`, `buildEmailHtml()`, `fetchReportEmail_()`/`get_report_email`,
+  the Drive-archiving block) are in the VRM plan doc's §26, not duplicated here.
 - **Weekly report migrated from Google Sheets to Supabase (2026-07-17).** Confirmed by
   running both versions for the same site/week and comparing output — the Sheets version
   had two real bugs, not just noise:

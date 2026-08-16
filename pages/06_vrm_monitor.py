@@ -59,6 +59,70 @@ def _chip_row(chips: list[str]) -> None:
                f'margin:0.4rem 0 0.9rem;">{spans}</div>', unsafe_allow_html=True)
 
 
+def _feature_card(icon: str, title: str, desc: str) -> None:
+    st.markdown(
+        f'<div style="border:1px solid #e5e7eb;border-radius:8px;padding:0.7rem 0.9rem;'
+        f'margin-bottom:0.6rem;min-height:6.2rem;">'
+        f'<div style="font-size:0.85rem;font-weight:700;color:{BRAND_NAVY};">'
+        f'{icon} {title}</div>'
+        f'<div style="font-size:0.75rem;color:#6b7280;margin-top:3pt;">{desc}</div>'
+        f'</div>', unsafe_allow_html=True,
+    )
+
+
+def _report_feature_cards(lang: str, num_days: int, is_overview: bool,
+                          system_type: str, with_narrative: bool,
+                          with_weather: bool) -> None:
+    """Preview of the report's actual sections, reusing the exact same
+    title/subtitle strings `report_i18n.get()` feeds the PDF — never a
+    second, hand-written copy of that text to keep in sync by hand. Wording
+    (and which cards appear) reacts to the same inputs the report itself
+    reacts to, so this preview can't say something the generated PDF
+    doesn't: is_overview for the daily-vs-monthly text (plan doc §22/§23),
+    system_type for which blocks a given site even has, and the two
+    "Incluir" checkboxes for the optional ones.
+    """
+    from victron import report_i18n
+    t = report_i18n.get(lang, num_days, is_overview=is_overview)
+    has_batt = system_type != "grid_zero"
+    has_grid = system_type != "off_grid"
+    es = lang == "es"
+
+    cards = [("📈", t["healthScore"],
+             "Puntaje 0-100 con generación solar, independencia de red y "
+             "eventos del período." if es else
+             "0-100 score alongside solar generation, grid independence, "
+             "and period events.")]
+    if with_narrative:
+        cards.append(("🤖", "Narrativa (IA)" if es else "Narrative (AI)",
+                      "Resumen en prosa generado por IA sobre lo más "
+                      "relevante del período." if es else
+                      "AI-generated prose summary of the period's key "
+                      "story."))
+    cards.append(("📊", t["sectionDaily"], t["subDaily"]))
+    cards.append(("🥧", t["energyMix"], t["subEnergyMix"]))
+    if has_batt:
+        cards.append(("🔋", t["sectionBattery"], t["subBattery"]))
+    if has_grid:
+        cards.append(("⚡", t["sectionGrid"], t["subGrid"]))
+    cards.append(("🔔", t["sectionEvents"], t["subEvents"]))
+    if has_batt:
+        cards.append(("📉", t["socTimeline"], t["subSocChart"]))
+    cards.append(("☀️", t["solarPerformance"], t["subSolarPerf"]))
+    if with_weather:
+        cards.append(("🌦️", t["weatherTitle"], t["subWeather"]))
+    cards.append(("📅", t["fourWeekChart"], t["sub4Week"]))
+    cards.append(("💰", t["tariffSavings"], t["subSavings"]))
+
+    st.caption(
+        "Vista previa de las secciones del reporte" if es else
+        "Preview of the report's sections")
+    cols = st.columns(3)
+    for i, (icon, title, desc) in enumerate(cards):
+        with cols[i % 3]:
+            _feature_card(icon, title, desc)
+
+
 SYSTEM_TYPES = ["hybrid", "off_grid", "grid_zero"]
 LANGS = {"es": "Español", "en": "English"}
 _COUNTRY_CODES = list(COUNTRIES)
@@ -518,6 +582,9 @@ def tab_report() -> None:
 
     labels = {s["site_id"]: f"{s['display_name']} ({s['site_id']})" for s in sites}
     site_id = b.selectbox("Sitio", list(labels), format_func=labels.get)
+    site = next(s for s in sites if s["site_id"] == site_id)
+    site_lang = "es" if (site.get("report_language") or "en").lower() == "es" else "en"
+    site_system_type = site.get("system_type") or "hybrid"
 
     dates = rdb.get_available_dates(site_id, schema)
     if not dates:
@@ -549,8 +616,10 @@ def tab_report() -> None:
                 "con datos. El reporte se genera igual, pero los totales no "
                 "son comparables con una semana completa."
             )
+        _report_feature_cards(site_lang, 7, False, site_system_type,
+                              "Narrativa (IA)" in opts, "Clima (Open-Meteo)" in opts)
     else:
-        # vrm: operator picks any [start, end] up to MAX_CUSTOM_RANGE_DAYS, one
+        # vrm: operator picks any [start, end] up to MAX_OVERVIEW_RANGE_DAYS, one
         # calendar with range selection bounded to the site's real data span.
         # A calendar can't restrict individual days to only the ones with
         # data the way the old date-dropdowns did, but a sparse or fully
@@ -572,14 +641,28 @@ def tab_report() -> None:
         else:
             start, end = (d.isoformat() for d in picked)
             num_days = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1
-            if num_days > rdb.MAX_CUSTOM_RANGE_DAYS:
+            if num_days > rdb.MAX_OVERVIEW_RANGE_DAYS:
                 st.error(
                     f"El rango elegido es de {num_days} días; el máximo para "
-                    f"este reporte es {rdb.MAX_CUSTOM_RANGE_DAYS}. Elegí un "
+                    f"este reporte es {rdb.MAX_OVERVIEW_RANGE_DAYS}. Elegí un "
                     "rango más corto."
                 )
                 valid = False
             else:
+                # Which mode this pick will produce — shown for every valid
+                # pick, not just past the boundary, so the operator always
+                # knows before clicking Generar (plan doc §22: auto-switch,
+                # no manual toggle, but never a silent one).
+                if num_days > rdb.MAX_CUSTOM_RANGE_DAYS:
+                    st.caption(
+                        f"📊 **Resumen (Overview)** — {num_days} días, agrupado "
+                        "por mes. Rangos mayores a "
+                        f"{rdb.MAX_CUSTOM_RANGE_DAYS} días se resumen "
+                        "automáticamente en vez de mostrarse día por día."
+                    )
+                else:
+                    st.caption(f"📅 **Detallado** — {num_days} días, día por día.")
+
                 covered = [d for d in dates if start <= d <= end]
                 if len(covered) < num_days:
                     st.warning(
@@ -588,6 +671,11 @@ def tab_report() -> None:
                         "igual, pero los totales no son comparables con un "
                         "rango completo."
                     )
+
+                _report_feature_cards(
+                    site_lang, num_days, num_days > rdb.MAX_CUSTOM_RANGE_DAYS,
+                    site_system_type, "Narrativa (IA)" in opts,
+                    "Clima (Open-Meteo)" in opts)
 
     if valid and st.button("Generar reporte", type="primary"):
         with st.spinner("Generando…"):

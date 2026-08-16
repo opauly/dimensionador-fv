@@ -1,11 +1,28 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.7
+# Pauly&Co Solar Design Tool — Final Requirements v3.8
 
-**Version:** 3.7  
-**Date:** 2026-07-31  
+**Version:** 3.8  
+**Date:** 2026-08-16  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.7 → v3.8
+
+- **Victron Monitor: Apps Script retirement scoped (Section 4.5; see PHASES.md Phase 12,
+  planned but not yet built).** Report *rendering* for both `monitoring` and `vrm` already
+  runs entirely through the Python weekly-report path (`victron/weekly_report.py`); what's
+  left on Apps Script is purely automation — the Monday scheduling trigger, `MailApp` email
+  delivery, and Drive archiving of each PDF. Scoped to retire exactly those three. The
+  Sheets backup writer stays on Apps Script untouched, and so does `saveDriveBackup()`
+  (found, while scoping this, to run from the same `doPost` handler as the Sheets write,
+  not from the report path). Decided with the user: Resend for email (send quotas and lack
+  of delivery observability on Gmail/`MailApp` were the disqualifying factor at any real
+  volume — this app has no deployed server today, so scheduling moves to a GitHub Actions
+  cron workflow rather than a local job tied to one machine being awake). A new
+  `monitoring.report_log` table was also agreed, so an unattended run has somewhere to
+  record what happened instead of Apps Script's `Logger.log()`, which disappears once
+  execution ends.
 
 ## Change log v3.6 → v3.7
 
@@ -349,6 +366,13 @@ This Supabase project also hosts **Victron Monitor**, a separate product (Victro
 - **Client email routing:** `monitoring.sites.client_id` links a site to a `public.clients` row (Section 4.6). The weekly report email goes to that client's address via a narrow `SECURITY DEFINER` RPC (`get_report_email`) — the `anon` key never gets direct read access to the `clients` table itself.
 - Full details, schema, and onboarding: [`victron-monitor/README.md`](victron-monitor/README.md).
 - **Known gap, planned for a future phase (see PHASES.md):** the `monitoring` schema currently has no Row-Level Security — one shared `anon` key has read/write/delete on all sites' data. This is acceptable for the current handful of internally-owned sites but must be replaced with per-site RLS + per-device JWT provisioning before Victron Monitor is sold as a paid subscription to external customers.
+- **Planned, not yet built (Phase 12 in PHASES.md — added v3.8):** the weekly report's
+  *rendering* already runs entirely on Python (Section 4.5 above), but scheduling
+  (`createWeeklyReportTrigger()`), email delivery (`MailApp`), and PDF archiving (Drive)
+  still run on Apps Script. Scoped to move to Resend (email) and a GitHub Actions cron
+  workflow (scheduling, since this app has no deployed server to run a local job on) plus
+  Supabase Storage (archiving, same bucket the proposal PDFs already use) — the Sheets
+  backup writer (`doPost`) is explicitly out of scope and keeps running on Apps Script.
 
 ---
 

@@ -642,16 +642,90 @@ New tab under Projects (alongside Phase 10's register): fleet scorecard, per-sit
 
 ---
 
-## Future — Victron weekly-report tariff savings (separate product, not scheduled)
+## Superseded — Victron weekly-report tariff savings (resolved a different way)
 
-**Goal:** the Victron weekly PDF + email show an **estimated savings** figure for the customer, instead of the current "coming soon" placeholder.
+**This did not happen as described below, and does not need to.** Real savings shipped
+directly in the Python VRM report instead (`victron/savings.py`, 2026-07-29) — a CR
+blended-tariff average or a per-site configured flat rate, never a fabricated number. Once
+Phase 12 below retires Apps Script's own report generation, every weekly report renders
+through that one Python path regardless of schema, so a JS port inside Apps Script would
+now be throwaway work. Kept here, unexecuted, only so the abandoned approach isn't
+re-proposed without the context of why it wasn't the one taken — see
+[`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13) for the full note.
 
-Belongs to `victron-monitor/`, not the solar tool's roadmap. Cross-product: the report reuses this repo's tariff data/formula. Full plan and prerequisites in [`CONTEXT.md`](CONTEXT.md#victron-monitor-integration-added-2026-07-13).
+- ~~Port `estimate_bill_crc` (`calculations/tariff_calculator.py`) to JS inside the Apps Script; read tariffs live from the shared Supabase `public` tables via PostgREST.~~
+- ~~Define each site's electric company (`distributor` + `tariff_code`) via the Node-RED Project Config payload.~~
+- ~~Savings ≈ `(weekly load − weekly grid import) × effective ₡/kWh`.~~
 
-- Port `estimate_bill_crc` (`calculations/tariff_calculator.py`) to JS inside the Apps Script; read tariffs live from the shared Supabase `public` tables via PostgREST.
-- Define each site's electric company (`distributor` + `tariff_code`) via the Node-RED Project Config payload.
-- Savings ≈ `(weekly load − weekly grid import) × effective ₡/kWh`.
-- **Blocked on:** Supabase creds in Apps Script Script Properties, anon `SELECT` on the public tariff tables, and tariffs seeded for the relevant distributors.
+---
+
+## Phase 12 — Victron Monitor: Retire Apps Script Scheduling, Email, and PDF Archiving (separate product, scoped 2026-08-16)
+
+**Goal:** the weekly report's automation shell — not its rendering, already fully on
+Python — moves off Apps Script/Gmail/Drive onto infrastructure that doesn't depend on
+Google Workspace send quotas or a single script's execution limits, matching the arch
+doc's own recommendation once real customer volume is a possibility.
+
+This phase belongs to `victron-monitor/`, off the critical path like Phases 9–11. Full
+scope, exact line numbers in the Apps Script this was grounded in, and the build order
+are in [`victron-monitor/docs/vrm-report-v1-implementation-plan.md` §26](victron-monitor/docs/vrm-report-v1-implementation-plan.md) — not
+duplicated in full here.
+
+### What's in scope, and what explicitly isn't
+
+Report *rendering* is already fully replaced by `victron/weekly_report.py` (both
+`monitoring` and `vrm`). What's left on Apps Script, and what this phase retires:
+1. **Scheduling** — `createWeeklyReportTrigger()`'s Monday time-driven trigger +
+   `runAllWeeklyReports()`'s fan-out over active `monitoring.sites`.
+2. **Email delivery** — `MailApp.sendEmail()` + `buildEmailHtml()`.
+3. **PDF archiving** — the Drive upload inside `weeklyReport()`.
+
+**Explicitly not in scope, stays on Apps Script untouched:** the Sheets backup writer
+(`doPost` → `sheet.appendRow()`) and `saveDriveBackup()` — found while scoping this to run
+from the *same* `doPost` handler right after the Sheets write, not from `weeklyReport()`,
+so it's part of the Sheets-backup job rather than the PDF-archiving one being retired.
+`vrm` reports are untouched either way — Apps Script's scheduler has never generated
+those; they stay manual, from the Streamlit Reporte tab, exactly as decided for V1.
+
+### Decisions locked with the user (2026-08-16)
+
+- **Email: Resend**, over Postmark or SES.
+- **Scheduling: a GitHub Actions scheduled workflow** (`cron:` trigger), over a Supabase
+  Edge Function + `pg_cron` — this app has no deployed server today (it only runs when
+  someone starts Streamlit locally), so a `cron`/`launchd` job tied to a personal Mac was
+  ruled out as a real reliability regression from what Apps Script already provides
+  today (always-on, independent of any one machine).
+- **A new `monitoring.report_log` table** (`site_id, sent_at, storage_path,
+  recipient_email, email_status, error`) — not literally asked for, but agreed because an
+  unattended scheduled job needs somewhere to say what happened; Apps Script's
+  `Logger.log()` disappears once execution ends, and that's exactly the kind of silent
+  failure this repo has hit before (see the Sheets-vs-Supabase weekly-report bugs, and
+  `vrm.ingestion_log`'s own reasoning in migration 012).
+
+### Tasks (see plan doc §26 for full detail)
+
+1. `victron/archive.py` — PDF archiving via Supabase Storage, reusing
+   `proposals/generator.py:upload_pdf()`'s existing pattern (same `solar-tool` bucket,
+   new `vrm-monitor-reports/{site_id}/{end_str}.pdf` path convention).
+2. Migration: `monitoring.report_log`.
+3. Email: port `buildEmailHtml()` (Apps Script, ~150 lines, table-layout/inline-styled,
+   no `data:` URIs — Gmail strips them) to a Jinja2 template; wire Resend's send call;
+   recipient resolution via the existing `get_report_email` RPC (already ported-ready,
+   no change needed — same `.schema("monitoring").rpc(...)` pattern already used
+   elsewhere in this repo).
+4. `tools/run_weekly_reports.py` — orchestrates archive → email → log, one pass per
+   active `monitoring` site, same per-site failure isolation
+   `runAllWeeklyReports()` already has (one site's failure logged and skipped, not
+   blocking the rest).
+5. GitHub Actions workflow (`.github/workflows/`), Monday cron, calling step 4's script.
+
+### Validation
+
+- A real Monday run: recipient, subject, PDF attachment, and archived copy all match
+  what Apps Script would have produced; a `report_log` row exists for every site.
+- Deliberately break one site's data mid-run — confirm the others still send.
+- Cutover: disable only `createWeeklyReportTrigger()`'s trigger. `doPost` (Sheets write +
+  `saveDriveBackup()`) keeps running exactly as it does today.
 
 ---
 
@@ -670,11 +744,15 @@ Belongs to `victron-monitor/`, not the solar tool's roadmap. Cross-product: the 
 | 8 | QA + handoff | 2–3 | Week 11–12 |
 | 9 | Victron Monitor multi-tenant hardening | 3–5 | Whenever needed — independent of 0–8 |
 | 10 | Site register & maintenance scheduler | 4–6 | Whenever needed — independent of 0–9 |
+| 11 | Design calibration from fleet data | 4–6 | Whenever needed — gated by data, not sequence |
+| 12 | Retire Apps Script scheduling/email/archiving | 2–4 | Whenever needed — independent of 0–11 |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
 **Victron Monitor sellable to external customers:** End of Phase 9, triggered by business need (first external customer), not by calendar time  
-**Site register replaces the maintenance spreadsheet:** End of Phase 10, triggered by whenever you want off the manual xlsx, not by calendar time
+**Site register replaces the maintenance spreadsheet:** End of Phase 10, triggered by whenever you want off the manual xlsx, not by calendar time  
+**Fleet-calibrated design constants become self-refreshing:** End of Phase 11, gated by monitored sites accumulating enough history, not by calendar time  
+**Apps Script fully retired from the weekly-report pipeline:** End of Phase 12, triggered by wanting off Gmail send quotas / Google's execution limits, not by calendar time
 
 These are part-time estimates assuming 2–3 focused hours per day alongside client work. If you have a full week free, Phase 0+1 can be done in 3 days.
 
@@ -709,6 +787,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 10 is also off this critical path.** It spans both products (extends `monitoring.sites`, adds new `public` schema tables) and its UI hangs off the Projects nav item without depending on Phase 6 being built. Trigger it whenever you're ready to retire the manual maintenance spreadsheet.
 
 **Phase 11 (Design Calibration) is off the critical path too**, and is gated by *data* rather than by other phases — VRM's ~6-month retention of 1-minute data means the low-irradiance months only become exportable in a December run. The first calibration was already done by hand (see [`docs/design-calibration-2026-08.md`](docs/design-calibration-2026-08.md)) and its results are live in the tier tables, so this phase is about making that repeatable, not about unblocking proposals.
+
+**Phase 12 (Retire Apps Script scheduling/email/archiving) is off this critical path too.** Report *rendering* is already fully on Python for both `monitoring` and `vrm` — this phase only replaces the automation shell (trigger, `MailApp`, Drive) still running on Apps Script. Trigger it whenever Gmail's send quotas or Apps Script's execution limits become a real constraint, not by sequence.
 
 ---
 

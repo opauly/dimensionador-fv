@@ -1056,3 +1056,618 @@ Phase B is actually scoped.
 **Sequencing:** Phase A first (bounded, mechanical, extends what already works). Phase B
 after, once Phase A's chart-legibility work has already answered some of the "how many
 bars/labels actually fit" questions Phase B will hit again at a coarser granularity.
+
+## 22. Phase B scoped — auto-switching Overview report (2026-08-14)
+
+Phase A shipped (`feat/vrm-custom-date-range`, merged 2026-08-06): `MAX_CUSTOM_RANGE_DAYS =
+31` is enforced in `database/vrm_report_db.py:fetch_report_window()` — currently a hard
+`ValueError` — and `pages/06_vrm_monitor.py:tab_report()` blocks the operator's calendar pick
+above it with `st.error`. This section turns Phase B from the §21 sketch into a concrete
+build plan, with one decision now locked with the user:
+
+**Auto-switch, no operator toggle.** Crossing the 31-day cap does not error and does not
+present a "Detallado vs. Resumen" choice — it silently renders as the Overview layout. The
+cap becomes a mode boundary, not a hard stop, exactly as §21 already leaned. Rationale: the
+operator's actual decision is *what date range has the data I need*; which layout best
+presents that range is a rendering-legibility fact the tool knows and the operator
+shouldn't have to.
+
+**But the tool must say which mode a given pick will produce, before the operator clicks
+generate.** An invisible mode switch is worse than the current hard error — at least the
+error told the operator something. `tab_report()`'s range picker (`pages/06_vrm_monitor.py`
+~line 561) gets a live indicator under the calendar that updates as the picked range
+changes: "Detallado (día por día) · ≤31 días" while `num_days ≤ 31`, "Resumen (Overview,
+agrupado por semana/mes) · N días" once it crosses. This is the one UI requirement from this
+decision — both scopes need to be visible before generation, not discovered after.
+
+### Data layer (`database/vrm_report_db.py`)
+
+- `fetch_report_window()`'s `if num_days > MAX_CUSTOM_RANGE_DAYS: raise ValueError` is
+  deleted. Replaced with `is_overview = num_days > MAX_CUSTOM_RANGE_DAYS` added to the
+  returned dict — `MAX_CUSTOM_RANGE_DAYS` keeps its name and its job, it just stops being a
+  ceiling and becomes the flag's threshold.
+- A new, real ceiling still has to exist — Overview mode removes the 31-day stop but the
+  query and the render both need *some* bound. **Locked with the user (2026-08-15):
+  `MAX_OVERVIEW_RANGE_DAYS = 183`** (~6 months) — a `ValueError` in the same place the old
+  one was, for a pick past it.
+- **New shared bucketing primitive.** The fixed 4-week trend already contains the logic
+  Overview mode needs — group daily rows into buckets, sum/average each. Today that's
+  inlined as the `for i in range(3, -1, -1)` loop directly in `fetch_report_window()`
+  (lines ~223-233), hardcoded to 4 buckets of 7 days. Extract it to a standalone
+  `bucket_days(rows: list[dict], start: date, end: date, bucket_len_days: int) -> list[dict]`
+  that returns `{label, start, end, days, pv, load, ...}` per bucket, `[bucket_len_days ==
+  7]` reproducing the existing fixed trend call exactly (regression check: re-run against
+  the already-validated reference site, confirm identical output). `fetch_report_window()`
+  calls it once for the always-fixed 4-week trend (unchanged) and, when `is_overview`, a
+  second time over the full `[start, end]` for the Overview blocks.
+- **Bucket granularity rule for Overview mode — locked with the user (2026-08-15), simpler
+  than this section's first two guesses.** No weekly tier. Every Overview report — the
+  entire `32`–`183`-day range, i.e. everything past the 4-week/31-day Detallado cap up to
+  `MAX_OVERVIEW_RANGE_DAYS` — buckets monthly (`bucket_len_days ≈ 30`). Detallado stays
+  daily through 31 days exactly as today; the moment a pick crosses that line it goes
+  straight to monthly, no intermediate weekly-bucketed band. `bucket_days()` still takes
+  `bucket_len_days` as a parameter (the 4-week trend keeps calling it with `7`), it's just
+  that Overview's own call site always passes `~30`, never `7`. The bucket *count* this
+  produces at real data volumes — as low as ~2 for a 32-day pick, up to ~6 near the cap —
+  is still worth a visual check once built (same as Phase A's chart thresholds), but the
+  rule itself (monthly, always, once overview) is decided, not provisional.
+- `health`/`get_daily_health` and the grid/battery figures that feed the new trend blocks are
+  already fetched per-day by `fetch_report_window()` for the main window — Overview mode
+  buckets the same rows client-side, no new Supabase query shape.
+
+### Rendering layer (`victron/report_svg.py`, `victron/weekly_report.py`)
+
+`build_report_data()` threads `is_overview` from `fetch_report_window()`'s result into the
+template context, the same way `system_type`'s `has_grid`/`has_batt` already gate blocks.
+
+- **Daily bar chart / SOC chart → bucketed.** `bar_chart_svg()`'s and `soc_chart_svg()`'s
+  per-day x-axis becomes per-bucket when `is_overview`: PV/load bars sum per bucket (reusing
+  `four_week_trend_svg()`'s bar-pair rendering, generalized off the now-shared bucketing
+  primitive rather than copied), SOC becomes a per-bucket min/max band instead of the daily
+  min-line-with-annotations `soc_chart_svg()` draws today — the existing band-fill logic in
+  that function (`band_fwd`/`band_rev`) already draws a min/max envelope for a full period;
+  Overview mode reuses that shape per-bucket instead of per-day.
+- **Health score → trend line, new block.** Today `avgHealth` is one number averaged over the
+  whole window (`weekly_report.py`), which over a quarter hides a bad month inside an
+  otherwise-fine one. New `health_trend_svg()` — one point per bucket, `score_colors()`
+  (already used for the KPI card) coloring each point/segment. New chart, not a reworked KPI
+  card; the KPI card itself stays as the period average for both modes.
+- **Grid dependency / battery cycling trend, new block.** Both are already computed per day
+  (they feed `compute_daily_health()`), so this is `bucket_days()` output charted, not new
+  computation. One new SVG function, styled like `health_trend_svg()` — two line series
+  (dependency %, cycles) rather than a new visual language.
+- **Seasonal coverage — the flagship Overview chart.** `wizard/common.py:
+  monthly_coverage_chart()` already exists for exactly this shape — monthly generation vs.
+  monthly consumption, weakest month flagged — built for the off-grid *proposal* wizard's
+  Step 6 against PVGIS-estimated generation (`wizard/off_grid.py` ~line 1719,
+  `_og_monthly_coverage_and_sim()`). The Overview report's version feeds it **real measured**
+  monthly PV and load from `bucket_days()` output instead of a PVGIS estimate — reuse the
+  chart function itself if its input shape and rendering target (matplotlib/PNG for the
+  wizard's PDF vs. this report's inline SVG pipeline) are compatible; port the visual design
+  rather than the function if not. Decide which once the function's actual signature is
+  read, not assumed compatible.
+- **Copy genericization — resolving §21's open item.** Doing it everywhere (`monitoring`
+  included), per the lean already recorded in §21: `reportTitle` "Weekly Energy Report" →
+  "Energy Report", `healthScore` "Weekly Health Score" → "Health Score", `"vs prev"` → "vs
+  previous period", the narrative prompt's `"this week"` → the actual period phrase already
+  computed elsewhere in the file. One wording set is simpler than branching every string on
+  `is_overview`, and none of it was load-bearing information — a 7-day report calling itself
+  "Health Score" instead of "Weekly Health Score" loses nothing.
+- **Narrative — distinct prompt, not a reworded one.** `weekly_report.py`'s narrative call
+  branches on `is_overview` to a new prompt template in `report_i18n.py`: framed around
+  "how has this system trended over the period" rather than a single week's events, fed the
+  bucketed health/PV/load series instead of the daily ones, and reusing `_season_context()`
+  unchanged (a period spanning multiple months benefits from the CR dry/rainy season fact
+  even more than a single week did). Same fail-soft contract as today — a missing key or API
+  error still returns a placeholder, never blocks the report.
+
+### UI (`pages/06_vrm_monitor.py: tab_report()`)
+
+- Remove the `num_days > MAX_CUSTOM_RANGE_DAYS` branch that currently sets `st.error` +
+  `valid = False` (~lines 575-580). Replace with the live mode indicator described above,
+  shown for every valid pick — not just ones that cross the boundary — so "which mode am I
+  about to get" is always visible, not only surfaced as a warning past the line.
+  `date_input`'s `max_value=max_d` already allows selecting the site's full data span; only
+  the hard error was stopping a long pick from reaching `build_report_data()`.
+  `MAX_OVERVIEW_RANGE_DAYS` becomes the new outer error case in the same spot, for the
+  rare pick past even that.
+- For the record, since it's the one alternative this section considered and rejected:
+  an explicit "Detallado / Resumen" radio, independent of range length, was the other
+  option on the table. Rejected in favor of auto (see the decision at the top of this
+  section) — noted here so it isn't re-litigated later without the reasoning at hand.
+- Coverage warning (`len(covered) < num_days`) stays as-is for both modes — a sparse Overview
+  window is exactly as worth flagging as a sparse Detallado one, same reasoning, no new code.
+
+### Sequencing
+
+1. **Done (2026-08-15).** `bucket_days()` extracted into `database/vrm_report_db.py`,
+   `fetch_report_window()`'s inlined anchored-from-`end` loop replaced with
+   `bucket_days(rows, trend_span_start, end, 7)` — forward-from-`start` and
+   anchored-from-`end` coincide exactly on the trend's fixed 28-day/7-day-bucket span, so
+   no behavior changed. Verified two ways against real `vista-atenas-lp-m3` data: (1) the
+   old loop reimplemented standalone and diffed bucket-for-bucket against the new function's
+   output for two different end dates — identical; (2) a full `build_report_data()` +
+   `render_pdf()` run end to end with no exceptions, trend still producing 4 buckets, totals
+   unchanged from what §11 already validated.
+2. **Done (2026-08-15).** `MAX_OVERVIEW_RANGE_DAYS = 183` added; `fetch_report_window()`'s
+   old `num_days > MAX_CUSTOM_RANGE_DAYS` hard error is gone, replaced by
+   `is_overview = num_days > MAX_CUSTOM_RANGE_DAYS` in the returned dict and a `ValueError`
+   only past the new 183-day ceiling. `build_report_data()` threads it through as
+   `isOverview` in the template context. Verified: a 7-day window still gives
+   `is_overview=False` with identical output to before; a 40-day pick no longer raises and
+   returns `is_overview=True`; exactly 183 days succeeds, 184 raises; a 591-day pick raises
+   against the new cap with the new message. `build_report_data()` + `render_pdf()` both
+   still succeed for the `is_overview=True` case — as expected, it renders as a
+   Detallado-style report with daily charts stretched past their tuned range, since no
+   Overview blocks exist yet (steps 3+ below); this intermediate state isn't shipped alone.
+   Also re-verified through the actual UI (`Reporte` tab, `vista-atenas-2-floor-pool`,
+   7-day pick): generated end to end with no console errors, numbers matching §11's
+   validated reference (437.0 kWh, 96.1% independence, 81/100 health).
+3. **Done (2026-08-15).** `bucket_days()` extended to also aggregate `min_soc`/`max_soc`
+   per bucket (named to match `energy_daily`'s own columns, so the SOC chart's band logic
+   needs no field renaming). `bar_chart_svg()` and `soc_chart_svg()` both now branch on
+   `d["isOverview"]`: daily mode is byte-for-byte unchanged; overview mode reads
+   `d["overviewBuckets"]` instead of `d["dailyGrouped"]`, drawing one bar-pair / one
+   band-point per bucket with the bucket's own `label` on the x-axis. `weekly_report.py`
+   computes `overviewBuckets` via `db.bucket_days(days, period_start, period_end, 30)` —
+   always monthly, no weekly tier, per §22's locked rule — and threads it through
+   `build_report_data()`'s return dict alongside `isOverview`.
+   **Verified in isolation**, not live: a real environment problem surfaced mid-step (see
+   below) that made the actual `.venv` unusable for a stretch, so this was verified by
+   importing `victron/report_svg.py` directly with plain system Python — it has zero
+   non-stdlib dependencies — and `database/vrm_report_db.py` with `supabase_client` stubbed
+   in `sys.modules` (its only external dependency, called lazily, never at import time).
+   Confirmed: `bucket_days()`'s new min/max/sum aggregation matches hand-computed values on
+   synthetic 45-day data; daily-mode bar/SOC charts still produce one bar/point per day
+   (unchanged); overview-mode charts correctly switch to bucket count (2 buckets for 45
+   days, 7 for a 183-day max-cap span with a partial 3-day final bucket) with correct
+   labels; a 60-day case that divides evenly into two full 30-day buckets; the 32-day
+   just-past-cap case (30 + 2 days); and the 183-day max-cap case all render without
+   exceptions. Not yet re-verified through a live `render_pdf()` / real WeasyPrint layout
+   pass (bucket counts are small — at most 7 — comfortably inside what the daily chart was
+   already tuned for up to 31 bars, so a layout regression is unlikely, but "verify visually
+   rather than assume" per this doc's own standard means this is still owed once the
+   environment issue below is resolved).
+
+   **Environment issue found during this step, unrelated to the code above:** this
+   project's `.venv` lives under `~/Desktop`, which syncs via iCloud Drive. Partway through
+   this step, files inside it started reading back empty (`open().read()` returning 0
+   bytes) while `ls`/`wc -c` kept reporting their correct original size — a stuck iCloud
+   "dataless file" that isn't materializing. Confirmed *not* a sandbox-specific artifact:
+   even a plain `cp` (outside any tool sandbox) produced a 0-byte copy of the affected file.
+   Repeated `brctl download` passes over the whole tree fixed most of the affected files
+   (the import chain got measurably further each time — `postgrest`, then deeper into
+   `jwt`/`supabase_auth`) but one file, `cryptography/hazmat/primitives/asymmetric/ec.py`,
+   stayed stuck at 0 bytes through several direct, targeted `brctl download` attempts.
+   Free disk space is fine (17 GB), so that's not the cause. This blocks the actual
+   Streamlit app (any fresh `.venv/bin/python3.9` process hits it), not just this
+   verification — worth the user checking their iCloud Drive sync status directly (System
+   Settings → Apple ID → iCloud → iCloud Drive, or network connectivity) since it's a
+   machine-level stall, not something fixable from the command line.
+4. **Built, then removed after review (2026-08-15/16).** The chart block described below
+   was built and verified, but the user reviewed an actual generated report and asked for it
+   removed — it wasn't something they'd asked to see, regardless of it having been in this
+   plan. Removed in full (`report_svg.py:health_grid_trend_svg()` deleted, the template block
+   and its render call site gone, the three now-dead i18n keys removed) in §23 below. The data
+   plumbing it was built on (`bucket_health_days()`, `bucket_days()`'s grid/discharge sums,
+   `overviewTrend`) stayed, because step 6's narrative prompt also depends on it — only the
+   standalone visual block came out. Left the original build notes below for the record.
+
+   New `database/vrm_report_db.py:bucket_health_days()` — same
+   boundary-walking as `bucket_days()`, but over `daily_health` rows, with its own
+   dedup-by-date-keep-highest-score rule (mirrors `weekly_report.py`'s existing whole-period
+   logic exactly). `bucket_days()` extended to also sum `grid_kwh`/`battery_discharge_kwh`
+   per bucket, so grid independence % and battery cycles can be *derived* per bucket with
+   the identical formula the period totals already use — not a second definition.
+   `weekly_report.py` zips the two bucket lists into `overviewTrend`
+   (`{label, healthScore, gridIndependencePct, batteryCycles}`), added to
+   `build_report_data()`'s return dict.
+
+   New `report_svg.py:health_grid_trend_svg()` — one combined block covering both of this
+   step's planned bullets rather than two separate chart functions: health score and grid
+   independence share one 0-100 axis (both naturally percent/score-scale, so no dual axis
+   needed), health dots coloured via the existing `score_colors()`, independence drawn as a
+   line; battery cycles (a different unit — a count) is a per-bucket text label instead of a
+   third line series, the same pattern `four_week_trend_svg()` already uses for its
+   week-over-week % annotations. Two new i18n keys (`healthGridTrend`, `subHealthGridTrend`,
+   `cyclesAbbr`) added to both EN and ES. Wired into the template as a new page-2 block,
+   `{% if health_grid_trend_svg %}`-gated so it only ever appears when `isOverview`.
+
+   **Verified** the same two ways as step 3: isolated (`bucket_health_days()`'s dedup+average
+   checked against hand-computed values on synthetic data with duplicate-date rows, a
+   missing-data bucket correctly returning `None` rather than a false zero, the chart
+   rendering correctly for n=1 and for a bucket with no health score at all, ES i18n) and
+   live (`vista-atenas-lp-m3`, 2026-07-06→08-14, real health/independence/cycles per bucket:
+   86→84 / 95.8%→100% / 14.39→4.35 cyc; the 7-day Detallado path re-rendered
+   byte-for-byte identical — 53058 bytes both before and after this step).
+5. **Decided with the user (2026-08-15): option (c), skipped for V1.** Investigated first,
+   see below for why — but the resolution is: no seasonal coverage chart in this version.
+   Steps 6-9 shipped without it. Revisit once real `vrm` sites have accumulated enough
+   history for option (a) — the true full-year view — to actually populate for more than a
+   rare site; until then it would ship mostly invisible, which isn't worth the query-scope
+   change from "always the report's own picked period" that option (a) requires. Revisiting
+   later means re-reading this section fresh, not assuming the analysis below still reflects
+   the codebase — confirm `monthly_coverage_svg()`'s 12-month constraint and the VRM 6-month
+   retention window are still what they were before building against them again.
+
+   `wizard/common.py:monthly_coverage_chart()` (Plotly) is confirmed **not** usable — its own
+   docstring says so directly ("WeasyPrint can't render Plotly"; screen-only, wizard Step 6).
+   Its docstring points at the actual PDF-compatible sibling, `proposals/charts.py:
+   monthly_coverage_svg()` — inline SVG, same 520-unit width and palette as
+   `victron/report_svg.py` *by explicit design* (its module docstring: "so the quote PDFs
+   and the VRM weekly reports read as one family"), same paired-bar-with-amber-shortfall
+   visual this step wants. Mechanically this is exactly the reuse the plan hoped for.
+
+   **But it hard-requires exactly 12 months** (`if len(generation_kwh) != 12: return ""`) —
+   a real, deliberate check, not an incidental limit, because the function's whole point for
+   proposals is "does this cover a full year." The Overview report's own picked window tops
+   out at `MAX_OVERVIEW_RANGE_DAYS = 183` (~6 months, locked in this same section) — it can
+   never supply 12 months on its own. Feeding it a partial year either breaks the length
+   check (returns `""`, chart silently vanishes) or requires querying a site's data **beyond
+   the report's own picked period** to assemble a real Jan–Dec view — a materially different
+   thing than every other Overview block, which all stay scoped to whatever `[start, end]`
+   the operator picked.
+
+   **This is a scope decision, not a technical one**, so not resolved unilaterally:
+   - **(a) Reuse `monthly_coverage_svg()` for real, as a full-year view** — query the site's
+     *entire* available history (via `get_available_dates()` / `get_energy_daily()` beyond
+     the report window), bucket into calendar months, and only render the chart when ≥12
+     distinct months of data exist. Closest to the plan's original "flagship chart" framing
+     and to the wizard's proposal-side chart, but most real `vrm` sites won't have 12 months
+     yet (VRM itself only retains ~6 months of 1-min-resolution data, per §7.6/§11's earlier
+     findings) — the chart would render `""` (nothing) for nearly every site today, a real
+     feature shipping mostly invisible at launch.
+   - **(b) Port the visual design, not the function, scoped to the picked period.** A new,
+     smaller function styled after `monthly_coverage_svg()` (same palette, same paired-bar
+     shape, same amber-shortfall flag) but accepting however many calendar-month buckets the
+     Overview window actually spans (2–7, not always 12) — visually similar to what
+     `bar_chart_svg()`'s Overview mode (step 3) already draws, but framed as "coverage" with
+     the shortfall-month flag added. Works today for every Overview report regardless of
+     site age, at the cost of not being a true seasonal/annual view for a young site — and
+     it's genuinely close to redundant with step 3's already-shipped bucketed bar chart,
+     which is worth being honest about rather than building a near-duplicate block.
+   - **(c) Skip this block for V1 of Phase B**, ship steps 6–9 (narrative, copy, UI,
+     verification) without it, and revisit once real `vrm` sites actually accumulate a full
+     year of history — at which point option (a) becomes the obviously right (and actually
+     populated) choice.
+
+   No option was wrong on the merits; each traded off differently between "matches the
+   original flagship framing" and "actually shows something for the sites that exist today."
+   Left as a genuine choice for the user rather than guessed at, since it changed what would
+   get queried and what the report would promise, not just how a chart is drawn — (c) is the
+   answer that came back.
+6. **Done (2026-08-15).** No dependency on step 5, so done out of order while that one was
+   still undecided. New
+   `weekly_report.py:_bucket_trend_lines()` formats `overviewBuckets` + `overviewTrend`
+   (both already built in steps 3-4) into one line per bucket — date range, days, solar,
+   consumption, health, grid independence, battery cycles — feeding a genuinely different
+   prompt frame in `generate_narrative()` for `isOverview`: "describe how the system trended
+   across the segments... rather than only restating the period's totals," with the
+   per-segment breakdown given explicitly so the model has real trend data to work from
+   rather than being asked to infer a trend from one lump total. The non-overview prompt is
+   untouched — same text as before this step, refactored only so both branches share the
+   trailing per-period data lines (`site`, `pv`, `load`, outages, etc.) via a common
+   `framing + shared_lines` structure instead of duplicating them.
+
+   **A real bug caught by isolated testing, not by reasoning about the diff**: the initial
+   edit left the shared data lines outside the closed parenthesis of the `if`/`else` branches
+   — a plain `SyntaxError: unmatched ')'` that a diff read wouldn't obviously catch either,
+   since each individual `if`/`else` block looked locally well-formed. Caught immediately by
+   running `ast.parse()` on the file as the very first verification step, before any
+   isolated-logic testing — fixed by having both branches build a `framing` string, then a
+   single shared `prompt = (framing + ...)` continuation for the common data lines.
+
+   **Verified**: `_bucket_trend_lines()`'s formatting (correct fields, correct
+   `days`/date-range text, missing health score renders as `"n/a"` rather than a fabricated
+   number); `generate_narrative()`'s existing fail-soft contract (`ANTHROPIC_API_KEY`
+   missing → placeholder, unchanged) still holds for both branches; and a live Claude call
+   for both branches on real `vista-atenas-lp-m3` data. The overview-mode narrative does
+   exactly what this step asked — it names and compares the two segments rather than
+   restating one lump total: *"the system's grid independence actually improved between
+   segments — rising from 95.8% in the first 30 days to a perfect 100.0% in the final 10 —
+   even as the battery health edged down slightly from 86 to 84."* The 7-day narrative came
+   back unchanged in style from before this step ("a standout week..."), confirming zero
+   regression on the Detallado path.
+7. **Turned out to already be done (checked 2026-08-15), no new code.** `report_i18n.get(lang,
+   num_days)` already does exactly what this bullet asked for — built during Phase A (§21),
+   not this session: `num_days == 7` returns the original "Weekly" wording unchanged (so
+   `monitoring`, which only ever passes 7, is untouched either way); any other length —
+   which every Overview report is, by construction — returns `_PERIOD_OVERRIDES`
+   ("Energy Report" / "Health Score" / "this period", etc.), already wired in both EN and
+   ES. Confirmed live: `report_i18n.get('en', 40)['reportTitle']` returns `"Energy Report"`.
+   grepped `weekly_report.py`/`report_svg.py`/the template for any remaining hardcoded
+   "week"/"semana" outside comments and the always-correct 4-week-trend chart (which is
+   deliberately exempt — see the code comment at `_PERIOD_OVERRIDES`'s definition, it's
+   always a fixed 4×7-day view regardless of the report's own window) — none found. Every
+   string this session's steps 3/4/6 added (`healthGridTrend`, `_bucket_trend_lines()`'s
+   prompt text, etc.) was already written period-neutral from the start, so there was
+   nothing left to generalize. §21's original "not decided" framing ("genericize everywhere
+   including `monitoring`, or `vrm` only") is resolved by what already shipped: everywhere,
+   since the override only ever triggers on a non-7-day count.
+8. **Done (2026-08-15).** `pages/06_vrm_monitor.py: tab_report()`'s `vrm`-branch hard
+   `st.error` at `num_days > MAX_CUSTOM_RANGE_DAYS` is gone — the outer bound check now
+   targets `rdb.MAX_OVERVIEW_RANGE_DAYS` (183) instead, the only remaining hard stop. Every
+   valid pick now shows a live `st.caption` mode indicator before the operator clicks
+   Generar: "📅 Detallado — N días, día por día" at ≤31 days, "📊 Resumen (Overview) — N
+   días, agrupado por mes..." past it — worded to match the locked no-weekly-tier rule
+   (earlier draft text in this section said "semana/mes"; corrected to "por mes" only).
+   Coverage warning unchanged.
+
+   **Verified live** in the browser: default 7-day pick shows the Detallado caption; picking
+   the site's full 2026-05-10→07-28 range (80 days) shows the Overview caption with no
+   error, and clicking Generar actually renders — 4839.4 kWh solar, 97.1% independence,
+   81/100 health, 80/80 days, over 3 monthly buckets — with no console errors beyond the
+   same benign health-check-probe 404s seen in earlier steps (unrelated, self-correcting).
+9. **Done (2026-08-15) for everything Phase B V1 actually ships** — step 5 is skipped, not
+   deferred-and-pending, so there's no further block on calling this pass complete. Every
+   step that landed (1-4, 6-8) got a consolidated final check on top of the per-step
+   verification already recorded above:
+   - **`monitoring` re-confirmed byte-for-byte unchanged** with all of steps 6-8's changes
+     applied, not just steps 1-4's (53058 bytes, identical to §2 and §4's checks) — the
+     narrative branch, the UI changes, and the copy-genericization check all touch code
+     shared with `vrm`, so this needed re-running after they landed, not just once.
+   - **The true 183-day max cap, against real (sparse) data** rather than the synthetic
+     full-coverage data used in earlier per-step checks: `vista-atenas-lp-m3` only has 40
+     real days, picked across a 183-day window — 7 buckets, 4 of them entirely empty (0
+     days, `pv=0`), `missingDays=143`. Confirms the "don't silently show a partial period as
+     a full one" rule holds at the real end of the range real customer data will actually
+     produce, not an idealized one.
+   - **Empty-bucket rendering, checked directly against the SVG output**: all three
+     bucket-driven charts (`bar_chart_svg`, `soc_chart_svg`, `health_grid_trend_svg`)
+     confirmed to contain no literal `"None"`/`"nan"` leaking into the rendered SVG text for
+     those empty buckets — missing `min_soc`/`max_soc`/`healthScore` correctly stay `None`
+     and get skipped by the drawing code, not coerced into a fabricated zero or a visible
+     Python `None`.
+   - **Both schemas re-confirmed live in the browser**, not just via script: `vrm` origin
+     generates the Overview report end to end (already recorded in step 8); `monitoring`
+     origin, switched to for the first time this session, correctly shows its unchanged
+     fixed "Semana que termina el" picker (no Overview UI exposed there — by design, since
+     `monitoring` can never set `is_overview`) and renders matching §11's original reference
+     figures exactly (429.0 kWh solar, 100.0% independence, 84/100 health).
+
+   **One item still open, gated by data age rather than by anything left to build**:
+   cross-checking a bucketed period's sum against the same period's already-validated
+   Detallado total needs a real site with enough history that an Overview render and a
+   Detallado render actually overlap on real dates — not yet available for any real site
+   (same constraint that ruled out step 5's option (a)). Worth doing whenever a site
+   accumulates enough history for it, but nothing about Phase B V1 is waiting on it.
+
+**Phase B V1 status: done.** Steps 1-4 and 6-9 shipped and verified; step 5 deliberately
+skipped (decided with the user 2026-08-15, see step 5 above for the full reasoning and the
+trigger for revisiting it).
+
+## 23. Fixes from reviewing a real generated report (2026-08-16)
+
+The user reviewed an actual Overview-mode PDF (`El Encino (Casona)`, 2026-05-10 → 07-29, 81
+days) and found two real issues plus asked a question, all against real output rather than
+against the plan.
+
+### The daily bar/SOC chart text was wrong in Overview mode — a real bug, not a nitpick
+
+`sectionDaily`/`subDaily`/`subSocChart` all still said "daily"/"diario" even when the chart
+they label was drawing one bar per **month**, not per day. Root cause: `_PERIOD_OVERRIDES`
+(Phase A, §21) already generalizes this wording once, but only for the case it was built
+for — a Detallado custom range that's still day-by-day, just not exactly 7 days, where
+"daily" stays completely accurate. Phase B's Overview mode (step 3) started drawing monthly
+buckets under that same still-"daily" label and nothing caught it, because every isolated
+test checked the *numbers* each chart produced, never re-read the *copy* sitting next to
+them — exactly the kind of thing that only surfaces once someone looks at a real rendered
+page rather than an assertion.
+
+Fixed with a second override tier, `_OVERVIEW_OVERRIDES` in `report_i18n.py`, layered on top
+of `_PERIOD_OVERRIDES` only when `is_overview=True`: `sectionDaily` → "Solar vs. consumption"
+/ "Solar vs. consumo" (drops "daily" entirely), `subDaily` and `subSocChart` reworded around
+"segment"/"tramo" instead of "day"/"día". `report_i18n.get()` gained an `is_overview`
+parameter; `weekly_report.py`'s call site now passes `window["is_overview"]`. Verified:
+Overview mode (81 days) no longer says "diario" anywhere in that block; a Detallado custom
+range (checked at 20 days) still says "diaria"/"cada día" — confirming the fix is scoped to
+the actual bucketed case and didn't regress the case Phase A already got right.
+
+### How alarm episodes are actually counted (the user asked, not a bug)
+
+Two layers, both already covered by earlier build notes (§8, §12) but worth restating
+together since the report just shows one number with no explanation:
+
+1. **Only two alarm categories are scored at all** — `low_battery` and `overload`
+   (`victron/vrm_csv.py: ALARM_CATEGORIES`), deliberately mirroring exactly what Node-RED's
+   live Cerbo path emits. The CSV export contains ten more alarm signals (DC ripple,
+   temperature, the whole Battery Monitor set — `UNSCORED_ALARM_SIGNALS`), detected and
+   surfaced as an ingestion warning but never counted here — scoring them would make a
+   CSV-ingested site look systematically worse than an identically-behaving Cerbo site for
+   no real difference in what happened, since `count_alarm_episodes()` runs one shared
+   in-episode flag over whatever rows exist for the day.
+2. **An episode is a WARNING→CLEARED transition, not a duration.** For each scored category,
+   `victron/vrm_csv.py: alarm_events()` watches the raw 1-minute signal for edges (not-active
+   → active = `WARNING`, active → not-active = `CLEARED`) and emits one row per transition. A
+   Postgres function, `count_alarm_episodes(site_id, date)` (identical logic in
+   `monitoring`/migration 005 and `vrm`/migration 012, differing only in which timezone
+   buckets "date"), walks a day's events in time order and increments a counter each time the
+   flag flips from clear to active — so a single alarm that stays active for six hours is
+   **one** episode, and the same category re-triggering later the same day is a **second**
+   one. This count becomes `daily_health.alarms_count`; "Total de Episodios de Alarma" in the
+   report is just the sum of that column over the picked period.
+
+Net effect on reading the number: 41 episodes means 41 distinct low-battery/overload
+warning-to-clear cycles across the period, not 41 minutes or 41 separate alarm *types* — and
+it's a floor, not a ceiling, since ten other real alarm signals aren't in that count at all.
+
+### Chart removed after review
+
+`health_grid_trend_svg()` (step 4's health/grid-independence/battery-cycling block) — the
+user hadn't asked to see it and, seeing the real output, didn't want it. Removed
+completely: the function, its template block and render call site, and the three i18n keys
+that existed only for it (`healthGridTrend`, `subHealthGridTrend`, `cyclesAbbr`). The data it
+was built on (`overviewTrend`, `bucket_health_days()`, `bucket_days()`'s grid/discharge sums)
+stayed in place — step 6's narrative prompt still consumes `overviewTrend` via
+`_bucket_trend_lines()`, so deleting those would have silently degraded the narrative too.
+Verified: no leftover references anywhere in `victron/`/`pages/`/`database/`, syntax-checked,
+and a real report regenerated for the same site/range that surfaced the original issues —
+chart is gone, bar/SOC text no longer says "diario", narrative unaffected.
+
+## 24. Report-sections preview in the Reporte tab (2026-08-16)
+
+`tab_report()` (`pages/06_vrm_monitor.py`) now shows a card grid — one card per report
+section, icon + title + one-line description — before the operator clicks Generar, so
+they see what the report will actually contain (and how it reads) before spending a
+generation.
+
+**Reuses `report_i18n.get()`'s exact strings rather than a second, hand-written
+description set.** Every card's title/description is `t["sectionX"]`/`t["subX"]` pulled
+from the same dict `build_report_data()` feeds the PDF, called with the same
+`(lang, num_days, is_overview)` the actual render will use. This was a deliberate choice
+after §23's bug (a description drifting out of sync with what the report actually shows) —
+duplicating the copy here would reintroduce exactly that risk the moment either one changes
+without the other. Confirmed live: the 7-day pick shows "Weekly Health Score" / "Daily solar
+vs. consumption" (unmodified base strings); switching to an 80-day Overview pick updates
+the same cards to "Health Score" / "Solar vs. consumption" with the segment-worded
+description from §23's fix, while "4-week solar trend" correctly stays unchanged in both —
+it's always a fixed weekly view regardless of mode, and the preview reflects that faithfully
+because it's reading the same dict, not inferring it.
+
+Which cards appear also reacts to real state, not a fixed list: `system_type` (`has_batt`/
+`has_grid`, matching `weekly_report.py`'s own gating) hides Battery Health/SOC for
+`grid_zero` sites and Grid Quality for `off_grid` ones; the Narrativa/Clima "Incluir"
+checkboxes show or hide those two cards. The KPI summary row and the AI-narrative card use
+short original copy (no `sub*` key exists for either in the PDF itself — the KPI row is
+just numbers, the narrative is a dynamic AI paragraph), everything else is a direct reuse.
+
+Verified live for both schemas: `vrm` origin at 7 days and at 80 days (Overview), and
+`monitoring` origin (always the fixed 7-day wording, confirmed unaffected). No console
+errors beyond the same benign health-check-probe 404s seen throughout this document.
+
+## 25. Company logo in the report footer (2026-08-16)
+
+Small logo added to the bottom-right corner of the weekly report footer, both schemas —
+one change, since `monitoring` and `vrm` render through the exact same
+`weekly_report.py`/`weekly_report.html` pipeline.
+
+Reused `proposals/assets/assets.py: get_logo_b64()` (already existed, already used by the
+proposal PDFs) rather than adding a second base64-encoding path — one shared source for
+the logo asset, so the two PDF families can't drift apart on which file or encoding they
+embed. `weekly_report.py: render_html()` now passes `logo_b64=get_logo_b64()` into the
+Jinja context; the template's single `.ftr` block (there's only one footer div in this
+template, at the true end of the document — see §the template itself, no per-page footer
+exists) gained a small `<img class="ftr-logo">` beside the existing "Page 1"/"Página 1"
+text, 13px tall.
+
+Verified by rendering both a `monitoring` (7-day) and a `vrm` (Overview, 80-day) report to
+PNG via `pdftoppm` and inspecting the footer directly — logo appears small, clean, bottom
+right, in both.
+
+## 26. Apps Script retirement, scoped — scheduling + email + PDF archiving only (2026-08-16)
+
+Scope, per the user: port the three of §12's four remaining Apps Script jobs that aren't
+the Sheets backup writer. That writer (`doPost` → `sheet.appendRow()`) stays on Apps Script
+untouched, and — found while reading the code, not assumed — `saveDriveBackup()`, which
+saves a raw JSON dump of every daily payload to Drive, is called from the *same* `doPost`
+handler right after the Sheets row write (`Victron_Events_App_Script_v1p7.js:121`), not from
+`weeklyReport()`. It's part of the Sheets-backup job, not the "Drive archiving" being
+retired here, so it stays too — worth being explicit about so it isn't accidentally cut
+later under the "Drive archiving" heading.
+
+**Scope is `monitoring` only, inherited from what already exists.** `runAllWeeklyReports()`
+only ever iterates `monitoring.sites` — Apps Script's scheduler has never touched `vrm`.
+`vrm` reports stay exactly what the plan already decided for V1 (§5): manual, on-demand,
+from the Streamlit Reporte tab. Nothing here changes that.
+
+### 1. PDF archiving → Supabase Storage (no open decision, direct port)
+
+`weeklyReport()` (lines 994-1012) saves the rendered PDF to Drive under
+`weekly-reports/{siteSlug}/`. Replace with `proposals/generator.py:upload_pdf()`'s already-
+working pattern (`client.storage.from_("solar-tool").upload(...)`, already used for proposal
+PDFs, same Supabase project) rather than standing up a second storage mechanism. New
+function, `victron/archive.py: upload_report_pdf(pdf_bytes, site_id, end_str) -> str`,
+path `vrm-monitor-reports/{site_id}/{end_str}.pdf` — mirrors the existing `proposals/
+{proposal_id}/...` convention, in the same `solar-tool` bucket rather than a new one (no new
+bucket to create/configure).
+
+### 2. Email delivery — needs a provider decision, not resolved here
+
+`MailApp` → a transactional provider, per the arch doc's own §6 recommendation (Postmark/
+Resend/SES) — Gmail/Workspace send quotas and the total lack of delivery observability
+(bounces, retries) are exactly the failure mode an *unattended* scheduled job can't afford,
+unlike the interactive Streamlit path where a human is watching. This needs an account
+signup + API key, so it's asked of the user separately (see below) rather than picked here.
+
+Recipient resolution ports as-is: `get_report_email` is already a Postgres RPC
+(`fetchReportEmail_`, `Victron_Events_App_Script_v1p7.js:1726`) — callable directly via
+`get_client().schema("monitoring").rpc("get_report_email", {"p_site_id": site_id}).execute()`
+(same `.schema().rpc()` pattern already used in `tools/run_migration_012.py`), falling back
+to `proyectos@paulyco.com` (today's `CONFIG.reportEmail`) when a site has no linked client.
+
+`buildEmailHtml()` (`Victron_Events_App_Script_v1p7.js:1588`, ~150 lines) ports to a new
+`victron/templates/weekly_report_email.html` — table-layout, inline-styled, no `data:` URIs
+(the original's own comment: "Gmail strips data: URIs," hence the text-based logo fallback
+there — worth keeping that constraint even though the PDF footer now embeds the logo as a
+`data:` URI directly, since email and PDF are different rendering environments with
+different rules). The "surplus" feel-good line and the narrative-highlight extraction
+(skip the first sentence, prefer sentences 2-3) port as straight logic, not net-new design.
+
+### 3. Scheduling — needs a mechanism decision, not resolved here
+
+`createWeeklyReportTrigger()` runs inside Google's infrastructure, so it's always on
+regardless of any particular machine's state. This app currently has **no deployed server**
+— it runs locally via `.venv/bin/python3.9 -m streamlit run app.py` (this doc's own §
+recreations of `scripts/start_dimensionador.sh` earlier this session). A naive port to a
+local `cron`/`launchd` job would be a real reliability regression from today: if the Mac is
+asleep or off Monday morning, the report silently never sends, and nothing here has anyone
+watching for that. Two options exist that don't have that dependency, asked of the user
+below rather than picked unilaterally since it's an infrastructure choice, not a technical
+one:
+- A GitHub Actions scheduled workflow (`cron:` trigger) running a Python script against this
+  same repo — no new hosting account, matches the project's existing GitHub-centric
+  workflow, secrets go in the repo's Actions secrets.
+- A Supabase Edge Function + `pg_cron`, calling a small webhook — stays inside the Supabase
+  project already used for everything else here, but the function itself would be
+  TypeScript/Deno, not Python, so none of `victron/weekly_report.py`'s logic runs there
+  directly (it would need to be a thin trigger calling out to something else that runs the
+  actual Python — likely the GitHub Actions workflow via its `repository_dispatch` API, or a
+  small always-on Python endpoint that doesn't exist yet).
+
+New script either way: `tools/run_weekly_reports.py`, porting `runAllWeeklyReports()`'s
+fan-out (every `monitoring.sites` row where `active = true`, one site's failure logged and
+skipped rather than blocking the rest — same try/except-continue shape).
+
+### Recommended addition beyond pure Apps-Script parity: a report log
+
+Not in the original Apps Script (which relies on `Logger.log()` — invisible once the
+execution finishes) and not literally asked for, but flagged because §21's ingestion path
+already draws this exact lesson: an unattended process needs somewhere to say what happened,
+or a failure is invisible until a customer asks why they didn't get a report. Recommend
+`monitoring.report_log` (new migration): `id, site_id, sent_at, pdf_bytes, storage_path,
+recipient_email, email_status, error`. Cheap now (mirrors `vrm.ingestion_log`'s own
+reasoning from migration 012), and it's the only thing that will answer "why didn't Tuesday's
+run send" without grepping GitHub Actions logs by hand.
+
+### Build order
+
+1. Storage archiving (`victron/archive.py`) — self-contained, no new accounts, do first.
+2. `report_log` migration — cheap, do alongside step 3 so testing has visibility from the
+   start rather than bolted on after something already broke silently.
+3. Email: port `buildEmailHtml()` → Jinja2 template, wire the chosen provider's send call,
+   recipient resolution via `get_report_email`. Blocked on the provider decision below.
+4. `tools/run_weekly_reports.py` — orchestrates 1-3 per active `monitoring` site, logs to
+   `report_log`, same per-site failure isolation as `runAllWeeklyReports()`.
+5. Wire the scheduling trigger (whichever mechanism is chosen) to call step 4's script.
+   Blocked on the mechanism decision below.
+6. Validate against a real Monday run: recipient, subject, attachment, archived copy, and a
+   `report_log` row all match what Apps Script would have produced; confirm one site's
+   failure doesn't block the others (deliberately break one site's data mid-test).
+7. Cutover: disable `createWeeklyReportTrigger()`'s trigger only — `doPost` (Sheets write +
+   `saveDriveBackup()`) stays running exactly as it does today, untouched by this work.
+
+### Two decisions — locked with the user (2026-08-16)
+
+Both were new-account/infrastructure choices, not technical determinations this plan
+could resolve by reading code the way §22/§23's earlier open items were:
+1. **Email provider: Resend** (not Postmark or SES).
+2. **Scheduling mechanism: GitHub Actions** scheduled workflow (not a Supabase Edge
+   Function + `pg_cron`).
+
+Also agreed: the recommended `monitoring.report_log` table (§ above) — build it.
+
+This section is now a locked scope, not an open one. Cross-referenced into the top-level
+project docs the same day: `PHASES.md` (new Phase 12), `REQUIREMENTS.md` (v3.8, Section
+4.5), `CONTEXT.md` (Victron Monitor integration section — also corrects that section's
+stale tariff-savings-via-Apps-Script note, superseded since §15's real numbers shipped in
+the Python report instead).

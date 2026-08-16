@@ -258,19 +258,48 @@ _PERIOD_OVERRIDES_ES = {
 }
 _PERIOD_OVERRIDES = {"en": _PERIOD_OVERRIDES_EN, "es": _PERIOD_OVERRIDES_ES}
 
+# Overview mode only (plan doc §22) — `_PERIOD_OVERRIDES` above still says
+# "daily"/"diario" because it was written for a longer *Detallado* range
+# (Phase A: still one bar per day, just not exactly 7 of them), where that
+# wording is accurate. Overview's bar/SOC charts draw one bar/point per
+# monthly bucket instead, so "daily" is wrong there specifically — a real
+# bug a generated report surfaced (2026-08-16), not something the Phase A
+# override was ever meant to cover.
+_OVERVIEW_OVERRIDES_EN = {
+    "sectionDaily": "Solar vs. consumption",
+    "subDaily": "Compares solar production against household consumption "
+               "for each segment of this period.",
+    "subSocChart": "Shows each segment's high and low battery charge level "
+                   "— a dip below 20% signals heavy use.",
+}
+_OVERVIEW_OVERRIDES_ES = {
+    "sectionDaily": "Solar vs. consumo",
+    "subDaily": "Compara la producción solar contra el consumo de la "
+               "propiedad para cada tramo de este período.",
+    "subSocChart": "Muestra el nivel de carga máximo y mínimo de cada tramo "
+                   "de la batería — bajar de 20% indica uso intenso.",
+}
+_OVERVIEW_OVERRIDES = {"en": _OVERVIEW_OVERRIDES_EN, "es": _OVERVIEW_OVERRIDES_ES}
 
-def get(lang: str, num_days: int = 7) -> dict:
+
+def get(lang: str, num_days: int = 7, is_overview: bool = False) -> dict:
     """Translation dict for `lang`, worded for a window of `num_days`.
 
-    `num_days == 7` (the only value `monitoring` ever passes, and the common
-    case for `vrm`) returns the original dict unchanged — same object
-    identity even — so the already-verified 7-day report is byte-for-byte
-    unaffected. Any other length swaps in period-neutral wording so a 20-day
-    `vrm` report doesn't call itself "weekly".
+    `num_days == 7` and not `is_overview` (the only combination `monitoring`
+    ever passes, and the common case for `vrm`) returns the original dict
+    unchanged — same object identity even — so the already-verified 7-day
+    report is byte-for-byte unaffected. Any other length swaps in
+    period-neutral wording so a 20-day `vrm` report doesn't call itself
+    "weekly"; `is_overview` layers a further correction on top for the
+    "daily" chart text that's specifically wrong once bars represent
+    monthly buckets rather than days.
     """
     lang = (lang or "en").lower()
     base = TRANSLATIONS.get(lang, EN)
-    if num_days == 7:
+    if num_days == 7 and not is_overview:
         return base
     overrides = _PERIOD_OVERRIDES.get(lang, _PERIOD_OVERRIDES_EN)
-    return {**base, **overrides}
+    merged = {**base, **overrides}
+    if is_overview:
+        merged.update(_OVERVIEW_OVERRIDES.get(lang, _OVERVIEW_OVERRIDES_EN))
+    return merged

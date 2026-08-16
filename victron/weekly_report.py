@@ -33,11 +33,16 @@ from datetime import date
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from database import vrm_report_db as db
+from proposals.assets.assets import get_logo_b64
 from victron import report_i18n, report_svg as S, savings as savings_mod
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _SYSTEM_EFF = 0.80          # same derating the original uses
 _FALLBACK_PEAK_SUN_HRS = 4.5  # CR average, used when weather is unavailable
+_OVERVIEW_BUCKET_DAYS = 30
+# No weekly tier (plan doc §22, locked with the user 2026-08-15) — every
+# Overview report (past db.MAX_CUSTOM_RANGE_DAYS, up to
+# db.MAX_OVERVIEW_RANGE_DAYS) buckets monthly, always.
 _NARRATIVE_MODEL = "claude-sonnet-4-6"
 
 # Costa Rica has two well-defined seasons that don't shift year to year —
@@ -137,33 +142,87 @@ def fetch_weather(lat: float, lng: float, start: str, end: str,
 # ══════════════════════════════════════════════════════════════════
 # Narrative
 # ══════════════════════════════════════════════════════════════════
+def _bucket_trend_lines(overview_buckets: list[dict], overview_trend: list[dict]) -> str:
+    """One line per Overview bucket — solar/load plus health/independence/
+    cycles — for the narrative prompt to describe an actual trend across the
+    period instead of restating one aggregate as if the whole span were a
+    single week (plan doc §22, step 6)."""
+    lines = []
+    for eb, tb in zip(overview_buckets, overview_trend):
+        health = f"{tb['healthScore']}/100" if tb.get("healthScore") is not None else "n/a"
+        lines.append(
+            f"- {eb['start']} to {eb['end']} ({eb['days']} days): "
+            f"{eb['pv']} kWh solar, {eb['load']} kWh consumption, "
+            f"health {health}, grid independence {tb['gridIndependencePct']}%, "
+            f"{tb['batteryCycles']} battery cycles"
+        )
+    return "\n".join(lines)
+
+
 def generate_narrative(stats: dict, lang: str) -> str:
     """Port of `generateWeeklyNarrative()` — same prompt, same fail-soft.
 
     A missing key or an API error returns a placeholder rather than raising:
     the report is the deliverable, and losing one paragraph must not lose it.
+
+    Overview mode (plan doc §22, step 6) gets a genuinely different frame —
+    "how did this trend across the period" — rather than the weekly prompt
+    reworded with a bigger day count. Without this, a multi-month period
+    read as a single oversized "week," describing one lump total with no
+    sense of whether the site improved, worsened, or stayed flat across it.
     """
     t = report_i18n.get(lang, stats["totalDays"])
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         return t["narrativeNoKey"]
 
-    period_label = "week" if stats["totalDays"] <= 8 else f"{stats['totalDays']}-day period"
+    is_overview = bool(stats.get("isOverview"))
+    period_label = ("week" if stats["totalDays"] <= 8
+                    else f"{stats['totalDays']}-day period")
+
+    if is_overview:
+        framing = (
+            "You are writing the insights paragraph for a residential "
+            f"solar+battery monitoring report covering a {period_label}, "
+            f"broken into {len(stats['bucketTrendLines'].splitlines())} "
+            f"monthly segments. {t['narrativeLang']}"
+            "\n\nWrite exactly 2 short paragraphs (60-90 words total). Plain "
+            "prose only - no headers, no bullets, no markdown."
+            " Warm, professional tone. Be specific with numbers. Describe how "
+            "the system trended across the segments below — improving, "
+            "worsening, or holding steady — rather than only restating the "
+            "period's totals; that trend is the most meaningful story of a "
+            "multi-segment report, more than any single number."
+            " If the battery kept the home running during outages, say so."
+            " A forward-looking closing sentence is welcome, but only restate "
+            "a fact given below (e.g. the season named, if one is given) or a "
+            "trend visible in these numbers — never invent a date, a "
+            "transition month, or any other detail not explicitly given, even "
+            "one that sounds plausible. If a season is given, do not guess "
+            "when it changes."
+            f"\n\nPer-segment breakdown:\n{stats['bucketTrendLines']}"
+            f"\n\nFull {period_label} totals:"
+        )
+    else:
+        framing = (
+            "You are writing the insights paragraph for a residential "
+            f"solar+battery monitoring report covering a {period_label}. "
+            f"{t['narrativeLang']}"
+            "\n\nWrite exactly 2 short paragraphs (60-90 words total). Plain prose "
+            "only - no headers, no bullets, no markdown."
+            " Warm, professional tone. Be specific with numbers. Lead with the most "
+            f"meaningful story of the {period_label}."
+            " If the battery kept the home running during outages, say so."
+            " A forward-looking closing sentence is welcome, but only restate a "
+            "fact given below (e.g. the season named, if one is given) or a trend "
+            "visible in these numbers — never invent a date, a transition month, "
+            "or any other detail not explicitly given, even one that sounds "
+            "plausible. If a season is given, do not guess when it changes."
+            f"\n\nThis {period_label}'s data:"
+        )
+
     prompt = (
-        "You are writing the insights paragraph for a residential "
-        f"solar+battery monitoring report covering a {period_label}. "
-        f"{t['narrativeLang']}"
-        "\n\nWrite exactly 2 short paragraphs (60-90 words total). Plain prose "
-        "only - no headers, no bullets, no markdown."
-        " Warm, professional tone. Be specific with numbers. Lead with the most "
-        f"meaningful story of the {period_label}."
-        " If the battery kept the home running during outages, say so."
-        " A forward-looking closing sentence is welcome, but only restate a "
-        "fact given below (e.g. the season named, if one is given) or a trend "
-        "visible in these numbers — never invent a date, a transition month, "
-        "or any other detail not explicitly given, even one that sounds "
-        "plausible. If a season is given, do not guess when it changes."
-        f"\n\nThis {period_label}'s data:"
+        framing +
         f"\n- Site: {stats['site']}"
         f"\n- Report period: {stats['periodStart']} to {stats['periodEnd']}"
         f"\n- Solar generated: {stats['pv']} kWh"
@@ -250,9 +309,18 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
             f"{window['period_start']} and {window['period_end']}"
         )
 
+    # Overview mode (plan doc §22): the whole picked period, bucketed
+    # monthly, for the bar/SOC charts to draw one bar/point per bucket
+    # instead of per day. Empty when not is_overview — nothing reads it then.
+    overview_buckets = (
+        db.bucket_days(days, date.fromisoformat(window["period_start"]),
+                       date.fromisoformat(window["period_end"]), _OVERVIEW_BUCKET_DAYS)
+        if window["is_overview"] else []
+    )
+
     lang = (site.get("report_language") or "en").lower()
     lang = "es" if lang == "es" else "en"
-    t = report_i18n.get(lang, len(days))
+    t = report_i18n.get(lang, len(days), is_overview=window["is_overview"])
     system_type = site.get("system_type") or "hybrid"
 
     totals = {
@@ -313,6 +381,26 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     batt_usable = _num(site.get("battery_usable_kwh"), 0) or 1
     battery_cycles = round(totals["discharge"] / batt_usable, 2)
     longest_outage = window["longest_outage_minutes"]
+
+    # Overview mode (plan doc §22): health/grid-independence/battery-cycling
+    # trend, one point per bucket. Independence and cycles are *derived* per
+    # bucket with the exact same formulas as the period totals just above —
+    # not a second definition — from `overview_buckets`' own grid/discharge
+    # sums. Health comes from a separate bucketing pass since `daily_health`
+    # is a different table with its own dedup rule.
+    overview_trend: list[dict] = []
+    if window["is_overview"]:
+        health_buckets = db.bucket_health_days(
+            health, date.fromisoformat(window["period_start"]),
+            date.fromisoformat(window["period_end"]), _OVERVIEW_BUCKET_DAYS)
+        for eb, hb in zip(overview_buckets, health_buckets):
+            overview_trend.append({
+                "label": eb["label"],
+                "healthScore": hb["health_score"],
+                "gridIndependencePct": (round(100 - eb["grid"] / eb["load"] * 100, 1)
+                                        if eb["load"] > 0 else 100),
+                "batteryCycles": round(eb["discharge"] / batt_usable, 2),
+            })
 
     weather = None
     weather_errors: list[str] = []
@@ -394,6 +482,9 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
                               if site.get("exports_to_grid") else None),
             "gridExportPct": (round(totals["gridExport"] / totals["pv"] * 100)
                               if site.get("exports_to_grid") and totals["pv"] else 0),
+            "isOverview": window["is_overview"],
+            "bucketTrendLines": (_bucket_trend_lines(overview_buckets, overview_trend)
+                                 if window["is_overview"] else ""),
         }, lang)
 
     return {
@@ -424,6 +515,15 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         "savings": savings_mod.compute_weekly_savings(totals, site, len(days)),
         "exportsToGrid": bool(site.get("exports_to_grid")),
         "trend": window["trend"],
+        # Past db.MAX_CUSTOM_RANGE_DAYS (plan doc §22, Phase B), the bar and
+        # SOC charts switch to `overviewBuckets` (monthly, always — no
+        # weekly tier); `overviewTrend` (health/grid-independence/battery
+        # cycling, one point per bucket) feeds the new health/grid/battery
+        # trend block. Seasonal coverage and the overview-framed narrative
+        # don't exist yet as of this step landing.
+        "isOverview": window["is_overview"],
+        "overviewBuckets": overview_buckets,
+        "overviewTrend": overview_trend,
     }
 
 
@@ -574,6 +674,10 @@ def render_html(d: dict) -> str:
     return tpl.render(
         lang=d["lang"], t=t, site_name=d["siteName"],
         start_str=d["startStr"], end_str=d["endStr"],
+        # Same asset + base64 helper the proposal PDFs already use
+        # (proposals/assets/assets.py) — one shared source, so the logo can
+        # never drift between the two PDF families.
+        logo_b64=get_logo_b64(),
         narrative_paragraphs=[p for p in (d["narrative"] or "").split("\n") if p.strip()],
         # Pre-built SVG must not be HTML-escaped by autoescape.
         kpi_svg=_safe(S.kpi_svg(d, t)),

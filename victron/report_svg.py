@@ -366,7 +366,23 @@ def bar_chart_svg(d: dict, t: dict) -> str:
     base_y = top_y + BAR_H_MAX
     svg_h = base_y + 18
 
-    days = d["dailyGrouped"]
+    # Overview mode (plan doc §22) draws one bar-pair per bucket instead of
+    # per day — `overviewBuckets` is already-summed output from
+    # `db.bucket_days()`, so it's `pv`/`load`/`label` rather than
+    # `dailyGrouped`'s `pv_kwh`/`load_kwh`/`date`. Buckets max out around 7
+    # (183-day cap / ~30-day buckets), comfortably inside every size limit
+    # below that was tuned for up to 31 daily bars.
+    if d.get("isOverview"):
+        days = d["overviewBuckets"]
+        get_pv = lambda r: r.get("pv")
+        get_load = lambda r: r.get("load")
+        get_label = lambda r, n: r["label"]
+    else:
+        days = d["dailyGrouped"]
+        get_pv = lambda r: r.get("pv_kwh")
+        get_load = lambda r: r.get("load_kwh")
+        get_label = lambda r, n: _x_axis_label(r["date"], t, n)
+
     n = len(days)
     plot_w = SVG_W - BAR_LPAD - BAR_RPAD
     slot_w = plot_w / max(n, 1)
@@ -381,8 +397,8 @@ def bar_chart_svg(d: dict, t: dict) -> str:
         BAR_GAP = max(1.0, slot_w * 0.15)
         BAR_W = max(2.0, (slot_w - BAR_GAP) / 2)
     label_idx = _label_indices(n)
-    vals = [float(r.get("pv_kwh") or 0) for r in days] + \
-           [float(r.get("load_kwh") or 0) for r in days]
+    vals = [float(get_pv(r) or 0) for r in days] + \
+           [float(get_load(r) or 0) for r in days]
     # ceil to the next 10, matching the original's Math.ceil(max/10)*10.
     # int(x/10)+1 would round an exact multiple of 10 up a whole step.
     y_max = math.ceil((max(vals) if vals else 1) / 10) * 10 or 10
@@ -406,13 +422,13 @@ def bar_chart_svg(d: dict, t: dict) -> str:
 
     for i, r in enumerate(days):
         cx = BAR_LPAD + slot_w * i + slot_w / 2
-        pv_h, load_h = bar_h(r.get("pv_kwh")), bar_h(r.get("load_kwh"))
+        pv_h, load_h = bar_h(get_pv(r)), bar_h(get_load(r))
         s += (f"<rect x='{_f(cx - BAR_W - BAR_GAP / 2)}' y='{_f(base_y - pv_h)}' "
               f"width='{_f(BAR_W)}' height='{pv_h}' fill='{GREEN}' rx='1'/>"
               f"<rect x='{_f(cx + BAR_GAP / 2)}' y='{_f(base_y - load_h)}' "
               f"width='{_f(BAR_W)}' height='{load_h}' fill='{MINT}' rx='1'/>")
         if i in label_idx:
-            label = esc(_x_axis_label(r['date'], t, n))
+            label = esc(get_label(r, n))
             s += (f"<text x='{_f(cx)}' y='{svg_h - 4}' text-anchor='middle' "
                   f"font-size='8' fill='#aaa'>{label}</text>")
     return _svg(s, SVG_W, svg_h)
@@ -813,7 +829,18 @@ def soc_chart_svg(d: dict, t: dict) -> str:
               f"<text x='{SPAD - 3}' y='{y + 3:.1f}' font-size='7' fill='#ccc' "
               f"text-anchor='end'>{p}%</text>")
 
-    days = d["dailyGrouped"]
+    # Overview mode (plan doc §22): one min/max point per bucket instead of
+    # per day. `bucket_days()` names its aggregates `min_soc`/`max_soc` to
+    # match `energy_daily`'s own columns exactly for this reason — the band
+    # logic below reads the same keys either way, only the label source and
+    # point count change.
+    if d.get("isOverview"):
+        days = d["overviewBuckets"]
+        get_label = lambda r, n: r["label"]
+    else:
+        days = d["dailyGrouped"]
+        get_label = lambda r, n: _x_axis_label(r["date"], t, n)
+
     n = len(days)
     sw = (SW - SPAD * 2) / max(n - 1, 1)
 
@@ -853,7 +880,7 @@ def soc_chart_svg(d: dict, t: dict) -> str:
         if i in label_idx:
             s += (f"<text x='{x:.1f}' y='{SH - 5}' text-anchor='middle' "
                   f"font-size='7.5' fill='#aaa'>"
-                  f"{esc(_x_axis_label(r['date'], t, n))}</text>")
+                  f"{esc(get_label(r, n))}</text>")
         if float(mp) < 40 and period_min is not None and float(mp) == period_min:
             s += (f"<text x='{x + 4:.1f}' y='{dy - 4:.1f}' font-size='7' "
                   f"fill='{AMBER}'>{_f(mp, 0)}%</text>")
