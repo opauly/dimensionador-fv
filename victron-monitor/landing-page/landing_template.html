@@ -1,0 +1,915 @@
+<title>VRM Monitor</title>
+<style>
+@font-face {
+  font-family: 'Big Shoulders';
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+  src: url(data:font/woff2;base64,__BIGSHOULDERS__) format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  src: url(data:font/woff2;base64,__PLEXSANS__) format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url(data:font/woff2;base64,__PLEXMONO400__) format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url(data:font/woff2;base64,__PLEXMONO500__) format('woff2');
+}
+
+/* ============================================================
+   Tokens — a single committed world (instrument panel at night),
+   per artifact-design's allowance for a deliberate single theme.
+   Every color is declared explicitly; nothing depends on the host.
+   ============================================================ */
+:root {
+  --ink:         #0B2231;   /* page ground — the enclosure */
+  --ink-2:       #0E2A3C;   /* slightly lifted ground, section bands */
+  --panel:       #12324A;   /* card / module surface */
+  --panel-2:     #163A55;   /* hover / raised module surface */
+  --line:        #234A63;   /* hairlines, module borders at rest */
+  --victron:     #0089B6;   /* Victron's own RAL5012 blue — primary accent */
+  --victron-glow:#4FC8EC;   /* bright variant — active states, glow */
+  --signal:      #F2A93B;   /* amber — sparing, "live" indicator only */
+  --paper:       #E9F2F6;   /* body text on dark ground */
+  --paper-dim:   #AFC7D4;   /* secondary text */
+  --mute:        #6F93A6;   /* tertiary text, captions */
+  --good:        #3FBF8F;   /* status green, semantic only */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--ink);
+  color: var(--paper);
+  font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+::selection { background: var(--victron); color: var(--ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+a { color: inherit; }
+img, svg { display: block; max-width: 100%; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+
+/* ---------- type scale ---------- */
+.eyebrow {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--victron-glow);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--victron-glow);
+  box-shadow: 0 0 8px 1px var(--victron-glow);
+}
+.eyebrow.amber { color: var(--signal); }
+.eyebrow.amber .dot { background: var(--signal); box-shadow: 0 0 8px 1px var(--signal); animation: pulse 2.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+h1, h2, h3 {
+  font-family: 'Big Shoulders', 'IBM Plex Sans', sans-serif;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+  color: #FFFFFF;
+}
+h1 { font-size: clamp(44px, 6.4vw, 84px); line-height: 0.96; }
+h2 { font-size: clamp(30px, 3.6vw, 46px); line-height: 1.02; }
+h3 { font-size: 20px; line-height: 1.15; letter-spacing: 0.005em; }
+
+p { color: var(--paper-dim); max-width: 60ch; }
+p.lede { font-size: 19px; line-height: 1.6; color: var(--paper); max-width: 46ch; }
+
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.num  { font-variant-numeric: tabular-nums; font-family: 'IBM Plex Mono', monospace; }
+
+/* ---------- nav ---------- */
+nav {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(11,34,49,0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 72px; }
+.brand { display: flex; align-items: center; gap: 15px; font-family: 'Big Shoulders', sans-serif; font-weight: 800; font-size: 20px; letter-spacing: 0.01em; color: #fff; text-transform: uppercase; }
+.brand .mark { width: 30px; height: 30px; flex: none; }
+.brand small { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; font-weight: 400; letter-spacing: 0.14em; color: var(--mute); text-transform: uppercase; margin-top: 2px; }
+.brand .logo-img { height: 25px; width: auto; display: block; flex: none; }
+.brand .brand-divider { width: 1px; height: 22px; background: var(--line); flex: none; }
+.navlinks { display: flex; align-items: center; gap: 34px; }
+.navlinks a { font-family: 'IBM Plex Mono', monospace; font-size: 13px; letter-spacing: 0.03em; color: var(--paper-dim); text-decoration: none; transition: color 0.15s; }
+.navlinks a:hover { color: var(--victron-glow); }
+.navlinks a:focus-visible, .btn:focus-visible, .card:focus-visible, .mode-toggle button:focus-visible { outline: 2px solid var(--victron-glow); outline-offset: 3px; }
+
+.btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px; font-weight: 500; letter-spacing: 0.05em;
+  text-transform: uppercase; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 13px 22px; border-radius: 3px;
+  border: 1px solid var(--victron);
+  background: var(--victron);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.15s;
+  box-shadow: 0 0 0 0 rgba(79,200,236,0);
+}
+.btn:hover { background: var(--victron-glow); border-color: var(--victron-glow); color: var(--ink); box-shadow: 0 0 26px 0 rgba(79,200,236,0.45); transform: translateY(-1px); }
+.btn.ghost { background: transparent; color: var(--paper); border-color: var(--line); }
+.btn.ghost:hover { border-color: var(--victron-glow); color: var(--victron-glow); background: transparent; box-shadow: none; transform: none; }
+.btn .arrow { transition: transform 0.15s; }
+.btn:hover .arrow { transform: translateX(3px); }
+
+/* ---------- hero ---------- */
+.hero { position: relative; padding: 92px 0 88px; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -20% -10% auto -10%; height: 620px;
+  background: radial-gradient(ellipse 620px 420px at 72% 18%, rgba(0,137,182,0.28), transparent 68%);
+  pointer-events: none;
+}
+.hero-grid { position: relative; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 56px; align-items: center; }
+.hero-copy .eyebrow { margin-bottom: 22px; }
+.hero-copy h1 { margin-bottom: 22px; }
+.hero-copy h1 em { font-style: normal; color: var(--victron-glow); }
+.hero-copy p.lede { margin-bottom: 34px; }
+.hero-ctas { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 30px; }
+.hero-note { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--mute); letter-spacing: 0.02em; }
+
+/* instrument readout module */
+.readout {
+  background: linear-gradient(175deg, var(--panel), var(--ink-2));
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 26px 26px 22px;
+  box-shadow: 0 30px 70px -30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.03);
+  position: relative;
+}
+.readout::after {
+  content: ""; position: absolute; top: -1px; left: 14px; right: 14px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--victron-glow), transparent);
+  opacity: 0.6;
+}
+.readout-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.readout-head .site { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--paper-dim); }
+.readout-head .site b { color: #fff; font-weight: 500; }
+.readout-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+.stat { border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; background: rgba(255,255,255,0.015); }
+.stat .lbl { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mute); margin-bottom: 8px; }
+.stat .val { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 500; color: var(--victron-glow); letter-spacing: -0.01em; text-shadow: 0 0 18px rgba(79,200,236,0.35); }
+.stat .val small { font-size: 13px; color: var(--paper-dim); font-weight: 400; margin-left: 3px; text-shadow: none; }
+.stat.good .val { color: var(--good); text-shadow: 0 0 18px rgba(63,191,143,0.35); }
+.readout-narr { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; line-height: 1.6; color: var(--paper-dim); border-left: 2px solid var(--victron); padding-left: 13px; font-style: italic; }
+.readout-narr b { color: var(--paper); font-style: normal; font-weight: 500; }
+
+/* ---------- section shell ---------- */
+section { padding: 96px 0; }
+section.band { background: var(--ink-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.section-head { max-width: 640px; margin-bottom: 56px; }
+.section-head .eyebrow { margin-bottom: 16px; }
+.section-head p { margin-top: 14px; }
+
+/* ---------- signal flow (3-step, real sequence) ---------- */
+.flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; position: relative; }
+.flow-step { position: relative; padding: 0 28px 0 0; }
+.flow-step:first-child { padding-left: 0; }
+.flow-num { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--victron-glow); letter-spacing: 0.06em; margin-bottom: 14px; display: block; }
+.flow-step h3 { margin-bottom: 12px; }
+.flow-step p { font-size: 14.5px; }
+.flow-trace {
+  position: absolute; top: 8px; left: -14px; right: 14px; height: 1px;
+  background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 11px);
+}
+.flow-step:first-child .flow-trace { display: none; }
+.flow-trace::after {
+  content: ""; position: absolute; right: -3px; top: -2.5px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--victron-glow); box-shadow: 0 0 8px 1px var(--victron-glow);
+}
+
+/* ---------- module grid (features) ---------- */
+.modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.card { background: var(--panel); padding: 26px 26px 24px; position: relative; transition: background 0.15s; }
+.card:hover { background: var(--panel-2); }
+.card .led { width: 7px; height: 7px; border-radius: 50%; background: var(--good); box-shadow: 0 0 7px 1px rgba(63,191,143,0.7); position: absolute; top: 24px; right: 26px; }
+.card h3 { margin-bottom: 10px; font-size: 17px; }
+.card p { font-size: 13.5px; min-height: 58px; }
+.card .tag { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); margin-bottom: 12px; }
+
+/* mode toggle — Detallado vs. Resumen, real product behavior demonstrated live */
+.mode-toggle-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 28px 0 40px; }
+.mode-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; padding: 4px; background: var(--ink-2); gap: 3px; }
+.mode-toggle button {
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.03em;
+  padding: 10px 18px; border-radius: 4px; border: none; background: transparent;
+  color: var(--paper-dim); cursor: pointer; transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.mode-toggle button.active { background: var(--victron); color: #fff; box-shadow: 0 0 18px rgba(0,137,182,0.4); }
+.mode-toggle button:hover:not(.active) { color: var(--paper); }
+.mode-hint { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--mute); }
+.card .adapts { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--victron-glow); border: 1px solid rgba(79,200,236,0.35); border-radius: 3px; padding: 2px 6px; margin-bottom: 10px; }
+.card .fixed-badge { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); border: 1px solid var(--line); border-radius: 3px; padding: 2px 6px; margin-bottom: 10px; }
+.cards-wrap[data-mode="detallado"] [data-only="overview"] { display: none; }
+.cards-wrap[data-mode="overview"] [data-only="detallado"] { display: none; }
+
+/* ---------- report preview ---------- */
+.preview-grid { display: grid; grid-template-columns: 0.72fr 1.28fr; gap: 56px; align-items: start; }
+.mini-list { list-style: none; margin-top: 16px; }
+.mini-list li { display: flex; justify-content: space-between; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13px; color: var(--paper-dim); }
+.mini-list li b { color: var(--paper); font-weight: 500; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; }
+.preview-badge {
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 24px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--mute);
+  border: 1px solid var(--line); border-radius: 20px; padding: 7px 14px 7px 10px;
+}
+.preview-badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--victron-glow); box-shadow: 0 0 6px 1px var(--victron-glow); }
+
+/* real rendered report screenshot, in a document-frame chrome */
+.report-frame {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  box-shadow: 0 40px 100px -30px rgba(0,0,0,0.7);
+}
+.report-frame .chrome {
+  display: flex; align-items: center; gap: 7px; padding: 13px 16px;
+  background: var(--ink-2); border-bottom: 1px solid var(--line);
+}
+.report-frame .chrome .dot { width: 9px; height: 9px; border-radius: 50%; }
+.report-frame .chrome .fname {
+  margin-left: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--mute);
+}
+.report-frame .shot-wrap { position: relative; max-height: 620px; overflow: hidden; background: #fff; }
+.report-frame .shot-wrap img { width: 100%; display: block; }
+.report-frame .shot-wrap::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 160px;
+  background: linear-gradient(180deg, rgba(255,255,255,0), var(--panel) 92%);
+}
+.report-frame .shot-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 16px 20px 20px;
+}
+.report-frame .shot-foot span { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--mute); }
+
+/* ---------- pricing ---------- */
+.pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: stretch; }
+.price-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 30px 28px 28px; position: relative; display: flex; flex-direction: column;
+}
+.price-card.featured {
+  background: linear-gradient(175deg, var(--panel-2), var(--panel));
+  border-color: var(--victron);
+  box-shadow: 0 30px 70px -30px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,137,182,0.25);
+  transform: translateY(-8px);
+}
+.price-card.featured::after {
+  content: ""; position: absolute; top: -1px; left: 14px; right: 14px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--victron-glow), transparent);
+  opacity: 0.7;
+}
+.featured-tag {
+  position: absolute; top: -12px; left: 28px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink);
+  background: var(--victron-glow); padding: 4px 10px; border-radius: 3px;
+}
+.price-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+.price-card-head h3 { font-size: 22px; }
+.price-range { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--mute); letter-spacing: 0.04em; white-space: nowrap; }
+.price-num {
+  font-family: 'IBM Plex Mono', monospace; font-size: 42px; font-weight: 500;
+  color: var(--victron-glow); letter-spacing: -0.02em;
+  text-shadow: 0 0 18px rgba(79,200,236,0.35);
+  padding-bottom: 20px; margin-bottom: 20px; border-bottom: 1px solid var(--line);
+}
+.price-num .per { font-size: 13px; color: var(--paper-dim); font-weight: 400; text-shadow: none; margin-left: 4px; letter-spacing: 0; }
+.price-features { list-style: none; display: flex; flex-direction: column; gap: 12px; flex: 1; margin-bottom: 26px; }
+.price-features li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--paper-dim); }
+.price-features li .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--victron-glow); box-shadow: 0 0 6px 1px var(--victron-glow); flex: none; }
+.price-features li.carry { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mute); padding-top: 2px; }
+.price-note { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--mute); text-align: center; margin-top: 34px; letter-spacing: 0.02em; }
+
+/* two package types share the pricing toggle pattern already used above */
+.pricing-wrap[data-mode="subscription"] [data-only="single"] { display: none; }
+.pricing-wrap[data-mode="single"] [data-only="subscription"] { display: none; }
+#access-form[data-mode="installer"] [data-only="owner"] { display: none; }
+#access-form[data-mode="owner"] [data-only="installer"] { display: none; }
+
+.single-report-card {
+  display: grid; grid-template-columns: 1.3fr 0.9fr; gap: 44px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 40px 40px 38px;
+}
+.single-report-card .tag { margin-bottom: 4px; }
+.single-report-card h3 { font-size: 26px; margin: 8px 0 14px; }
+.single-report-card p { font-size: 14.5px; max-width: 46ch; }
+.src-right {
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px;
+  padding-left: 40px; border-left: 1px solid var(--line); height: 100%; justify-content: center;
+}
+.src-right .price-num { border-bottom: none; padding-bottom: 0; margin-bottom: 0; font-size: 44px; }
+.src-note { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--mute); line-height: 1.5; }
+
+/* ---------- CTA band ---------- */
+.cta-band { padding: 100px 0; text-align: center; position: relative; overflow: hidden; }
+.cta-band::before {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 900px; height: 900px;
+  background: radial-gradient(circle, rgba(0,137,182,0.16), transparent 62%);
+  pointer-events: none;
+}
+.cta-band .wrap { position: relative; }
+.cta-band h2 { max-width: 780px; margin: 0 auto 18px; }
+.cta-band p.lede { margin: 0 auto 36px; text-align: center; }
+.cta-row { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+
+/* ---------- access request form ---------- */
+.access-form {
+  max-width: 620px; margin: 0 auto; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 32px 32px 28px; box-shadow: 0 40px 100px -30px rgba(0,0,0,0.65);
+}
+.audience-row { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+.audience-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
+.field label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mute); }
+.field label .req { color: var(--signal); margin-left: 2px; }
+.field label .opt { text-transform: none; letter-spacing: 0; color: var(--mute); }
+.field input, .field select, .field textarea {
+  background: var(--ink-2); border: 1px solid var(--line); border-radius: 4px; padding: 11px 13px;
+  color: var(--paper); font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; width: 100%;
+}
+.field input::placeholder, .field textarea::placeholder { color: var(--mute); opacity: 1; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none; border-color: var(--victron); box-shadow: 0 0 0 3px rgba(0,137,182,0.22);
+}
+.field textarea { resize: vertical; min-height: 74px; font-family: 'IBM Plex Sans', sans-serif; }
+.send-link { display: inline-flex; align-items: center; justify-content: center; gap: 9px; width: 100%; opacity: 1; transition: opacity 0.15s; }
+.send-link[aria-disabled="true"] { opacity: 0.4; pointer-events: none; cursor: not-allowed; }
+.form-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+.form-note { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--mute); }
+.form-note a { color: var(--victron-glow); text-decoration: none; }
+.form-note a:hover { text-decoration: underline; }
+
+/* ---------- footer ---------- */
+footer { border-top: 1px solid var(--line); padding: 44px 0; }
+footer .wrap { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; }
+footer .fbrand { display: flex; align-items: center; gap: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--mute); }
+footer .fbrand .mark { width: 16px; height: 16px; opacity: 0.7; }
+footer .flinks { display: flex; gap: 26px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--mute); }
+footer .flinks a { text-decoration: none; transition: color 0.15s; }
+footer .flinks a:hover { color: var(--victron-glow); }
+
+/* ---------- responsive ---------- */
+@media (max-width: 920px) {
+  .hero-grid { grid-template-columns: 1fr; }
+  .navlinks { display: none; }
+  .flow { grid-template-columns: 1fr; gap: 34px; }
+  .flow-step { padding-left: 0; }
+  .flow-trace { display: none !important; }
+  .modules { grid-template-columns: 1fr; }
+  .preview-grid { grid-template-columns: 1fr; gap: 40px; }
+  .pricing-grid { grid-template-columns: 1fr; gap: 16px; }
+  .price-card.featured { transform: none; }
+  .single-report-card { grid-template-columns: 1fr; text-align: center; }
+  .single-report-card p { max-width: none; margin: 0 auto; }
+  .src-right { border-left: none; border-top: 1px solid var(--line); padding: 26px 0 0; margin-top: 8px; }
+}
+@media (max-width: 560px) {
+  .wrap { padding: 0 20px; }
+  .readout-stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { padding: 11px 12px; }
+  .stat .val { font-size: 21px; }
+  section { padding: 68px 0; }
+  .access-form { padding: 24px 20px 22px; }
+  .field-row { grid-template-columns: 1fr; gap: 0; }
+  .form-foot { flex-direction: column; align-items: flex-start; gap: 10px; }
+}
+</style>
+
+<nav>
+  <div class="wrap">
+    <div class="brand">
+      <img class="logo-img" src="data:image/png;base64,__PAULYLOGO__" alt="Pauly &amp; Co.">
+      <span class="brand-divider" aria-hidden="true"></span>
+      VRM Monitor
+    </div>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#modules">What's inside</a>
+      <a href="#preview">Sample report</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#cta" class="btn ghost" style="padding:9px 16px;">Request access</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="eyebrow"><span class="dot"></span>Built on Victron VRM data</span>
+      <h1>The export nobody opens.<br>Now a report <em>everyone</em> reads.</h1>
+      <p class="lede">Every Cerbo GX is already logging health score, grid independence, and battery behavior. We turn that CSV into a branded, AI-narrated report that actually gets opened — for your own system, or every customer on your fleet — automatically, every week.</p>
+      <div class="hero-ctas">
+        <a href="#cta" class="btn">Request early access <span class="arrow">→</span></a>
+        <a href="#preview" class="btn ghost">See a sample report</a>
+      </div>
+      <span class="hero-note">No Node-RED changes. No Cerbo reflash. Works with equipment you've already installed.</span>
+    </div>
+
+    <div class="readout" role="img" aria-label="Sample weekly report readout showing health score 84 out of 100, 429 kilowatt hours solar generated, and 96.1 percent grid independence">
+      <div class="readout-head">
+        <span class="site">SAMPLE SITE <b>· 7-DAY REPORT</b></span>
+        <span class="eyebrow amber" style="font-size:10.5px;"><span class="dot"></span>Live</span>
+      </div>
+      <div class="readout-stats">
+        <div class="stat good">
+          <div class="lbl">Health score</div>
+          <div class="val">84<small>/100 · Good</small></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Solar generated</div>
+          <div class="val">429<small>kWh</small></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Grid independence</div>
+          <div class="val">96.1<small>%</small></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Alarm episodes</div>
+          <div class="val">3<small>events</small></div>
+        </div>
+      </div>
+      <p class="readout-narr">"The system produced <b>96.1% of what the home used</b> this week, with the battery covering every evening peak. Grid draw stayed under 17 kWh total…"</p>
+    </div>
+  </div>
+</header>
+
+<section id="how" class="band">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>How it works</span>
+      <h2>Three steps. Zero new hardware.</h2>
+      <p>The same pipeline that has been sending Pauly &amp; Co.'s own customers a report every Monday for months — now available whether you're watching one home or a whole fleet of installs.</p>
+    </div>
+    <div class="flow">
+      <div class="flow-step">
+        <span class="flow-num">01</span>
+        <h3>Upload</h3>
+        <p>Export a CSV straight from VRM, or connect the VRM API for automatic pulls. No changes to Node-RED, no re-flashing a Cerbo GX — this reads data your equipment is already generating.</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-trace"></div>
+        <span class="flow-num">02</span>
+        <h3>Process</h3>
+        <p>We parse daily energy, battery cycling, alarms, and outages; score system health 0–100; and let Claude write the week in plain language — not just a wall of numbers.</p>
+      </div>
+      <div class="flow-step">
+        <div class="flow-trace"></div>
+        <span class="flow-num">03</span>
+        <h3>Deliver</h3>
+        <p>A branded PDF lands in your inbox automatically — or your customer's, if you're managing more than one site. Pick a range past a month and it becomes a monthly Overview instead — same report, right granularity.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="modules">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>What's inside</span>
+      <h2>Every section the report<br>actually contains.</h2>
+      <p>Twelve modules, computed once and shown consistently everywhere. Two of them read differently depending on the range you pick — try the toggle.</p>
+    </div>
+
+    <div class="mode-toggle-row">
+      <div class="mode-toggle" data-toggle-target=".cards-wrap" role="group" aria-label="Report mode">
+        <button type="button" class="active" data-set-mode="detallado" aria-pressed="true">Detallado · ≤31 days</button>
+        <button type="button" data-set-mode="overview" aria-pressed="false">Resumen · 32 days–6 months</button>
+      </div>
+      <span class="mode-hint">Past 31 days, the report switches itself — no setting to remember.</span>
+    </div>
+
+    <div class="modules cards-wrap" data-mode="detallado">
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Scoring</span>
+        <h3>Health score</h3>
+        <p>0–100, alongside solar generation, grid independence, and events for the period — one number a homeowner can actually track over time.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Narrative</span>
+        <h3>AI narrative</h3>
+        <p><span data-only="detallado">A short paragraph explaining what happened this period — plain language, not a wall of numbers.</span><span data-only="overview">A paragraph that describes how the system <em>trended</em> across segments — improving, worsening, or steady — not one lump total.</span></p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="adapts">Adapts to range</span>
+        <h3><span data-only="detallado">Daily solar vs. consumption</span><span data-only="overview">Solar vs. consumption</span></h3>
+        <p><span data-only="detallado">Compares daily solar production against household consumption for each day in this period.</span><span data-only="overview">Compares solar production against household consumption for each segment of this period.</span></p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Energy mix</span>
+        <h3>Where your energy came from</h3>
+        <p>Shows how much of your energy came from solar panels, batteries, and the utility grid — one donut, always up to date.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Battery</span>
+        <h3>Battery health</h3>
+        <p>Tracks how well your batteries charged and discharged throughout this period — cycling stress, float days, voltage range.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Grid</span>
+        <h3>Grid quality</h3>
+        <p>Measures the quality and stability of the utility grid supply at your site — frequency and voltage extremes, not just outages.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Events</span>
+        <h3>Outages &amp; alarms</h3>
+        <p>Logs grid outages and alarm episodes recorded by the system during this period — the same definition your live monitoring uses.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="adapts">Adapts to range</span>
+        <h3>Battery SOC timeline</h3>
+        <p><span data-only="detallado">Shows the daily high and low battery charge level — a dip below 20% signals heavy use.</span><span data-only="overview">Shows each segment's high and low battery charge level — a dip below 20% signals heavy use.</span></p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Performance</span>
+        <h3>Solar performance</h3>
+        <p>Compares real solar production to the theoretical maximum, based on your panel capacity and the sunlight actually available.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Weather</span>
+        <h3>Weather context</h3>
+        <p>Local conditions for this period — cloud cover and rain directly reduce solar output, so the report accounts for them.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="fixed-badge">Always weekly</span>
+        <h3>4-week solar trend</h3>
+        <p>Compares production across the past 4 weeks to spot seasonal patterns — fixed at this cadence on purpose, whatever range you picked.</p>
+      </div>
+      <div class="card">
+        <span class="led" aria-hidden="true"></span>
+        <span class="tag">Savings</span>
+        <h3>Estimated savings</h3>
+        <p>Estimated electricity cost avoided this period by using solar instead of buying from the grid — a real number, never a placeholder.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="preview" class="band">
+  <div class="wrap preview-grid">
+    <div>
+      <span class="eyebrow"><span class="dot"></span>Sample report</span>
+      <h2>What lands in the inbox.</h2>
+      <p style="margin-top:16px;">Not a mockup — this is page one of an actual report, rendered by the same pipeline that generates every customer's PDF: real health scoring, a real AI narrative, real savings math against live tariff tables. Only the household is invented.</p>
+      <ul class="mini-list">
+        <li>Format <b>PDF, 2 pages</b></li>
+        <li>Cadence <b>Weekly or Monthly Overview</b></li>
+        <li>Languages <b>ES / EN</b></li>
+        <li>Delivery <b>Automatic, branded</b></li>
+      </ul>
+      <span class="preview-badge"><span class="dot"></span>Synthetic household — no customer data shown</span>
+    </div>
+
+    <div class="report-frame">
+      <div class="chrome">
+        <span class="dot" style="background:#E4664B;"></span>
+        <span class="dot" style="background:#F2A93B;"></span>
+        <span class="dot" style="background:#3FBF8F;"></span>
+        <span class="fname">weekly-report_casa-modelo_2026-08-09.pdf</span>
+      </div>
+      <div class="shot-wrap">
+        <img src="data:image/png;base64,__SAMPLEREPORT__" alt="Sample weekly report PDF, page 1: Casa Modelo, health score 86 out of 100, 264.7 kWh solar generated, 94.0% grid independence, an AI-written narrative paragraph, a daily solar-versus-consumption bar chart, and an energy-mix donut chart.">
+      </div>
+      <div class="shot-foot">
+        <span>Page 1 of 2</span>
+        <a href="#cta" class="btn ghost" style="padding:9px 16px;">Request the full sample</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <span class="eyebrow"><span class="dot"></span>Pricing</span>
+      <h2>Subscribe one system,<br>or a whole fleet.</h2>
+      <p>No seats, no per-user math — you pay for what's actually being monitored, whether that's your own home or fifty customers. Or skip the commitment and try one report first.</p>
+    </div>
+
+    <div class="mode-toggle-row">
+      <div class="mode-toggle" data-toggle-target=".pricing-wrap" role="group" aria-label="Pricing model">
+        <button type="button" class="active" data-set-mode="subscription" aria-pressed="true">Subscription</button>
+        <button type="button" data-set-mode="single" aria-pressed="false">Single report</button>
+      </div>
+      <span class="mode-hint">Start with a single report, upgrade to a subscription whenever — nothing to migrate.</span>
+    </div>
+
+    <div class="pricing-wrap" data-mode="subscription">
+      <div class="pricing-grid" data-only="subscription">
+        <div class="price-card">
+          <div class="price-card-head">
+            <h3>Starter</h3>
+            <span class="price-range">Up to 10 sites</span>
+          </div>
+          <div class="price-num">$14<span class="per">/ site / mo</span></div>
+          <ul class="price-features">
+            <li><span class="dot"></span>Automatic weekly &amp; Overview reports</li>
+            <li><span class="dot"></span>Health score + AI narrative</li>
+            <li><span class="dot"></span>CSV upload · Spanish / English</li>
+            <li><span class="dot"></span>Automatic email delivery</li>
+          </ul>
+          <a href="#cta" class="btn ghost" style="justify-content:center;">Get started</a>
+        </div>
+
+        <div class="price-card featured">
+          <span class="featured-tag">Most installers</span>
+          <div class="price-card-head">
+            <h3>Growth</h3>
+            <span class="price-range">Up to 50 sites</span>
+          </div>
+          <div class="price-num">$9<span class="per">/ site / mo</span></div>
+          <ul class="price-features">
+            <li class="carry">Everything in Starter, plus</li>
+            <li><span class="dot"></span>Full white-label branding</li>
+            <li><span class="dot"></span>Priority support</li>
+          </ul>
+          <a href="#cta" class="btn" style="justify-content:center;">Get started</a>
+        </div>
+
+        <div class="price-card">
+          <div class="price-card-head">
+            <h3>Fleet</h3>
+            <span class="price-range">50+ sites</span>
+          </div>
+          <div class="price-num" style="font-size:32px;">Custom</div>
+          <ul class="price-features">
+            <li class="carry">Everything in Growth, plus</li>
+            <li><span class="dot"></span>VRM API auto-ingestion</li>
+            <li><span class="dot"></span>Dedicated onboarding</li>
+            <li><span class="dot"></span>Delivery SLA</li>
+          </ul>
+          <a href="mailto:proyectos@paulyco.com?subject=VRM%20Monitor%20-%20Fleet%20pricing" class="btn ghost" style="justify-content:center;">Talk to us</a>
+        </div>
+      </div>
+
+      <div class="single-report-card" data-only="single">
+        <div>
+          <span class="tag">One-time · no subscription</span>
+          <h3>Single Report</h3>
+          <p>Already have a CSV export, or just want to see one system's story before committing to a subscription? Upload it once — get back the exact same report a subscriber gets every week, nothing held back.</p>
+          <ul class="price-features" style="margin-top:20px;">
+            <li><span class="dot"></span>One site, any range up to 6 months of history</li>
+            <li><span class="dot"></span>All 12 report sections, full health scoring + AI narrative</li>
+            <li><span class="dot"></span>Delivered within minutes of upload</li>
+          </ul>
+        </div>
+        <div class="src-right">
+          <div class="price-num">$29<span class="per">/ report</span></div>
+          <a href="#cta" class="btn" style="justify-content:center; width:100%;">Get a report</a>
+          <span class="src-note">One PDF, delivered once — no automatic re-delivery. Want it weekly instead? Switch to a subscription above, anytime.</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="price-note">Early-access pricing — subscription rates locked in for 12 months for owners and installers who join during onboarding.</p>
+  </div>
+</section>
+
+<section id="cta" class="cta-band">
+  <div class="wrap">
+    <span class="eyebrow" style="justify-content:center;"><span class="dot"></span>For owners &amp; installers</span>
+    <h2 style="margin-top:18px;">Every Victron system already has this data.<br>Most of it goes unread.</h2>
+    <p class="lede">We're onboarding a small group of owners and installers running Victron equipment before opening this up broadly. Tell us about your system — we'll generate a sample report from a real export, on us.</p>
+
+    <form class="access-form" id="access-form" data-mode="installer">
+      <div class="audience-row">
+        <span class="audience-label">I am a</span>
+        <div class="mode-toggle" data-toggle-target="#access-form" role="group" aria-label="I am a...">
+          <button type="button" class="active" data-set-mode="installer" aria-pressed="true">Solar installer</button>
+          <button type="button" data-set-mode="owner" aria-pressed="false">System owner</button>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="af-name">Name<span class="req">*</span></label>
+          <input type="text" id="af-name" name="name" placeholder="Jane Solar" autocomplete="name">
+        </div>
+        <div class="field">
+          <label for="af-email">Email<span class="req">*</span></label>
+          <input type="email" id="af-email" name="email" placeholder="jane@yourcompany.com" autocomplete="email">
+        </div>
+      </div>
+
+      <div class="field-row" data-only="installer">
+        <div class="field">
+          <label for="af-company">Company<span class="req">*</span></label>
+          <input type="text" id="af-company" name="company" placeholder="Your installer name" autocomplete="organization">
+        </div>
+        <div class="field">
+          <label for="af-fleet">Fleet size<span class="req">*</span></label>
+          <select id="af-fleet" name="fleet">
+            <option value="" selected>Select a range</option>
+            <option value="Fewer than 10 sites">Fewer than 10 sites</option>
+            <option value="10-50 sites">10 – 50 sites</option>
+            <option value="50+ sites">50+ sites</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field-row" data-only="owner">
+        <div class="field">
+          <label for="af-systemtype">System type<span class="req">*</span></label>
+          <select id="af-systemtype" name="systemtype">
+            <option value="" selected>Select your system</option>
+            <option value="Hybrid (grid + battery)">Hybrid (grid + battery)</option>
+            <option value="Off-grid">Off-grid</option>
+            <option value="Grid-tied, no battery">Grid-tied, no battery</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="af-installer">Installer <span class="opt">(optional)</span></label>
+          <input type="text" id="af-installer" name="installer" placeholder="Who installed your system?" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="af-message">What would you like to know? <span class="opt">(optional)</span></label>
+        <textarea id="af-message" name="message" placeholder="Tell us about your system, or ask us anything."></textarea>
+      </div>
+
+      <a href="mailto:proyectos@paulyco.com" class="btn send-link" id="af-send" aria-disabled="true">Send request <span class="arrow">→</span></a>
+      <div class="form-foot">
+        <span class="form-note">Opens in your email client, addressed to Pauly &amp; Co. — nothing sends automatically.</span>
+        <a href="#preview" class="form-note" style="text-decoration:none;">See the sample report again →</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+(function () {
+  var form = document.getElementById('access-form');
+  var link = document.getElementById('af-send');
+  if (!form || !link) return;
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  function val(name) {
+    var el = form.elements.namedItem(name);
+    return el ? el.value.trim() : '';
+  }
+
+  // Field set (and what counts as "required") depends on data-mode, kept in
+  // sync with the #access-form[data-mode=...] [data-only=...] CSS that shows
+  // and hides the two field-rows — installer asks about a fleet, owner asks
+  // about one system. Both share name/email/message.
+  function update() {
+    var mode = form.getAttribute('data-mode') || 'installer';
+    var name = val('name'), email = val('email'), message = val('message');
+    var subject, lines, valid;
+
+    if (mode === 'owner') {
+      var systemType = val('systemtype'), installer = val('installer');
+      valid = name && systemType && EMAIL_RE.test(email);
+      subject = 'VRM Monitor — Early access request from ' + (name || 'a system owner');
+      lines = [
+        'Name: ' + name,
+        'Email: ' + email,
+        'Account type: System owner',
+        'System type: ' + systemType,
+        'Installer: ' + (installer || '(not specified)'),
+        '',
+        message || '(no message)'
+      ];
+    } else {
+      var company = val('company'), fleet = val('fleet');
+      valid = name && company && fleet && EMAIL_RE.test(email);
+      subject = 'VRM Monitor — Early access request from ' + (company || name);
+      lines = [
+        'Name: ' + name,
+        'Company: ' + company,
+        'Email: ' + email,
+        'Account type: Solar installer',
+        'Fleet size: ' + fleet,
+        '',
+        message || '(no message)'
+      ];
+    }
+
+    if (valid) {
+      link.href = 'mailto:proyectos@paulyco.com'
+        + '?subject=' + encodeURIComponent(subject)
+        + '&body=' + encodeURIComponent(lines.join('\n'));
+      link.removeAttribute('aria-disabled');
+    } else {
+      link.href = 'mailto:proyectos@paulyco.com';
+      link.setAttribute('aria-disabled', 'true');
+    }
+  }
+
+  // Belt-and-suspenders: pointer-events:none (CSS) blocks mouse clicks while
+  // disabled, but not a keyboard-triggered click on a focused <a> — an <a>
+  // has no native `disabled` the way a <button> would, so the click handler
+  // is what actually stops keyboard activation too.
+  link.addEventListener('click', function (e) {
+    if (link.getAttribute('aria-disabled') === 'true') e.preventDefault();
+  });
+
+  // Delegated at the form level rather than per-field, so the two conditional
+  // field-rows (installer/owner) don't need their own listener wiring.
+  form.addEventListener('input', update);
+  form.addEventListener('change', update);
+
+  // The audience toggle's own click listener (in the shared mode-toggle
+  // script, at the end of the document) sets data-mode on #access-form —
+  // it doesn't know to call update() too. A MutationObserver reacts to that
+  // attribute change directly, so this doesn't depend on script/listener
+  // *order* between the two separate <script> blocks (fragile to assume;
+  // this doesn't need to).
+  new MutationObserver(update).observe(form, { attributes: true, attributeFilter: ['data-mode'] });
+
+  update();
+})();
+</script>
+
+<footer>
+  <div class="wrap">
+    <div class="fbrand">
+      <svg class="mark" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M15 2 L27 8.5 V21.5 L15 28 L3 21.5 V8.5 Z" stroke="#6F93A6" stroke-width="1.6" fill="none"/>
+      </svg>
+      VRM Monitor by Pauly &amp; Co. — Atenas, Costa Rica
+    </div>
+    <div class="flinks">
+      <a href="mailto:proyectos@paulyco.com">proyectos@paulyco.com</a>
+      <a href="#how">How it works</a>
+      <a href="#modules">What's inside</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Generic mode-toggle wiring — each .mode-toggle group is scoped to its own
+// buttons and its own [data-toggle-target] wrapper, so the page can hold more
+// than one independent toggle (report-section modules, pricing) without one
+// group's clicks bleeding into another's. Placed at the very end of the
+// document, after every section that can contain a .mode-toggle — a script
+// earlier in document order only sees elements parsed before it runs, which
+// is exactly the bug that made the pricing toggle (declared after this block
+// used to sit) inert: querySelectorAll found the modules toggle and stopped
+// there, since the pricing section didn't exist in the DOM yet.
+(function () {
+  document.querySelectorAll('.mode-toggle').forEach(function (group) {
+    var targetSel = group.getAttribute('data-toggle-target');
+    var target = targetSel ? document.querySelector(targetSel) : null;
+    var buttons = group.querySelectorAll('button');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var mode = btn.getAttribute('data-set-mode');
+        if (target) target.setAttribute('data-mode', mode);
+        buttons.forEach(function (b) {
+          var active = b === btn;
+          b.classList.toggle('active', active);
+          b.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+      });
+    });
+  });
+})();
+</script>
