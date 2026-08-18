@@ -1,0 +1,55 @@
+/* app/(portal)/app/profile — new dashboard-only rules, same reasoning as
+   app/(portal)/app/sites/sites.module.css's header comment. */
+
+.readonly {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 22px 24px;
+  margin: 20px 0 32px;
+}
+.readonlyItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.readonlyLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.readonlyValue {
+  font-size: 16px;
+  color: var(--paper);
+}
+
+.section {
+  margin-top: 36px;
+}
+
+.form {
+  max-width: 560px;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin-bottom: 14px;
+}

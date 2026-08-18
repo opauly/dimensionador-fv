@@ -1,0 +1,47 @@
+/* Moved from landing_template.html's .stat / .stat .lbl / .stat .val rules.
+   This is literally the hero readout's KPI tile — reused unchanged as the
+   customer dashboard's KPI card later, which is the point of building
+   components/ui/* from the marketing markup first (PLAN_PHASE14.md §1.7). */
+
+.stat {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.lbl {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-bottom: 8px;
+}
+.val {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--victron-glow);
+  letter-spacing: -0.01em;
+  text-shadow: 0 0 18px rgba(var(--victron-glow-rgb), 0.35);
+}
+.val .unit {
+  font-size: 13px;
+  color: var(--paper-dim);
+  font-weight: 400;
+  margin-left: 3px;
+  text-shadow: none;
+}
+.stat.good .val {
+  color: var(--good);
+  text-shadow: 0 0 18px rgba(var(--good-rgb), 0.35);
+}
+
+@media (max-width: 560px) {
+  .stat {
+    padding: 11px 12px;
+  }
+  .val {
+    font-size: 21px;
+  }
+}

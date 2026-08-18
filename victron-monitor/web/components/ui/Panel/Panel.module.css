@@ -1,0 +1,102 @@
+/* Shared card "chrome" extracted from .readout / .card / .price-card in
+   landing_template.html — only the surface (background, border, radius,
+   shadow, hover, hairline) lives here. Each surface's *content* markup
+   (readout-head, mini-list, price-features, ...) stays with the marketing
+   components that assemble it in Step 2, per PLAN_PHASE14.md §1.7's
+   "extract ui/* from the marketing markup first" ordering. */
+
+.card {
+  background: var(--panel);
+  padding: 26px 26px 24px;
+  position: relative;
+  transition: background 0.15s;
+}
+/* Only .modules cards hover-highlight in the template; the isolated .card
+   demo on /styleguide opts in explicitly rather than always hovering. */
+.card.interactive:hover {
+  background: var(--panel-2);
+}
+.card:focus-visible {
+  outline: 2px solid var(--victron-glow);
+  outline-offset: 3px;
+}
+
+.readout {
+  background: linear-gradient(175deg, var(--panel), var(--ink-2));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 26px 26px 22px;
+  box-shadow:
+    0 30px 70px -30px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  position: relative;
+}
+
+.price {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 30px 28px 28px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.price.featured {
+  background: linear-gradient(175deg, var(--panel-2), var(--panel));
+  border-color: var(--victron);
+  box-shadow:
+    0 30px 70px -30px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(var(--victron-rgb), 0.25);
+  transform: translateY(-8px);
+}
+@media (max-width: 920px) {
+  .price.featured {
+    transform: none;
+  }
+}
+
+/* The top-edge hairline gradient is identical between .readout and
+   .price-card.featured in the template (only the opacity differs) — one
+   shared rule, applied with a `hairline` modifier prop, instead of two
+   near-identical copies. */
+.hairline::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--victron-glow), transparent);
+  opacity: 0.6;
+}
+.price.featured.hairline::after {
+  opacity: 0.7;
+}
+
+/* .card .led — the small "alive" status dot in the top-right of a module card. */
+.led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 7px 1px rgba(var(--good-rgb), 0.7);
+  position: absolute;
+  top: 24px;
+  right: 26px;
+}
+
+/* .featured-tag — the "Most installers" pill on the featured price card. */
+.featuredTag {
+  position: absolute;
+  top: -12px;
+  left: 28px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--victron-glow);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+}

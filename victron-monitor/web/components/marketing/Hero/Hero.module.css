@@ -1,0 +1,58 @@
+/* Moved from landing_template.html's "hero" block (L152-164). */
+
+.hero {
+  position: relative;
+  padding: 92px 0 88px;
+  overflow: hidden;
+}
+/* .hero::before — the radial glow behind the readout, sitting above the
+   hero-grid content via z-index-free stacking (it's positioned first in
+   source order, .grid gets position:relative below to stack above it). */
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 620px;
+  background: radial-gradient(ellipse 620px 420px at 72% 18%, rgba(var(--victron-rgb), 0.28), transparent 68%);
+  pointer-events: none;
+}
+
+.grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.eyebrow {
+  margin-bottom: 22px;
+}
+.h1 {
+  margin-bottom: 22px;
+}
+.em {
+  font-style: normal;
+  color: var(--victron-glow);
+}
+.lede {
+  margin-bottom: 34px;
+}
+.ctas {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+}
+.note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 920px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

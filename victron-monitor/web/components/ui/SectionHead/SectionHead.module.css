@@ -1,0 +1,17 @@
+/* Moved from landing_template.html's .section-head / .section-head .eyebrow /
+   .section-head p rules. The template reaches .eyebrow with a plain
+   descendant selector; CSS Modules scope Eyebrow's own class to
+   Eyebrow.module.css, so the same spacing is applied here via Eyebrow's
+   `className` prop instead of a descendant selector that could never match
+   the hashed class name. */
+
+.head {
+  max-width: 640px;
+  margin-bottom: 56px;
+}
+.eyebrow {
+  margin-bottom: 16px;
+}
+.head p {
+  margin-top: 14px;
+}

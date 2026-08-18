@@ -1,0 +1,38 @@
+/* Moved from landing_template.html's .mode-toggle / .mode-toggle button /
+   .mode-toggle button.active rules. */
+
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 4px;
+  background: var(--ink-2);
+  gap: 3px;
+}
+.button {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--paper-dim);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+}
+.button.active {
+  background: var(--victron);
+  color: #fff;
+  box-shadow: 0 0 18px rgba(var(--victron-rgb), 0.4);
+}
+.button:hover:not(.active) {
+  color: var(--paper);
+}
+.button:focus-visible {
+  outline: 2px solid var(--victron-glow);
+  outline-offset: 3px;
+}

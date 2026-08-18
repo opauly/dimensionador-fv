@@ -1,0 +1,78 @@
+.statusActive {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusInactive {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.editRow {
+  background: var(--panel);
+  padding: 16px 20px !important;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.caption {
+  font-size: 13px;
+  color: var(--mute);
+  margin: -8px 0 18px;
+  max-width: none;
+}
+
+.checkboxRow {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 18px;
+}
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--paper);
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.formActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.reassignRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.reassignLabel {
+  font-size: 13px;
+  color: var(--paper-dim);
+}

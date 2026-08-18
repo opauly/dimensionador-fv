@@ -1,0 +1,125 @@
+/* ============================================================
+   Base rules — ported verbatim from landing_template.html's un-namespaced
+   selectors: *, html, body, ::selection, prefers-reduced-motion, a,
+   img/svg, .wrap and section/section.band, plus the global element-level
+   type scale (h1-h3, p, .mono, .num) that the template applies to raw
+   elements rather than to a components/ui/* primitive. Everything that *is*
+   a component (Button, Panel, Stat, Eyebrow, SectionHead, Field, ModeToggle)
+   lives in its own CSS Module instead — see components/ui/* — per
+   PLAN_PHASE14.md §1.7. This file is only what the original template left
+   un-scoped.
+   ============================================================ */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--victron);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+a {
+  color: inherit;
+}
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+.wrap {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+/* ---------- type scale (landing_template.html "type scale" block) ---------- */
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-wrap: balance;
+  color: #ffffff;
+}
+h1 {
+  font-size: var(--text-h1);
+  line-height: 0.96;
+}
+h2 {
+  font-size: var(--text-h2);
+  line-height: 1.02;
+}
+h3 {
+  font-size: var(--text-h3);
+  line-height: 1.15;
+  letter-spacing: 0.005em;
+}
+
+p {
+  color: var(--paper-dim);
+  max-width: 60ch;
+}
+p.lede {
+  font-size: var(--text-lede);
+  line-height: 1.6;
+  color: var(--paper);
+  max-width: 46ch;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+/* ---------- section shell (landing_template.html "section shell" block) ----------
+   Bare-element selectors, like h1-h3 above — every marketing section is a raw
+   <section>, and .band is the alternating darker stripe (How it works,
+   Sample report). Kept here rather than duplicated into FlowSteps/
+   ReportPreview's own CSS Modules, the same reasoning as .wrap. */
+section {
+  padding: 96px 0;
+}
+section.band {
+  background: var(--ink-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+@media (max-width: 560px) {
+  .wrap {
+    padding: 0 20px;
+  }
+  section {
+    padding: 68px 0;
+  }
+}

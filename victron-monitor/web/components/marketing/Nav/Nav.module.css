@@ -1,0 +1,71 @@
+/* Moved from landing_template.html's "nav" block (L114-130). `.brand .mark`
+   and `.brand small` from that block are intentionally not ported — nothing
+   in the actual nav markup has class="mark" or a <small> inside .brand (the
+   template's real nav uses .logo-img instead); those two selectors are dead
+   CSS in the source, ported CSS should match rendered output. */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(11, 34, 49, 0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 72px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-transform: uppercase;
+}
+.logoImg {
+  height: 25px;
+  width: auto;
+  display: block;
+  flex: none;
+}
+.divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  flex: none;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 34px;
+}
+.links a {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  color: var(--paper-dim);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.links a:hover {
+  color: var(--victron-glow);
+}
+.links a:focus-visible {
+  outline: 2px solid var(--victron-glow);
+  outline-offset: 3px;
+}
+
+@media (max-width: 920px) {
+  .links {
+    display: none;
+  }
+}

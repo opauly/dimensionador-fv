@@ -1,0 +1,95 @@
+.subtle {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.statusActive {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusInvited {
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusNone {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.actionsCell {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rowError {
+  color: var(--signal);
+  font-size: 11px;
+  margin-top: 4px;
+  max-width: 220px;
+}
+
+.editRow {
+  background: var(--panel);
+  padding: 16px 20px !important;
+}
+
+.actionsRow {
+  display: flex;
+  justify-content: flex-start;
+  margin: 20px 0 14px;
+}
+
+.panel {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.formActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin: 10px 0;
+}
+
+.warning {
+  color: var(--signal);
+  font-size: 13px;
+  margin: 10px 0;
+  max-width: none;
+}
+
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin: 10px 0;
+}

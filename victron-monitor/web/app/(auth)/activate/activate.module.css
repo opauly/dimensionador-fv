@@ -1,0 +1,50 @@
+.card {
+  width: 100%;
+  padding: 32px 30px 28px;
+}
+
+.title {
+  margin-bottom: 4px;
+}
+
+.subtitleIntro {
+  color: var(--paper-dim);
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.subtitle {
+  margin: 0 0 8px 0;
+}
+
+.body {
+  color: var(--paper-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.status {
+  color: var(--paper-dim);
+  font-size: 14px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.error {
+  background: rgba(242, 169, 59, 0.1);
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-md);
+  color: var(--paper);
+  font-size: 13px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}

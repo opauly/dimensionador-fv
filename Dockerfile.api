@@ -1,0 +1,67 @@
+# vrm_api — the FastAPI pipeline service (PLAN_PHASE14.md §1.4, §2 Step 5).
+#
+# Built and deployed as a Render Web Service (Standard, 2 GB, to start —
+# §1.4). python:3.11-slim, not this repo's local 3.9: the 3.9 pin
+# (CONTEXT.md §Environment) is a macOS accident, not a code requirement —
+# every module already starts `from __future__ import annotations`. Step 5's
+# validation proves the pipeline produces identical report numbers on 3.11
+# before this image is trusted (vrm_api/README.md records the result).
+#
+# WeasyPrint (victron/weekly_report.py:render_pdf) needs Pango/Cairo/
+# gdk-pixbuf as real system libraries — pip alone cannot install them, which
+# is the reason this service needs a Dockerfile at all rather than a
+# buildpack host (§1.4's hosting comparison table).
+#
+# Built from the REPO ROOT (`docker build -f Dockerfile.api .`), not from
+# inside vrm_api/ — vrm_api imports victron/*.py and database/*.py as
+# top-level packages, exactly as it does when run locally with
+# `uvicorn vrm_api.main:app` from the repo root (§1.1: "none of Phase 13's
+# sys.path bootstrap is needed, because uvicorn uses the CWD").
+
+FROM python:3.11-slim
+
+# Pango/Cairo/gdk-pixbuf + fonts, per WeasyPrint's own documented Debian
+# dependency list (https://doc.courtbouillon.org/weasyprint/stable/
+# first_steps.html#debian-ubuntu), plus shared-mime-info (WeasyPrint reads
+# it to sniff embedded image types) and a real font so PDFs don't fall back
+# to Debian's default (no) fonts.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libpango-1.0-0 \
+      libpangocairo-1.0-0 \
+      libpangoft2-1.0-0 \
+      libcairo2 \
+      libgdk-pixbuf-2.0-0 \
+      libffi-dev \
+      shared-mime-info \
+      fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Dependencies first, source after — so a source-only change doesn't bust
+# the (slow, WeasyPrint-adjacent) pip layer on every deploy.
+COPY requirements.txt requirements-api.txt ./
+RUN pip install --no-cache-dir -r requirements-api.txt
+
+# Only what vrm_api actually imports (victron.*, database.*, config.py,
+# utils/*) plus itself — not the Streamlit app, not victron-monitor/web, not
+# this repo's plan docs. Keeps the image (and what it could leak if
+# compromised) to the pipeline this service exists to run.
+COPY victron/ ./victron/
+COPY database/ ./database/
+COPY utils/ ./utils/
+COPY config.py ./config.py
+# victron/weekly_report.py imports proposals.assets.assets:get_logo_b64() for
+# the PDF header logo — the only thing this service needs from proposals/.
+COPY proposals/__init__.py ./proposals/__init__.py
+COPY proposals/assets/ ./proposals/assets/
+COPY vrm_api/ ./vrm_api/
+
+ENV PYTHONUNBUFFERED=1
+
+# $PORT is Render's convention (it injects the port to bind); default so
+# `docker run` without --env PORT still starts something sane locally.
+ENV PORT=8000
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn vrm_api.main:app --host 0.0.0.0 --port ${PORT}"]

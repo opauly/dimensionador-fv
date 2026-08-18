@@ -1,0 +1,63 @@
+/* Moved from landing_template.html's .btn / .btn.ghost / .btn .arrow rules. */
+
+.btn {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--btn-fill);
+  background: var(--btn-fill);
+  color: #ffffff;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
+  box-shadow: 0 0 0 0 rgba(var(--victron-glow-rgb), 0);
+}
+.btn:hover {
+  background: var(--victron-glow);
+  border-color: var(--victron-glow);
+  color: var(--ink);
+  box-shadow: 0 0 26px 0 rgba(var(--victron-glow-rgb), 0.45);
+  transform: translateY(-1px);
+}
+/* Originally part of a combined selector shared with nav links, cards and
+   the mode toggle (landing_template.html L130); split per component here
+   since CSS Modules scope each file — Panel and ModeToggle carry their own
+   copy of this same rule. */
+.btn:focus-visible {
+  outline: 2px solid var(--victron-glow);
+  outline-offset: 3px;
+}
+
+.ghost {
+  background: transparent;
+  color: var(--paper);
+  border-color: var(--line);
+}
+/* Deliberately --victron here, not --victron-glow like every other hover/
+   active state in this file (.btn:hover, :focus-visible) — Oscar's call: a
+   ghost button (e.g. "See a sample report") hovers into the brand blue
+   itself, not the brighter glow cyan used for filled-button hover/focus. */
+.ghost:hover {
+  border-color: var(--victron);
+  color: var(--victron);
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.arrow {
+  transition: transform 0.15s;
+}
+.btn:hover .arrow {
+  transform: translateX(3px);
+}

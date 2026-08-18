@@ -1,0 +1,60 @@
+/* Moved from landing_template.html's .readout-head / .readout-stats /
+   .readout-narr rules — the .readout surface chrome itself (background,
+   border, hairline) is components/ui/Panel, per Panel.module.css's own
+   "surface only, content stays with marketing" comment. */
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.site {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper-dim);
+}
+.site b {
+  color: #fff;
+  font-weight: 500;
+}
+/* Template inline-overrides .eyebrow.amber's font-size to 10.5px only here
+   (style="font-size:10.5px;") — the "Live" badge reads smaller than a
+   section eyebrow. */
+.liveEyebrow {
+  font-size: 10.5px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+/* No explicit max-width override here: this is a <p>, so it inherits
+   base.css's `p { max-width: 60ch }` — the template does the same (no
+   max-width rule on .readout-narr either), and 60ch comfortably fits inside
+   the readout panel's own width. */
+.narr {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--paper-dim);
+  border-left: 2px solid var(--victron);
+  padding-left: 13px;
+  font-style: italic;
+}
+.narr b {
+  color: var(--paper);
+  font-style: normal;
+  font-weight: 500;
+}
+
+@media (max-width: 560px) {
+  .stats {
+    gap: 10px;
+  }
+}

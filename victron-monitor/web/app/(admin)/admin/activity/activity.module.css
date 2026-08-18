@@ -1,0 +1,29 @@
+.empty {
+  color: var(--paper-dim);
+}
+
+.expandButton {
+  background: none;
+  border: none;
+  color: var(--victron-glow);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.expandButton:hover {
+  color: var(--paper);
+}
+
+.warningsRow {
+  background: rgba(242, 169, 59, 0.06);
+}
+.warningsRow ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.warningsRow li {
+  font-size: 13px;
+  color: var(--paper-dim);
+  margin-bottom: 4px;
+}

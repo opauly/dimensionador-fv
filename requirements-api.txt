@@ -1,0 +1,24 @@
+# vrm_api — the FastAPI pipeline service (PLAN_PHASE14.md §2 Step 5).
+#
+# Everything the Streamlit app needs (WeasyPrint, pandas via supabase's own
+# deps, anthropic, jinja2, ...) plus the three packages that make this a web
+# service. Deliberately layered on top of requirements.txt, not a fork of
+# it: vrm_api imports victron/*.py and database/*.py unchanged, so it needs
+# the exact same pipeline dependencies the Streamlit app already pins.
+-r requirements.txt
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.7.0
+
+# `vrm_api/schemas.py` starts `from __future__ import annotations` (this
+# repo's convention, §3 of PLAN_PHASE14.md) and uses `X | None` unions.
+# Pydantic v2 evaluates those postponed (string) annotations at class-
+# definition time to build each model, and Python's own `eval()` can't
+# resolve `X | None` syntax before 3.10 — this repo's LOCAL interpreter is
+# 3.9 (CONTEXT.md §Environment), even though the container this ships in is
+# 3.11 (Dockerfile.api). Without this package, `uvicorn vrm_api.main:app`
+# fails to import on 3.9 with "Unable to evaluate type annotation 'str |
+# None'". A no-op on 3.10+, where the interpreter can eval `|` unions
+# natively — kept for local dev, not because the deployed image needs it.
+eval_type_backport>=0.2.0

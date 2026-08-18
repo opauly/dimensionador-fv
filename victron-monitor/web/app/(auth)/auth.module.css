@@ -1,0 +1,50 @@
+/* A standalone shell, not assembled from marketing section rules (no
+   `.wrap`, no `section` padding) — this route group is never rendered
+   alongside the Nav/Footer, so there's no shared layout to stay
+   pixel-consistent with beyond the design tokens themselves. */
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: var(--ink);
+}
+
+.inner {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+/* Same brand lockup as components/marketing/Nav, kept independent rather
+   than imported — Nav's markup is scoped to the marketing header's flex
+   layout (logo + divider + wordmark inline with nav links), and this is a
+   single centered column above the card. Duplicating the four lines of
+   markup here is cheaper than parameterizing Nav for a layout it was never
+   designed to support. */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: 15px;
+  color: var(--paper);
+  text-decoration: none;
+}
+.logoImg {
+  height: 28px;
+  width: auto;
+}
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}

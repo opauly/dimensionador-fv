@@ -1,0 +1,16 @@
+/* components/app/JobProgress — new dashboard-only rules built from
+   styles/tokens.css (PLAN_PHASE14.md §1.7). The running state reuses
+   ui/Eyebrow's amber pulse (it's already "a small live indicator with a
+   label" — no reason to invent a second spinner primitive for the same
+   idea). */
+
+.running {
+  margin: 16px 0;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin: 16px 0;
+  max-width: 560px;
+}

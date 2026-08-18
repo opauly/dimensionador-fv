@@ -1,0 +1,85 @@
+/* ============================================================
+   Design tokens — the "instrument panel at night" palette.
+   Ported verbatim from victron-monitor/landing-page/landing_template.html
+   (the design system's source of truth until Phase 14 Step 8 cutover — see
+   PLAN_PHASE14.md §6.2). Don't add a token here that doesn't trace back to
+   a rule the landing page already renders; this file is a port, not a
+   redesign.
+   ============================================================ */
+:root {
+  /* ---- base palette (landing_template.html L37-50) ---- */
+  --ink: #0b2231; /* page ground — the enclosure */
+  --ink-2: #0e2a3c; /* slightly lifted ground, section bands */
+  --panel: #12324a; /* card / module surface */
+  --panel-2: #163a55; /* hover / raised module surface */
+  --line: #234a63; /* hairlines, module borders at rest */
+  --victron: #0789d4; /* Primary accent. §1.8's open decision is resolved:
+    Oscar compared the RAL5012 spec value (#0089b6) against photo-matched
+    candidates sampled off a real MultiPlus-II on /styleguide and picked this
+    one, with the 'flat' button treatment (this value used directly as the
+    button fill — see --btn-fill below), not the AA-derived --victron-deep. */
+  --victron-glow: #4fc8ec; /* bright variant — active states, glow. Not part
+    of the §1.8 candidate swap; it stays the same across all three blues. */
+  --signal: #f2a93b; /* amber — sparing, "live" indicator only */
+  --paper: #e9f2f6; /* body text on dark ground */
+  --paper-dim: #afc7d4; /* secondary text */
+  --mute: #6f93a6; /* tertiary text, captions */
+  --good: #3fbf8f; /* status green, semantic only */
+
+  /* ---- §1.8 accessibility option: an AA-safe button fill ----
+     The primary .btn is white 13px uppercase text on --victron — below
+     WCAG AA's 4.5:1 for normal text, and 13px doesn't qualify as "large
+     text" either. --victron-deep is the button-fill-only alternative that
+     keeps the brighter --victron/--victron-glow for hairlines, glow and
+     accents; Oscar compared it against the flat (status-quo) fill on
+     /styleguide via ?btn=deep|flat and **picked flat** — this token is kept
+     derived-and-current (same lightness/saturation drop applied to whichever
+     --victron is shipped, computed via the formula in
+     app/styleguide/colors.ts:deriveDeepHex) so it stays a meaningful choice
+     if that decision is ever revisited, not dead weight from the old blue. */
+  --victron-deep: #0b72ae;
+
+  /* ---- RGB triplets for the repeating rgba() glows ----
+     landing_template.html repeats rgba(0,137,182, X) and
+     rgba(79,200,236, X) at different alphas across the hero glow, focus
+     rings, active states and card shadows (.hero::before, .field
+     input:focus, .price-card.featured, .cta-band::before, .mode-toggle
+     button.active, .stat .val, .price-num, .btn:hover). Tokenizing the
+     *triplet* — not the whole rgba() — is what makes a candidate-blue swap
+     on /styleguide a couple of custom-property writes instead of a find-
+     and-replace across nine rules across as many files. */
+  --victron-rgb: 7, 137, 212;
+  --victron-glow-rgb: 79, 200, 236;
+  --good-rgb: 63, 191, 143;
+
+  /* ---- radii, collected from the same literal values scattered through
+     the template (nothing here is a new value) ---- */
+  --radius-sm: 3px; /* .btn */
+  --radius-md: 4px; /* .stat, .field input/select/textarea, .mode-toggle button */
+  --radius-lg: 6px; /* .readout, .modules, .price-card */
+  --radius-xl: 7px; /* .mode-toggle */
+  --radius-2xl: 8px; /* .report-frame, .access-form, .single-report-card */
+  --radius-pill: 20px; /* .preview-badge */
+
+  /* ---- type scale ----
+     Family tokens reference the CSS variable next/font/local generates
+     (app/fonts/index.ts), not the literal family string — next/font renames
+     each face to a scoped/hashed name at build time, so 'Big Shoulders'
+     alone would silently fall through to the system-font fallback. */
+  --font-heading: var(--font-big-shoulders), 'IBM Plex Sans', sans-serif;
+  --font-body: var(--font-plex-sans), -apple-system, sans-serif;
+  --font-mono: var(--font-plex-mono), monospace;
+
+  --text-h1: clamp(44px, 6.4vw, 84px);
+  --text-h2: clamp(30px, 3.6vw, 46px);
+  --text-h3: 20px;
+  --text-body: 16px;
+  --text-lede: 19px;
+  --text-eyebrow: 12.5px;
+
+  /* Components read --btn-fill, not --victron, for the primary button's
+     background. That indirection is what lets /styleguide's ?btn=deep|flat
+     re-bind the fill without Button.tsx knowing an A/B exists — see
+     app/styleguide/page.tsx. */
+  --btn-fill: var(--victron);
+}

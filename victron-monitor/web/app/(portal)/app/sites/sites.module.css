@@ -1,0 +1,106 @@
+/* app/(portal)/app/sites — new dashboard-only rules, built from
+   styles/tokens.css (PLAN_PHASE14.md §1.7). Nothing here is ported from
+   landing_template.html; the marketing page has no data table or a form
+   this dense. */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: none;
+  margin-bottom: 20px;
+}
+
+.statusActive {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusInactive {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.actionsRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 28px 0 14px;
+}
+
+.panel {
+  margin-top: 16px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.geocodeButtonWrap {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 18px;
+}
+
+.caption,
+.sectionCaption {
+  font-size: 13px;
+  color: var(--mute);
+  margin: -8px 0 18px;
+  max-width: none;
+}
+
+.checkboxRow {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 18px;
+}
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--paper);
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.formActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.limitCallout {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 20px 22px;
+  margin-top: 16px;
+}
+.limitCallout p {
+  color: var(--paper-dim);
+  max-width: none;
+  margin-bottom: 10px;
+}

@@ -1,0 +1,54 @@
+/* Moved from landing_template.html's .field / .field label / .field input,
+   select, textarea rules (including the focus ring). The template applies
+   the control styling via a descendant selector (".field input, .field
+   select, .field textarea"); CSS Modules scope per file, so the three tags
+   share one exported `.control` class instead — same result, explicit
+   about which elements opt in. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.req {
+  color: var(--signal);
+  margin-left: 2px;
+}
+.opt {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--mute);
+}
+
+.control {
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 11px 13px;
+  color: var(--paper);
+  font-family: var(--font-body);
+  font-size: 14px;
+  width: 100%;
+}
+.control::placeholder {
+  color: var(--mute);
+  opacity: 1;
+}
+.control:focus {
+  outline: none;
+  border-color: var(--victron);
+  box-shadow: 0 0 0 3px rgba(var(--victron-rgb), 0.22);
+}
+textarea.control {
+  resize: vertical;
+  min-height: 74px;
+  font-family: var(--font-body);
+}

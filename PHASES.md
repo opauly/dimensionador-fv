@@ -4,7 +4,7 @@
 **Stack:** Streamlit · Supabase · WeasyPrint/Jinja2 · Anthropic SDK · numpy-financial  
 **Reference:** Requirements v3.5  
 **Goal:** Real proposals in production as fast as possible  
-**Last updated:** 2026-07-17
+**Last updated:** 2026-08-16
 
 | Phase | Status |
 |---|---|
@@ -19,6 +19,10 @@
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
 | 10 — Site Register & Preventive Maintenance Scheduler | ⬜ Not started (spans both products, no dependency on 0–9) |
+| 11 — Design Calibration from Fleet Data | ⬜ Not started (gated by data availability, not sequence) |
+| 12 — Victron Monitor: Retire Apps Script Scheduling/Email/Archiving | ⬜ Not started (separate product, no dependency on 0–11) |
+| 13 — VRM Monitor Customer Portal (Streamlit) | 🔶 Superseded by Phase 14 — Step 1 built & validated (migration 021, login, role resolution) |
+| 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | ⬜ Not started (supersedes Phase 13; see PLAN_PHASE14.md) |
 
 ---
 
@@ -729,6 +733,222 @@ those; they stay manual, from the Streamlit Reporte tab, exactly as decided for 
 
 ---
 
+## Phase 13 — VRM Monitor Customer Portal: Auth, User Dashboard, Admin Dashboard (5–8 days, separate product surface, scoped 2026-08-16)
+
+> **Superseded by Phase 14** ([`PLAN_PHASE14.md`](PLAN_PHASE14.md)) — the goal stands, the Streamlit implementation does not. Step 1 (migration 021 + login + role resolution) was built and validated live and is **not** to be redone. Kept in full because its product decisions carried forward.
+
+**Goal:** VRM Monitor stops being a tool Oscar operates on customers' behalf and becomes a
+product customers log into. A customer follows a **Log in** link from the landing page,
+signs in with a password they set from an invitation email, and gets their own
+tenant-scoped dashboard — Reports, Upload CSV, My Sites, Profile. Oscar gets an admin
+dashboard in the same app: create customers, send the invite, and see every customer,
+site, and upload across the product.
+
+Full build plan, resolved decisions, and per-step validation gates:
+[`PLAN_PHASE13.md`](PLAN_PHASE13.md). Not duplicated in full here.
+
+### Why this phase exists
+
+Everything about VRM Monitor is sellable today except the part where a customer can
+actually use it. The report pipeline is done and validated (V1, plan doc §1–§25), the
+`vrm` schema is multi-tenant by design (migration 012), and the landing page is publicly
+pitching subscriptions with an account-type toggle and per-site pricing. But
+`pages/06_vrm_monitor.py` is an internal Spanish admin tool where Oscar picks a customer
+from a dropdown and uploads their CSV for them — there is no login, no customer-facing
+surface, and no way to onboard someone without Oscar doing the work by hand. This phase
+closes exactly that gap and nothing else.
+
+### Where this sits relative to other phases
+
+- **A new, separate Streamlit application**, not new pages on the existing one. `app.py`
+  and everything under `pages/` — including `pages/06_vrm_monitor.py` — are **not modified
+  by this phase**. Entry point `victron-monitor/portal/app.py`, all Python in a new
+  root-level `vrm_portal/` package (the same "Python at the repo root, product assets under
+  `victron-monitor/`" split that `victron/` already follows).
+- Off the critical path like Phases 9–12. Triggered by business need (the first external
+  customer who should self-serve), not by sequence.
+- **Reuses the pipeline, doesn't rebuild it** — `victron/vrm_csv.py`, `victron/ingest.py`,
+  `victron/weekly_report.py`, `victron/report_svg.py`, `victron/report_i18n.py`,
+  `victron/savings.py`, `database/vrm_report_db.py`, `database/supabase_client.py` are all
+  imported as-is. Arch doc §7's "port, don't rebuild."
+- **Leaves `vrm_portal/mailer.py` (Resend) behind for Phase 12**, which needs the same
+  integration for weekly report emails. Written generic on purpose. If Phase 13 lands
+  first, Phase 12 inherits it; if not, Phase 13 writes it.
+
+### Decisions locked (see PLAN_PHASE13.md §1 for the full reasoning)
+
+- **One login per customer**, on `vrm.customers` — the tenant root already in migration 012.
+  Auth linkage is a set of columns on that row (`auth_user_id`, `auth_email`, `invited_at`,
+  `activated_at`, `account_type`, `site_limit`, `ui_language`), not a companion table.
+  `auth_user_id` is a **soft pointer with no FK** to `auth.users`, matching
+  `vrm.sites.public_client_id`'s existing precedent: the schema must stay dumpable into its
+  own project, and an `ON DELETE CASCADE` from `auth.users` would mean deleting a login
+  deletes a customer's telemetry.
+- **Access control: service_role + enforced application-layer scoping.** No per-user JWTs,
+  no RLS policies yet — `vrm.*` stays RLS-enabled-with-no-policies. `service_role` bypasses
+  RLS by definition, so policies would protect nothing the app does; they would only matter
+  alongside a new access path (user JWTs) that would have to thread a per-session client
+  through modules shared with the untouchable internal app. Migration 012 already wrote this
+  intention down; this phase honours it and records the revisit trigger (any non-Streamlit
+  client talking to Supabase on a customer's behalf).
+- **Real enforcement lives in one choke point**, `vrm_portal/db.py`: every tenant function
+  takes `customer_id` as its required first argument, site operations go through
+  `assert_owns_site()`, and customer views may not import `get_client()`,
+  `database/vrm_report_db.py`, or `victron/ingest.py` directly.
+- **Admin identity via `app_metadata.vrm_role == 'admin'`** — tamper-proof (unlike
+  `user_metadata`), returned directly by `sign_in_with_password`, no extra table.
+- **Invitations: `auth.admin.generate_link(type='invite')` + our own Resend email**, not
+  `invite_user_by_email()`. Supabase's default invite link delivers its tokens in the URL
+  **fragment**, which is never sent to the server and which Streamlit cannot read; the
+  `token_hash` query-param variant + `verify_otp()` is the server-side flow that works, and
+  building the link ourselves keeps the email template in git instead of in undiffable
+  dashboard state. Re-sends and forgot-password use `type='recovery'` through the same
+  activation screen.
+- **No public self-serve signup.** Oscar creates accounts; the landing page's
+  "Request early access" `mailto:` stays a `mailto:`. The only landing-page change is a
+  **Log in** link in the nav.
+
+### Tasks
+
+1. **Migration + shell + login** — `ALTER TABLE vrm.customers` (auth columns + two partial
+   unique indexes), `.env.example` additions (`SUPABASE_ANON_KEY`, `PORTAL_BASE_URL`,
+   `RESEND_API_KEY`, `PORTAL_FROM_EMAIL`), the entry point with its `sys.path` bootstrap and
+   `st.navigation` role branch, `vrm_portal/auth.py`, the login view, `strings.py`.
+2. **`vrm_portal/db.py`** — the tenant-scoped choke point, plus `admin_db.py` for the
+   cross-customer counterpart. Ships with a scoping test proving customer A cannot touch
+   customer B's site.
+3. **Customer dashboard: My Sites + Profile** — scoped port of `tab_sites()`, plus profile
+   editing, plan/limit display, and change-password.
+4. **Customer dashboard: Upload CSV + Reports** — ports of `tab_upload()` and `tab_report()`
+   with the customer picker and schema picker removed, `ingest.upsert_customer()` never
+   called from a customer session, and the upload history from `vrm.ingestion_log` finally
+   surfaced in a UI.
+5. **Admin dashboard + invite flow** — Clientes (create/invite/resend/edit/deactivate),
+   Sitios (cross-customer), Cargar CSV (on behalf of), Reporte (both schemas), Actividad
+   (ingestion log), plus `mailer.py`, `invites.py`, and the branded invite email template.
+6. **Landing-page link, deployment, docs** — Log in link in the nav (re-run `build.py`,
+   never hand-edit `landing_page.html`), Dockerfile/host config with WeasyPrint's system
+   libs, host env vars, `victron-monitor/portal/README.md`, and updates to
+   `victron-monitor/README.md`, `ARCHITECTURE.md`, and `CONTEXT.md`.
+
+### Explicit non-goals
+
+Public signup, billing/payments/usage metering (plan is a label plus a site cap), multiple
+users per customer, RLS policies / per-user JWTs, persistent login across a hard browser
+refresh, VRM API token ingestion, scheduled customer report emails (that's Phase 12),
+per-customer report branding / white-labelling, admin impersonation, and retiring
+`pages/06_vrm_monitor.py` (it stays live and untouched).
+
+### Validation
+
+- Oscar creates a customer from the admin dashboard → the invite email arrives → the link
+  opens the activation screen → the customer sets a password → lands on their dashboard →
+  uploads their own CSV → downloads their own report. No Oscar involvement after the invite.
+- Customer A cannot see or modify customer B's sites, including by tampering with a
+  submitted `site_id` — `NotAuthorized`, nothing written.
+- A report generated from the portal is numerically identical to the same range generated
+  from `pages/06_vrm_monitor.py`.
+- Re-uploading the same CSV does not grow row counts or double alarm episodes.
+- `git diff --stat` shows **no changes** to `app.py` or anything under `pages/`, and
+  `streamlit run app.py` still works with an unchanged sidebar.
+
+### Open questions for Oscar (block Task 6 only, not 1–5)
+
+Hosting target (recommendation: Render/Railway + Dockerfile + `monitor.paulyco.com`, because
+Streamlit Community Cloud sleeps and has no custom domain), portal UI default language
+(assumed English with a per-customer `ui_language` override; admin views stay Spanish),
+exact Admin v1 scope, whether the landing page's `mailto:` truly stays as-is, and the
+site-limit numbers to seed per plan.
+
+---
+
+## Phase 14 — VRM Monitor unified Next.js site: marketing + customer portal + admin, on a Python pipeline API (12–18 days, supersedes Phase 13, scoped 2026-08-16)
+
+**Goal:** VRM Monitor becomes one product on one domain: the marketing page, the customer
+dashboard, and Oscar's admin dashboard are all pages of a single Next.js application sharing
+one design system, one navigation, and one login — instead of two disconnected surfaces (a
+static marketing Artifact and a separate Streamlit app). The Python report pipeline is not
+rewritten; it is wrapped in a small internal HTTP API that only the Next.js server calls.
+
+Full build plan, resolved decisions, and per-step validation gates:
+[`PLAN_PHASE14.md`](PLAN_PHASE14.md). Not duplicated in full here.
+
+### Why this phase exists
+
+Phase 13 shipped a working Streamlit login and role resolution, but Oscar reviewed the
+approach and rejected the *shape*, not the goal: a second Streamlit app ships fast but reads
+as a different, disconnected product from the landing page that sells it. This phase rebuilds
+the customer-facing surface as one coherent website instead.
+
+### Where this sits relative to other phases
+
+- **Supersedes Phase 13.** `database/migrations/021_vrm_portal_auth.sql` (already run against
+  the dev DB) and the product decisions in `PLAN_PHASE13.md` §0.3/§1 mostly carry forward
+  unchanged — see `PLAN_PHASE14.md` §7 for the exact decision-by-decision map. What's replaced
+  is Streamlit-specific: the app shell, the two-client rule, and — because a browser-facing
+  frontend reopens Phase 13's own written revisit trigger — the access-control model.
+- `app.py` and everything under `pages/` (including `pages/06_vrm_monitor.py`) are **not
+  modified by this phase either**. It stays live and untouched, and remains the only path for
+  CSV backfills larger than the new portal's upload cap.
+- Off the critical path like Phases 9–13. Triggered by the same business need Phase 13 was.
+- Introduces this repo's first JS/TypeScript toolchain (Next.js), alongside the existing
+  Python pipeline — `victron/*.py` and `database/vrm_report_db.py` are imported unchanged by
+  a new Python API service (`vrm_api/`), not reimplemented.
+
+### Decisions locked (see PLAN_PHASE14.md §1 for the full reasoning)
+
+- **All Supabase access is server-side; no Supabase credential of any kind reaches the
+  browser.** No `NEXT_PUBLIC_SUPABASE_*` variable ever exists, every server module is guarded
+  by `import 'server-only'`, and `anon`/`authenticated` keep zero grants on `vrm` (unchanged
+  since migration 012) — a stronger position than adding RLS policies, which would require
+  *opening* a browser-reachable grant in order to then constrain it.
+- **Repo layout:** `victron-monitor/web/` (the Next.js app) + root-level `vrm_api/` (a FastAPI
+  service importing `victron/*`/`database/*` unchanged), matching this repo's existing
+  "Python at the root, product assets under `victron-monitor/`" convention.
+- **Hosting:** Vercel for the Next.js app, Render (Docker) for `vrm_api` — WeasyPrint's system
+  libraries rule out a buildpack-only host for the pipeline.
+- **Design system ports as CSS Modules over shared tokens**, not a Tailwind rewrite, so the
+  hand-tuned landing-page CSS can be diffed against the original rather than silently
+  regressing inside a mechanical-looking rewrite.
+- **Brand blue is being reconsidered**, not silently inherited: Oscar sampled the real
+  MultiPlus-II hardware and gave two candidates (`#3481B8` / `#0588B6`) to replace the RAL
+  5012 spec value (`#0089B6`) used when the landing page was first designed. Decided on a
+  `/styleguide` swatch page, not by hex code alone.
+- **One login per customer, admin-provisioned accounts, `generate_link()` + Resend for
+  invites** — all carried forward from Phase 13 unchanged.
+
+### Explicit non-goals
+
+Public signup, billing/payments/usage metering beyond `site_limit`, multiple users per
+customer, RLS policies / per-user JWTs / any browser-side Supabase client, a real job queue
+(Celery/Redis), introducing a test framework as a side effect of this phase, VRM API token
+ingestion, scheduled customer report emails (Phase 12's job — this phase only leaves
+`victron/mailer.py` behind for it), per-customer report branding, admin impersonation, and
+retiring `pages/06_vrm_monitor.py` (stays live, stays the only path for large backfills).
+
+### Validation
+
+- From the deployed marketing page: Log in → sign in → upload a CSV → generate a report →
+  download it, end to end on the real hosts (Vercel + Render).
+- Three leak checks pass against a production build: no `NEXT_PUBLIC_SUPABASE_*` anywhere in
+  the source, no secret key string in the compiled client bundle, and a direct PostgREST call
+  against `vrm.sites` with a real user access token returns nothing.
+- Customer A cannot see or touch customer B's anything, including via a tampered request
+  straight at `vrm_api` with a stolen bearer token.
+- A report generated from the new site is numerically identical to the same range generated
+  from `pages/06_vrm_monitor.py`, verified inside the Python 3.11 container as well as locally.
+- `git diff --stat` shows **no changes** to `app.py` or anything under `pages/`, and
+  `streamlit run app.py` still works with an unchanged sidebar.
+
+### Open questions for Oscar (see PLAN_PHASE14.md §0.4 — block specific steps, not the start)
+
+Domain name, Supabase Free vs. Pro (sets the customer-facing CSV upload ceiling), the final
+brand-blue pick from the `/styleguide` page, whether the marketing site stays English-only,
+Anthropic/Resend spend tolerance now that a public login page exists, and whether to migrate
+to Supabase's new `sb_publishable_…`/`sb_secret_…` key format now or at a later cleanup.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -746,13 +966,16 @@ those; they stay manual, from the Streamlit Reporte tab, exactly as decided for 
 | 10 | Site register & maintenance scheduler | 4–6 | Whenever needed — independent of 0–9 |
 | 11 | Design calibration from fleet data | 4–6 | Whenever needed — gated by data, not sequence |
 | 12 | Retire Apps Script scheduling/email/archiving | 2–4 | Whenever needed — independent of 0–11 |
+| 13 | VRM Monitor customer portal (Streamlit, superseded) | 5–8 | Step 1 built & validated; superseded by Phase 14 |
+| 14 | VRM Monitor unified Next.js site + Python pipeline API | 12–18 | Whenever needed — triggered by the first self-serve customer |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
 **Victron Monitor sellable to external customers:** End of Phase 9, triggered by business need (first external customer), not by calendar time  
 **Site register replaces the maintenance spreadsheet:** End of Phase 10, triggered by whenever you want off the manual xlsx, not by calendar time  
 **Fleet-calibrated design constants become self-refreshing:** End of Phase 11, gated by monitored sites accumulating enough history, not by calendar time  
-**Apps Script fully retired from the weekly-report pipeline:** End of Phase 12, triggered by wanting off Gmail send quotas / Google's execution limits, not by calendar time
+**Apps Script fully retired from the weekly-report pipeline:** End of Phase 12, triggered by wanting off Gmail send quotas / Google's execution limits, not by calendar time  
+**VRM Monitor becomes self-serve (customers log in and run it themselves):** End of Phase 14 (Phase 13's Streamlit approach was superseded before completion), triggered by the first customer who should not need Oscar to upload their CSV for them
 
 These are part-time estimates assuming 2–3 focused hours per day alongside client work. If you have a full week free, Phase 0+1 can be done in 3 days.
 
@@ -789,6 +1012,10 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 11 (Design Calibration) is off the critical path too**, and is gated by *data* rather than by other phases — VRM's ~6-month retention of 1-minute data means the low-irradiance months only become exportable in a December run. The first calibration was already done by hand (see [`docs/design-calibration-2026-08.md`](docs/design-calibration-2026-08.md)) and its results are live in the tier tables, so this phase is about making that repeatable, not about unblocking proposals.
 
 **Phase 12 (Retire Apps Script scheduling/email/archiving) is off this critical path too.** Report *rendering* is already fully on Python for both `monitoring` and `vrm` — this phase only replaces the automation shell (trigger, `MailApp`, Drive) still running on Apps Script. Trigger it whenever Gmail's send quotas or Apps Script's execution limits become a real constraint, not by sequence.
+
+**Phase 13 (VRM Monitor customer portal, Streamlit) is superseded by Phase 14** — its Step 1 (migration 021, login, role resolution) was built and validated live, but the app shell it was building is replaced. See `PLAN_PHASE13.md`'s supersession banner and `PLAN_PHASE14.md` §7 for the full decision map.
+
+**Phase 14 (VRM Monitor unified Next.js site) is off this critical path as well**, and — like Phase 13 before it — builds a *second application* rather than extending the existing one; `app.py` and `pages/` stay untouched. It depends on the VRM report pipeline (done) and on nothing else; Phases 9 and 12 are complementary but not prerequisites. Phase 14 and Phase 12 overlap in exactly one place — the Resend integration — and whichever lands first should write `victron/mailer.py` generically so the other inherits it. Trigger Phase 14 by the first customer who should be able to upload their own CSV without Oscar doing it for them.
 
 ---
 

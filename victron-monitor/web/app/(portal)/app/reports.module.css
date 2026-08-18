@@ -1,0 +1,163 @@
+/* app/(portal)/app (Reports) — new dashboard-only rules, built from
+   styles/tokens.css (PLAN_PHASE14.md §1.7), following the same conventions
+   as app/(portal)/app/sites/sites.module.css. */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: none;
+  margin-bottom: 20px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 22px 24px;
+  margin-bottom: 24px;
+}
+
+.emptyPanel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 28px 24px;
+  text-align: center;
+  color: var(--paper-dim);
+}
+.emptyPanel a {
+  display: inline-block;
+  margin-top: 10px;
+}
+
+.controls {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.controlField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+.controlLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.dateInput {
+  background: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--paper);
+  padding: 9px 12px;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+.dateInput:focus {
+  outline: none;
+  border-color: var(--victron);
+  box-shadow: 0 0 0 3px rgba(var(--victron-rgb), 0.25);
+}
+
+.caption {
+  font-size: 13px;
+  color: var(--mute);
+  margin: 0 0 14px;
+  max-width: none;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.warning {
+  color: var(--signal);
+  font-size: 13px;
+  margin: 10px 0;
+  max-width: none;
+}
+
+.generateButton {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--btn-fill);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 11px 22px;
+  cursor: pointer;
+}
+.generateButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.statGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  color: var(--paper-dim);
+}
+
+.mix {
+  margin: 18px 0;
+}
+.mixLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-bottom: 8px;
+}
+.mixBar {
+  display: flex;
+  height: 22px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.mixSegment {
+  height: 100%;
+}
+.mixLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+}
+.mixLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--paper-dim);
+}
+.mixSwatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}

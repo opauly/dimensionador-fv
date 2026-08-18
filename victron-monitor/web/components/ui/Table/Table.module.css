@@ -1,0 +1,42 @@
+/* New primitive (see Table.tsx's header comment) — built from tokens.css,
+   not ported from any existing template rule. */
+
+.wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.table :global(thead th) {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+  background: var(--ink-2);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.table :global(tbody td) {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--paper);
+  vertical-align: middle;
+}
+
+.table :global(tbody tr:last-child td) {
+  border-bottom: none;
+}
+
+.table :global(tbody tr:hover) {
+  background: var(--panel);
+}
