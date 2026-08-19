@@ -1,0 +1,16 @@
+/* PLAN_PHASE15.md §8 Step 6 — same "bordered panel, amber accent" shape
+   `app/(portal)/app/sites/sites.module.css`'s `.limitCallout`/`.syncErrorText`
+   already use for a non-fatal, action-needed notice; --signal is this
+   design system's only warning color (styles/tokens.css). */
+.banner {
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-lg);
+  background: rgba(242, 169, 59, 0.08);
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+.banner p {
+  color: var(--paper);
+  max-width: none;
+  margin: 0;
+}

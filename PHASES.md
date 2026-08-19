@@ -22,7 +22,8 @@
 | 11 — Design Calibration from Fleet Data | ⬜ Not started (gated by data availability, not sequence) |
 | 12 — Victron Monitor: Retire Apps Script Scheduling/Email/Archiving | ⬜ Not started (separate product, no dependency on 0–11) |
 | 13 — VRM Monitor Customer Portal (Streamlit) | 🔶 Superseded by Phase 14 — Step 1 built & validated (migration 021, login, role resolution) |
-| 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | ⬜ Not started (supersedes Phase 13; see PLAN_PHASE14.md) |
+| 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | 🔶 Steps 1–7 built & validated (design system, auth, tenancy, vrm_api, upload/reports, admin+invites); Step 8 (deploy/cutover) pending — see PLAN_PHASE14.md |
+| 15 — VRM Monitor: direct VRM API ingestion (customer-connected Victron accounts + Oscar's own admin fleet access) | ✅ Steps 0–6 built & independently verified (see PLAN_PHASE15.md); Step 7 (scheduled sync) deferred at Oscar's request |
 
 ---
 
@@ -949,6 +950,103 @@ to Supabase's new `sb_publishable_…`/`sb_secret_…` key format now or at a la
 
 ---
 
+## Phase 15 — VRM Monitor: direct VRM API ingestion (10–14 days, scoped 2026-08-18; Step 0 done 2026-08-18)
+
+**Goal:** two new, parallel ways data can arrive besides a manual CSV upload — (1) a customer
+connects their own Victron VRM account once, with a personal access token they generate in their
+own VRM portal, maps their real VRM installations to their VRM Monitor sites, and their data is
+pulled from Victron instead of being exported and uploaded by hand; (2) Oscar's own VRM personal
+access token already sees his whole fleet (confirmed at Step 0: 13 installations on one account),
+and he can link/sync any of it onto any customer's site himself, admin-side — the API-era
+equivalent of uploading a CSV on their behalf, added to the plan after Step 0 at Oscar's request.
+Neither replaces CSV upload, which stays available for every site regardless of how it's linked,
+and a customer who never connects a token must not be able to tell this phase happened.
+
+Full build plan, resolved decisions, the verified Victron API findings, and per-step validation
+gates: [`PLAN_PHASE15.md`](PLAN_PHASE15.md). Not duplicated in full here.
+
+### Why this phase exists
+
+`vrm.sites.source` has had a `'vrm_api'` value since migration 012 and nothing has ever written
+it. Every customer's data still arrives because a human exported a CSV from the VRM portal and
+uploaded it — which caps the product at "as fresh as the last time someone remembered." Migration
+012 also pre-built the token columns (`vrm_token_secret_id` and friends) on the explicit
+understanding that a plaintext token column was never acceptable. This phase finally uses them.
+
+### Where this sits relative to other phases
+
+- **Depends on Phase 14** (`victron-monitor/web/` + `vrm_api/` + the tenancy choke points). Its
+  security model is inherited wholesale, not re-decided.
+- Off the critical path like Phases 9–14. Triggered by a customer who should not have to export a
+  CSV every week, and by Oscar wanting fleet visibility without exporting one either.
+- **Step 0 is done.** Oscar provided a VRM personal access token from his own account; the
+  discovery spike ran against 13 real installations and every open question in PLAN_PHASE15.md
+  §0.2 is now answered. That same token is being kept permanently as the admin fleet credential
+  (§3.3 below), not revoked.
+- Touches `victron/vrm_csv.py` for the first time since it was written — but only to *extract* its
+  format-independent core into `victron/vrm_daily.py`, behind a byte-identical-output gate.
+
+### Decisions locked (see PLAN_PHASE15.md §1–§6 for the full reasoning)
+
+- **Naming, deliberately:** Victron's remote service is reached through `victron/vrm_remote.py`
+  and mapped by `victron/vrm_series.py`. Neither is called "api" — this repo's own FastAPI service
+  is already `vrm_api/`, and the ambiguity would otherwise bite every future stack trace.
+- **Token storage: Supabase Vault**, reached *only* through three `SECURITY DEFINER` wrappers in
+  the `vrm` schema (`vault` is not exposed to the Data API and must never be). The vault secret id
+  never leaves Postgres. Envelope encryption is the documented fallback, taken only if Step 1's
+  empirical gate fails.
+- **Verified against Victron's current docs, correcting the old exploratory doc:** the auth header
+  is `X-Authorization: Token <token>` (not `Authorization: Bearer`); a personal access token can
+  read **every installation the account can see**, with no per-installation scoping available;
+  rate limit is a ~200-request rolling window; and Victron's own terms say the API is not intended
+  for commercial use — a business risk flagged for Oscar.
+- **The customer maps installations explicitly.** Never auto-mapped, not even when there is exactly
+  one installation and one site.
+- **Coexistence:** `source` means "the path this site's data currently arrives by," not an
+  exclusive mode. Every sync writes a `vrm.ingestion_log` row (`source='vrm_api'`) so "why did this
+  report look wrong" stays answerable, and a sync that overwrites CSV-sourced days says so.
+- **Trigger:** on-demand "Sync now" in v1 (confirmed by Oscar — Step 7's scheduling is deferred); a
+  GitHub Actions `cron:` hitting one authenticated `run-due` endpoint remains the design if it's
+  ever built, the same scheduling mechanism Phase 12 locked.
+- **Admin fleet access (added after Step 0, PLAN_PHASE15.md §3.3):** Oscar's own token is a
+  platform secret (`VRM_ADMIN_TOKEN`, stored like `PIPELINE_API_KEY`/`RESEND_API_KEY`), not a
+  Vault-per-customer one — there's exactly one of it. New `vrm_api` endpoints let admin browse his
+  fleet and link/sync any installation onto any site; both the Next.js `/admin` panel and
+  `pages/06_vrm_monitor.py`'s "Cargar" tab get this capability (Step 4b).
+
+### Explicit non-goals
+
+Replacing the CSV path, OAuth (Victron has none), writing anything back to Victron, real-time
+dashboards, multiple VRM accounts per customer, **Oscar pasting a *customer's* token** from
+`/admin` (distinct from Oscar using his *own* token as the admin fleet credential, which is now
+in scope — see above), widening the scored alarm taxonomy, RLS policies, a real job queue, a test
+framework, and backfilling beyond VRM's own retention.
+
+### Validation
+
+- The reference CSV export produces a **byte-identical** `parse_export()` result before and after
+  the `vrm_daily.py` extraction.
+- The same window pulled through both paths for one real site produces an agreement table within
+  written per-column tolerances; anything that can't meet its tolerance ships as `NULL` with a
+  warning rather than as a number nobody trusts.
+- A token never appears in a log line, a `vrm.jobs` row, a client bundle, a URL, or a cookie.
+- Customer A's token cannot reach customer B's data, including via a tampered request aimed
+  straight at `vrm_api`.
+- Re-syncing does not grow row counts, double alarm episodes, or leave two `daily_health` rows for
+  one date on a mixed-source site.
+- `git diff --stat` shows no changes to `app.py` or anything under `pages/`.
+
+### Open questions — all resolved 2026-08-18 (see PLAN_PHASE15.md §0.5–§0.6)
+
+All eight are answered: the Step 0 token was provided and Step 0 is complete; Victron's
+non-commercial API terms are an accepted risk Oscar will address directly with Victron via the
+Software Integrator Program; on-demand "Sync now" is enough for v1 (Step 7 deferred); initial
+backfill is 31 days at 15-minute interval; admin does not paste a *customer's* token (Oscar's own
+admin-fleet token, added after Step 0, is a separate and already-scoped exception, see above); and
+`source` stays non-exclusive. Nothing blocks Step 1.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -968,6 +1066,7 @@ to Supabase's new `sb_publishable_…`/`sb_secret_…` key format now or at a la
 | 12 | Retire Apps Script scheduling/email/archiving | 2–4 | Whenever needed — independent of 0–11 |
 | 13 | VRM Monitor customer portal (Streamlit, superseded) | 5–8 | Step 1 built & validated; superseded by Phase 14 |
 | 14 | VRM Monitor unified Next.js site + Python pipeline API | 12–18 | Whenever needed — triggered by the first self-serve customer |
+| 15 | VRM Monitor: direct VRM API ingestion (customer-connected accounts + Oscar's admin fleet access) | 10–14 | Whenever needed — triggered by a customer who shouldn't have to export a CSV weekly, or by Oscar wanting fleet visibility without one |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
@@ -1016,6 +1115,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 13 (VRM Monitor customer portal, Streamlit) is superseded by Phase 14** — its Step 1 (migration 021, login, role resolution) was built and validated live, but the app shell it was building is replaced. See `PLAN_PHASE13.md`'s supersession banner and `PLAN_PHASE14.md` §7 for the full decision map.
 
 **Phase 14 (VRM Monitor unified Next.js site) is off this critical path as well**, and — like Phase 13 before it — builds a *second application* rather than extending the existing one; `app.py` and `pages/` stay untouched. It depends on the VRM report pipeline (done) and on nothing else; Phases 9 and 12 are complementary but not prerequisites. Phase 14 and Phase 12 overlap in exactly one place — the Resend integration — and whichever lands first should write `victron/mailer.py` generically so the other inherits it. Trigger Phase 14 by the first customer who should be able to upload their own CSV without Oscar doing it for them.
+
+**Phase 15 (direct VRM API ingestion) is off this critical path too**, and is the first phase that *depends* on another off-path phase: it builds on Phase 14's web app, `vrm_api`, and tenancy model rather than standing alone. It is also the first time this product stores a credential belonging to a third party on a customer's behalf, which is why its plan spends more of its length on storage and tenancy than on features. Trigger it by the first customer for whom weekly CSV exports are the thing standing between them and renewing.
 
 ---
 

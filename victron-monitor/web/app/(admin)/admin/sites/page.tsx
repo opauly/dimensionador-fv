@@ -4,7 +4,7 @@ import { listAllSites, listCustomers } from '@/lib/server/db/admin';
 import { AdminSitesManager } from './AdminSitesManager';
 
 export const metadata: Metadata = {
-  title: 'Sitios — Admin',
+  title: 'Sites — Admin',
 };
 
 // `/admin/sites` (PLAN_PHASE14.md §2 Step 7) — cross-customer sites table,
@@ -18,9 +18,9 @@ export default async function AdminSitesPage() {
 
   return (
     <div>
-      <h1>Sitios</h1>
+      <h1>Sites</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Todos los sitios del esquema <code>vrm</code>, de todos los clientes.
+        All sites in the <code>vrm</code> schema, across every customer.
       </p>
       <AdminSitesManager sites={sites} customers={customers} />
     </div>

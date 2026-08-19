@@ -27,3 +27,14 @@
   color: var(--paper-dim);
   margin-bottom: 4px;
 }
+
+/* `days_replacing_csv` (PLAN_PHASE15.md §8 Step 6) — pulled out of the
+   generic "Avisos" expand into its own always-visible badge; amber, same
+   token as .warningsRow's background tint above, so a mixed-source day
+   reads as "worth a look" at a glance, not just on expand. */
+.replacedBadge {
+  display: inline-block;
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}

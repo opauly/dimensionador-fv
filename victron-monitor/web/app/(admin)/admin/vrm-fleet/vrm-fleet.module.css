@@ -1,0 +1,119 @@
+/* app/(admin)/admin/vrm-fleet — same tokens/conventions as
+   app/(admin)/admin/sites/sites.module.css and
+   app/(admin)/admin/upload/upload.module.css (PLAN_PHASE14.md §1.7). */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: none;
+  margin-bottom: 20px;
+}
+
+.statusLinked {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusUnlinked {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.linksList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.linkChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.linkMeta {
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.editRow {
+  background: var(--panel);
+  padding: 16px 20px !important;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.radioRow {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+.radioLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--paper);
+}
+
+.sectionTitle {
+  font-size: 14px;
+  color: var(--paper);
+  margin: 16px 0 4px;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--paper);
+  margin: 4px 0 12px;
+}
+
+.caption {
+  font-size: 13px;
+  color: var(--mute);
+  margin: -8px 0 14px;
+  max-width: none;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin: 10px 0;
+}
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin: 10px 0;
+}
+
+.formActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.actionsRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.status {
+  color: var(--paper-dim);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 10px;
+}

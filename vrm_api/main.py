@@ -35,9 +35,9 @@ from fastapi.responses import JSONResponse
 
 from vrm_api import jobs, storage
 from vrm_api.deps import require_pipeline_key
-from vrm_api.routers import ingest, meta, reports
+from vrm_api.routers import ingest, meta, reports, vrm_fleet, vrm_link, vrm_sync
 from vrm_api.schemas import JobOut
-from vrm_api.tenancy import NotAuthorized
+from vrm_api.tenancy import NotAuthorized, VrmAccountAlreadyLinked
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vrm_api")
@@ -57,6 +57,22 @@ async def _not_authorized_handler(request: Request, exc: NotAuthorized) -> JSONR
     # (PLAN_PHASE14.md §1.12 rule 6).
     logger.warning("tenancy check failed on %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse(status_code=403, content={"code": "not_authorized"})
+
+
+@app.exception_handler(VrmAccountAlreadyLinked)
+async def _vrm_account_already_linked_handler(
+    request: Request, exc: VrmAccountAlreadyLinked
+) -> JSONResponse:
+    # PLAN_PHASE15.md §1.5: turns a raw Postgres unique-violation on
+    # vrm.customers.vrm_user_id into a clean, typed, customer-renderable
+    # response instead of an opaque 500 — same pattern as NotAuthorized
+    # above. The message itself is safe to return as-is (see the exception's
+    # own docstring in tenancy.py — it never names the other customer).
+    logger.info("vrm-link connect: %s", exc)
+    return JSONResponse(
+        status_code=409,
+        content={"code": "vrm_account_already_linked", "message": str(exc)},
+    )
 
 
 @app.exception_handler(Exception)
@@ -123,3 +139,6 @@ def get_job(job_id: str) -> JobOut:
 app.include_router(ingest.router)
 app.include_router(reports.router)
 app.include_router(meta.router)
+app.include_router(vrm_link.router)
+app.include_router(vrm_sync.router)
+app.include_router(vrm_fleet.router)

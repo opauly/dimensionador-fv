@@ -1,4 +1,9 @@
 streamlit>=1.35.0
+# Without this, Streamlit's dev-mode file watcher falls back to a degraded
+# polling mode that doesn't reliably pick up changes to imported modules
+# (only the page script itself) — confirmed causing real staleness in dev,
+# 2026-08-19. Streamlit's own startup log recommends it.
+watchdog>=6.0.0
 supabase>=2.4.0
 anthropic>=0.30.0
 weasyprint>=61.0

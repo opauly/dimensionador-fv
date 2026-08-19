@@ -30,6 +30,13 @@ EN = {
     "voltageRangeL2": "Voltage Range L2",
     "gridDataDays": "Days With Grid Data",
     "alarmEpisodes": "Total Alarm Episodes",
+    # Display labels for `alarm_events.alarm`'s two scored categories
+    # (`victron/vrm_csv.py:ALARM_CATEGORIES`) — the Events section's
+    # per-category breakdown (report bug fix, 2026-08-19). Shorter than the
+    # stored label ("Low Battery Alarm") since the section header already
+    # says "alarm episodes", so repeating "Alarm" on every row is noise.
+    "alarmCategoryLowBattery": "Low battery",
+    "alarmCategoryOverload": "Overload",
     "outages": "Grid Outages",
     "noOutagesShort": "No outages",
     # Outages come only from the device's own Grid alarm flag — a brief
@@ -69,6 +76,12 @@ EN = {
                "at your site.",
     "subEvents": "Logs grid outages and alarm events recorded by the system "
                  "this week.",
+    # Period-neutral, unlike `subEvents` above (no "this week"/"this period"
+    # distinction needed) — same reason `subSavingsOffGrid` only needs one
+    # definition per language rather than one per num_days/is_overview
+    # combination: off-grid wording doesn't vary by report length.
+    "subEventsOffGrid": "Logs alarm events recorded by the system during "
+                        "this period. This site has no grid connection.",
     "subSocChart": "Shows the daily high and low battery charge level — a dip "
                    "below 20% signals heavy use.",
     "subSolarPerf": "Compares real solar production to the theoretical maximum "
@@ -85,6 +98,27 @@ EN = {
     "gridExport": "Energy Exported to Grid",
     "gridExportKpi": "Energy Exported",
     "ofGeneration": "of generation",
+    # Off-grid-only KPI cards (report bug fix, 2026-08-18) — replace the
+    # grid-independence/outage cards that have no meaning without a grid.
+    "inverterShutdowns": "Inverter Shutdowns",
+    # KPI-card sub-labels render on one unwrapped line — see report_svg.py's
+    # kpi_svg() `sub()` helper — so these must stay short (~35 chars max,
+    # calibrated against a real generated report; a full-sentence caption
+    # like the original draft here overflowed past the card's edge).
+    # Shortened 2026-08-19: the original text overflowed the card's own
+    # width (text_width() at font-size 8: 115.1 vs. ~113.5 available) —
+    # caught from the actual rendered PDF, not the source alone.
+    "inverterShutdownsSubZero": "Uninterrupted power",
+    "inverterShutdownsSub": "Low-battery shutdown(s)",
+    "batteryAutonomy": "Battery Autonomy",
+    "batteryAutonomyUnit": "days",
+    "batteryAutonomySub": "Battery reserve with no sun",
+    "batteryAutonomyUnavailable": "not enough data",
+    # Battery stress' third state (report bug fix, 2026-08-18): distinct from
+    # "Normal" — battery_charge_kwh/battery_discharge_kwh are NULL on every
+    # row for this ingestion path/window, so cycles genuinely cannot be
+    # computed, which must not read as a scored "Normal (0.0 cyc)".
+    "battStressNoData": "No data",
     "solarExpectedEstimated": "Expected output (estimated)",
     "weatherFallbackNote": "no weather data — estimate only",
     "fourWeekChart": "4-week solar trend",
@@ -132,6 +166,8 @@ ES = dict(EN, **{
     "voltageRangeL2": "Rango de Voltaje L2",
     "gridDataDays": "Días con Datos de Red",
     "alarmEpisodes": "Total de Episodios de Alarma",
+    "alarmCategoryLowBattery": "Batería baja",
+    "alarmCategoryOverload": "Sobrecarga",
     "outages": "Cortes de Red",
     "noOutagesShort": "Sin cortes",
     "outagesGridQualityNote": "Ver Calidad de Red",
@@ -170,6 +206,9 @@ ES = dict(EN, **{
                "eléctrica en su sitio.",
     "subEvents": "Registra los cortes de red y eventos de alarma detectados "
                  "por el sistema esta semana.",
+    "subEventsOffGrid": "Registra los eventos de alarma detectados por el "
+                        "sistema durante este período. Este sitio no tiene "
+                        "conexión a la red.",
     "subSocChart": "Muestra el nivel de carga máximo y mínimo diario de la "
                    "batería — bajar de 20% indica uso intenso.",
     "subSolarPerf": "Compara la producción solar real contra el máximo teórico "
@@ -179,6 +218,17 @@ ES = dict(EN, **{
     "gridExport": "Energía exportada a la red",
     "gridExportKpi": "Energía Exportada",
     "ofGeneration": "de lo generado",
+    "inverterShutdowns": "Cortes del Inversor",
+    # Shortened 2026-08-19: the original text overflowed the card's own
+    # width (text_width() at font-size 8: 118.3 vs. ~113.5 available) —
+    # caught from the actual rendered PDF, not the source alone.
+    "inverterShutdownsSubZero": "Energía sin interrupciones",
+    "inverterShutdownsSub": "Corte(s) por batería baja",
+    "batteryAutonomy": "Autonomía de Batería",
+    "batteryAutonomyUnit": "días",
+    "batteryAutonomySub": "Reserva de batería sin sol",
+    "batteryAutonomyUnavailable": "datos insuficientes",
+    "battStressNoData": "Sin datos",
     "solarExpectedEstimated": "Producción esperada (estimada)",
     "weatherFallbackNote": "sin datos de clima — solo estimación",
     "fourWeekChart": "Tendencia solar de 4 semanas",

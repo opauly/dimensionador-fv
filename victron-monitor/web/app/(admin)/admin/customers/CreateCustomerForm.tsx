@@ -2,8 +2,8 @@
 
 // Create-customer form (PLAN_PHASE14.md §2 Step 7): name -> live slug
 // preview, account type, plan (site_limit prefilled from `PLANS`,
-// editable), contact fields, login email, ui_language, then **Enviar
-// invitación** — a single submit that both creates the `vrm.customers` row
+// editable), contact fields, login email, ui_language, then **Create and
+// send invite** — a single submit that both creates the `vrm.customers` row
 // and sends the first invite (`actions.ts:createCustomerAction`), since the
 // plan describes these as one flow, not two separate steps an admin has to
 // remember to do in order.
@@ -53,16 +53,16 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
   // The customer row already exists at this point — swap to a read-only
   // confirmation instead of the (still-populated, resubmittable) form, so
   // there's no way to accidentally create a second row while reading the
-  // invite-send warning. "Reenviar invitación" from the table is the
+  // invite-send warning. "Resend invite" from the table is the
   // recovery path from here, not resubmitting this form.
   if (state.success) {
     return (
       <div className={styles.form}>
-        <p className={styles.success}>Cliente creado.</p>
+        <p className={styles.success}>Customer created.</p>
         {state.inviteWarning && <p className={styles.warning}>{state.inviteWarning}</p>}
         <div className={styles.formActions}>
           <Button type="button" onClick={onDone}>
-            Cerrar
+            Close
           </Button>
         </div>
       </div>
@@ -72,7 +72,7 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
   return (
     <form action={formAction} className={styles.form}>
       <div className={styles.fieldRow}>
-        <Field label="Nombre" htmlFor="cc-name" required>
+        <Field label="Name" htmlFor="cc-name" required>
           <Input id="cc-name" name="name" required disabled={pending} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Slug (site_id)" htmlFor="cc-slug-preview">
@@ -81,13 +81,13 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Tipo de cuenta" htmlFor="cc-account-type">
+        <Field label="Account type" htmlFor="cc-account-type">
           <Select id="cc-account-type" name="accountType" defaultValue="owner" disabled={pending}>
-            <option value="owner">Owner (dueño de sitio)</option>
-            <option value="installer">Installer (instalador)</option>
+            <option value="owner">Owner (site owner)</option>
+            <option value="installer">Installer</option>
           </Select>
         </Field>
-        <Field label="Idioma del panel" htmlFor="cc-ui-language">
+        <Field label="Dashboard language" htmlFor="cc-ui-language">
           <Select id="cc-ui-language" name="uiLanguage" defaultValue="en" disabled={pending}>
             <option value="en">English</option>
             <option value="es">Español</option>
@@ -105,7 +105,7 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
             ))}
           </Select>
         </Field>
-        <Field label="Límite de sitios" htmlFor="cc-site-limit" optional optionalLabel=" (vacío = ilimitado)">
+        <Field label="Site limit" htmlFor="cc-site-limit" optional optionalLabel=" (empty = unlimited)">
           <Input
             id="cc-site-limit"
             name="siteLimit"
@@ -120,10 +120,10 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Correo de acceso (login)" htmlFor="cc-auth-email" required>
+        <Field label="Login email" htmlFor="cc-auth-email" required>
           <Input id="cc-auth-email" name="authEmail" type="email" required disabled={pending} />
         </Field>
-        <Field label="País" htmlFor="cc-country">
+        <Field label="Country" htmlFor="cc-country">
           <Select id="cc-country" name="country" defaultValue={DEFAULT_COUNTRY} disabled={pending}>
             {COUNTRY_CODES.map((code) => (
               <option key={code} value={code}>
@@ -135,10 +135,10 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Nombre de contacto" htmlFor="cc-contact-name" optional>
+        <Field label="Contact name" htmlFor="cc-contact-name" optional>
           <Input id="cc-contact-name" name="contactName" disabled={pending} />
         </Field>
-        <Field label="Correo de contacto" htmlFor="cc-contact-email" optional>
+        <Field label="Contact email" htmlFor="cc-contact-email" optional>
           <Input id="cc-contact-email" name="contactEmail" type="email" disabled={pending} />
         </Field>
       </div>
@@ -147,10 +147,10 @@ export function CreateCustomerForm({ onDone }: { onDone: () => void }) {
 
       <div className={styles.formActions}>
         <Button type="submit" disabled={pending}>
-          {pending ? 'Creando…' : 'Crear y enviar invitación'}
+          {pending ? 'Creating…' : 'Create and send invite'}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
-          Cancelar
+          Cancel
         </Button>
       </div>
     </form>

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/server/auth';
 import { createCustomer, updateCustomer, setActive, type AdminCustomerUpdateFields, type CreateCustomerFields } from '@/lib/server/db/admin';
 import { sendInvite, resendInvite } from '@/lib/server/invites';
+import { vrmLinkDisconnect } from '@/lib/server/pipeline';
 
 const stringOrNull = z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null), z.string().nullable());
 const numberOrNull = z.preprocess((v) => {
@@ -37,7 +38,7 @@ export type CreateCustomerState = {
    * email didn't go out (e.g. Resend unreachable, or the email is already
    * registered to a different customer). Surfaced separately so an admin
    * doesn't think the whole operation failed when only the send did — the
-   * customer row exists either way and "Reenviar invitación" (or fixing the
+   * customer row exists either way and "Resend invite" (or fixing the
    * conflict first) recovers from here without re-creating anything. */
   inviteWarning?: string;
 };
@@ -57,7 +58,7 @@ export async function createCustomerAction(_prevState: CreateCustomerState, form
     uiLanguage: formData.get('uiLanguage'),
   });
   if (!parsed.success) {
-    return { error: 'Revisá los campos del formulario.' };
+    return { error: 'Please check the form fields.' };
   }
 
   let customerId: string;
@@ -68,13 +69,13 @@ export async function createCustomerAction(_prevState: CreateCustomerState, form
     // A duplicate `auth_email` (migration 021's case-insensitive unique
     // index) is the one expected failure here — everything else collapses
     // to the same generic message rather than a raw Postgres error string
-    // reaching this Spanish-admin surface (PLAN_PHASE14.md §1.12 rule 6
-    // applies to `/admin/*` too, not just customer-facing pages).
+    // reaching this admin surface (PLAN_PHASE14.md §1.12 rule 6 applies to
+    // `/admin/*` too, not just customer-facing pages).
     const message = err instanceof Error ? err.message : '';
     if (/duplicate key|unique/i.test(message)) {
-      return { error: 'Ya existe un cliente con ese correo de acceso o ese nombre.' };
+      return { error: 'A customer with that login email or name already exists.' };
     }
-    return { error: 'No se pudo crear el cliente. Intentá de nuevo.' };
+    return { error: 'Could not create the customer. Please try again.' };
   }
 
   revalidatePath('/admin/customers');
@@ -85,10 +86,10 @@ export async function createCustomerAction(_prevState: CreateCustomerState, form
   }
   const inviteWarning =
     inviteResult.reason === 'already_linked_elsewhere'
-      ? `Cliente creado, pero ese correo ya está vinculado a "${inviteResult.otherCustomerName ?? 'otro cliente'}" — usá otro correo de acceso o reasigná el existente.`
+      ? `Customer created, but that email is already linked to "${inviteResult.otherCustomerName ?? 'another customer'}" — use a different login email or reassign the existing one.`
       : inviteResult.reason === 'no_login_email'
-        ? 'Cliente creado, pero no tiene correo de acceso configurado.'
-        : 'Cliente creado, pero no se pudo enviar la invitación. Probá "Reenviar invitación" desde la tabla.';
+        ? 'Customer created, but no login email is configured.'
+        : 'Customer created, but the invite could not be sent. Try "Resend invite" from the table.';
   return { success: true, inviteWarning };
 }
 
@@ -123,7 +124,7 @@ export async function updateCustomerAction(customerId: string, _prevState: Updat
     uiLanguage: formData.get('uiLanguage'),
     notes: formData.get('notes'),
   });
-  if (!parsed.success) return { error: 'Revisá los campos del formulario.' };
+  if (!parsed.success) return { error: 'Please check the form fields.' };
 
   try {
     await updateCustomer(customerId, {
@@ -138,7 +139,7 @@ export async function updateCustomerAction(customerId: string, _prevState: Updat
       notes: parsed.data.notes,
     } as AdminCustomerUpdateFields);
   } catch {
-    return { error: 'No se pudo guardar. Intentá de nuevo.' };
+    return { error: 'Could not save. Please try again.' };
   }
   revalidatePath('/admin/customers');
   return { success: true };
@@ -160,8 +161,8 @@ export async function resendInviteAction(customerId: string): Promise<ResendStat
     return {
       error:
         result.reason === 'no_login_email'
-          ? 'Este cliente no tiene correo de acceso configurado — editalo primero.'
-          : 'No se pudo reenviar la invitación. Intentá de nuevo.',
+          ? 'This customer has no login email configured — edit it first.'
+          : 'Could not resend the invite. Please try again.',
     };
   }
   return { ok: true };
@@ -173,12 +174,36 @@ export async function sendInviteAction(customerId: string): Promise<ResendState>
   revalidatePath('/admin/customers');
   if (!result.ok) {
     if (result.reason === 'already_linked_elsewhere') {
-      return { error: `Ese correo ya está vinculado a "${result.otherCustomerName ?? 'otro cliente'}".` };
+      return { error: `That email is already linked to "${result.otherCustomerName ?? 'another customer'}".` };
     }
     if (result.reason === 'no_login_email') {
-      return { error: 'Este cliente no tiene correo de acceso configurado — editalo primero.' };
+      return { error: 'This customer has no login email configured — edit it first.' };
     }
-    return { error: 'No se pudo enviar la invitación. Intentá de nuevo.' };
+    return { error: 'Could not send the invite. Please try again.' };
   }
+  return { ok: true };
+}
+
+export type VrmLinkDisconnectState = { ok?: boolean; error?: string };
+
+/**
+ * Admin-triggered VRM disconnect (PLAN_PHASE15.md §8 Step 6 / §0.5 Q6 —
+ * "Oscar can sever a connection he cannot create"). Calls the exact same
+ * `vrm_api` endpoint a customer's own "Disconnect" button on `/app/sites`
+ * calls (`vrmLinkDisconnect()` → `POST /v1/vrm-link/disconnect`) — there is
+ * no second, admin-only disconnect code path. That endpoint destroys the
+ * Vault-backed token, stamps `vrm_token_revoked_at`, and reverts every
+ * `source='vrm_api'` site of this customer's back to
+ * `source='csv_upload'`/`vrm_sync_enabled=false`; telemetry already
+ * ingested is never touched.
+ */
+export async function disconnectVrmLinkAction(customerId: string): Promise<VrmLinkDisconnectState> {
+  await requireAdmin();
+  try {
+    await vrmLinkDisconnect(customerId);
+  } catch {
+    return { error: "Could not disconnect this customer's VRM account. Please try again." };
+  }
+  revalidatePath('/admin/customers');
   return { ok: true };
 }

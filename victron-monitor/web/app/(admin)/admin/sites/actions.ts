@@ -55,12 +55,12 @@ export async function updateAnySiteAction(siteId: string, _prevState: AdminSiteF
     exports_to_grid: formData.get('exports_to_grid') === 'true',
     active: formData.get('active') === 'true',
   });
-  if (!parsed.success) return { error: 'No se pudo guardar el sitio.' };
+  if (!parsed.success) return { error: 'Could not save the site.' };
 
   try {
     await updateAnySite(siteId, parsed.data as AdminSiteUpdateFields);
   } catch {
-    return { error: 'No se pudo guardar el sitio. Intentá de nuevo.' };
+    return { error: 'Could not save the site. Please try again.' };
   }
   revalidatePath('/admin/sites');
   return { success: true };
@@ -70,11 +70,11 @@ export type ReassignState = { error?: string; success?: boolean };
 
 export async function reassignSiteAction(siteId: string, newCustomerId: string): Promise<ReassignState> {
   await requireAdmin();
-  if (!newCustomerId) return { error: 'Elegí un cliente.' };
+  if (!newCustomerId) return { error: 'Choose a customer.' };
   try {
     await reassignSite(siteId, newCustomerId);
   } catch {
-    return { error: 'No se pudo reasignar el sitio.' };
+    return { error: 'Could not reassign the site.' };
   }
   revalidatePath('/admin/sites');
   return { success: true };

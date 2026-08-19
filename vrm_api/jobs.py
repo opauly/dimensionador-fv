@@ -78,12 +78,22 @@ def _safe_error_message(exc: Exception) -> str:
     own `NotAuthorized`) are passed through as-is; anything else collapses to
     one generic sentence, with the real exception and traceback going to the
     server log via `logging.exception` in `run_job` below, not here.
+
+    PLAN_PHASE15.md §8 Step 4 additions: `routers/vrm_sync.py:VrmSyncError`
+    is this router's own hand-written, always-customer-safe message type
+    (§9's failure-mode table) — every instance is constructed in that one
+    file, deliberately never with a token or a raw Postgres string. It is
+    the only `vrm_sync`-job exception type this function needs to allow-list
+    directly: `_do_sync()` catches every `victron.vrm_remote`/`victron.
+    vrm_series` exception itself and re-raises as `VrmSyncError`, so those
+    types never reach this function un-wrapped.
     """
     from victron.vrm_csv import VrmCsvError
 
+    from vrm_api.routers.vrm_sync import VrmSyncError
     from vrm_api.tenancy import NotAuthorized
 
-    if isinstance(exc, (VrmCsvError, NotAuthorized)):
+    if isinstance(exc, (VrmCsvError, NotAuthorized, VrmSyncError)):
         return str(exc)
     return "Internal error — see server logs."
 

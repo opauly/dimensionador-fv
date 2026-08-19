@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import { Button, Field, Input, Select } from '@/components/ui';
-import { t, type Lang } from '@/lib/i18n/strings';
+import { t, FORCE_LANG, type Lang } from '@/lib/i18n/strings';
 import { COUNTRIES, DEFAULT_COUNTRY } from '@/lib/countries';
 import type { CustomerRecord } from '@/lib/server/db';
 import { updateProfileAction, type ProfileFormState } from './actions';
@@ -27,10 +27,27 @@ export function ProfileForm({ customer, lang }: { customer: CustomerRecord; lang
           <Input id="profile-name" name="name" defaultValue={customer.name} required disabled={pending} />
         </Field>
         <Field label={t(lang, 'profile_field_ui_language')} htmlFor="profile-ui-language">
-          <Select id="profile-ui-language" name="ui_language" defaultValue={customer.ui_language} disabled={pending}>
+          {/* A `disabled` form control is excluded from FormData entirely —
+             without the hidden input below, disabling this <select> while
+             FORCE_LANG is active would silently drop `ui_language` from
+             every submit, and `updateProfileAction`'s Zod schema requires
+             it (`z.enum(['en','es'])`), so the WHOLE profile form —
+             name/contact/country too — would start failing to save, not
+             just the language piece. Caught before shipping, not from a
+             bug report. */}
+          {FORCE_LANG !== null && <input type="hidden" name="ui_language" value={customer.ui_language} />}
+          <Select
+            id="profile-ui-language"
+            name={FORCE_LANG === null ? 'ui_language' : undefined}
+            defaultValue={customer.ui_language}
+            disabled={pending || FORCE_LANG !== null}
+          >
             <option value="en">{t(lang, 'lang_en')}</option>
             <option value="es">{t(lang, 'lang_es')}</option>
           </Select>
+          {FORCE_LANG !== null && (
+            <p className={styles.hint}>{t(lang, 'profile_ui_language_locked_hint')}</p>
+          )}
         </Field>
       </div>
 

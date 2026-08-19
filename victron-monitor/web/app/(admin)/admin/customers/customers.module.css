@@ -25,6 +25,13 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+.statusRevoked {
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
 
 .actionsCell {
   display: flex;

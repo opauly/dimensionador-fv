@@ -3,9 +3,10 @@
 // Admin report generation (PLAN_PHASE14.md §2 Step 7) — the admin-side
 // counterpart of `app/(portal)/app/ReportManager.tsx`, extended with a
 // schema toggle (`vrm` / `monitoring`) and a customer picker. Copy is
-// Spanish, inline (§1.10). No report math happens here — same §1.11
-// reasoning as the customer version: every number comes back inside a
-// `report` job's `result.summary`, computed once, in `vrm_api`.
+// English, inline (admin views went English-only 2026-08-19). No report
+// math happens here — same §1.11 reasoning as the customer version: every
+// number comes back inside a `report` job's `result.summary`, computed
+// once, in `vrm_api`.
 import { startTransition, useEffect, useState } from 'react';
 import { Select, Stat } from '@/components/ui';
 import { JobProgress, type JobProgressJob } from '@/components/app';
@@ -28,11 +29,22 @@ type ReportSummary = {
     charge: number;
     outageCount: number;
     outageMinutes: number;
+    // `false` when battery_charge_kwh/battery_discharge_kwh are unavailable
+    // (VRM-API-ingested sites, PLAN_PHASE15.md §4.6) — `discharge`/`charge`
+    // above are then a fabrication-safe 0.0, not a real reading. Typed here
+    // for shape-accuracy even though this admin view has no energy-mix bar
+    // of its own to gate on it (see `ReportManager.tsx`'s `EnergyMixBar`
+    // for the customer-facing fix that actually needed this field).
+    batteryKwhAvailable: boolean;
   };
   gridIndependencePct: number;
   avgHealth: number | string;
   healthStatus: string;
-  batteryCycles: number;
+  // `null` for a site whose battery_charge_kwh/battery_discharge_kwh are
+  // unavailable (e.g. VRM-API-ingested sites, PLAN_PHASE15.md §4.6) —
+  // `weekly_report.py` distinguishes "no data" from "genuinely zero" rather
+  // than fabricating 0.
+  batteryCycles: number | null;
   battStressLabel: string;
   battStressColor: string;
   gridQualityScore: number;
@@ -55,10 +67,26 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
   const [customerId, setCustomerId] = useState<string>(customers[0]?.id ?? '');
   const [monitoringSites, setMonitoringSites] = useState<SiteSummary[] | null>(null);
 
+  // Bug-fix pass 2026-08-18 (Bug 3): `monitoring.sites` has no `customer_id`
+  // FK (this schema predates `vrm.customers` — it's Oscar's own
+  // Node-RED-monitored fleet, a different, older product), but its `owner`
+  // text column holds the real person's name, populated on every current
+  // row and confirmed to match `vrm.customers.name` exactly for at least
+  // one real customer (Karen Montealegre, 3 sites). Exact match,
+  // case-insensitive/trimmed — the data checked is consistently formatted,
+  // so a looser substring match would only risk a false-positive match
+  // between two differently-named people, not save anyone from a typo.
+  const selectedCustomerName = customers.find((c) => c.id === customerId)?.name ?? null;
+  const normalizedCustomerName = selectedCustomerName?.trim().toLowerCase() ?? null;
+
   const sites: SiteSummary[] =
     schema === 'vrm'
-      ? vrmSites.filter((s) => s.customer_id === customerId).map((s) => ({ site_id: s.site_id, display_name: s.display_name }))
-      : (monitoringSites ?? []);
+      ? vrmSites
+          .filter((s) => s.customer_id === customerId)
+          .map((s) => ({ site_id: s.site_id, display_name: s.display_name, owner: null }))
+      : normalizedCustomerName
+        ? (monitoringSites ?? []).filter((s) => (s.owner ?? '').trim().toLowerCase() === normalizedCustomerName)
+        : (monitoringSites ?? []);
 
   const [siteId, setSiteId] = useState<string>('');
   const [limits, setLimits] = useState<{ max_custom_range_days: number; max_overview_range_days: number } | null>(null);
@@ -136,11 +164,11 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string; maxDays?: number } | null;
         if (body?.error === 'range_too_long') {
-          setError(`El rango elegido es de ${numDays} días; el máximo es ${body.maxDays ?? '—'}.`);
+          setError(`The chosen range is ${numDays} days; the maximum is ${body.maxDays ?? '—'}.`);
         } else if (body?.error === 'not_authorized') {
-          setError('Este sitio no pertenece al cliente elegido.');
+          setError('This site does not belong to the selected customer.');
         } else {
-          setError('No se pudo generar el reporte. Intentá de nuevo.');
+          setError('Could not generate the report. Please try again.');
         }
         setGenerating(false);
         return;
@@ -148,7 +176,7 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
       const { job_id } = (await res.json()) as { job_id: string };
       setJobId(job_id);
     } catch {
-      setError('No se pudo contactar al servicio de reportes.');
+      setError('Could not reach the reporting service.');
       setGenerating(false);
     }
   }
@@ -170,13 +198,13 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
     try {
       const res = await fetch(`/api/admin/pipeline/reports/${encodeURIComponent(jobId)}/download`);
       if (!res.ok) {
-        setError('No se pudo preparar la descarga.');
+        setError('Could not prepare the download.');
         return;
       }
       const { url } = (await res.json()) as { url: string; filename: string };
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch {
-      setError('No se pudo preparar la descarga.');
+      setError('Could not prepare the download.');
     } finally {
       setDownloading(false);
     }
@@ -186,14 +214,14 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
     <div>
       <div className={styles.controls}>
         <label className={styles.controlField}>
-          <span className={styles.controlLabel}>Origen</span>
+          <span className={styles.controlLabel}>Source</span>
           <Select value={schema} onChange={(e) => setSchema(e.target.value as Schema)}>
-            <option value="vrm">vrm — clientes externos</option>
-            <option value="monitoring">monitoring — sitios propios</option>
+            <option value="vrm">vrm — external customers</option>
+            <option value="monitoring">monitoring — own sites</option>
           </Select>
         </label>
         <label className={styles.controlField}>
-          <span className={styles.controlLabel}>Cliente {schema === 'monitoring' ? '(solo referencia del job)' : ''}</span>
+          <span className={styles.controlLabel}>Customer {schema === 'monitoring' ? '(job reference only)' : ''}</span>
           <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
@@ -203,9 +231,9 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
           </Select>
         </label>
         <label className={styles.controlField}>
-          <span className={styles.controlLabel}>Sitio</span>
+          <span className={styles.controlLabel}>Site</span>
           <Select value={siteId} onChange={(e) => setSiteId(e.target.value)}>
-            <option value="">— elegí un sitio —</option>
+            <option value="">— choose a site —</option>
             {sites.map((s) => (
               <option key={s.site_id} value={s.site_id}>
                 {s.display_name}
@@ -216,27 +244,28 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
       </div>
       {schema === 'monitoring' && (
         <p className={styles.caption}>
-          Los sitios <code>monitoring</code> no pertenecen a ningún cliente — el cliente elegido arriba solo se usa como
-          referencia interna del job (requerida por <code>vrm.jobs.customer_id</code>), no para filtrar sitios.
+          <code>monitoring</code> sites have no customer FK — they are filtered by the <code>owner</code> field (person&apos;s
+          name) compared against the customer name chosen above; that customer also remains the job&apos;s internal reference
+          (required by <code>vrm.jobs.customer_id</code>).
         </p>
       )}
 
-      {sites.length === 0 && <p className={styles.emptyPanel}>No hay sitios en el esquema {schema}.</p>}
+      {sites.length === 0 && <p className={styles.emptyPanel}>No sites in the {schema} schema.</p>}
 
-      {dates && dates.length === 0 && siteId && <p className={styles.emptyPanel}>Ese sitio todavía no tiene datos diarios.</p>}
+      {dates && dates.length === 0 && siteId && <p className={styles.emptyPanel}>This site has no daily data yet.</p>}
 
       {dates && dates.length > 0 && (
         <div className={styles.panel}>
           <p className={styles.caption}>
-            Datos disponibles: {dates[0]} → {dates[dates.length - 1]} ({dates.length} días)
+            Available data: {dates[0]} → {dates[dates.length - 1]} ({dates.length} days)
           </p>
           <div className={styles.controls}>
             <label className={styles.controlField}>
-              <span className={styles.controlLabel}>Fecha de inicio</span>
+              <span className={styles.controlLabel}>Start date</span>
               <input type="date" className={styles.dateInput} value={start} min={dates[0]} max={end || dates[dates.length - 1]} onChange={(e) => setStart(e.target.value)} />
             </label>
             <label className={styles.controlField}>
-              <span className={styles.controlLabel}>Fecha de fin</span>
+              <span className={styles.controlLabel}>End date</span>
               <input type="date" className={styles.dateInput} value={end} min={start || dates[0]} max={dates[dates.length - 1]} onChange={(e) => setEnd(e.target.value)} />
             </label>
           </div>
@@ -244,14 +273,14 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
           {limits && numDays > 0 && !tooLong && (
             <p className={styles.caption}>
               {isOverviewRange
-                ? `Resumen (Overview) — ${numDays} días, agrupado por mes.`
-                : `Detallado — ${numDays} días, día por día.`}
+                ? `Overview — ${numDays} days, grouped by month.`
+                : `Detailed — ${numDays} days, day by day.`}
             </p>
           )}
-          {tooLong && limits && <p className={styles.error}>El rango es de {numDays} días; el máximo es {limits.max_overview_range_days}.</p>}
+          {tooLong && limits && <p className={styles.error}>The range is {numDays} days; the maximum is {limits.max_overview_range_days}.</p>}
           {!tooLong && numDays > 0 && covered < numDays && (
             <p className={styles.warning}>
-              El rango {start} → {end} tiene {covered} de {numDays} días con datos.
+              The range {start} → {end} has {covered} of {numDays} days with data.
             </p>
           )}
 
@@ -259,16 +288,16 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
 
           {!generating && (
             <button type="button" className={styles.generateButton} onClick={handleGenerate} disabled={!start || !end || tooLong}>
-              Generar reporte
+              Generate report
             </button>
           )}
           {generating && jobId && (
             <JobProgress
               jobId={jobId}
               endpoint="/api/admin/pipeline/jobs"
-              runningLabel="Generando…"
-              genericFailedLabel="Algo salió mal. Intentá de nuevo."
-              unreachableLabel="No se pudo contactar al servicio de reportes."
+              runningLabel="Generating…"
+              genericFailedLabel="Something went wrong. Please try again."
+              unreachableLabel="Could not reach the reporting service."
               onDone={handleJobDone}
               onFailed={handleJobFailed}
             />
@@ -279,46 +308,40 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
       {summary && (
         <div className={styles.panel}>
           <div className={styles.statGrid}>
-            <Stat label="Generación solar" value={summary.totals.pv.toFixed(1)} unit="kWh" />
-            <Stat label="Consumo" value={summary.totals.load.toFixed(1)} unit="kWh" />
-            <Stat label="Independencia" value={summary.gridIndependencePct} unit="%" />
-            <Stat label="Salud" value={summary.avgHealth} unit={`/100 · ${summary.healthStatus}`} good />
+            <Stat label="Solar generation" value={summary.totals.pv.toFixed(1)} unit="kWh" />
+            <Stat label="Consumption" value={summary.totals.load.toFixed(1)} unit="kWh" />
+            <Stat label="Independence" value={summary.gridIndependencePct} unit="%" />
+            <Stat label="Health" value={summary.avgHealth} unit={`/100 · ${summary.healthStatus}`} good />
           </div>
 
+          {/* Reorganized 2026-08-19 at Oscar's request, mirroring the same
+             change in pages/06_vrm_monitor.py's tab_report() and
+             ReportManager.tsx: this panel is a quick "did this run
+             correctly" glance before downloading, not a second copy of the
+             report — grid quality, outages, and battery-stress cycle count
+             are all already their own dedicated PDF sections
+             (report_svg.py's Grid Quality block, Events block, and SALUD DE
+             LA BATERÍA block). Kept: the four Stat cards above, system
+             type/data coverage (genuine "is this the right site/window"
+             context, not a restated PDF stat), and the
+             weather-fetch-failure warning (not a duplicated number — a
+             heads-up that a PDF section came out silently empty because an
+             external call failed). */}
           <div className={styles.chipRow}>
             <span className={styles.chip}>{summary.systemType}</span>
             <span className={styles.chip}>
-              {summary.daysWithData}/{summary.daysWithData + summary.missingDays} días con datos
-            </span>
-            <span className={styles.chip} style={{ color: summary.battStressColor }}>
-              {summary.battStressLabel} ({summary.batteryCycles} cyc)
-            </span>
-            <span className={styles.chip} style={{ color: summary.gridQualityColor }}>
-              {summary.gridQualityStatus} ({summary.gridQualityScore}/100)
-            </span>
-            <span className={styles.chip}>
-              {summary.totals.outageCount > 0 ? `${summary.totals.outageCount} corte(s) (${summary.totals.outageMinutes} min)` : 'Sin cortes'}
+              {summary.daysWithData}/{summary.daysWithData + summary.missingDays} days with data
             </span>
           </div>
 
           <p className={styles.caption}>
-            Periodo {summary.startStr} → {summary.endStr} · {summary.daysWithData} días
+            Period {summary.startStr} → {summary.endStr} · {summary.daysWithData} days
           </p>
 
-          {summary.weatherErrors.length > 0 && <p className={styles.warning}>No se pudo obtener el clima de Open-Meteo.</p>}
-          {(summary.battStressLabel === 'Alto estrés' || summary.battStressLabel === 'High stress') && (
-            <p className={styles.warning}>
-              Estrés de batería alto: {summary.batteryCycles} ciclos en {summary.daysWithData} días.
-            </p>
-          )}
-          {summary.gridQualityScore < 70 && (
-            <p className={styles.warning}>
-              Calidad de red baja: {summary.gridQualityScore}/100 ({summary.gridQualityStatus}).
-            </p>
-          )}
+          {summary.weatherErrors.length > 0 && <p className={styles.warning}>Could not fetch weather data from Open-Meteo.</p>}
 
           <button type="button" className={styles.generateButton} onClick={handleDownload} disabled={downloading}>
-            {downloading ? 'Preparando…' : 'Descargar PDF'}
+            {downloading ? 'Preparing…' : 'Download PDF'}
           </button>
         </div>
       )}

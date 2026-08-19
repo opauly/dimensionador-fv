@@ -43,6 +43,11 @@
   align-items: start;
 }
 
+.hint {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 4px;
+}
 .error {
   color: var(--signal);
   font-size: 14px;

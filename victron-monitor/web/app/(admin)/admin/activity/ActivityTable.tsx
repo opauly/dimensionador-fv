@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from 'react';
 import { Table } from '@/components/ui';
+import { formatDateTime } from '@/lib/dates';
 import type { IngestionLogRecord } from '@/lib/server/db';
 import styles from './activity.module.css';
 
@@ -10,6 +11,18 @@ function warningMessages(warnings: unknown): string[] {
   if (Array.isArray(warnings)) return warnings.map(String);
   const messages = (warnings as { messages?: unknown }).messages;
   return Array.isArray(messages) ? messages.map(String) : [];
+}
+
+/** `warnings.days_replacing_csv` (`victron/ingest.py:ingest_parsed()`, §5.4)
+ * — how many days this ingestion overwrote that a CSV upload had
+ * previously written for the same site. Pulled out as its own visible
+ * column rather than left buried inside the generic "Warnings" expand
+ * (PLAN_PHASE15.md §8 Step 6: "days_replacing_csv visible" — the whole
+ * point is that a mixed-source site's report changing isn't a mystery). */
+function daysReplacingCsv(warnings: unknown): number {
+  if (!warnings || typeof warnings !== 'object') return 0;
+  const n = (warnings as { days_replacing_csv?: unknown }).days_replacing_csv;
+  return typeof n === 'number' ? n : 0;
 }
 
 export function ActivityTable({
@@ -24,27 +37,29 @@ export function ActivityTable({
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
   if (ingestions.length === 0) {
-    return <p className={styles.empty}>Todavía no hay cargas registradas.</p>;
+    return <p className={styles.empty}>No uploads recorded yet.</p>;
   }
 
   return (
     <Table>
       <thead>
         <tr>
-          <th>Cliente</th>
-          <th>Sitio</th>
-          <th>Archivo</th>
-          <th>Origen</th>
-          <th>Periodo</th>
-          <th>Días</th>
-          <th>Alarmas</th>
-          <th>Avisos</th>
-          <th>Subido</th>
+          <th>Customer</th>
+          <th>Site</th>
+          <th>File</th>
+          <th>Source</th>
+          <th>Period</th>
+          <th>Days</th>
+          <th>CSV replaced</th>
+          <th>Alarms</th>
+          <th>Warnings</th>
+          <th>Uploaded</th>
         </tr>
       </thead>
       <tbody>
         {ingestions.map((log) => {
           const warnings = warningMessages(log.warnings);
+          const replacedDays = daysReplacingCsv(log.warnings);
           return (
             <Fragment key={log.id}>
               <tr>
@@ -56,6 +71,7 @@ export function ActivityTable({
                   {log.period_start?.slice(0, 10) ?? '—'} → {log.period_end?.slice(0, 10) ?? '—'}
                 </td>
                 <td>{log.rows_written ?? '—'}</td>
+                <td>{replacedDays > 0 ? <span className={styles.replacedBadge}>{replacedDays}</span> : 0}</td>
                 <td>{log.alarm_events_written ?? '—'}</td>
                 <td>
                   {warnings.length > 0 ? (
@@ -66,11 +82,11 @@ export function ActivityTable({
                     0
                   )}
                 </td>
-                <td>{new Date(log.uploaded_at).toLocaleString('es-CR')}</td>
+                <td>{formatDateTime(log.uploaded_at)}</td>
               </tr>
               {expanded[log.id] && warnings.length > 0 && (
                 <tr>
-                  <td colSpan={9} className={styles.warningsRow}>
+                  <td colSpan={10} className={styles.warningsRow}>
                     <ul>
                       {warnings.map((w, i) => (
                         <li key={i}>{w}</li>

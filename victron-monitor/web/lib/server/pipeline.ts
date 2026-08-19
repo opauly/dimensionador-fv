@@ -87,10 +87,19 @@ async function pipelineJson<T>(path: string, init: RequestInit = {}): Promise<T>
     // vrm_api's own exception handlers (main.py) always answer with a typed
     // `{"code": ...}` body, never a stack trace — so relaying the status is
     // safe; only the body's *shape* is untrusted enough to need a fallback.
+    // A plain `raise HTTPException(status_code=..., detail={"code": ...})`
+    // (no custom exception-handler class, e.g. `routers/vrm_fleet.py`'s own
+    // typed 400/404/409s) is wrapped by FastAPI's default handling into
+    // `{"detail": {"code": ...}}`, one level deeper than a custom handler's
+    // flat `{"code": ...}` (`main.py`'s `NotAuthorized`/
+    // `VrmAccountAlreadyLinked` handlers) — both shapes are real and both
+    // are checked here, so a route handler calling this module never has to
+    // know which style the vrm_api endpoint it's hitting happens to use.
     let code = 'pipeline_error';
     try {
-      const body = (await res.json()) as { code?: string; detail?: string };
-      code = body.code ?? code;
+      const body = (await res.json()) as { code?: string; detail?: string | { code?: string } };
+      const nestedCode = typeof body.detail === 'object' && body.detail !== null ? body.detail.code : undefined;
+      code = body.code ?? nestedCode ?? code;
     } catch {
       // No body, or not JSON — keep the generic code.
     }
@@ -233,7 +242,12 @@ export async function getAvailableDatesAdmin(siteId: string, customerId: string,
   return data.dates;
 }
 
-export type SiteSummary = { site_id: string; display_name: string };
+/** `owner` mirrors `vrm_api/schemas.py:SiteSummaryOut.owner` (bug-fix pass
+ * 2026-08-18, Bug 3) — `monitoring.sites.owner`'s real-person name, `null`
+ * for `schema: 'vrm'` rows (that schema's own `customer_id` FK is the real
+ * ownership fact there). `/admin/reports` uses this to narrow the
+ * `monitoring` site picker by the selected customer's name. */
+export type SiteSummary = { site_id: string; display_name: string; owner: string | null };
 
 /** Cross-*customer* site list for one schema — see
  * `vrm_api/routers/meta.py:list_sites()`'s own comment for why this is
@@ -253,4 +267,171 @@ export type Limits = { max_custom_range_days: number; max_overview_range_days: n
 
 export async function getLimits(): Promise<Limits> {
   return pipelineJson('/v1/limits', { method: 'GET' });
+}
+
+// ── VRM fleet (PLAN_PHASE15.md §3.3 / §8 Step 4b) ───────────────────────
+// Oscar's OWN VRM fleet (`VRM_ADMIN_TOKEN`, read only inside `vrm_api` —
+// never sent through this module, never reaches Next.js at all), reachable
+// only from `/admin/vrm-fleet` (`requireAdminForRoute()` gates every route
+// handler that calls the three functions below — this module itself has no
+// opinion on who may call it, same disclaimer as every other function in
+// this file). Mirrors `vrm_api/schemas.py`'s `VrmFleet*` models field-for-
+// field, same "restated, not re-derived" convention as `SiteFieldsIn` above.
+
+export type VrmFleetLinkedSite = {
+  customer_id: string;
+  customer_name: string | null;
+  site_id: string;
+  site_display_name: string;
+  vrm_sync_enabled: boolean;
+  vrm_last_synced_at: string | null;
+};
+
+export type VrmFleetInstallation = {
+  id_site: number;
+  name: string | null;
+  identifier: string | null;
+  /** Empty = unlinked. More than one entry is possible (§1.1: the unique
+   * constraint is per-customer, not global) — a single installation can be
+   * linked under more than one `customer_id` at once. */
+  links: VrmFleetLinkedSite[];
+  /** Bug-fix pass 2026-08-18, Bug 1 — a pre-fill sourced from
+   * `monitoring.sites` for this same physical installation, when one was
+   * found (`vrm_api/routers/vrm_fleet.py:_monitoring_suggestions_by_installation()`).
+   * `null` most of the time; never auto-applied by anything that reads this
+   * — `VrmFleetManager.tsx` only ever copies it into the (fully editable)
+   * link form's initial state. */
+  suggested_fields: SiteFieldsIn | null;
+};
+
+export async function listVrmFleetInstallations(): Promise<VrmFleetInstallation[]> {
+  const data = await pipelineJson<{ installations: VrmFleetInstallation[] }>('/v1/vrm-fleet/installations', { method: 'GET' });
+  return data.installations;
+}
+
+export async function linkVrmFleetInstallation(body: {
+  vrm_installation_id: number;
+  /** Exactly one of `customer_id`/`new_customer_name` — `vrm_api`'s own
+   * 400 (`exactly_one_customer_field_required`) is the enforcement point;
+   * this function does not pre-validate. */
+  customer_id?: string;
+  new_customer_name?: string;
+  site_name_or_id: string;
+  site_fields?: SiteFieldsIn;
+}): Promise<{ customer_id: string; customer_is_existing: boolean; site_id: string; site_is_existing: boolean }> {
+  return pipelineJson('/v1/vrm-fleet/link', jsonInit(body));
+}
+
+export async function syncVrmFleetSite(body: { site_id: string; start: string; end: string }): Promise<{ job_id: string }> {
+  return pipelineJson('/v1/vrm-fleet/sync', jsonInit(body));
+}
+
+// ── VRM link (PLAN_PHASE15.md §3.1 / §8 Step 5) ─────────────────────────
+// A CUSTOMER'S OWN VRM personal access token — never `VRM_ADMIN_TOKEN`
+// (that's the `VrmFleet*` functions above). Mirrors `vrm_api/schemas.py`'s
+// `VrmLink*`/`VrmSyncRequest` models field-for-field, same "restated, not
+// re-derived" convention as `SiteFieldsIn`. Every function here takes
+// `customer_id` explicitly rather than reading it from anywhere implicit —
+// callers (route handlers under `app/api/vrm/*`) MUST always pass
+// `session.customerId`, never a value out of the request body (§3.2 control
+// 1 restated one layer down from `SiteFieldsIn`'s own callers).
+
+export type VrmInstallationOut = {
+  id_site: number;
+  name: string | null;
+  identifier: string | null;
+};
+
+/** `POST /v1/vrm-link/validate`'s response — writes NOTHING to Postgres or
+ * Vault (PLAN_PHASE15.md §3.1 step 1). No field here can carry the token
+ * back out — see `vrm_api/schemas.py:VrmLinkValidateOut`'s own docstring. */
+export type VrmLinkValidateOut = {
+  vrm_user_id: string;
+  vrm_account_email: string | null;
+  installations: VrmInstallationOut[];
+};
+
+export async function vrmLinkValidate(body: { customer_id: string; token: string }): Promise<VrmLinkValidateOut> {
+  return pipelineJson('/v1/vrm-link/validate', jsonInit(body));
+}
+
+/** One customer decision from §3.1 step 2's mapping UI — "ignore" is simply
+ * omitting an installation from the `mappings` array sent to `vrmLinkConnect()`,
+ * mirroring `vrm_api/schemas.py:VrmLinkMapping`'s own docstring. `site_name_or_id`
+ * reuses `IngestPreviewRequest`'s ambiguous-by-design field: an existing
+ * site's `site_id`, or a new site's display name. */
+export type VrmLinkMapping = {
+  vrm_installation_id: number;
+  site_name_or_id: string;
+  site_fields?: SiteFieldsIn;
+};
+
+export type VrmLinkSiteResult = {
+  vrm_installation_id: number;
+  site_id: string;
+  site_is_existing: boolean;
+};
+
+export type VrmLinkConnectOut = {
+  vrm_user_id: string;
+  vrm_account_email: string | null;
+  sites: VrmLinkSiteResult[];
+};
+
+export async function vrmLinkConnect(body: {
+  customer_id: string;
+  token: string;
+  mappings: VrmLinkMapping[];
+}): Promise<VrmLinkConnectOut> {
+  return pipelineJson('/v1/vrm-link/connect', jsonInit(body));
+}
+
+export type VrmLinkDisconnectOut = { sites_reverted: number };
+
+export async function vrmLinkDisconnect(customerId: string): Promise<VrmLinkDisconnectOut> {
+  return pipelineJson('/v1/vrm-link/disconnect', jsonInit({ customer_id: customerId }));
+}
+
+export type VrmLinkSiteStatus = {
+  site_id: string;
+  display_name: string;
+  vrm_last_synced_at: string | null;
+  vrm_last_sync_error: string | null;
+  vrm_sync_enabled: boolean;
+};
+
+/** `GET /v1/vrm-link/status`'s response — connection STATE only, never a
+ * token (PLAN_PHASE15.md §2.5 rule 2; see `VrmLinkStatusOut`'s own docstring
+ * in `vrm_api/schemas.py` — no field here could carry one by construction). */
+export type VrmLinkStatusOut = {
+  connected: boolean;
+  vrm_account_email: string | null;
+  connected_since: string | null;
+  token_revoked_at: string | null;
+  token_last_error: string | null;
+  sites: VrmLinkSiteStatus[];
+};
+
+export async function vrmLinkStatus(customerId: string): Promise<VrmLinkStatusOut> {
+  const params = new URLSearchParams({ customer_id: customerId });
+  return pipelineJson(`/v1/vrm-link/status?${params}`, { method: 'GET' });
+}
+
+/**
+ * `POST /v1/vrm-sync` — a customer's own connected site, synced with THEIR
+ * OWN stored token (read fresh, per run, inside `vrm_api` — never sent
+ * through this module). `site_id` here is only ever safe to call with once
+ * the caller has already run `assertOwnsSite(customer_id, site_id)` — this
+ * function does not check that itself (same division of responsibility as
+ * `ingestPreview()` above); `vrm_api`'s own `tenancy.assert_owns_site()`
+ * re-derives the same fact independently regardless (§3.2 control 3's
+ * enforcement point lives there, not here).
+ */
+export async function vrmSync(body: {
+  customer_id: string;
+  site_id: string;
+  start: string;
+  end: string;
+}): Promise<{ job_id: string }> {
+  return pipelineJson('/v1/vrm-sync', jsonInit(body));
 }

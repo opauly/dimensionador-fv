@@ -23,6 +23,9 @@ export type { SiteUpdateFields, CreateSiteFields, CanAddSiteResult } from './sit
 export { listIngestions } from './ingestions';
 export type { ListIngestionsOptions } from './ingestions';
 
+export { getVrmLinkStatus } from './vrmLink';
+export type { VrmLinkStatusOut, VrmLinkSiteStatus } from './vrmLink';
+
 export { NotAuthorized } from './errors';
 
 export type { CustomerRecord, SiteRecord, IngestionLogRecord, Lang, AccountType, SystemType } from './types';

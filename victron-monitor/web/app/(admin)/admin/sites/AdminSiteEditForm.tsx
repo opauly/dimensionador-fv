@@ -40,23 +40,23 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
   return (
     <form action={formAction} className={styles.form}>
       <div className={styles.fieldRow}>
-        <Field label="Nombre del sitio" htmlFor={`as-name-${site.site_id}`} required>
+        <Field label="Site name" htmlFor={`as-name-${site.site_id}`} required>
           <Input id={`as-name-${site.site_id}`} name="display_name" defaultValue={site.display_name} required disabled={pending} />
         </Field>
-        <Field label="Tipo de sistema" htmlFor={`as-type-${site.site_id}`}>
+        <Field label="System type" htmlFor={`as-type-${site.site_id}`}>
           <Select id={`as-type-${site.site_id}`} name="system_type" defaultValue={site.system_type} disabled={pending}>
-            <option value="hybrid">Híbrido</option>
+            <option value="hybrid">Hybrid</option>
             <option value="off_grid">Off-grid</option>
-            <option value="grid_zero">Conectado a red, sin batería</option>
+            <option value="grid_zero">Grid-tied, no battery</option>
           </Select>
         </Field>
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Potencia FV (kWp)" htmlFor={`as-kwp-${site.site_id}`}>
+        <Field label="PV power (kWp)" htmlFor={`as-kwp-${site.site_id}`}>
           <Input id={`as-kwp-${site.site_id}`} name="pv_kwp" type="number" step="0.1" min="0" defaultValue={site.pv_kwp ?? ''} disabled={pending} />
         </Field>
-        <Field label="Idioma del reporte" htmlFor={`as-lang-${site.site_id}`}>
+        <Field label="Report language" htmlFor={`as-lang-${site.site_id}`}>
           <Select id={`as-lang-${site.site_id}`} name="report_language" defaultValue={site.report_language} disabled={pending}>
             <option value="en">English</option>
             <option value="es">Español</option>
@@ -65,7 +65,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Batería nominal (kWh)" htmlFor={`as-batt-nom-${site.site_id}`}>
+        <Field label="Nominal battery (kWh)" htmlFor={`as-batt-nom-${site.site_id}`}>
           <Input
             id={`as-batt-nom-${site.site_id}`}
             name="battery_nominal_kwh"
@@ -91,13 +91,13 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
           />
         </Field>
       </div>
-      {usableKwh !== null && <p className={styles.caption}>Batería utilizable = nominal × DoD/100 = {usableKwh.toFixed(2)} kWh</p>}
+      {usableKwh !== null && <p className={styles.caption}>Usable battery = nominal × DoD/100 = {usableKwh.toFixed(2)} kWh</p>}
 
       <div className={styles.fieldRow}>
-        <Field label="Ubicación" htmlFor={`as-loc-${site.site_id}`}>
+        <Field label="Location" htmlFor={`as-loc-${site.site_id}`}>
           <Input id={`as-loc-${site.site_id}`} name="location" defaultValue={site.location ?? ''} disabled={pending} />
         </Field>
-        <Field label="Zona horaria" htmlFor={`as-tz-${site.site_id}`}>
+        <Field label="Timezone" htmlFor={`as-tz-${site.site_id}`}>
           <Select id={`as-tz-${site.site_id}`} name="timezone" defaultValue={site.timezone} disabled={pending}>
             {TIMEZONES.map((tz) => (
               <option key={tz} value={tz}>
@@ -106,7 +106,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
             ))}
           </Select>
         </Field>
-        <Field label="País" htmlFor={`as-country-${site.site_id}`}>
+        <Field label="Country" htmlFor={`as-country-${site.site_id}`}>
           <Select id={`as-country-${site.site_id}`} name="country" defaultValue={site.country ?? 'CR'} disabled={pending}>
             {COUNTRY_CODES.map((code) => (
               <option key={code} value={code}>
@@ -118,10 +118,10 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Latitud" htmlFor={`as-lat-${site.site_id}`}>
+        <Field label="Latitude" htmlFor={`as-lat-${site.site_id}`}>
           <Input id={`as-lat-${site.site_id}`} name="latitude" type="number" step="0.000001" defaultValue={site.latitude ?? ''} disabled={pending} />
         </Field>
-        <Field label="Longitud" htmlFor={`as-lng-${site.site_id}`}>
+        <Field label="Longitude" htmlFor={`as-lng-${site.site_id}`}>
           <Input
             id={`as-lng-${site.site_id}`}
             name="longitude"
@@ -134,7 +134,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       </div>
 
       <div className={styles.fieldRow}>
-        <Field label="Tarifa de ahorro (por kWh)" htmlFor={`as-rate-${site.site_id}`}>
+        <Field label="Savings rate (per kWh)" htmlFor={`as-rate-${site.site_id}`}>
           <Input
             id={`as-rate-${site.site_id}`}
             name="savings_rate"
@@ -145,7 +145,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
             disabled={pending}
           />
         </Field>
-        <Field label="Moneda" htmlFor={`as-currency-${site.site_id}`}>
+        <Field label="Currency" htmlFor={`as-currency-${site.site_id}`}>
           <Select id={`as-currency-${site.site_id}`} name="savings_currency" defaultValue={site.savings_currency ?? 'USD'} disabled={pending}>
             {SUPPORTED_FLAT_CURRENCIES.map((code) => (
               <option key={code} value={code}>
@@ -159,11 +159,11 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       <div className={styles.checkboxRow}>
         <label className={styles.checkboxLabel}>
           <input type="checkbox" name="exports_to_grid" value="true" defaultChecked={site.exports_to_grid} disabled={pending} />
-          Este sistema exporta energía a la red
+          This system exports energy to the grid
         </label>
         <label className={styles.checkboxLabel}>
           <input type="checkbox" name="active" value="true" defaultChecked={site.active} disabled={pending} />
-          Activo
+          Active
         </label>
       </div>
 
@@ -171,10 +171,10 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
 
       <div className={styles.formActions}>
         <Button type="submit" disabled={pending}>
-          {pending ? 'Guardando…' : 'Guardar'}
+          {pending ? 'Saving…' : 'Save'}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
-          Cancelar
+          Cancel
         </Button>
       </div>
     </form>

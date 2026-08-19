@@ -35,6 +35,7 @@ import 'server-only';
 import { createSite, listIngestions, listSites, updateSite, getSite, assertOwnsSite, NotAuthorized } from '@/lib/server/db';
 import { createCustomer } from '@/lib/server/db/admin';
 import { getSupabaseAdmin } from '@/lib/server/supabase';
+import { vrmSync, PipelineError } from '@/lib/server/pipeline';
 
 type Check = { name: string; pass: boolean; detail?: string };
 const checks: Check[] = [];
@@ -103,6 +104,49 @@ async function main() {
       await expectNotAuthorized('listIngestions(A, { siteId: B.site_id }) throws NotAuthorized', () =>
         listIngestions(customerA.id, { siteId: siteB.site_id }),
       );
+
+      // ── PLAN_PHASE15.md §8 Step 5's own cases: customer A must never be
+      // able to validate/connect/disconnect/sync using customer B's
+      // customer_id/site_id through the four new `/api/vrm/*` routes. Those
+      // routes are thin (`requireCustomerForRoute()` + Zod + a forward),
+      // so what actually needs to keep passing is the two real controls
+      // they're built on top of (§3.2): `assertOwnsSite()` on OUR side
+      // (already proven generically above — restated here, named for these
+      // specific call sites, exactly the way `app/api/vrm/connect/route.ts`'s
+      // "existing site" branch and `app/api/vrm/sync/route.ts` both call it
+      // before ever forwarding to `vrm_api`) and `vrm_api`'s OWN
+      // `tenancy.assert_owns_site()` re-check (§3.2 control 2 — exercised for
+      // real below, over HTTP, against the live `vrm_api`, not re-trusted).
+      await expectNotAuthorized("/api/vrm/connect's assertOwnsSite(A, B.site_id) refuses an 'existing site' mapping", () =>
+        assertOwnsSite(customerA.id, siteB.site_id),
+      );
+      await expectNotAuthorized('/api/vrm/sync\'s assertOwnsSite(A, B.site_id) refuses a sync request', () =>
+        assertOwnsSite(customerA.id, siteB.site_id),
+      );
+
+      // A real HTTP call to `vrm_api`'s own `POST /v1/vrm-sync`, with
+      // customer A's id and customer B's site_id — `vrm_api`'s
+      // `tenancy.assert_owns_site()` (its own control, independent of
+      // anything this Next.js app already checked) must refuse this with a
+      // 403 before it ever touches Victron or writes a `vrm.jobs` row; this
+      // is the live, network-level restatement of §3.2's "customer A's
+      // token can never be used to pull customer B's data even if a
+      // site_id gets confused somewhere". No real VRM token is exercised —
+      // the tenancy check happens before `vrm_sync.py` ever reads one.
+      try {
+        await vrmSync({ customer_id: customerA.id, site_id: siteB.site_id, start: '2020-01-01', end: '2020-01-02' });
+        record('vrmSync(A.id, B.site_id) refused by live vrm_api', false, 'expected a 403, but the call succeeded');
+      } catch (err) {
+        if (err instanceof PipelineError && err.status === 403) {
+          record('vrmSync(A.id, B.site_id) refused by live vrm_api', true);
+        } else {
+          record(
+            'vrmSync(A.id, B.site_id) refused by live vrm_api',
+            false,
+            `threw, but not a 403 PipelineError: ${(err as Error)?.message ?? err}`,
+          );
+        }
+      }
 
       // ── listSites(A) must never contain B's site ───────────────────
       const sitesForA = await listSites(customerA.id);

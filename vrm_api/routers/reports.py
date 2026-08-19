@@ -55,6 +55,13 @@ def _report_summary(data: dict) -> dict:
             "charge": round(tot["charge"], 1),
             "outageCount": tot["outageCount"],
             "outageMinutes": tot["outageMinutes"],
+            # Added 2026-08-19: this router's field list predates
+            # `battery_kwh_available` (PLAN_PHASE15.md §4.6) — without it,
+            # a VRM-API-ingested site's "discharge": 0.0 (fabricated-safe
+            # value, not a real reading — see weekly_report.py's own guard)
+            # is indistinguishable on the frontend from a real zero, and the
+            # energy-mix bar renders "Batería · 0 kWh (0%)" as if confirmed.
+            "batteryKwhAvailable": tot["batteryKwhAvailable"],
         },
         "gridIndependencePct": data["gridIndependencePct"],
         "avgHealth": data["avgHealth"],

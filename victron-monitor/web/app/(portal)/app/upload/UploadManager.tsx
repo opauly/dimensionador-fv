@@ -17,6 +17,7 @@ import { COUNTRIES, DEFAULT_COUNTRY } from '@/lib/countries';
 import { SUPPORTED_FLAT_CURRENCIES } from '@/lib/currencies';
 import { listTimezones, DEFAULT_TIMEZONE } from '@/lib/timezones';
 import { MAX_UPLOAD_BYTES, formatBytes } from '@/lib/uploadLimits';
+import { formatDateTime } from '@/lib/dates';
 import { reverseGeocodeAction } from '../sites/actions';
 import type { CanAddSiteResult, IngestionLogRecord, SiteRecord } from '@/lib/server/db';
 import { uploadFileToSignedUrl } from '@/lib/uploadClient';
@@ -735,7 +736,7 @@ export function UploadManager({ sites, lang, canAdd, ingestions }: UploadManager
                   <td>{log.rows_written ?? '—'}</td>
                   <td>{log.alarm_events_written ?? '—'}</td>
                   <td>{warnings.length}</td>
-                  <td>{new Date(log.uploaded_at).toLocaleString(lang === 'es' ? 'es-CR' : 'en-US')}</td>
+                  <td>{formatDateTime(log.uploaded_at, lang === 'es' ? 'es-CR' : 'en-US')}</td>
                 </tr>
               );
             })}

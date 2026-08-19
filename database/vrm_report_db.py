@@ -140,6 +140,84 @@ def get_longest_outage_minutes(site_id: str, start: str | date, end: str | date,
     return max((float(r.get("outage_minutes") or 0) for r in rows), default=0.0)
 
 
+def get_low_battery_shutdown_count(site_id: str, start: str | date, end: str | date,
+                                   schema: str) -> int:
+    """Count of Low Battery Alarm *starts* (the inverter shutting down on a
+    low-battery condition) within the window — an off-grid-specific metric
+    (report bug fix, 2026-08-18).
+
+    `alarm_events` has the same shape in both `monitoring` (Node-RED) and
+    `vrm` (CSV/API) schemas, and both write the identical label
+    `'Low Battery Alarm'` with `WARNING`/`CLEARED` severities per episode
+    (confirmed live against `vista-atenas-lp-m3` in `monitoring` and every
+    `vrm` site's `ALARM_CATEGORIES`/`vrm_daily.alarm_episode_events()`), so
+    one query serves both — no schema branching needed here, unlike
+    `get_longest_outage_minutes` above.
+
+    Counts only `severity = 'WARNING'` rows — the shutdown-start edge of each
+    episode. Counting both `WARNING` and `CLEARED` would double the real
+    number of shutdown events, since every episode writes one of each.
+    """
+    rows = (_table(schema, "alarm_events").select("id")
+            .eq("site_id", site_id)
+            .eq("alarm", "Low Battery Alarm")
+            .eq("severity", "WARNING")
+            .gte("timestamp", f"{start}T00:00:00")
+            .lte("timestamp", f"{end}T23:59:59")
+            .execute().data or [])
+    return len(rows)
+
+
+def get_alarm_episode_counts_by_category(site_id: str, start: str | date, end: str | date,
+                                         schema: str) -> dict[str, int]:
+    """Episode-start count per `alarm` category within the window — one
+    query, grouped in Python (report bug fix, 2026-08-19), for the Events
+    section's "which alarm fired how many times" breakdown.
+
+    Counts only `severity = 'WARNING'` rows, same reasoning as
+    `get_low_battery_shutdown_count()` above: each episode writes one
+    `WARNING` (start) and one `CLEARED` (end) row, so counting both would
+    double the real number of episodes.
+
+    Only the categories `ALARM_CATEGORIES` (`victron/vrm_csv.py`) actually
+    scores — `'Low Battery Alarm'`, `'Overload Alarm'` — show up here in
+    practice; unscored signals (DC ripple, temperature, Battery Monitor
+    faults — `UNSCORED_ALARM_SIGNALS`) are a different, lower-confidence
+    tier this function does not touch, deliberately, matching how they've
+    never been scored or counted anywhere else in this product.
+
+    `sum(this function's values)` is `alarmEpisodesTotal` (`weekly_report.py`
+    — the Events section's "Total" AND what the AI narrative cites), NOT
+    `sum(daily_health.alarms_count)`, deliberately: `vrm.count_alarm_
+    episodes()` (migration 012) tracks a single in/out state PER SITE PER
+    DAY across every category combined, so a second category's `WARNING`
+    arriving while the first is still active does not open a new counted
+    episode there. This function, querying `alarm_events` directly per
+    category, does not have that limitation. **Not a rare edge case** — a
+    first draft of this feature assumed it was and shipped `alarmEpisodesTotal`
+    still wired to `alarms_count`; caught immediately from a real site
+    (`vista-atenas-2-floor-pool`, 2026-07-21..28): 68 Low battery + 29
+    Overload = 97 from this function, vs. 83 from `alarms_count` — an 18%
+    gap on ordinary, real data. `daily_health.alarms_count` / the persisted
+    `health_score` are untouched by this (a separate, Postgres-trigger-
+    computed value this module never recalculates) — only what a customer
+    reads as "how many alarm episodes happened" changed, to the more
+    complete number.
+    """
+    rows = (_table(schema, "alarm_events").select("alarm")
+            .eq("site_id", site_id)
+            .eq("severity", "WARNING")
+            .gte("timestamp", f"{start}T00:00:00")
+            .lte("timestamp", f"{end}T23:59:59")
+            .execute().data or [])
+    counts: dict[str, int] = {}
+    for row in rows:
+        alarm = row.get("alarm")
+        if alarm:
+            counts[alarm] = counts.get(alarm, 0) + 1
+    return counts
+
+
 # ──────────────────────────────────────────────────────────────────
 # Report window assembly
 # ──────────────────────────────────────────────────────────────────
@@ -355,6 +433,18 @@ def fetch_report_window(site_id: str, start: str | date, end: str | date,
         "trend": trend,
         "health": get_daily_health(site_id, start, end, schema),
         "longest_outage_minutes": get_longest_outage_minutes(site_id, start, end, schema),
+        # Off-grid-only KPI (report bug fix, 2026-08-18) — skipped for every
+        # other system_type so a grid-tied report doesn't pay for a query it
+        # never renders.
+        "low_battery_shutdown_count": (
+            get_low_battery_shutdown_count(site_id, start, end, schema)
+            if site.get("system_type") == "off_grid" else None
+        ),
+        # Every system_type, unlike the off-grid-only KPI above — the Events
+        # section's per-category breakdown is useful for hybrid/grid_zero
+        # sites too (report bug fix, 2026-08-19).
+        "alarm_episode_counts_by_category": get_alarm_episode_counts_by_category(
+            site_id, start, end, schema),
         # A window can be short because the CSV didn't cover it or because
         # Node-RED missed days. The report must be able to say so rather than
         # present 3 days of data as a full window.

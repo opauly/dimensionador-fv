@@ -289,10 +289,18 @@ def kpi_svg(d: dict, t: dict) -> str:
                 f"{esc(txt)}</text>")
 
     def badge(x, txt, bg, fg):
-        bw = min(len(txt) * 6 + 14, CW - PAD * 2)
+        # Width still an estimate (real font metrics need a loaded face —
+        # see text_width()'s own docstring), but the text itself is
+        # `text-anchor="middle"` at the pill's true horizontal center, not a
+        # fixed left-inset — so any mismatch between the estimate and the
+        # real glyph width no longer reads as off-center text, only as a
+        # slightly generous or snug pill (fixed 2026-08-19, caught from a
+        # real rendered PDF: "Excelente" sat visibly left of center).
+        bw = min(text_width(txt, 8.5, bold=True) + 14, CW - PAD * 2)
+        cx = x + PAD + bw / 2
         return (f"<rect x='{x + PAD}' y='58' width='{bw:.0f}' height='15' "
                 f"rx='7.5' fill='{bg}'/>"
-                f"<text x='{x + PAD + 7}' y='69' font-size='8.5' "
+                f"<text x='{cx:.1f}' y='69' text-anchor='middle' font-size='8.5' "
                 f"font-weight='600' fill='{fg}'>{esc(txt)}</text>")
 
     x2, x3, x4 = CW + GAP, (CW + GAP) * 2, (CW + GAP) * 3
@@ -345,6 +353,46 @@ def kpi_svg(d: dict, t: dict) -> str:
                   + value(x4, str(tot["outageCount"]), "",
                           AMBER if tot["outageCount"] > 0 else "#111")
                   + sub(x4, outage_sub, outage_col))
+    else:
+        # Off-grid-only KPI cards (report bug fix, 2026-08-18): the two slots
+        # a grid-tied card would otherwise fill are meaningless here, so two
+        # off-grid-specific metrics take their place instead of sitting blank.
+        shutdowns = d.get("lowBatteryShutdownCount")
+        if shutdowns is None:
+            # Unexpected — fetch_report_window always queries this for an
+            # off_grid site — but fail soft rather than crash the report.
+            shutdown_bg, shutdown_val, shutdown_val_col = BG_GREY, "—", "#999"
+            shutdown_sub_txt, shutdown_sub_col = "—", "#aaa"
+        else:
+            shutdown_bg = "#FEF7EC" if shutdowns > 0 else BG_MINT
+            shutdown_val, shutdown_val_col = str(shutdowns), (AMBER if shutdowns > 0 else "#111")
+            shutdown_sub_txt = (t["inverterShutdownsSub"] if shutdowns > 0
+                                else t["inverterShutdownsSubZero"])
+            shutdown_sub_col = AMBER if shutdowns > 0 else GREEN
+        c += (rect(x3, shutdown_bg) + label(x3, t["inverterShutdowns"].upper())
+              + value(x3, shutdown_val, "", shutdown_val_col)
+              + sub(x3, shutdown_sub_txt, shutdown_sub_col))
+
+        # Standard off-grid sizing metric: how long the battery alone could
+        # carry this period's actual average load with zero solar input.
+        # Independent of battery_charge_kwh/battery_discharge_kwh (the NULL
+        # columns on the vrm_api path) — uses only battery_usable_kwh (site
+        # config) and totals["load"] (measured), so it's safe to compute
+        # regardless of ingestion path.
+        n_days = len(d["dailyGrouped"])
+        avg_daily_load = (tot["load"] / n_days) if n_days else 0.0
+        batt_usable_raw = (d.get("site") or {}).get("battery_usable_kwh")
+        batt_usable = float(batt_usable_raw) if batt_usable_raw else None
+        autonomy_days = (batt_usable / avg_daily_load
+                         if batt_usable and avg_daily_load > 0 else None)
+        c += (
+            rect(x4, BG_GREY) + label(x4, t["batteryAutonomy"].upper())
+            + value(x4, f"{autonomy_days:.1f}" if autonomy_days is not None else "—",
+                    (" " + t["batteryAutonomyUnit"]) if autonomy_days is not None else "",
+                    "#111")
+            + sub(x4, t["batteryAutonomySub"] if autonomy_days is not None
+                  else t["batteryAutonomyUnavailable"])
+        )
     return _svg(c, PW, CH)
 
 
@@ -518,6 +566,19 @@ def _seg(pct: float, prev_sum: float) -> str:
 _DONUT_CWID = 4.6  # approx px/char at font-size 9, same pattern as _two_bar_legend's CWID at font-size 7
 
 
+def _legend_value_text(pctd: str | None, kwh: float, t: dict) -> str:
+    """`"72.6% · 435.4 kWh"`, or an em dash when `pctd` is `None` — the
+    energy-mix donut's own "no data" marker (report bug fix, 2026-08-18): a
+    site whose `battery_charge_kwh`/`battery_discharge_kwh` are NULL for the
+    whole window (the `vrm_api` ingestion path — see `vrm_series.py`'s own
+    docstring point 2b) must not show a confident, fabricated "0.0% · 0.0
+    kWh" for its Battery slice.
+    """
+    if pctd is None:
+        return "—"
+    return f"{pctd}% · {_f(kwh)} {t['kwh']}"
+
+
 def _donut_dx(card_w: float, legend_rows: list[tuple], t: dict) -> float:
     """Left offset for the donut, chosen so donut+legend sit centered in a
     card of width `card_w` instead of hugging the left edge.
@@ -527,7 +588,7 @@ def _donut_dx(card_w: float, legend_rows: list[tuple], t: dict) -> float:
     widths), so this sizes the gap to the actual longest value string on this
     card rather than guessing one constant for every site.
     """
-    max_value_w = max(len(f"{pctd}% · {_f(kwh)} {t['kwh']}")
+    max_value_w = max(len(_legend_value_text(pctd, kwh, t))
                       for _, _, pctd, kwh in legend_rows) * _DONUT_CWID
     content_w = 80 + 55 + max_value_w  # 80: donut-to-legend gap; 55: label-to-value gap
     return max(8.0, (card_w - content_w) / 2)
@@ -536,12 +597,20 @@ def _donut_dx(card_w: float, legend_rows: list[tuple], t: dict) -> float:
 def row1_svg(d: dict, t: dict, batt_rows: list[dict],
              row_size: float = ROW_SIZE_MAX) -> str:
     tot = d["totals"]
+    # See weekly_report.py's build_report_data — False only when
+    # battery_charge_kwh AND battery_discharge_kwh are NULL for every row in
+    # the window (the vrm_api ingestion path), not merely summing to zero.
+    batt_available = tot.get("batteryKwhAvailable", True)
     total_energy = tot["pv"] + tot["grid"] + tot["discharge"]
     solar_pct = round(tot["pv"] / total_energy * 100) if total_energy else 0
     grid_pct = round(tot["grid"] / total_energy * 100) if total_energy else 0
-    batt_pct = max(0, 100 - solar_pct - grid_pct)
+    # Forced to 0, not the rounding-leftover share, when the data isn't
+    # available — otherwise a stray 1% rounding leftover still draws a
+    # battery-coloured sliver on the ring next to a "—" legend entry.
+    batt_pct = max(0, 100 - solar_pct - grid_pct) if batt_available else 0
     sd = _f(tot["pv"] / total_energy * 100) if total_energy else "0.0"
-    bd = _f(tot["discharge"] / total_energy * 100) if total_energy else "0.0"
+    bd = ((_f(tot["discharge"] / total_energy * 100) if total_energy else "0.0")
+          if batt_available else None)
     gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
 
     legend_rows = [
@@ -587,7 +656,7 @@ def row1_svg(d: dict, t: dict, batt_rows: list[dict],
               f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
               f"{esc(lbl)}</text>"
               f"<text x='{LX + 55}' y='{cy + 4}' font-size='9' font-weight='600' "
-              f"fill='#222'>{pctd}% · {_f(kwh)} {esc(t['kwh'])}</text>")
+              f"fill='#222'>{esc(_legend_value_text(pctd, kwh, t))}</text>")
 
     s += info_block_svg(IW + GAP, 0, BG_GREY, t["sectionBattery"],
                         batt_rows, row1_h, t["subBattery"], row_size=row_size)
@@ -649,7 +718,7 @@ def energy_mix_full_svg(d: dict, t: dict) -> str:
               f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
               f"{esc(lbl)}</text>"
               f"<text x='{LX + 55}' y='{cy + 4}' font-size='9' font-weight='600' "
-              f"fill='#222'>{pctd}% · {_f(kwh)} {esc(t['kwh'])}</text>")
+              f"fill='#222'>{esc(_legend_value_text(pctd, kwh, t))}</text>")
 
     return _svg(s, PW, h)
 

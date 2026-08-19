@@ -104,3 +104,88 @@
   max-width: none;
   margin-bottom: 10px;
 }
+
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+
+.status {
+  color: var(--paper-dim);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+/* ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ── */
+.vrmPanel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 24px 26px;
+  margin-bottom: 32px;
+}
+.vrmPanel h2 {
+  margin-bottom: 4px;
+}
+
+.portalPath {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--paper-dim);
+  margin: 4px 0 18px;
+}
+
+.installationRow {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.installationName {
+  font-weight: 600;
+  color: var(--paper);
+  margin-bottom: 2px;
+}
+.installationMeta {
+  color: var(--mute);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  margin-bottom: 12px;
+}
+
+.radioRow {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.radioLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--paper);
+}
+
+.linkedSiteRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.linkedSiteRow:first-of-type {
+  border-top: none;
+}
+.linkedSiteMeta {
+  color: var(--mute);
+  font-size: 13px;
+}
+.syncErrorText {
+  color: var(--signal);
+  font-size: 13px;
+}

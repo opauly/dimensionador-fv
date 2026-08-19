@@ -94,8 +94,25 @@ def _chunks(seq: list, size: int = _CHUNK):
 
 
 def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
-                  replace_alarms: bool = True) -> dict:
-    """Persist `vrm_csv.parse_export()` output. Returns a summary.
+                  replace_alarms: bool = True, *,
+                  source: str = "csv_upload",
+                  triggered_by: str | None = None) -> dict:
+    """Persist `vrm_csv.parse_export()` output — or, identically,
+    `vrm_series.fetch_and_map()`'s (PLAN_PHASE15.md §4.2: both mappers return
+    the same shape on purpose, so this function never branches on which
+    produced `parsed`). Returns a summary.
+
+    `source`/`triggered_by` are keyword-only and additive (PLAN_PHASE15.md
+    §5.1/§3.3). `source` becomes `vrm.ingestion_log.source` — defaults to
+    `"csv_upload"`, today's only value, so every caller that doesn't pass it
+    (`ingest_csv()`, `vrm_api/routers/ingest.py:_do_commit()`) writes exactly
+    the row it writes today, unchanged. `triggered_by` becomes
+    `vrm.ingestion_log.triggered_by` (`'customer' | 'admin' | 'schedule'`,
+    migration 024) — `None` by default (the column is nullable with no
+    CHECK-breaking default), set explicitly by callers that know who/what
+    triggered the write; a customer's own CSV upload or "Sync now" is
+    `'customer'`, Oscar's Streamlit/`/admin` tools are `'admin'`, Step 7's
+    scheduled sync (if built) is `'schedule'`.
 
     Re-ingesting an overlapping window is safe: `energy_daily` upserts on
     (site_id, date), and alarm events for the covered period are replaced
@@ -119,16 +136,63 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
     for chunk in _chunks(events):
         _t("alarm_events").insert(chunk).execute()
 
+    # PLAN_PHASE15.md §5.3/§5.4: look up what dump_type (if any) already
+    # occupies each touched (site_id, date) BEFORE the upsert below
+    # overwrites it. This is both the `days_replacing_csv` audit figure
+    # (§5.4) and, further down, what the daily_health cleanup needs to know
+    # which OTHER dump_type's row to remove. Every row a single parse
+    # produces shares one dump_type (vrm_csv.py and vrm_series.py each call
+    # vrm_daily.to_energy_daily_rows() once per parse, for the whole batch),
+    # so `rows[0]["dump_type"]` speaks for all of them.
+    touched_dates = sorted({r["date"] for r in rows})
+    new_dump_type = rows[0]["dump_type"] if rows else None
+    prior_dump_type_by_date: dict[str, str] = {}
+    if touched_dates:
+        prior_dump_type_by_date = {
+            r["date"]: r["dump_type"]
+            for r in (_t("energy_daily").select("date,dump_type")
+                     .eq("site_id", site_id).in_("date", touched_dates)
+                     .execute().data or [])
+        }
+
     # 2. Daily rows — trigger fires per row and scores each day.
     written = 0
     for chunk in _chunks(rows):
         res = _t("energy_daily").upsert(chunk, on_conflict="site_id,date").execute()
         written += len(res.data or chunk)
 
+    # PLAN_PHASE15.md §5.3: vrm.daily_health is keyed (site_id, date,
+    # dump_type) — a DIFFERENT key from energy_daily's (site_id, date) — so
+    # the health trigger the upsert above just fired ADDS a second
+    # daily_health row per date rather than replacing one, whenever a date
+    # already had a health row under a different dump_type (e.g. a
+    # csv_upload day now re-ingested via the API, or vice versa).
+    # database/vrm_report_db.py:bucket_health_days() dedups a mixed-source
+    # site by keeping the HIGHEST-scoring row per date, which would silently
+    # flatter a customer's health score — the worst possible way to be wrong
+    # about a health metric. Delete the other dump_type's row for each
+    # touched date so exactly one survives. Done here (shared by both
+    # mappers, not per-path) so a CSV re-ingest of an API-sourced day is
+    # cleaned up symmetrically, too. A no-op for a CSV-only site: it has only
+    # ever had one dump_type per date, so there is never another dump_type's
+    # row to find or delete.
+    days_replacing_csv = 0
+    if new_dump_type and touched_dates:
+        for d in touched_dates:
+            prior = prior_dump_type_by_date.get(d)
+            if prior == "csv_upload" and prior != new_dump_type:
+                days_replacing_csv += 1
+        (_t("daily_health").delete()
+         .eq("site_id", site_id)
+         .in_("date", touched_dates)
+         .neq("dump_type", new_dump_type)
+         .execute())
+
     # 3. Audit trail.
     log = {
         "site_id": site_id,
-        "source": "csv_upload",
+        "source": source,
+        "triggered_by": triggered_by,
         "filename": filename or None,
         "installation_id": (str(parsed["installation_id"])
                             if parsed.get("installation_id") else None),
@@ -139,12 +203,19 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
         "alarm_events_written": len(events),
         "warnings": {"messages": parsed.get("warnings", []),
                      "missing_signals": parsed.get("missing_signals", []),
-                     "unscored_alarms": parsed.get("unscored_alarms", {})},
+                     "unscored_alarms": parsed.get("unscored_alarms", {}),
+                     # New (§5.4): when this sync overwrote days that came
+                     # from a CSV, that fact is recorded here rather than
+                     # only being visible as a silent diff in energy_daily —
+                     # the difference between "the report changed" and "we
+                     # can explain why the report changed."
+                     "days_replacing_csv": days_replacing_csv},
     }
     _t("ingestion_log").insert(log).execute()
 
     return {"rows_written": written, "alarm_events_written": len(events),
-            "period_start": parsed["period_start"], "period_end": parsed["period_end"]}
+            "period_start": parsed["period_start"], "period_end": parsed["period_end"],
+            "days_replacing_csv": days_replacing_csv}
 
 
 def ingest_csv(source, customer_name: str, site_name: str,

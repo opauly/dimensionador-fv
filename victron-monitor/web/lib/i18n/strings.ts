@@ -124,6 +124,62 @@ export const STRINGS = {
       "Your plan includes {limit} site(s), and you're using all of them. Contact us to add more.",
     sites_limit_cta: 'Contact proyectos@paulyco.com',
 
+    // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
+    vrm_link_title: 'Victron VRM account',
+    vrm_link_disconnected_intro:
+      'Connect your Victron VRM account once, and your data arrives automatically instead of by CSV upload. Your token is never shown again after you paste it, and it never leaves our server.',
+    vrm_link_portal_path: 'Generate a personal access token in the VRM portal: Preferences → Integrations → Access tokens.',
+    vrm_link_token_label: 'VRM personal access token',
+    vrm_link_validate_button: 'Validate',
+    vrm_link_validating: 'Validating…',
+    vrm_link_validate_error_invalid_token: 'Victron rejected this personal access token. Check that you copied it correctly.',
+    vrm_link_validate_error_generic: "Couldn't validate that token. Please try again.",
+    vrm_link_validate_error_unreachable: "Couldn't reach the VRM connection service. Please try again in a moment.",
+    vrm_link_mapping_title: 'Map your installations',
+    vrm_link_mapping_intro:
+      'These are the installations visible to this token. Choose what to do with each one — installations left as "Ignore" are not connected.',
+    vrm_link_mapping_replace_notice:
+      'Days already imported from a CSV will be replaced by data pulled from VRM for any site you map here.',
+    vrm_link_mapping_installation_id_label: 'VRM installation ID {id}',
+    vrm_link_mapping_choice_ignore: 'Ignore',
+    vrm_link_mapping_choice_existing: 'Link to an existing site',
+    vrm_link_mapping_choice_new: 'Create a new site',
+    vrm_link_mapping_existing_site_label: 'Site',
+    vrm_link_mapping_new_site_name_label: 'New site name',
+    vrm_link_mapping_connect_button: 'Connect',
+    vrm_link_mapping_connecting: 'Connecting…',
+    vrm_link_mapping_cancel_button: 'Cancel',
+    vrm_link_mapping_error_account_already_linked: 'This VRM account is already connected to another VRM Monitor account.',
+    vrm_link_mapping_error_generic: "Couldn't connect your VRM account. Please try again.",
+    vrm_link_mapping_error_unreachable: "Couldn't reach the VRM connection service. Please try again in a moment.",
+    vrm_link_connected_title: 'Connected',
+    vrm_link_connected_account_label: 'Connected account',
+    vrm_link_connected_since_label: 'Connected since',
+    vrm_link_connected_sites_title: 'Linked sites',
+    vrm_link_connected_last_synced_label: 'Last synced',
+    vrm_link_connected_never_synced: 'Never synced yet',
+    vrm_link_connected_sync_now_button: 'Sync now',
+    vrm_link_connected_syncing: 'Syncing with VRM…',
+    vrm_link_connected_sync_all_button: 'Sync all',
+    vrm_link_connected_sync_success: 'Imported {rows} day(s) and {alarms} alarm event(s).',
+    vrm_link_connected_sync_error_unreachable: "Couldn't reach the sync service. Please try again in a moment.",
+    vrm_link_disconnecting: 'Disconnecting…',
+    vrm_link_disconnect_button: 'Disconnect',
+    vrm_link_disconnect_confirm:
+      'Disconnect this VRM account? Your existing data (all days already imported) is kept — only future automatic updates stop. You can reconnect at any time.',
+    vrm_link_disconnect_error_generic: "Couldn't disconnect. Please try again.",
+
+    // ── Failure surfacing (PLAN_PHASE15.md §8 Step 6 / §9) ─────────
+    // §9's table verbatim: shown on /app and /app/sites whenever
+    // vrm_token_revoked_at is set OR vrm_token_last_error is present for
+    // the signed-in customer — whether that's a real auth failure or a
+    // deliberate disconnect, "reconnect to resume" is equally true either
+    // way. Never customized per failure reason; the per-site
+    // vrm_last_sync_error text (already rendered where it occurs) is what
+    // carries the specific reason, when there is one.
+    vrm_link_broken_banner:
+      'Your VRM connection stopped working — reconnect to resume automatic updates. Your existing data is unaffected.',
+
     // ── Profile (PLAN_PHASE14.md §2 Step 4) ───────────────────────
     profile_title: 'Profile',
     profile_login_email: 'Login email',
@@ -131,11 +187,15 @@ export const STRINGS = {
     profile_sites_used: 'Sites',
     profile_sites_unlimited: 'unlimited',
     profile_member_since: 'Member since',
+    profile_vrm_title: 'VRM connection',
+    profile_vrm_not_connected: 'Not connected yet — connect your Victron VRM account so your data arrives automatically.',
+    profile_vrm_manage_cta: 'Manage on the Sites page',
     profile_field_name: 'Company / account name',
     profile_field_contact_name: 'Contact name',
     profile_field_contact_email: 'Contact email',
     profile_field_country: 'Country',
     profile_field_ui_language: 'Dashboard language',
+    profile_ui_language_locked_hint: 'Temporarily English-only for every account.',
     profile_save_button: 'Save changes',
     profile_saving: 'Saving…',
     profile_save_success: 'Profile updated.',
@@ -350,6 +410,55 @@ export const STRINGS = {
     sites_limit_body: 'Tu plan incluye {limit} sitio(s), y ya los estás usando todos. Contactanos para agregar más.',
     sites_limit_cta: 'Contactar a proyectos@paulyco.com',
 
+    // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
+    vrm_link_title: 'Cuenta de Victron VRM',
+    vrm_link_disconnected_intro:
+      'Conectá tu cuenta de Victron VRM una sola vez y tus datos llegan automáticamente en vez de por carga de CSV. Tu token nunca se vuelve a mostrar después de pegarlo, y nunca sale de nuestro servidor.',
+    vrm_link_portal_path: 'Generá un token de acceso personal en el portal de VRM: Preferences → Integrations → Access tokens.',
+    vrm_link_token_label: 'Token de acceso personal de VRM',
+    vrm_link_validate_button: 'Validar',
+    vrm_link_validating: 'Validando…',
+    vrm_link_validate_error_invalid_token: 'Victron rechazó este token de acceso personal. Revisá que lo copiaste bien.',
+    vrm_link_validate_error_generic: 'No se pudo validar el token. Intentá de nuevo.',
+    vrm_link_validate_error_unreachable: 'No se pudo contactar al servicio de conexión con VRM. Intentá de nuevo en un momento.',
+    vrm_link_mapping_title: 'Mapeá tus instalaciones',
+    vrm_link_mapping_intro:
+      'Estas son las instalaciones visibles con este token. Elegí qué hacer con cada una — las instalaciones que dejes en "Ignorar" no se conectan.',
+    vrm_link_mapping_replace_notice:
+      'Los días ya importados por CSV serán reemplazados por los datos traídos de VRM en cualquier sitio que mapees acá.',
+    vrm_link_mapping_installation_id_label: 'ID de instalación VRM {id}',
+    vrm_link_mapping_choice_ignore: 'Ignorar',
+    vrm_link_mapping_choice_existing: 'Vincular a un sitio existente',
+    vrm_link_mapping_choice_new: 'Crear un sitio nuevo',
+    vrm_link_mapping_existing_site_label: 'Sitio',
+    vrm_link_mapping_new_site_name_label: 'Nombre del nuevo sitio',
+    vrm_link_mapping_connect_button: 'Conectar',
+    vrm_link_mapping_connecting: 'Conectando…',
+    vrm_link_mapping_cancel_button: 'Cancelar',
+    vrm_link_mapping_error_account_already_linked: 'Esta cuenta de VRM ya está conectada a otra cuenta de VRM Monitor.',
+    vrm_link_mapping_error_generic: 'No se pudo conectar tu cuenta de VRM. Intentá de nuevo.',
+    vrm_link_mapping_error_unreachable: 'No se pudo contactar al servicio de conexión con VRM. Intentá de nuevo en un momento.',
+    vrm_link_connected_title: 'Conectado',
+    vrm_link_connected_account_label: 'Cuenta conectada',
+    vrm_link_connected_since_label: 'Conectado desde',
+    vrm_link_connected_sites_title: 'Sitios vinculados',
+    vrm_link_connected_last_synced_label: 'Última sincronización',
+    vrm_link_connected_never_synced: 'Todavía no se sincronizó',
+    vrm_link_connected_sync_now_button: 'Sincronizar ahora',
+    vrm_link_connected_syncing: 'Sincronizando con VRM…',
+    vrm_link_connected_sync_all_button: 'Sincronizar todo',
+    vrm_link_connected_sync_success: 'Importados {rows} día(s) y {alarms} evento(s) de alarma.',
+    vrm_link_connected_sync_error_unreachable: 'No se pudo contactar al servicio de sincronización. Intentá de nuevo en un momento.',
+    vrm_link_disconnecting: 'Desconectando…',
+    vrm_link_disconnect_button: 'Desconectar',
+    vrm_link_disconnect_confirm:
+      '¿Desconectar esta cuenta de VRM? Tus datos existentes (todos los días ya importados) se conservan — solo se detienen las actualizaciones automáticas futuras. Podés reconectar en cualquier momento.',
+    vrm_link_disconnect_error_generic: 'No se pudo desconectar. Intentá de nuevo.',
+
+    // ── Failure surfacing (PLAN_PHASE15.md §8 Step 6 / §9) ─────────
+    vrm_link_broken_banner:
+      'Tu conexión con VRM dejó de funcionar — reconectá para reanudar las actualizaciones automáticas. Tus datos existentes no se ven afectados.',
+
     // ── Profile (PLAN_PHASE14.md §2 Step 4) ───────────────────────
     profile_title: 'Perfil',
     profile_login_email: 'Correo de inicio de sesión',
@@ -357,11 +466,15 @@ export const STRINGS = {
     profile_sites_used: 'Sitios',
     profile_sites_unlimited: 'ilimitado',
     profile_member_since: 'Cliente desde',
+    profile_vrm_title: 'Conexión VRM',
+    profile_vrm_not_connected: 'Todavía no conectada — conectá tu cuenta de Victron VRM para que tus datos lleguen automáticamente.',
+    profile_vrm_manage_cta: 'Gestionar en la página de Sitios',
     profile_field_name: 'Nombre de la cuenta / empresa',
     profile_field_contact_name: 'Nombre de contacto',
     profile_field_contact_email: 'Correo de contacto',
     profile_field_country: 'País',
     profile_field_ui_language: 'Idioma del panel',
+    profile_ui_language_locked_hint: 'Por ahora, solo inglés para todas las cuentas.',
     profile_save_button: 'Guardar cambios',
     profile_saving: 'Guardando…',
     profile_save_success: 'Perfil actualizado.',
@@ -478,6 +591,21 @@ export const STRINGS = {
 
 export type StringKey = keyof (typeof STRINGS)['en'];
 
+// TEMPORARY (2026-08-19, Oscar's own request: "english only across all
+// account types, no spanish for now") — forces every call to resolve
+// against `STRINGS.en` regardless of the `lang` a caller passes in
+// (`session.uiLanguage`, a customer's own stored preference, is completely
+// unaffected and untouched in the database; this only short-circuits what
+// `t()` does with it). Deliberately the smallest possible change: nothing
+// in `STRINGS.es` was deleted, no call site anywhere in the app changed —
+// reverting to real bilingual behavior later is deleting this one line's
+// override, not rebuilding anything.
+// Exported (not just used internally by `t()` below) so a page offering a
+// language *choice* — today, only `/app/profile`'s selector — can disable
+// itself while this override is active, rather than silently accepting a
+// selection that would visibly do nothing.
+export const FORCE_LANG: Lang | null = 'en';
+
 /**
  * Looks up `key` in `lang`, falling back to English and then to the raw key
  * itself — a visibly-wrong string beats a crash if a key is ever mistyped or
@@ -485,6 +613,6 @@ export type StringKey = keyof (typeof STRINGS)['en'];
  * `vrm_portal/strings.py:t()`).
  */
 export function t(lang: Lang, key: StringKey): string {
-  const table = STRINGS[lang] ?? STRINGS.en;
+  const table = STRINGS[FORCE_LANG ?? lang] ?? STRINGS.en;
   return table[key] ?? STRINGS.en[key] ?? key;
 }

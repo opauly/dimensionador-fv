@@ -150,11 +150,16 @@ def _bucket_trend_lines(overview_buckets: list[dict], overview_trend: list[dict]
     lines = []
     for eb, tb in zip(overview_buckets, overview_trend):
         health = f"{tb['healthScore']}/100" if tb.get("healthScore") is not None else "n/a"
+        # "n/a", not a literal "None" — battery_charge_kwh/battery_discharge_kwh
+        # are NULL for every row on some ingestion paths (vrm_api), which makes
+        # tb['batteryCycles'] None rather than a fabricated 0.0 (see
+        # build_report_data's battery_kwh_available guard).
+        cycles = tb["batteryCycles"] if tb["batteryCycles"] is not None else "n/a"
         lines.append(
             f"- {eb['start']} to {eb['end']} ({eb['days']} days): "
             f"{eb['pv']} kWh solar, {eb['load']} kWh consumption, "
             f"health {health}, grid independence {tb['gridIndependencePct']}%, "
-            f"{tb['batteryCycles']} battery cycles"
+            f"{cycles} battery cycles"
         )
     return "\n".join(lines)
 
@@ -179,6 +184,8 @@ def generate_narrative(stats: dict, lang: str) -> str:
     is_overview = bool(stats.get("isOverview"))
     period_label = ("week" if stats["totalDays"] <= 8
                     else f"{stats['totalDays']}-day period")
+
+    is_off_grid = stats.get("systemType") == "off_grid"
 
     if is_overview:
         framing = (
@@ -221,22 +228,47 @@ def generate_narrative(stats: dict, lang: str) -> str:
             f"\n\nThis {period_label}'s data:"
         )
 
+    # Off-grid sites have no utility grid concept at all — not a grid
+    # connection that happens to read zero. Omitting the grid *numbers* below
+    # is not enough on its own: without an explicit negative instruction the
+    # model reliably invents generic "went completely off-grid, achieved X%
+    # independence" framing anyway (observed verbatim in a real generated
+    # report for karen-montealegre-proyecto-km-ukiyo, 2026-08-18).
+    if is_off_grid:
+        framing += (
+            " This site has no utility grid connection of any kind (fully "
+            "off-grid) — do not mention grid connection, disconnection, "
+            "independence percentage, or grid outages anywhere in the "
+            "narrative; frame everything purely in terms of solar generation "
+            "and battery performance."
+        )
+
     prompt = (
         framing +
         f"\n- Site: {stats['site']}"
         f"\n- Report period: {stats['periodStart']} to {stats['periodEnd']}"
         f"\n- Solar generated: {stats['pv']} kWh"
         f"\n- Total consumption: {stats['load']} kWh"
-        f"\n- Grid consumption: {stats['grid']} kWh"
-        f"\n- Grid independence: {stats['gridIndependencePct']}%"
+    )
+    if not is_off_grid:
+        prompt += (
+            f"\n- Grid consumption: {stats['grid']} kWh"
+            f"\n- Grid independence: {stats['gridIndependencePct']}%"
+        )
+    prompt += (
         f"\n- Health score: {stats['healthScore']}/100 ({stats['healthStatus']})"
         f"\n- Lowest battery SOC: {stats['minSoc']}%"
         f"\n- Battery cycles this {period_label}: {stats['batteryCycles']}"
         f"\n- Days battery reached full charge: {stats['daysFullCharge']} of {stats['totalDays']}"
-        f"\n- Grid outages: {stats['outageCount']} ({stats['outageMinutes']} minutes total)"
-        f"\n- Longest single outage: {stats['longestOutageMinutes']} minutes"
-        f"\n- Battery covered loads during outages: "
-        f"{'yes' if stats['batteryProtectedDuringOutage'] else 'no / unknown'}"
+    )
+    if not is_off_grid:
+        prompt += (
+            f"\n- Grid outages: {stats['outageCount']} ({stats['outageMinutes']} minutes total)"
+            f"\n- Longest single outage: {stats['longestOutageMinutes']} minutes"
+            f"\n- Battery covered loads during outages: "
+            f"{'yes' if stats['batteryProtectedDuringOutage'] else 'no / unknown'}"
+        )
+    prompt += (
         f"\n- Alarm episodes: {stats['alarmEpisodes']}"
         f"\n- Best production day: {stats['bestDay']} kWh"
         f"\n- Worst production day: {stats['worstDay']} kWh"
@@ -261,8 +293,9 @@ def generate_narrative(stats: dict, lang: str) -> str:
             " If weather affected generation, mention it."
             f"\n- Solar performance ratio: {stats['solarPerformancePct']}% of expected"
         )
-    prompt += (f"\n- Grid quality: {stats['gridQualityScore']}/100 "
-               f"({stats['gridQualityStatus']})")
+    if not is_off_grid:
+        prompt += (f"\n- Grid quality: {stats['gridQualityScore']}/100 "
+                   f"({stats['gridQualityStatus']})")
 
     try:
         import anthropic
@@ -323,6 +356,21 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     t = report_i18n.get(lang, len(days), is_overview=window["is_overview"])
     system_type = site.get("system_type") or "hybrid"
 
+    # "No data is better than fabricated data" (vrm_series.py's own §4.5
+    # principle) — the vrm_api ingestion path deliberately leaves
+    # battery_charge_kwh/battery_discharge_kwh NULL on every row (that
+    # module's docstring point 2b: VRM's flow-diagram totals disagreed with
+    # the CSV path's battery-monitor figure by up to 97%/58%, so NULL rather
+    # than a number nobody should trust). `_num()` turns None into 0.0, which
+    # is indistinguishable from a site that genuinely discharged zero — only
+    # true when *every* day is None, not just some (a CSV-sourced site can
+    # have a real zero-discharge day). Only that all-None case means the
+    # metric isn't available for this site/window at all.
+    battery_kwh_available = not (
+        all(r.get("battery_charge_kwh") is None for r in days)
+        and all(r.get("battery_discharge_kwh") is None for r in days)
+    )
+
     totals = {
         "pv": sum(_num(r.get("pv_kwh")) for r in days),
         "grid": sum(_num(r.get("grid_kwh")) for r in days),
@@ -335,6 +383,7 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         "daysNoGridData": sum(1 for r in days if not r.get("grid_data_available")),
         "daysSelfSufficient": sum(1 for r in days if _num(r.get("grid_kwh")) <= 0),
         "gridExport": sum(_num(r.get("grid_export_kwh")) for r in days),
+        "batteryKwhAvailable": battery_kwh_available,
     }
 
     prev = window["previous_days"]
@@ -374,12 +423,35 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         grouped = [by_date[k] for k in sorted(by_date)]
         avg_health = round(sum(_num(r.get("health_score")) for r in grouped) / len(grouped))
         health_status = grouped[-1].get("health_status") or ""
-        alarm_total = sum(int(_num(r.get("alarms_count"))) for r in grouped)
+    # The "Total" shown in the Events section and referenced by the AI
+    # narrative is the sum of the per-category breakdown (report bug fix,
+    # 2026-08-19) — NOT `sum(daily_health.alarms_count)` as it was until
+    # today. Empirically confirmed on a real site (vista-atenas-2-floor-pool,
+    # 2026-07-21..28) that these two definitions genuinely disagree, and not
+    # by a rounding sliver: 68 Low battery + 29 Overload = 97, vs. 83 from
+    # `alarms_count` — an 18% gap, not the "rare" edge case the breakdown
+    # feature's own first draft assumed. Root cause: `vrm.count_alarm_
+    # episodes()` (migration 012) tracks ONE in/out state per site per day
+    # across every category combined, so a second category's episode start
+    # while the first is still active is not counted there — this function's
+    # per-category count (`get_alarm_episode_counts_by_category()`) does not
+    # have that limitation, so it is the more complete number, not just a
+    # differently-defined one. Does NOT touch the persisted `daily_health.
+    # health_score` itself (an independent, Postgres-trigger-computed value
+    # this Python code never recalculates) — only what the customer reads as
+    # "how many alarm episodes."
+    alarm_by_category = window.get("alarm_episode_counts_by_category") or {}
+    alarm_total = sum(alarm_by_category.values())
 
     grid_independence = (round(100 - totals["grid"] / totals["load"] * 100, 1)
                          if totals["load"] > 0 else 100)
     batt_usable = _num(site.get("battery_usable_kwh"), 0) or 1
-    battery_cycles = round(totals["discharge"] / batt_usable, 2)
+    # None, not 0.0, when the underlying data isn't available — see
+    # battery_kwh_available above. A fabricated 0.0 here is what the stress
+    # label below used to score as "Normal", which is the single worst
+    # possible label for data that is actually just absent.
+    battery_cycles = (round(totals["discharge"] / batt_usable, 2)
+                      if battery_kwh_available else None)
     longest_outage = window["longest_outage_minutes"]
 
     # Overview mode (plan doc §22): health/grid-independence/battery-cycling
@@ -399,7 +471,12 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
                 "healthScore": hb["health_score"],
                 "gridIndependencePct": (round(100 - eb["grid"] / eb["load"] * 100, 1)
                                         if eb["load"] > 0 else 100),
-                "batteryCycles": round(eb["discharge"] / batt_usable, 2),
+                # Same battery_kwh_available guard as the period total above —
+                # a site/window where charge/discharge is NULL for every row
+                # stays NULL per bucket too, not a second un-fixed copy of the
+                # fabricated-zero bug.
+                "batteryCycles": (round(eb["discharge"] / batt_usable, 2)
+                                  if battery_kwh_available else None),
             })
 
     weather = None
@@ -445,25 +522,42 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     thr = {"batteryCyclesHigh": 10.0, "batteryCyclesMid": 7.0}
     thr.update(site.get("health_thresholds") or {})
     thr = {k: v * week_scale for k, v in thr.items()}
-    if battery_cycles > thr["batteryCyclesHigh"]:
+    # A genuine third state, not "Normal" and not the existing high-stress
+    # tier — "Normal" would actively assert everything's fine for data that
+    # is actually just absent (battery_kwh_available is False; see above).
+    # Neutral grey on purpose so it doesn't visually read as either the good
+    # green or the bad amber/red the other two states use.
+    if battery_cycles is None:
+        stress = t["battStressNoData"]
+        stress_color = "#999"
+    elif battery_cycles > thr["batteryCyclesHigh"]:
         stress = "Alto estrés" if lang == "es" else "High stress"
+        stress_color = S.AMBER
     elif battery_cycles > thr["batteryCyclesMid"]:
         stress = "Uso activo" if lang == "es" else "Working hard"
+        stress_color = S.AMBER
     else:
         stress = "Normal"
-    stress_color = S.AMBER if battery_cycles > thr["batteryCyclesMid"] else S.GREEN
+        stress_color = S.GREEN
 
     narrative = ""
     if with_narrative:
         narrative = generate_narrative({
             "site": site["display_name"], "pv": f"{totals['pv']:.1f}",
             "load": f"{totals['load']:.1f}", "grid": f"{totals['grid']:.1f}",
+            "systemType": system_type,
             "periodStart": window["period_start"], "periodEnd": window["period_end"],
             "seasonContext": _season_context(site.get("country"),
                                             date.fromisoformat(window["period_end"]), lang),
             "gridIndependencePct": grid_independence,
             "healthScore": avg_health, "healthStatus": health_status,
-            "minSoc": min_soc, "batteryCycles": battery_cycles,
+            "minSoc": min_soc,
+            # "not available" text, not a bare None, so the model sees why
+            # the number is missing rather than rendering "None" verbatim —
+            # see battery_kwh_available above.
+            "batteryCycles": (battery_cycles if battery_cycles is not None
+                              else "not available (no per-day battery "
+                                   "charge/discharge data for this site)"),
             "daysFullCharge": totals["daysFullCharge"], "totalDays": len(days),
             "outageCount": totals["outageCount"],
             "outageMinutes": totals["outageMinutes"],
@@ -524,7 +618,27 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         "isOverview": window["is_overview"],
         "overviewBuckets": overview_buckets,
         "overviewTrend": overview_trend,
+        # Off-grid-only KPI card data (report bug fix, 2026-08-18) — None for
+        # every other system_type (fetch_report_window skips the query then).
+        "lowBatteryShutdownCount": window["low_battery_shutdown_count"],
+        # Events section per-category breakdown (report bug fix, 2026-08-19)
+        # — every system_type. `sum(...)` of this dict IS `alarmEpisodesTotal`
+        # above (see that variable's own comment, a few lines up in this
+        # function, for why it's no longer `sum(daily_health.alarms_count)`).
+        "alarmEpisodesByCategory": window["alarm_episode_counts_by_category"],
     }
+
+
+# `alarm_events.alarm`'s stored label -> the i18n key for its Events-section
+# display label (report bug fix, 2026-08-19). Only the two categories
+# `victron/vrm_csv.py:ALARM_CATEGORIES` actually scores — an unrecognised
+# label (there shouldn't be one, but `alarmEpisodesByCategory` is a raw
+# group-by, not validated against this list) is skipped in `_rows()` below
+# rather than crashing the report.
+_ALARM_CATEGORY_LABEL_KEYS = {
+    "Low Battery Alarm": "alarmCategoryLowBattery",
+    "Overload Alarm": "alarmCategoryOverload",
+}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -542,7 +656,10 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
          "value": f"{d['minSoc']:.0f}%" if d["minSoc"] is not None else "—"},
         {"label": t["avgTemp"], "value": fmt(d["maxTemp"], 1, " °C")},
         {"label": t["batteryHealthLabel"],
-         "value": f"{d['battStressLabel']} ({d['batteryCycles']} cyc)",
+         # No "(N cyc)" suffix when cycles genuinely can't be computed —
+         # "Sin datos (0.0 cyc)" would still assert a number that isn't real.
+         "value": (f"{d['battStressLabel']} ({d['batteryCycles']} cyc)"
+                   if d["batteryCycles"] is not None else d["battStressLabel"]),
          "valueColor": d["battStressColor"]},
         {"label": t["voltageRange"],
          "value": (f"{d['minVoltage']:.1f} – {d['maxVoltage']:.1f} V"
@@ -565,13 +682,48 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
          "valueColor": d["gridQualityColor"]},
     ]
     oc = d["totals"]["outageCount"]
-    events = [
-        {"label": t["outages"],
-         "value": (t["noOutagesShort"] if oc == 0
-                   else f"{oc} ({d['totals']['outageMinutes']} min)"),
-         "valueColor": S.AMBER if oc > 0 else "#222"},
-        {"label": t["alarmEpisodes"], "value": str(d["alarmEpisodesTotal"])},
-    ]
+    events = []
+    # "Cortes de Red" implies "we monitor grid outages here and found none" —
+    # wrong for a site with no grid concept at all. The underlying detector
+    # already returns 0 for a genuinely off-grid site (vrm_daily._grid_outages'
+    # own _GRID_SITE_MIN_V/_GRID_SITE_MIN_SHARE guard), so this row must be
+    # dropped explicitly rather than relying on "0" to read as "not
+    # applicable" — it doesn't. Alarm episodes are a different, still
+    # meaningful metric for off-grid (e.g. overload/low-battery alarms) and
+    # stay.
+    if d["systemType"] != "off_grid":
+        events.append({
+            "label": t["outages"],
+            "value": (t["noOutagesShort"] if oc == 0
+                      else f"{oc} ({d['totals']['outageMinutes']} min)"),
+            "valueColor": S.AMBER if oc > 0 else "#222",
+        })
+    events.append({"label": t["alarmEpisodes"], "value": str(d["alarmEpisodesTotal"])})
+    # Per-category breakdown (report bug fix, 2026-08-19) — categories with
+    # zero episodes are omitted rather than shown as "Batería baja: 0",
+    # matching this section's own existing "Sin cortes" convention (a zero
+    # row for something that didn't happen is noise, not information).
+    # Sorted by count, descending, so the most frequent alarm reads first.
+    #
+    # Every category in `by_category` gets a row — `_ALARM_CATEGORY_LABEL_KEYS`
+    # supplies a translated label for the two known ones (confirmed live,
+    # 2026-08-19: 'Low Battery Alarm'/'Overload Alarm' are the only labels
+    # that exist in either schema's real `alarm_events` today), and an
+    # UNRECOGNISED label — a category added later, or one only `monitoring`
+    # ever writes — falls back to its raw stored text rather than being
+    # silently dropped. This is not cosmetic: `alarmEpisodesTotal` is the
+    # sum of every value in `by_category` (see that variable's own comment,
+    # `_build_report_data()`), so silently skipping a row here would make
+    # the visible breakdown undercount the Total sitting right above it —
+    # the exact bug this feature just replaced, reappearing through a
+    # different door.
+    by_category = d.get("alarmEpisodesByCategory") or {}
+    for alarm_label, count in sorted(by_category.items(), key=lambda kv: -kv[1]):
+        if count <= 0:
+            continue
+        key = _ALARM_CATEGORY_LABEL_KEYS.get(alarm_label)
+        display_label = t[key] if key else alarm_label
+        events.append({"label": f"— {display_label}", "value": str(count)})
     # A poor Grid Quality score alongside a clean outage count is flagged on
     # the Grid Outages KPI card itself (report_svg.kpi_svg) rather than here —
     # that's the number a reader sees first, so the pointer belongs there,
@@ -651,14 +803,21 @@ def render_html(d: dict) -> str:
     else:
         savings_svg = S.savings_placeholder_svg(t)
 
+    # Same pattern as `subSavingsOffGrid` above: the Events caption still
+    # said "Registra los cortes de red..." even after the outages row itself
+    # was dropped from `events` for off_grid (Bug 2's fix removed the row but
+    # missed this static caption, which then contradicted its own section —
+    # caught by inspecting the actual rendered PDF, not just the code).
+    events_sub = (t["subEventsOffGrid"] if d["systemType"] == "off_grid"
+                 else t["subEvents"])
     if has_grid:
         row2 = S.two_block_row_svg(t["sectionGrid"], grid, t["subGrid"],
-                                   t["sectionEvents"], events, t["subEvents"],
+                                   t["sectionEvents"], events, events_sub,
                                    row_size=row_size)
     else:
         # No grid to assess — Events takes the full width rather than sitting
         # beside an empty half.
-        row2 = S.single_block_row_svg(t["sectionEvents"], events, t["subEvents"],
+        row2 = S.single_block_row_svg(t["sectionEvents"], events, events_sub,
                                       row_size=row_size)
 
     row3 = S.two_block_row_svg(

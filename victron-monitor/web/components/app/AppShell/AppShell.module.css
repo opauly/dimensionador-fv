@@ -66,6 +66,34 @@
   color: var(--paper);
 }
 
+/* The "personal" nav group (2026-08-19) — `.nav` above already has
+ * `flex: 1`, so it consumes all the row's slack space and this sits
+ * immediately to its right, pinned against `.account` — no separate
+ * positioning needed. `.divider` (already used in `.brandRow`) marks the
+ * seam; the pill treatment on `.navLinkPersonal` keeps it visually
+ * "on" at rest, not just on hover, so it reads as a different kind of
+ * link at a glance, not just a differently-placed one. */
+.navPersonal {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.navLinkPersonal {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--victron);
+  background: color-mix(in srgb, var(--victron) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--victron) 40%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  text-decoration: none;
+}
+.navLinkPersonal:hover {
+  background: color-mix(in srgb, var(--victron) 22%, transparent);
+  border-color: var(--victron);
+}
+
 .account {
   display: flex;
   align-items: center;
@@ -107,5 +135,13 @@
     order: 3;
     width: 100%;
     flex-wrap: wrap;
+  }
+  .navPersonal {
+    order: 4;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .navPersonal .divider {
+    display: none;
   }
 }

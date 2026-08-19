@@ -84,7 +84,14 @@ def list_sites(
     if actor != "admin":
         raise HTTPException(status_code=403, detail="cross-tenant site list requires actor=admin")
     rows = rdb.list_sites(schema, active_only=False)
-    return SitesOut(sites=[SiteSummaryOut(site_id=r["site_id"], display_name=r["display_name"]) for r in rows])
+    # `owner` only means anything for `schema="monitoring"` (PLAN_PHASE15.md
+    # bug-fix pass, Bug 3) — `rdb.list_sites()` already selects `*`, so a
+    # `vrm` row simply has no `owner` key and `.get()` returns `None`, same
+    # as any other column one schema has and the other doesn't.
+    return SitesOut(sites=[
+        SiteSummaryOut(site_id=r["site_id"], display_name=r["display_name"], owner=r.get("owner"))
+        for r in rows
+    ])
 
 
 @router.get("/limits", response_model=LimitsOut)

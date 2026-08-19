@@ -4,7 +4,7 @@ import { listAllSites, listCustomers } from '@/lib/server/db/admin';
 import { AdminReportsManager } from './AdminReportsManager';
 
 export const metadata: Metadata = {
-  title: 'Reportes — Admin',
+  title: 'Reports — Admin',
 };
 
 // `/admin/reports` (PLAN_PHASE14.md §2 Step 7) — like `/app`'s report
@@ -21,10 +21,10 @@ export default async function AdminReportsPage() {
 
   return (
     <div>
-      <h1>Reportes</h1>
+      <h1>Reports</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        El mismo generador sirve para los dos esquemas: <code>vrm</code> (clientes externos, desde CSV) y{' '}
-        <code>monitoring</code> (sitios propios con Cerbo GX y Node-RED).
+        The same generator serves both schemas: <code>vrm</code> (external customers, from CSV) and{' '}
+        <code>monitoring</code> (Oscar&apos;s own sites with Cerbo GX and Node-RED).
       </p>
       <AdminReportsManager vrmSites={vrmSites} customers={customers} />
     </div>

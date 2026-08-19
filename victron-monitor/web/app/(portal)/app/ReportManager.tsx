@@ -34,11 +34,19 @@ type ReportSummary = {
     charge: number;
     outageCount: number;
     outageMinutes: number;
+    // `false` when battery_charge_kwh/battery_discharge_kwh are unavailable
+    // for every day in range (VRM-API-ingested sites, PLAN_PHASE15.md §4.6)
+    // — `discharge`/`charge` above are then a fabrication-safe 0.0, not a
+    // real reading, and must not be presented as a confirmed zero.
+    batteryKwhAvailable: boolean;
   };
   gridIndependencePct: number;
   avgHealth: number | string;
   healthStatus: string;
-  batteryCycles: number;
+  // `null` when battery_charge_kwh/battery_discharge_kwh are unavailable
+  // (e.g. VRM-API-ingested sites, PLAN_PHASE15.md §4.6) — `weekly_report.py`
+  // distinguishes "no data" from "genuinely zero" rather than fabricating 0.
+  batteryCycles: number | null;
   battStressLabel: string;
   battStressColor: string;
   gridQualityScore: number;
@@ -313,21 +321,23 @@ export function ReportManager({ sites, lang }: ReportManagerProps) {
             <Stat label={t(lang, 'reports_stat_health')} value={summary.avgHealth} unit={`/100 · ${summary.healthStatus}`} good />
           </div>
 
+          {/* Reorganized 2026-08-19 at Oscar's request, mirroring the same
+             change in pages/06_vrm_monitor.py's tab_report(): this panel is
+             a quick "did this run correctly" glance before downloading, not
+             a second copy of the report — grid quality, outages,
+             battery-stress cycle count, and the energy-mix chart are all
+             already their own dedicated PDF sections (report_svg.py's Grid
+             Quality block, Events block, SALUD DE LA BATERÍA block, and the
+             DE DÓNDE VINO SU ENERGÍA donut). Kept: the four Stat cards
+             above, system type/data coverage (genuine "is this the right
+             site/window" context, not a restated PDF stat), and the
+             weather-fetch-failure warning (not a duplicated number — a
+             heads-up that a PDF section came out silently empty because an
+             external call failed). */}
           <div className={styles.chipRow}>
             <span className={styles.chip}>{summary.systemType}</span>
             <span className={styles.chip}>
               {t(lang, 'reports_chip_days').replace('{covered}', String(summary.daysWithData)).replace('{total}', String(summary.daysWithData + summary.missingDays))}
-            </span>
-            <span className={styles.chip} style={{ color: summary.battStressColor }}>
-              {summary.battStressLabel} ({summary.batteryCycles} cyc)
-            </span>
-            <span className={styles.chip} style={{ color: summary.gridQualityColor }}>
-              {summary.gridQualityStatus} ({summary.gridQualityScore}/100)
-            </span>
-            <span className={styles.chip}>
-              {summary.totals.outageCount > 0
-                ? t(lang, 'reports_chip_outages').replace('{count}', String(summary.totals.outageCount)).replace('{minutes}', String(summary.totals.outageMinutes))
-                : t(lang, 'reports_chip_no_outages')}
             </span>
           </div>
 
@@ -338,19 +348,7 @@ export function ReportManager({ sites, lang }: ReportManagerProps) {
               .replace('{days}', String(summary.daysWithData))}
           </p>
 
-          <EnergyMixBar summary={summary} lang={lang} />
-
           {summary.weatherErrors.length > 0 && <p className={styles.warning}>{t(lang, 'reports_weather_error_warning')}</p>}
-          {(summary.battStressLabel === 'Alto estrés' || summary.battStressLabel === 'High stress') && (
-            <p className={styles.warning}>
-              {t(lang, 'reports_battery_stress_warning').replace('{cycles}', String(summary.batteryCycles)).replace('{days}', String(summary.daysWithData))}
-            </p>
-          )}
-          {summary.gridQualityScore < 70 && (
-            <p className={styles.warning}>
-              {t(lang, 'reports_grid_quality_warning').replace('{score}', String(summary.gridQualityScore)).replace('{status}', summary.gridQualityStatus)}
-            </p>
-          )}
 
           <button type="button" className={styles.generateButton} onClick={handleDownload} disabled={downloading}>
             {downloading ? t(lang, 'reports_downloading') : t(lang, 'reports_download_button')}
@@ -361,33 +359,3 @@ export function ReportManager({ sites, lang }: ReportManagerProps) {
   );
 }
 
-function EnergyMixBar({ summary, lang }: { summary: ReportSummary; lang: Lang }) {
-  const { pv, discharge, grid } = summary.totals;
-  const total = pv + discharge + grid;
-  if (total <= 0) return null;
-  const segments = [
-    { label: t(lang, 'reports_energy_mix_pv'), value: pv, color: 'var(--good)' },
-    { label: t(lang, 'reports_energy_mix_battery'), value: discharge, color: 'var(--victron-glow)' },
-    { label: t(lang, 'reports_energy_mix_grid'), value: grid, color: 'var(--mute)' },
-  ];
-  return (
-    <div className={styles.mix}>
-      <div className={styles.mixLabel}>{t(lang, 'reports_energy_mix_title')}</div>
-      <div className={styles.mixBar}>
-        {segments.map((s) =>
-          s.value > 0 ? (
-            <div key={s.label} className={styles.mixSegment} style={{ width: `${(s.value / total) * 100}%`, background: s.color }} title={`${s.label}: ${s.value.toFixed(1)} kWh`} />
-          ) : null,
-        )}
-      </div>
-      <div className={styles.mixLegend}>
-        {segments.map((s) => (
-          <span key={s.label} className={styles.mixLegendItem}>
-            <span className={styles.mixSwatch} style={{ background: s.color }} />
-            {s.label} · {s.value.toFixed(0)} kWh ({total > 0 ? Math.round((s.value / total) * 100) : 0}%)
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}

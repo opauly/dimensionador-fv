@@ -4,7 +4,7 @@ import { listCustomers } from '@/lib/server/db/admin';
 import { CustomersManager } from './CustomersManager';
 
 export const metadata: Metadata = {
-  title: 'Clientes — Admin',
+  title: 'Customers — Admin',
 };
 
 // `/admin/customers` (PLAN_PHASE14.md §2 Step 7) — the admin dashboard's
@@ -18,10 +18,10 @@ export default async function AdminCustomersPage() {
 
   return (
     <div>
-      <h1>Clientes</h1>
+      <h1>Customers</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Clientes externos del producto VRM Monitor — un esquema aparte de <code>clients</code> (el CRM de Pauly &amp; Co) y del
-        esquema <code>monitoring</code> de los sitios propios.
+        External customers of the VRM Monitor product — a schema separate from <code>clients</code> (Pauly &amp; Co&apos;s CRM)
+        and from the <code>monitoring</code> schema of Oscar&apos;s own sites.
       </p>
       <CustomersManager customers={customers} />
     </div>

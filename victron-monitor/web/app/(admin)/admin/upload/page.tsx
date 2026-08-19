@@ -4,7 +4,7 @@ import { listCustomers } from '@/lib/server/db/admin';
 import { AdminUploadManager } from './AdminUploadManager';
 
 export const metadata: Metadata = {
-  title: 'Cargar CSV — Admin',
+  title: 'Upload CSV — Admin',
 };
 
 // `/admin/upload` (PLAN_PHASE14.md §2 Step 7) — same upload UX as
@@ -17,10 +17,10 @@ export default async function AdminUploadPage() {
 
   return (
     <div>
-      <h1>Cargar exportación CSV de VRM</h1>
+      <h1>Upload VRM CSV export</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Subí un archivo en nombre de un cliente. El archivo se procesa y se muestra un resumen antes de escribir nada en la base de
-        datos.
+        Upload a file on behalf of a customer. The file is processed and a summary is shown before anything is written to the
+        database.
       </p>
       <AdminUploadManager customers={customers} />
     </div>

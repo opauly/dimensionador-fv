@@ -31,6 +31,19 @@ class NotAuthorized(Exception):
     distinguished in the response."""
 
 
+class VrmAccountAlreadyLinked(Exception):
+    """PLAN_PHASE15.md §1.5: raised by the connect flow
+    (`routers/vrm_link.py`) when the Victron VRM account being connected
+    (identified by Victron's own `vrm_user_id`, not anything we assign) is
+    already linked to a DIFFERENT `vrm.customers` row. `vrm.customers.
+    vrm_user_id` carries a `UNIQUE` constraint for exactly this case — this
+    typed exception (paired with a handler in `main.py`, the same pattern
+    `NotAuthorized` uses) is what turns a would-be raw Postgres
+    unique-violation into a clean, customer-renderable 409 instead of an
+    opaque 500. The message is safe to return as-is: it never names the
+    other customer, only the fact that a collision happened."""
+
+
 def _t(name: str):
     return get_client().schema(SCHEMA).table(name)
 
@@ -69,3 +82,16 @@ def assert_owns_site(customer_id: str, site_id: str) -> dict:
     if not rows:
         raise NotAuthorized(f"Customer {customer_id!r} does not own site {site_id!r}.")
     return rows[0]
+
+
+def find_customer_by_vrm_user_id(vrm_user_id: str) -> dict | None:
+    """The `vrm.customers` row (if any) already connected to this Victron
+    VRM account — used by `routers/vrm_link.py`'s connect flow's §1.5
+    typed-conflict check, BEFORE any write, so a raw Postgres unique
+    violation on `vrm.customers.vrm_user_id` never reaches a caller.
+    Returns `None`, not `NotAuthorized` — "nobody has this VRM account yet"
+    is the expected, common case (a first connect), not an authorization
+    failure."""
+    rows = (_t("customers").select("id").eq("vrm_user_id", vrm_user_id)
+            .limit(1).execute().data)
+    return rows[0] if rows else None

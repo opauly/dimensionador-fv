@@ -13,6 +13,22 @@
   letter-spacing: 0.05em;
 }
 
+.syncPaused {
+  color: var(--signal);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.syncError {
+  color: var(--mute);
+  font-size: 11px;
+  margin-top: 2px;
+  max-width: 240px;
+}
+
 .editRow {
   background: var(--panel);
   padding: 16px 20px !important;

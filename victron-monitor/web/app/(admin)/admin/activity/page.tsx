@@ -4,7 +4,7 @@ import { listAllIngestions, listAllSites, listCustomers } from '@/lib/server/db/
 import { ActivityTable } from './ActivityTable';
 
 export const metadata: Metadata = {
-  title: 'Actividad — Admin',
+  title: 'Activity — Admin',
 };
 
 // `/admin/activity` (PLAN_PHASE14.md §2 Step 7) — `vrm.ingestion_log`
@@ -27,9 +27,9 @@ export default async function AdminActivityPage() {
 
   return (
     <div>
-      <h1>Actividad</h1>
+      <h1>Activity</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Registro de cargas (<code>vrm.ingestion_log</code>) de todos los clientes, más reciente primero.
+        Upload log (<code>vrm.ingestion_log</code>) across all customers, most recent first.
       </p>
       <ActivityTable ingestions={ingestions} customerNameBySite={Object.fromEntries(customerNameBySite)} displayNameBySite={Object.fromEntries(displayNameBySite)} />
     </div>
