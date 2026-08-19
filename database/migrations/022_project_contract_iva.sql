@@ -1,0 +1,22 @@
+-- Migration 022: projects.contract_iva_usd
+--
+-- Follow-on to migration 020 / PLAN_PHASE6.md §1.5's revised contract_usd
+-- semantics: contract_usd is now the real quoted grand total (already
+-- includes each line item's own IVA where it applies), not an ex-IVA base.
+-- That's correct for "what does the client pay" but broke utilidad_bruta
+-- (PLAN_PHASE6.md §1.2), which compares ingresos against gastos.amount_usd
+-- (genuinely ex-IVA) — with no way to strip the embedded tax back out,
+-- gross profit was overstated by exactly whatever IVA is baked into
+-- contract_usd on a mixed-rate contract (e.g. +$949 on a real test case).
+--
+-- contract_iva_usd is a plain dollar amount (not a rate — a real number
+-- someone can read off an invoice, unlike the "8.10% blended" figure the
+-- first attempt at this produced), seeded from the proposal's own
+-- costs.iva_usd at promotion time. calculations/project_finance.py (Step 3)
+-- uses it to back out the ex-IVA portion of contract_usd:
+--   ingresos_base   = (contract_usd - contract_iva_usd) + Σ extras.amount_usd
+--   iva_repercutido = contract_iva_usd + Σ (extras.amount_usd * extras.iva_rate)
+-- Defaults to 0 — the common case (single-rate or untaxed contracts, and
+-- every manually-created project) needs no adjustment.
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_iva_usd numeric(10,2) NOT NULL DEFAULT 0;

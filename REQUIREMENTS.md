@@ -433,12 +433,18 @@ Mirrors the Excel's Presupuesto sheet exactly:
 
 **INGRESOS (Revenue)**
 ```
-Contract amount (USD) — pulled from proposal version total
-IVA rate on contract — 0% or 13%
-Contract total with IVA
+Contract amount (USD) — pulled from proposal version total, IVA already included per line item
+IVA already included in contract (USD) — informational, not a rate (superseded 2026-08-17;
+  IVA in this app is per line item — equipment commonly exempt, labor/materials/services
+  commonly 13% — never a single "0% or 13%" rate on the whole contract)
 Extras (additional work orders) — add rows
 Grand total income
 ```
+
+INGRESOS "Extras" (additional work orders that increase the contract) persists to its own
+table, `project_extras` — distinct from the `extras` *expense* category in `project_expenses`
+(the catch-all expense rubro for costs that don't fit Banco/Equipo/Materiales/Mano de
+obra/Viáticos). Same word, two unrelated tables — don't conflate them.
 
 **PAGOS (Client payments received)**
 ```
@@ -530,8 +536,11 @@ projects (
   client_name     text, -- denormalized
   system_type     text,
   status          text DEFAULT 'active', -- active | completed | paused | cancelled
-  contract_usd    numeric(10,2),
-  contract_iva_rate numeric(4,3),
+  contract_usd    numeric(10,2), -- the FULL quoted total, IVA already included where it applies
+                                  -- (per-item, not a whole-contract rate — see §5.3)
+  contract_iva_rate numeric(4,3), -- vestigial, always 0 for proposal-derived projects
+  contract_iva_usd  numeric(10,2), -- dollar amount of IVA embedded in contract_usd, if any
+                                    -- (migration 022) — used only to compute ex-IVA profit
   notes           text
 )
 
@@ -571,8 +580,11 @@ project_labor (
   role            text,
   quoted_amount   numeric(10,2),
   advances        jsonb, -- [{number: 1, amount: 460, date: "2026-01-15"}, ...]
-  total_advanced  numeric(10,2),
-  balance_pending numeric(10,2) GENERATED ALWAYS AS (quoted_amount - total_advanced) STORED
+  total_advanced  numeric(10,2)
+  -- balance_pending is NOT a column: a GENERATED column can't aggregate a
+  -- jsonb array, and total_advanced already has to be written by application
+  -- code for that reason — so balance_pending is derived alongside it, in
+  -- Python, in calculations/project_finance.py (quoted_amount - total_advanced).
 )
 
 project_invoice_items (
@@ -584,6 +596,18 @@ project_invoice_items (
   amount_usd  numeric(10,2),
   iva_amount  numeric(10,2) GENERATED ALWAYS AS (amount_usd * iva_rate) STORED,
   total_usd   numeric(10,2) GENERATED ALWAYS AS (amount_usd * (1 + iva_rate)) STORED
+)
+
+project_extras (
+  id              uuid PK DEFAULT gen_random_uuid(),
+  project_id      uuid REFERENCES projects(id) ON DELETE CASCADE,
+  description     text,
+  amount_usd      numeric(10,2), -- ex-IVA
+  iva_rate        numeric(4,3) DEFAULT 0,
+  total_with_iva  numeric(10,2) GENERATED ALWAYS AS (amount_usd * (1 + iva_rate)) STORED,
+  approved        boolean DEFAULT true,
+  extra_date      date,
+  notes           text
 )
 ```
 

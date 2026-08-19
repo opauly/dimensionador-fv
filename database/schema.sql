@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS projects (
                             CHECK (status IN ('active', 'completed', 'paused', 'cancelled')),
     contract_usd        numeric(10,2) NOT NULL,
     contract_iva_rate   numeric(4,3) NOT NULL DEFAULT 0,
+    contract_iva_usd    numeric(10,2) NOT NULL DEFAULT 0,
     notes               text
 );
 
@@ -194,7 +195,8 @@ CREATE TABLE IF NOT EXISTS project_payments (
     onvo_commission_pct numeric(5,4) NOT NULL DEFAULT 0.024,
     onvo_iva_pct        numeric(5,4),
     net_deposited       numeric(10,2),
-    notes               text
+    notes               text,
+    created_at          timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS project_expenses (
@@ -210,7 +212,8 @@ CREATE TABLE IF NOT EXISTS project_expenses (
     expense_date    date,
     budgeted_usd    numeric(10,2),
     receipt_path    text,
-    notes           text
+    notes           text,
+    created_at      timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS project_labor (
@@ -220,7 +223,8 @@ CREATE TABLE IF NOT EXISTS project_labor (
     role            text,
     quoted_amount   numeric(10,2) NOT NULL DEFAULT 0,
     advances        jsonb NOT NULL DEFAULT '[]',
-    total_advanced  numeric(10,2) NOT NULL DEFAULT 0
+    total_advanced  numeric(10,2) NOT NULL DEFAULT 0,
+    created_at      timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS project_invoice_items (
@@ -231,8 +235,33 @@ CREATE TABLE IF NOT EXISTS project_invoice_items (
     iva_rate    numeric(4,3) NOT NULL DEFAULT 0,
     amount_usd  numeric(10,2) NOT NULL,
     iva_amount  numeric(10,2) GENERATED ALWAYS AS (amount_usd * iva_rate) STORED,
-    total_usd   numeric(10,2) GENERATED ALWAYS AS (amount_usd * (1 + iva_rate)) STORED
+    total_usd   numeric(10,2) GENERATED ALWAYS AS (amount_usd * (1 + iva_rate)) STORED,
+    created_at  timestamptz DEFAULT now()
 );
+
+-- project_extras: INGRESOS "Extras" (additional work orders billed on top of
+-- the base contract). Deliberately its own table, not a reuse of
+-- project_invoice_items (the factura electrónica *decomposition* of the base
+-- contract) — see PLAN_PHASE6.md §1.1. total_with_iva mirrors
+-- project_expenses' generated column deliberately, so the same "never write
+-- a generated column" rule applies uniformly.
+CREATE TABLE IF NOT EXISTS project_extras (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id      uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    description     text NOT NULL,
+    amount_usd      numeric(10,2) NOT NULL,          -- ex-IVA
+    iva_rate        numeric(4,3) NOT NULL DEFAULT 0,
+    total_with_iva  numeric(10,2) GENERATED ALWAYS AS (amount_usd * (1 + iva_rate)) STORED,
+    approved        boolean NOT NULL DEFAULT true,
+    extra_date      date,
+    notes           text,
+    created_at      timestamptz DEFAULT now()
+);
+
+-- Only one project per proposal (REQUIREMENTS §3.2), while allowing
+-- unlimited proposal-less (manually created) projects — PLAN_PHASE6.md §6.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_proposal_unique
+    ON projects(proposal_id) WHERE proposal_id IS NOT NULL;
 
 -- App settings ----------------------------------------------------------------
 
@@ -250,6 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_project_payments_project_id    ON project_payment
 CREATE INDEX IF NOT EXISTS idx_project_expenses_project_id    ON project_expenses(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_labor_project_id       ON project_labor(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_invoice_items_project  ON project_invoice_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_extras_project_id      ON project_extras(project_id);
 CREATE INDEX IF NOT EXISTS idx_tariff_types_distributor_id    ON tariff_types(distributor_id);
 CREATE INDEX IF NOT EXISTS idx_tariff_tiers_tariff_type_id    ON tariff_tiers(tariff_type_id);
 

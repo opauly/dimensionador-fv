@@ -144,6 +144,15 @@ a.vrow-pill-btn:hover {
     margin: 4px 0 8px;
     background: white;
 }
+/* Promotion ("Mover a Proyecto") inline form — same bordered-container idiom
+   as det_panel_wrap, nested one level in, so it reads as a sub-panel. */
+.st-key-det_promote_wrap {
+    border: 1.5px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 12px 14px 10px;
+    margin: 10px 0 4px;
+    background: #f8fefb;
+}
 </style>
 """
 
@@ -393,6 +402,10 @@ def _render_detail_panel(proposal: dict) -> None:
                     except Exception as e:
                         st.error(f"Error: {e}")
 
+        # ── Mover a Proyecto (won proposals only) ────────────────────────────
+        if status == "won":
+            _render_promotion_block(proposal, vid)
+
         # ── Versions ──────────────────────────────────────────────────────────
         st.markdown(
             '<div style="border-top:1px solid #e2e8f0;margin:12px 0 8px;"></div>'
@@ -406,6 +419,166 @@ def _render_detail_panel(proposal: dict) -> None:
         else:
             for v in reversed(versions):
                 _render_version_row_compact(v, proposal)
+
+
+def _render_promotion_block(proposal: dict, vid: str) -> None:
+    """Won-proposal "Mover a Proyecto" affordance — either a link to the
+    already-promoted project, or an inline form to create one."""
+    import pandas as pd
+    from config import EXPENSE_CATEGORIES
+    from database.projects_db import (
+        get_project_by_proposal, promote_to_project,
+        derive_contract_terms, derive_budget_rows, payment_schedule_for_preset,
+    )
+    from database.proposals_db import get_version
+
+    pid = proposal["id"]
+
+    try:
+        existing_project = get_project_by_proposal(pid)
+    except Exception as e:
+        st.error(f"Error verificando proyecto: {e}")
+        return
+
+    if existing_project:
+        if st.button("Ver proyecto →", key=f"det_view_project_{pid}"):
+            st.session_state["selected_project_id"] = existing_project["id"]
+            st.switch_page("pages/04_project_detail.py")
+        return
+
+    open_key = f"det_promote_open_{pid}"
+    if not st.session_state.get(open_key):
+        if st.button("Mover a Proyecto", key=f"det_promote_btn_{pid}"):
+            st.session_state[open_key] = True
+            st.rerun()
+        return
+
+    with st.container(key="det_promote_wrap"):
+        st.markdown(
+            '<div style="font-size:0.82rem;font-weight:700;color:#166534;margin-bottom:8px;">'
+            'Mover a Proyecto</div>',
+            unsafe_allow_html=True,
+        )
+
+        try:
+            version = get_version(vid)
+        except Exception as e:
+            st.error(f"Error cargando versión: {e}")
+            return
+
+        derived = derive_contract_terms(version)
+        seeded_rows = derive_budget_rows(version)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            contract_usd = st.number_input(
+                "Monto del contrato (USD, según cotización)",
+                min_value=0.0, value=float(derived["contract_usd"]), step=10.0,
+                key=f"promo_contract_{pid}",
+                help="El total cotizado — ya incluye el IVA de cada renglón que corresponde "
+                     "(equipos exentos, mano de obra/materiales/servicios al 13%, etc.). "
+                     "El desglose por renglón se factura en la pestaña Facturación del proyecto.",
+            )
+        with c2:
+            contract_iva_usd = st.number_input(
+                "IVA incluido en el contrato (USD)",
+                min_value=0.0, value=float(derived["contract_iva_usd"]), step=10.0,
+                key=f"promo_iva_{pid}",
+                help="Monto de IVA ya incluido en el total de arriba (tomado de los renglones "
+                     "de la cotización con IVA — equipos suelen ser exentos, mano de obra/"
+                     "materiales/servicios suelen llevar 13%). Se usa para calcular la utilidad "
+                     "neta sin IVA en el Presupuesto del proyecto — no cambia el monto del "
+                     "contrato ni el esquema de pagos.",
+            )
+
+        st.caption("Mapeo de presupuesto por rubro — editable antes de confirmar")
+        budget_df = pd.DataFrame([
+            {"Concepto": r["description"], "Rubro": r["category"], "Presupuesto USD": r["budgeted_usd"]}
+            for r in seeded_rows
+        ]) if seeded_rows else pd.DataFrame(columns=["Concepto", "Rubro", "Presupuesto USD"])
+
+        edited_budget = st.data_editor(
+            budget_df,
+            column_config={
+                "Rubro": st.column_config.SelectboxColumn(options=EXPENSE_CATEGORIES, required=True),
+                "Presupuesto USD": st.column_config.NumberColumn(format="$%.2f"),
+            },
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key=f"promo_budget_editor_{pid}",
+        )
+
+        budget_total = float(edited_budget["Presupuesto USD"].fillna(0).sum()) if not edited_budget.empty else 0.0
+        st.caption(
+            f"Presupuesto de costos (rubros, sin IVA por renglón): {budget_total:,.2f} USD  ·  "
+            f"Monto del contrato (cotizado): {contract_usd:,.2f} USD — "
+            "no son el mismo concepto: el presupuesto es costo estimado, el contrato es el precio "
+            "cotizado al cliente."
+        )
+
+        preset = st.radio(
+            "Esquema de pagos", ["70/30", "50/40/10", "Personalizado"],
+            index=0, horizontal=True, key=f"promo_preset_{pid}",
+        )
+
+        total_with_iva = round(contract_usd, 2)  # already the full total — §1.5
+
+        if preset == "Personalizado":
+            custom_seed = payment_schedule_for_preset(total_with_iva, "70/30")
+            custom_df = pd.DataFrame([
+                {"Pago #": r["payment_number"], "Monto USD": r["amount_usd"]} for r in custom_seed
+            ])
+            edited_schedule = st.data_editor(
+                custom_df,
+                column_config={"Monto USD": st.column_config.NumberColumn(format="$%.2f")},
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                key=f"promo_schedule_editor_{pid}",
+            )
+            payment_schedule = [
+                {"payment_number": int(r["Pago #"]), "amount_usd": float(r["Monto USD"])}
+                for _, r in edited_schedule.iterrows()
+                if r["Monto USD"] is not None
+            ]
+        else:
+            payment_schedule = payment_schedule_for_preset(total_with_iva, preset)
+            st.caption(
+                " · ".join(
+                    f"Pago {r['payment_number']}: \\${r['amount_usd']:,.2f}" for r in payment_schedule
+                )
+            )
+
+        bcol1, bcol2 = st.columns([1, 1])
+        with bcol1:
+            if st.button("Confirmar", key=f"promo_confirm_{pid}", type="primary", use_container_width=True):
+                budget_rows = [
+                    {
+                        "description": r["Concepto"],
+                        "category": r["Rubro"],
+                        "budgeted_usd": float(r["Presupuesto USD"] or 0),
+                    }
+                    for _, r in edited_budget.iterrows()
+                    if r.get("Concepto")
+                ]
+                try:
+                    project = promote_to_project(
+                        pid, vid, contract_usd,
+                        contract_iva_usd=contract_iva_usd,
+                        budget_rows=budget_rows,
+                        payment_schedule=payment_schedule,
+                    )
+                    st.session_state.pop(open_key, None)
+                    st.success(f"Proyecto creado para {proposal.get('client_name')}.")
+                    st.session_state["selected_project_id"] = project["id"]
+                    st.switch_page("pages/04_project_detail.py")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        with bcol2:
+            if st.button("Cancelar", key=f"promo_cancel_{pid}", use_container_width=True):
+                st.session_state.pop(open_key, None)
+                st.rerun()
 
 
 def _render_version_row_compact(v: dict, proposal: dict) -> None:
