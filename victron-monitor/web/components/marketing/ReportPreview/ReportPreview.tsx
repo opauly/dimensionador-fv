@@ -58,7 +58,16 @@ export function ReportPreview() {
           </div>
           <div className={styles.shotFoot}>
             <span>Page 1 of 2</span>
-            <Button href="#cta" variant="ghost" style={{ padding: '9px 16px' }}>
+            {/* PLAN_PHASE16.md §8 Step 5.5 — `#cta` pointed at the
+                now-deleted `AccessForm` (Oscar's explicit decision to
+                retire it). "Request the full sample" isn't a signup, so
+                this becomes a mailto, the same pattern Fleet's/Single
+                Report's own CTAs already use, rather than /signup. */}
+            <Button
+              href="mailto:proyectos@paulyco.com?subject=VRM%20Monitor%20-%20Full%20sample%20report"
+              variant="ghost"
+              style={{ padding: '9px 16px' }}
+            >
               Request the full sample
             </Button>
           </div>

@@ -50,3 +50,21 @@
 .forgot:hover {
   color: var(--paper-dim);
 }
+
+.signupPrompt {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-align: center;
+  padding-top: 10px;
+  margin: 0;
+}
+.signupPrompt a {
+  color: var(--victron-glow);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.signupPrompt a:hover {
+  color: var(--paper);
+}

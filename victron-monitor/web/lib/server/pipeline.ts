@@ -41,15 +41,26 @@ const PIPELINE_TIMEOUT_MS = 30_000;
  * connection-refused message can contain vrm_api's own host/port
  * (PLAN_PHASE14.md §1.12 rule 6, one process further removed from Postgres
  * than usual).
+ *
+ * `detail` (PLAN_PHASE16.md §8 Step 5 addition): some `vrm_api` errors carry
+ * more than a bare `{code}` — `POST /v1/billing/subscription/change`'s own
+ * `over_site_limit` (`routers/billing.py:post_subscription_change()`) is the
+ * first one, returning `requires_confirmation`/`current_site_count`/
+ * `new_site_limit` alongside the code so `PlanPicker.tsx` can render the
+ * real numbers in its confirmation copy (`billing_change_confirm_body`'s own
+ * `{current}`/`{limit}` placeholders) instead of a generic error. Additive
+ * only: every existing caller that only ever reads `err.code` is unaffected.
  */
 export class PipelineError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message?: string) {
+  detail?: Record<string, unknown>;
+  constructor(status: number, code: string, message?: string, detail?: Record<string, unknown>) {
     super(message ?? code);
     this.name = 'PipelineError';
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -58,7 +69,7 @@ export class PipelineError extends Error {
  * rethrow those (they're a real bug, not a pipeline-shaped failure). */
 export function toErrorResponse(err: unknown): NextResponse | null {
   if (err instanceof PipelineError) {
-    return NextResponse.json({ error: err.code }, { status: err.status });
+    return NextResponse.json({ error: err.code, ...err.detail }, { status: err.status });
   }
   return null;
 }
@@ -96,14 +107,23 @@ async function pipelineJson<T>(path: string, init: RequestInit = {}): Promise<T>
     // are checked here, so a route handler calling this module never has to
     // know which style the vrm_api endpoint it's hitting happens to use.
     let code = 'pipeline_error';
+    let detail: Record<string, unknown> | undefined;
     try {
-      const body = (await res.json()) as { code?: string; detail?: string | { code?: string } };
-      const nestedCode = typeof body.detail === 'object' && body.detail !== null ? body.detail.code : undefined;
-      code = body.code ?? nestedCode ?? code;
+      const body = (await res.json()) as { code?: string; detail?: string | Record<string, unknown> };
+      if (typeof body.detail === 'object' && body.detail !== null) {
+        // Nested-shape case — pull `code` out and keep every OTHER field as
+        // `detail` (see `PipelineError`'s own comment: `over_site_limit`'s
+        // `requires_confirmation`/`current_site_count`/`new_site_limit`).
+        const { code: nestedCode, ...rest } = body.detail;
+        code = body.code ?? (typeof nestedCode === 'string' ? nestedCode : undefined) ?? code;
+        if (Object.keys(rest).length > 0) detail = rest;
+      } else {
+        code = body.code ?? code;
+      }
     } catch {
       // No body, or not JSON — keep the generic code.
     }
-    throw new PipelineError(res.status, code);
+    throw new PipelineError(res.status, code, undefined, detail);
   }
   return (await res.json()) as T;
 }
@@ -434,4 +454,219 @@ export async function vrmSync(body: {
   end: string;
 }): Promise<{ job_id: string }> {
   return pipelineJson('/v1/vrm-sync', jsonInit(body));
+}
+
+// ── Billing (PLAN_PHASE16.md §5.1-5.3 / §8 Step 5) ──────────────────────
+// Mirrors `vrm_api/schemas.py`'s `Billing*` models field-for-field, same
+// "restated, not re-derived" convention as `VrmLink*`/`SiteFieldsIn` above.
+// Every function takes `customer_id` explicitly — callers (route handlers
+// under `app/api/billing/*`) MUST always pass `session.customerId`, never a
+// value out of the request body (§6.4 control 1, restated one layer down).
+//
+// No `onvo_subscription_id`/`onvo_customer_id` is ever read OUT of a
+// `BillingStatusOut` — that type doesn't carry one (§5.1: "the browser has
+// no legitimate use for it"). The two exceptions, `BillingSubscribeOut` and
+// `BillingPaymentMethodSessionOut`, exist ONLY because the ONVO web SDK
+// genuinely needs `onvo_subscription_id`/`onvo_customer_id` to render
+// against (§5.2 step 5) — and even those never carry a `paymentMethodId`
+// the browser didn't already create itself directly against ONVO
+// (§0.2b finding 7).
+
+/** `GET /v1/billing/status`'s response (§5.1) — mirrors
+ * `vrm_api/schemas.py:BillingStatusOut` field-for-field. The common "fresh
+ * state" shape every mutation function below also returns, since every
+ * `vrm_api` billing mutation ends in its own `reconcile_customer()` call and
+ * returns this same shape (§4.4's post-mutation trigger) — the browser never
+ * has to guess what changed from a request it just made. */
+export type BillingStatusOut = {
+  customer_id: string;
+  plan_key: string | null;
+  plan_label_key: string | null;
+  billing_status: string | null;
+  provisioning_state: string;
+  status: string | null;
+  billing_interval: string | null;
+  currency: string | null;
+  amount_minor: number | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  trial_end: string | null;
+  pm_brand: string | null;
+  pm_last4: string | null;
+  pm_exp_month: number | null;
+  pm_exp_year: number | null;
+  billing_address: BillingAddressIn;
+  site_limit: number | null;
+  active_sites: number;
+  over_limit: boolean;
+};
+
+export async function billingStatus(customerId: string): Promise<BillingStatusOut> {
+  const params = new URLSearchParams({ customer_id: customerId });
+  return pipelineJson(`/v1/billing/status?${params}`, { method: 'GET' });
+}
+
+/** One `vrm.plans` row (§5.1) — mirrors `BillingPlanOut`. Deliberately no
+ * `onvo_product_id`/`onvo_price_id` (that model's own docstring: no reason
+ * for even an authenticated browser to hold a map of our ONVO catalogue). */
+export type BillingPlanOut = {
+  id: string;
+  plan_key: string;
+  plan_label_key: string;
+  billing_interval: string;
+  currency: string;
+  amount_minor: number;
+  site_limit: number | null;
+  self_serve: boolean;
+  is_current: boolean;
+};
+
+export async function billingPlans(customerId: string): Promise<{ plans: BillingPlanOut[] }> {
+  const params = new URLSearchParams({ customer_id: customerId });
+  return pipelineJson(`/v1/billing/plans?${params}`, { method: 'GET' });
+}
+
+export type BillingInvoiceOut = {
+  id: string;
+  status: string | null;
+  currency: string | null;
+  total_minor: number | null;
+  subtotal_minor: number | null;
+  original_total_minor: number | null;
+  period_start: string | null;
+  period_end: string | null;
+  attempt_count: number | null;
+  last_payment_attempt: string | null;
+  next_payment_attempt: string | null;
+};
+
+export type BillingInvoicesOut = { invoices: BillingInvoiceOut[]; has_more: boolean };
+
+export async function billingInvoices(
+  customerId: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<BillingInvoicesOut> {
+  const params = new URLSearchParams({ customer_id: customerId });
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.offset !== undefined) params.set('offset', String(opts.offset));
+  return pipelineJson(`/v1/billing/invoices?${params}`, { method: 'GET' });
+}
+
+/** `POST /v1/billing/subscription`'s body (§5.2, corrected at Step 5,
+ * 2026-08-20 — see `vrm_api/routers/billing.py:post_subscription()`'s own
+ * docstring for the full "why"). `plan_id` is OUR OWN `vrm.plans.id` —
+ * never an ONVO `priceId` (§6.4). There is deliberately NO
+ * `payment_method_id` here: the ONVO subscription this call creates comes
+ * back with NO card attached at all — the SDK widget that collects the
+ * card needs the returned `onvo_subscription_id` to render in the first
+ * place, so a browser cannot possibly hold a `payment_method_id` before
+ * calling this. `PaymentMethodPanel.tsx` renders the SDK widget AGAINST
+ * this response, and the card is attached afterward by the widget itself,
+ * only ever confirmed by a subsequent `POST /api/billing/refresh`. */
+export async function billingSubscribe(body: {
+  customer_id: string;
+  plan_id: string;
+}): Promise<{ onvo_subscription_id: string; onvo_customer_id: string; publishable_key: string }> {
+  return pipelineJson('/v1/billing/subscription', jsonInit(body));
+}
+
+/** `POST /v1/billing/subscription/change` (§5.3, Q3 final: cancel-and-
+ * restart, no proration, both directions immediate). `confirm` is the
+ * over-site-limit guard's second call — see `BillingChangeRequest`'s own
+ * docstring in `vrm_api/schemas.py`. */
+export async function billingChange(body: {
+  customer_id: string;
+  plan_id: string;
+  confirm?: boolean;
+}): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/subscription/change', jsonInit(body));
+}
+
+/** `POST /v1/billing/subscription/cancel` (§5.3, Q4). `mode: 'immediate'`
+ * is a real, tenancy-checked `vrm_api` capability but has no customer-facing
+ * caller in this app (Q4: graceful-only in v1's UI) — Step 6 (admin) is
+ * expected to be the only thing that ever sends it. */
+export async function billingCancel(body: {
+  customer_id: string;
+  mode: 'at_period_end' | 'immediate';
+}): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/subscription/cancel', jsonInit(body));
+}
+
+export async function billingResume(customerId: string): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/subscription/resume', jsonInit({ customer_id: customerId }));
+}
+
+/** `POST /v1/billing/payment-method/session` (§5.3, corrected at Step 5,
+ * 2026-08-20 alongside `billingSubscribe()`) — the REPLACE-CARD path for a
+ * customer who ALREADY has a live subscription (first-time subscribe gets
+ * its `onvo_subscription_id` straight from `billingSubscribe()` and never
+ * calls this). Hands back the customer's current live `onvo_subscription_id`
+ * — the SDK widget needs that real id to render a working card form,
+ * exactly like first-time subscribe does. Throws (via `toErrorResponse()`'s
+ * `no_active_subscription` code) if the customer has no live subscription
+ * to attach a new card to — see
+ * `vrm_api/routers/billing.py:post_payment_method_session()`'s own
+ * docstring. */
+export async function billingPaymentMethodSession(
+  customerId: string,
+): Promise<{ onvo_subscription_id: string; onvo_customer_id: string; publishable_key: string }> {
+  return pipelineJson('/v1/billing/payment-method/session', jsonInit({ customer_id: customerId }));
+}
+
+/** `POST /v1/billing/payment-method` (§5.3) — attaches an already-known
+ * `payment_method_id` to the customer's current subscription, re-verified
+ * server-side before being trusted. NOT part of the corrected SDK-widget
+ * flow (§5.2 point 3 / §5.3, Step 5 2026-08-20): the widget itself attaches
+ * a newly-entered card to the `subscriptionId` it was given, and this app
+ * only ever learns that happened via `billingRefresh()` — see
+ * `vrm_api/schemas.py:BillingPaymentMethodRequest`'s own docstring. Kept
+ * here as a lower-level primitive; not currently called by any route in
+ * this app. */
+export async function billingPaymentMethod(body: {
+  customer_id: string;
+  payment_method_id: string;
+}): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/payment-method', jsonInit(body));
+}
+
+/** ONVO's own billing-address shape (`billing.address` on a payment method),
+ * mirrored field-for-field from `vrm_api/schemas.py:BillingAddressIn`. */
+export type BillingAddressIn = {
+  city?: string | null;
+  country?: string | null;
+  line1?: string | null;
+  line2?: string | null;
+  postalCode?: string | null;
+  state?: string | null;
+};
+
+export async function billingAddress(body: {
+  customer_id: string;
+  address: BillingAddressIn;
+}): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/address', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+/** `POST /v1/billing/refresh` (§5.3) — a plain reconcile, what the browser
+ * calls after the SDK's own `onSuccess` fires (§5.2: "a hint to refresh,
+ * never a state change"). Rate-limited per customer by the route handler
+ * that calls this (§6.5) — this function itself has no rate limit of its
+ * own, matching `vrm_api`'s own division of responsibility. */
+export async function billingRefresh(customerId: string): Promise<BillingStatusOut> {
+  return pipelineJson('/v1/billing/refresh', jsonInit({ customer_id: customerId }));
+}
+
+// ── Billing webhook intake (PLAN_PHASE16.md §4.1, §4.2, §6.5) ───────────
+// Called ONLY from `app/api/webhooks/onvo/route.ts`, and ONLY after that
+// route has already verified `X-Webhook-Secret` in constant time and
+// rate-limited the request — see that route's own header comment.
+// `secret_ok` is always `true` on this path (a rejected secret never
+// reaches this function at all; the route writes its own
+// `vrm.billing_events` row directly via `getSupabaseAdmin()` for that
+// case, per `vrm_api/schemas.py:BillingWebhookEventRequest`'s own
+// docstring). Mirrors that schema field-for-field, same "restated, not
+// re-derived" convention as every other function in this module.
+export async function billingWebhookEvent(body: { secret_ok: true; payload: Record<string, unknown> }): Promise<{ ok: boolean }> {
+  return pipelineJson('/v1/billing/webhook-event', jsonInit(body));
 }

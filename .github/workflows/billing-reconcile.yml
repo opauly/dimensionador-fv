@@ -1,0 +1,52 @@
+name: Billing reconcile + retention sweep
+
+# PLAN_PHASE16.md §8 Step 7. Shape copied from PLAN_PHASE15.md §8 Step 7's
+# spec (repo secrets for PIPELINE_API_URL/PIPELINE_API_KEY, curl -f so any
+# non-2xx response fails the job and is visible in the Actions tab) — that
+# file's own Step 7 was deferred and never built, so this is the first
+# workflow in this repo, not a copy of an existing one. Phase 12 locked
+# GitHub Actions `cron:` as this project's scheduling mechanism; see
+# PHASES.md Phase 12 and PLAN_PHASE15.md §0.1/§6.3 for the reasoning
+# (no always-on machine of Oscar's own, run history visible in the Actions
+# tab, no second scheduler to remember).
+#
+# Two calls, both against vrm_api (never victron/, pages/, or app.py):
+#   1. POST /v1/billing/reconcile-due — §4.4's fourth reconcile trigger,
+#      the daily sweep. Reconciles every subscription that's due (past its
+#      current_period_end, in a transitional status, or unsynced for 48h)
+#      and retries any vrm.billing_events row stuck in status='error'.
+#   2. POST /v1/billing/prune-signups — §3.7/§3.8's retention sweep for
+#      vrm.signup_requests and vrm.rate_limits. "A retention job that never
+#      runs is a retention policy that doesn't exist" (PLAN_PHASE16.md §8
+#      Step 7) — wired into the same daily run, not left as a TODO.
+
+on:
+  schedule:
+    # 09:00 UTC daily (03:00 America/Costa_Rica) — off-peak, ahead of a
+    # Costa Rican business day.
+    - cron: "0 9 * * *"
+  workflow_dispatch: {} # manual trigger from the Actions tab, for a spot check
+
+jobs:
+  reconcile-and-prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile every due subscription
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/billing/reconcile-due" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}" \
+            -H "Content-Type: application/json"
+
+      - name: Prune expired signup requests and rate-limit windows
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/billing/prune-signups" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}" \
+            -H "Content-Type: application/json"

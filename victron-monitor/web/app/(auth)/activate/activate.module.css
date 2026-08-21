@@ -48,3 +48,9 @@
   padding: 10px 12px;
   margin-bottom: 16px;
 }
+
+.hint {
+  color: var(--mute);
+  font-size: 12px;
+  margin: 4px 0 0;
+}

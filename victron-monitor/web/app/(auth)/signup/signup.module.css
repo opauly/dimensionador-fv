@@ -1,0 +1,207 @@
+/* app/(auth)/signup — same conventions as forgot.module.css/
+   activate.module.css (styles/tokens.css only, nothing ported from
+   landing_template.html — this is a dashboard-shaped form, not a marketing
+   section). Wider than login/forgot/activate's fixed 420px card would
+   comfortably fit a multi-column plan grid, so the plan picker stacks in a
+   single column instead (`.planGrid`) rather than widening the shared
+   app/(auth)/auth.module.css shell every other auth route also uses. */
+
+.card {
+  width: 100%;
+  padding: 32px 30px 28px;
+}
+
+.title {
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: var(--paper-dim);
+  font-size: 14px;
+  margin-bottom: 24px;
+}
+
+.body {
+  color: var(--paper-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.status {
+  color: var(--paper-dim);
+  font-size: 14px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.submit {
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.confirmation {
+  color: var(--paper-dim);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+.backLink {
+  display: block;
+  background: none;
+  border: none;
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-align: center;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding-top: 6px;
+}
+.backLink:hover {
+  color: var(--paper-dim);
+}
+
+.linkRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The §6.6 honeypot — off-screen for a sighted visitor, aria-hidden +
+   tabIndex=-1 (set in SignupForm.tsx) for assistive tech, so nobody but an
+   automated filler ever touches this field. */
+.honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+}
+
+/* The account-type toggle (ModeToggle) is `display:inline-flex` — its
+   natural width is its own content, not the form's. `.form`'s flex column
+   has no `align-items` (defaults to `stretch`), which is right for every
+   other Field's full-width input/select but stretches this one into a
+   bar spanning the whole form instead of the compact pill it's meant to
+   be. Scoped to just this Field (className on the one instance in
+   SignupForm.tsx) rather than changing Field's own default, which every
+   other full-width control in this form still needs. */
+.accountTypeField {
+  align-items: center;
+  text-align: center;
+}
+
+.plans {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plansLabel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  color: var(--paper-dim);
+}
+
+.planGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.planCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 12px 16px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--paper);
+}
+.planCard:hover {
+  background: var(--panel-2);
+}
+.planCard:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.planCardSelected {
+  border-color: var(--victron);
+  box-shadow: 0 0 0 1px var(--victron);
+}
+
+.planName {
+  font-weight: 600;
+}
+.planSites {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+  margin-left: 10px;
+}
+/* Column, not the row every other cell in .planCard uses — the savings
+   badge sits under the price, not inline with it (Oscar's request,
+   2026-08-21: it was originally under the tier name, which pushed the
+   sites label onto two lines on narrower cards). */
+.planPrice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+.planPriceAmount {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--paper);
+}
+.planPer {
+  font-size: 12px;
+  color: var(--mute);
+  margin-left: 2px;
+}
+.planSavings {
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.agreeRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--paper-dim);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.agreeRow input {
+  margin-top: 3px;
+  accent-color: var(--victron);
+  flex-shrink: 0;
+}
+.agreeRow a {
+  color: var(--victron-glow);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

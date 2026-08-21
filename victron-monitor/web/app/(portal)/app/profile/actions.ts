@@ -3,10 +3,12 @@
 import 'server-only';
 
 // Server Actions for `app/(portal)/app/profile` (PLAN_PHASE14.md §2 Step 4).
-// `requireCustomer()` first in both, per §3.
+// `requireCustomerAllowPending()` first in both, per §3 — a
+// `pending_subscription` customer must still be able to edit their
+// profile and change their password (PLAN_PHASE16.md §6.4).
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requireCustomer } from '@/lib/server/auth';
+import { requireCustomerAllowPending } from '@/lib/server/auth';
 import { createSupabaseServerClient } from '@/lib/server/supabase';
 import { updateCustomerProfile, type ProfileUpdateFields } from '@/lib/server/db';
 import { t } from '@/lib/i18n/strings';
@@ -24,7 +26,7 @@ const profileFormSchema = z.object({
 export type ProfileFormState = { error?: string; success?: boolean };
 
 export async function updateProfileAction(_prevState: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
-  const session = await requireCustomer();
+  const session = await requireCustomerAllowPending();
 
   const parsed = profileFormSchema.safeParse({
     name: formData.get('name'),
@@ -56,7 +58,7 @@ export async function updateProfileAction(_prevState: ProfileFormState, formData
 export type PasswordFormState = { error?: string; success?: boolean };
 
 export async function changePasswordAction(_prevState: PasswordFormState, formData: FormData): Promise<PasswordFormState> {
-  const session = await requireCustomer();
+  const session = await requireCustomerAllowPending();
 
   const current = String(formData.get('current_password') ?? '');
   const next = String(formData.get('new_password') ?? '');

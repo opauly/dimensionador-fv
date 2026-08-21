@@ -30,6 +30,32 @@ export type ActivationEmailInput = {
 // the swatch page decided.
 const VICTRON_BLUE = '#0789d4';
 
+// Absolute URL, not a relative `/pauly_logo.png` — email clients fetch
+// images over plain HTTP with no notion of "relative to this app," so the
+// path has to be resolved against a real origin. Falls back to the
+// production domain the same way `lib/server/signup.ts`'s own `SITE_URL()`
+// does; in local dev (`SITE_URL=http://localhost:3000`) the image simply
+// won't load in a real mail client, since nothing outside this machine can
+// reach localhost — expected, not a bug, and `alt` below is what a
+// recipient sees either way until they click "show images" (most clients'
+// default), which is why it carries the real brand name, not just "logo."
+function siteBase(): string {
+  return (process.env.SITE_URL ?? 'https://monitor.paulyco.com').replace(/\/+$/, '');
+}
+
+function logoUrl(): string {
+  return `${siteBase()}/pauly_logo.png`;
+}
+
+// The footer's own link back to the marketing site — a small, deliberate
+// "carry the branding" touch: every one of this template's five callers
+// (invite, resend, password reset, signup-verify, existing-account) links
+// somewhere task-specific in the CTA button, but none of them otherwise
+// mention where VRM Monitor actually lives.
+function siteHomeUrl(): string {
+  return siteBase();
+}
+
 export function renderActivationEmail({ heading, intro, ctaLabel, ctaUrl, footerNote }: ActivationEmailInput): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -47,10 +73,12 @@ export function renderActivationEmail({ heading, intro, ctaLabel, ctaUrl, footer
                  style="width:480px; max-width:100%; background-color:#12324a; border-radius:8px; overflow:hidden;">
             <tr>
               <td style="padding:28px 32px 0 32px;">
-                <span style="display:inline-block; font-family:Helvetica, Arial, sans-serif; font-weight:800;
-                             text-transform:uppercase; letter-spacing:1px; font-size:13px; color:#e9f2f6;">
-                  Pauly &amp; Co. &middot; VRM Monitor
-                </span>
+                <!-- 567x156 native (public/pauly_logo.png) — displayed at a fixed
+                     136x37 (same ~3.65:1 ratio) so email clients that ignore CSS
+                     width/height still lay it out correctly; real dimension
+                     attributes matter more than the style ones here. -->
+                <img src="${escapeAttr(logoUrl())}" alt="Pauly &amp; Co. — VRM Monitor" width="136" height="37"
+                     style="display:block; width:136px; height:37px; border:0; outline:none;" />
               </td>
             </tr>
             <tr>
@@ -70,11 +98,11 @@ export function renderActivationEmail({ heading, intro, ctaLabel, ctaUrl, footer
               <td style="padding:0 32px 8px 32px;">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                   <tr>
-                    <td align="center" bgcolor="${VICTRON_BLUE}" style="border-radius:4px;">
+                    <td align="center" bgcolor="${VICTRON_BLUE}" style="border-radius:3px;">
                       <a href="${escapeAttr(ctaUrl)}"
                          style="display:inline-block; padding:12px 28px; font-family:Helvetica, Arial, sans-serif;
                                 font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;
-                                color:#ffffff; text-decoration:none; border-radius:4px;">
+                                color:#ffffff; text-decoration:none; border-radius:3px;">
                         ${escapeHtml(ctaLabel)}
                       </a>
                     </td>
@@ -98,8 +126,11 @@ export function renderActivationEmail({ heading, intro, ctaLabel, ctaUrl, footer
               </td>
             </tr>
             <tr>
-              <td style="padding:24px 32px 28px 32px;">
-                <p style="margin:0; font-family:Helvetica, Arial, sans-serif; font-size:11px; color:#6f93a6;">&copy; Pauly &amp; Co. Solar</p>
+              <td style="padding:24px 32px 28px 32px; border-top:1px solid #234a63;">
+                <p style="margin:16px 0 0 0; font-family:Helvetica, Arial, sans-serif; font-size:11px; color:#6f93a6;">
+                  &copy; Pauly &amp; Co. Solar &middot;
+                  <a href="${escapeAttr(siteHomeUrl())}" style="color:#6f93a6;">${escapeHtml(siteHomeUrl().replace(/^https?:\/\//, ''))}</a>
+                </p>
               </td>
             </tr>
           </table>

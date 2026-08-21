@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/server/auth';
 import { createCustomer, updateCustomer, setActive, type AdminCustomerUpdateFields, type CreateCustomerFields } from '@/lib/server/db/admin';
 import { sendInvite, resendInvite } from '@/lib/server/invites';
-import { vrmLinkDisconnect } from '@/lib/server/pipeline';
+import { billingCancel, billingRefresh, vrmLinkDisconnect, PipelineError } from '@/lib/server/pipeline';
 
 const stringOrNull = z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null), z.string().nullable());
 const numberOrNull = z.preprocess((v) => {
@@ -206,4 +206,114 @@ export async function disconnectVrmLinkAction(customerId: string): Promise<VrmLi
   }
   revalidatePath('/admin/customers');
   return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// Billing (PLAN_PHASE16.md §0.6 Q11, §8 Step 6) — view, refresh/reconcile,
+// and cancel only. NO field or action here ever collects card data — a
+// customer's card is entered by the customer, in ONVO's own form, never by
+// Oscar (Q11's own answer). All three functions below call straight
+// through `lib/server/pipeline.ts` (the same `vrm_api` endpoints
+// `/app/billing` itself calls), never a second, admin-only billing code
+// path — `vrm_api`'s own tenancy check only confirms `customerId` names a
+// real row, so an admin session calling these for ANY customer is exactly
+// as legitimate as that customer calling it for themselves; `requireAdmin()`
+// below is what makes that call.
+// ══════════════════════════════════════════════════════════════════════
+
+export type BillingActionState = { ok?: boolean; error?: string };
+
+/** "Refresh" (PLAN_PHASE16.md §8 Step 6) — a plain reconcile
+ * (`POST /v1/billing/refresh`), the exact code path §7's failure-modes
+ * table names as the first line of support for "their card works, ONVO
+ * says trialing, but the promotion didn't happen." */
+export async function billingRefreshAction(customerId: string): Promise<BillingActionState> {
+  const admin = await requireAdmin();
+  try {
+    await billingRefresh(customerId);
+  } catch {
+    return { error: "Could not refresh this customer's billing status. Please try again." };
+  }
+  console.info(`admin.billing_refresh customer_id=${customerId} admin=${admin.email}`);
+  revalidatePath('/admin/customers');
+  return { ok: true };
+}
+
+/** "Cancel" (PLAN_PHASE16.md §0.6 Q4/Q11, §8 Step 6) — exposes BOTH
+ * `at_period_end` (what the customer-facing UI already offers) and
+ * `immediate` (Q4's admin-only escape hatch, built and tenancy-checked in
+ * `vrm_api/routers/billing.py:post_subscription_cancel()` since Step 3 but
+ * never callable from anywhere until this action — this IS "the one place
+ * it's allowed to be reachable," per that endpoint's own docstring). Both
+ * modes are logged with the acting admin's identity — this is a real
+ * money/access action, not a read. */
+export async function billingCancelAction(customerId: string, mode: 'at_period_end' | 'immediate'): Promise<BillingActionState> {
+  const admin = await requireAdmin();
+  try {
+    await billingCancel({ customer_id: customerId, mode });
+  } catch (err) {
+    if (err instanceof PipelineError && err.code === 'no_active_subscription') {
+      return { error: 'This customer has no active subscription to cancel.' };
+    }
+    return { error: 'Could not cancel the subscription. Please try again.' };
+  }
+  console.info(`admin.billing_cancel customer_id=${customerId} mode=${mode} admin=${admin.email}`);
+  revalidatePath('/admin/customers');
+  return { ok: true };
+}
+
+export type PromoteToActiveState = { ok?: boolean; promoted?: boolean; error?: string; message?: string };
+
+/**
+ * "Promote to active" (PLAN_PHASE16.md §3.6, §7, §8 Step 6) — the deliberate,
+ * confirm-dialog-gated support escape hatch for "ONVO says trialing/entitled
+ * but the promotion to `provisioning_state='active'` never fired"
+ * (`vrm_api/billing.py:apply_entitlements()`'s own §4.5 rule 8 docstring).
+ *
+ * There is no separate "promote" mechanism to call: `POST
+ * /v1/billing/refresh` -> `reconcile_customer()` -> `apply_entitlements()`
+ * is the ONLY code that ever writes `provisioning_state`, and it already
+ * does exactly what "promote" means (flips `pending_subscription` ->
+ * `active` the moment it observes an entitled subscription WITH a payment
+ * method on file — `billing.py`'s own "Entitled status is necessary but NOT
+ * sufficient" note). Reusing it here (rather than building a second
+ * `provisioning_state` writer, which §4.5 rule 8 explicitly reserves for
+ * exactly two callers) means this action can genuinely be a no-op: a
+ * customer with no entitled subscription at all — no card ever accepted —
+ * stays `pending_subscription` after this runs, correctly, because a
+ * promote button cannot manufacture money that was never paid.
+ *
+ * The one thing this function adds beyond a plain refresh is the log line
+ * naming the acting admin (PLAN_PHASE16.md §8 Step 6: "writes a log line
+ * naming the admin") — `apply_entitlements()` itself only ever logs
+ * `customer_id` (`billing.entitlement_changed` / `signup.promoted`), never
+ * who asked for the reconcile that triggered it, since most reconciles are
+ * automatic (a webhook, the daily sweep, a customer's own page load). This
+ * one is admin-initiated, so it is the one call site in this whole feature
+ * where "who asked for this" is worth recording on its own line.
+ */
+export async function promoteToActiveAction(customerId: string): Promise<PromoteToActiveState> {
+  const admin = await requireAdmin();
+  let result;
+  try {
+    result = await billingRefresh(customerId);
+  } catch {
+    return { error: "Could not refresh this customer's billing status. Please try again." };
+  }
+  const promoted = result.provisioning_state === 'active';
+  console.info(
+    `admin.promote_to_active customer_id=${customerId} admin=${admin.email} (${admin.userId}) ` +
+      `promoted=${promoted} provisioning_state=${result.provisioning_state} billing_status=${result.billing_status} ` +
+      `plan_key=${result.plan_key} site_limit=${result.site_limit}`,
+  );
+  revalidatePath('/admin/customers');
+  if (!promoted) {
+    return {
+      ok: true,
+      promoted: false,
+      message:
+        'No change — ONVO does not currently report an entitled subscription with a payment method on file for this customer. If they genuinely have not paid, this is correct, not a bug.',
+    };
+  }
+  return { ok: true, promoted: true };
 }

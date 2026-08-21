@@ -5,5 +5,5 @@ export { FlowSteps } from './FlowSteps/FlowSteps';
 export { ModuleGrid } from './ModuleGrid/ModuleGrid';
 export { ReportPreview } from './ReportPreview/ReportPreview';
 export { Pricing } from './Pricing/Pricing';
-export { AccessForm } from './AccessForm/AccessForm';
+export type { PricingProps } from './Pricing/Pricing';
 export { Footer } from './Footer/Footer';

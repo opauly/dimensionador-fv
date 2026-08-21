@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { AccessForm, FlowSteps, Footer, Hero, ModuleGrid, Nav, Pricing, ReportPreview } from '@/components/marketing';
+import { FlowSteps, Footer, Hero, ModuleGrid, Nav, Pricing, ReportPreview } from '@/components/marketing';
+import { getFeaturedSelfServePlanIds } from '@/lib/server/db/signup';
 
 // Page-specific metadata layered on top of the root layout's defaults
 // (app/layout.tsx) — the marketing home page is the one URL that should
@@ -25,7 +26,17 @@ export const metadata: Metadata = {
 // route groups can each carry their own layout without this one's Nav/
 // Footer leaking into /app or /admin, which get their own AppShell
 // (PLAN_PHASE14.md §1.7's component tree, Steps 3-4).
-export default function MarketingPage() {
+//
+// `AccessForm` (the mailto "request early access" section) is retired as
+// of PLAN_PHASE16.md §8 Step 5.5 — Oscar's explicit decision, now that
+// `/signup` is a real self-serve flow rather than a waitlist. A Server
+// Component (unlike `Pricing`, a client component) so it can fetch the two
+// featured plans' real `vrm.plans.id`s directly and hand them down as
+// props — `Pricing`'s own "Get started" buttons need a real id to
+// preselect, not the marketing `plan_key` string.
+export default async function MarketingPage() {
+  const featuredPlans = await getFeaturedSelfServePlanIds();
+
   return (
     <>
       <Nav />
@@ -33,8 +44,7 @@ export default function MarketingPage() {
       <FlowSteps />
       <ModuleGrid />
       <ReportPreview />
-      <Pricing />
-      <AccessForm />
+      <Pricing starterPlanId={featuredPlans.starter} growthPlanId={featuredPlans.growth} />
       <Footer />
     </>
   );

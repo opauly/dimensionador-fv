@@ -52,6 +52,18 @@ SITE_URL=http://localhost:3000 # lib/site.ts — overrides the prod-domain-place
 `vrm_api` — see `lib/server/resend.ts`'s header comment for why
 `lib/server/invites.ts` doesn't call `victron/mailer.py` (the Python
 counterpart Phase 12 will import unchanged) even though both exist.
+
+Phase 16 Step 4 addition (`app/api/webhooks/onvo/route.ts`):
+
+```bash
+ONVO_WEBHOOK_SECRET=webhook_secret_...   # from the ONVO dashboard's "Desarrolladores"
+                                          # section, this endpoint's own registered
+                                          # webhook. NOT the same value as vrm_api's
+                                          # ONVO_SECRET_KEY (root .env) — see
+                                          # PLAN_PHASE16.md §6.1's table. Unset/empty
+                                          # means every delivery is rejected (fail
+                                          # closed), never "anything matches".
+```
 **Known account-config gap, not a code defect:** as of this writing the
 `paulyco.com` domain is not verified in this project's Resend account, so
 a real send to an arbitrary recipient (e.g. an actual customer) currently
@@ -61,6 +73,56 @@ verified working end-to-end with a deliverable from/to pair
 (`onboarding@resend.dev` → the account's own verified test address). Fix:
 verify the domain at resend.com/domains before relying on real invites
 sending in this environment.
+
+Phase 16 Step 5.5 additions (`lib/server/signup.ts`, `app/(auth)/signup/*`
+— public self-serve signup, `PLAN_PHASE16.md` §5.5/§6.6):
+
+```bash
+SIGNUP_IP_SALT=...              # server-side pepper for vrm.signup_requests.ip_hash
+                                 # = sha256(ip + SIGNUP_IP_SALT) — never the raw IP is
+                                 # stored. Rotating this resets the signup rate-limit
+                                 # history (§3.7) — acceptable, worth knowing.
+# SIGNUP_CAPTCHA_PROVIDER=turnstile   # commented out on purpose — a seam, not a
+# SIGNUP_CAPTCHA_SECRET=...           # decision (§0.6 Q12, unanswered). Left unset,
+                                       # lib/server/signup.ts:verifyHumanChallenge()
+                                       # is a no-op that always returns "human".
+                                       # Setting SIGNUP_CAPTCHA_PROVIDER without also
+                                       # shipping a verifier for it makes every signup
+                                       # fail closed — see that function's own comment.
+```
+
+`ONVO_SECRET_KEY`/`ONVO_PUBLISHABLE_KEY`/`ONVO_MODE` are **not** read by this
+app at all — they live in the root `.env` and are read only by `vrm_api`
+(`vrm_api/onvo.py`, `vrm_api/routers/billing.py`); see `vrm_api/README.md`.
+This app only ever forwards a `plan_id`/`payment_method_id` through
+`lib/server/pipeline.ts` to `vrm_api`'s pipeline-key-authenticated billing
+router, and never holds an ONVO key of its own.
+
+## Public surface
+
+The complete list of routes reachable with **no session** — reproduced
+verbatim from `PLAN_PHASE16.md` §1.1, which is the list `lib/server/
+ratelimit.ts` and the signup/webhook handlers police. A reviewer auditing
+"what can an unauthenticated request do to this app" should be able to find
+the answer here, in one place, without reading the plan doc:
+
+| Route | Auth | What it does |
+|---|---|---|
+| `/` (marketing), `/styleguide`, `robots`, `sitemap` | none | static, unchanged |
+| `/login`, `/forgot`, `/activate` | none | unchanged |
+| `/signup` (page + its Server Action) | none | stages a signup request, sends one email. Writes only `vrm.signup_requests` |
+| `/signup/verify` | token | redeems a single-use token; creates the `vrm.customers` row; redirects into `/activate` |
+| `/api/webhooks/onvo` | shared secret (`ONVO_WEBHOOK_SECRET`) | machine-to-machine, forwards to `vrm_api`'s `POST /v1/billing/webhook-event` after verifying the secret and rate-limiting |
+
+Anything not on this list requires a session (`requireCustomer()` /
+`requireAdmin()` / their `ForRoute` counterparts). A request with no session
+can never create anything of value through any of the rows above — `/signup`
+stages an intent and sends one email; `/signup/verify` requires possession of
+a single-use token already emailed to the address being claimed; the webhook
+route only re-triggers a read-through reconcile against a customer resolved
+from **our own** mirror tables, never from anything in the request body
+(§0.5, §4.2). Adding a row to this table means editing both this section and
+`PLAN_PHASE16.md` §1.1/§6.6.
 
 ## Node version
 

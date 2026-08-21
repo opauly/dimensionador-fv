@@ -19,8 +19,12 @@ export function Hero() {
             customer on your fleet — automatically, every week.
           </p>
           <div className={styles.ctas}>
-            <Button href="#cta" arrow>
-              Request early access
+            {/* PLAN_PHASE16.md §8 Step 5.5 — replaces the old `#cta` anchor
+                into the now-deleted `AccessForm`; the real self-serve
+                signup flow lives at /signup instead (Oscar's explicit
+                decision to retire the request-access form). */}
+            <Button href="/signup" arrow>
+              Get started
             </Button>
             <Button href="#preview" variant="ghost">
               See a sample report

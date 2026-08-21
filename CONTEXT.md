@@ -1191,3 +1191,69 @@ Implemented a CSS flexbox "pinned to bottom" layout in `off_grid_es.html`/`off_g
 - **Deliberately did not touch `grid_zero_es.html`/`grid_zero_en.html`** — the user's ask was scoped to off-grid, and testing the same flex change against Oscar Pauly's heaviest Grid Zero case (still using its own un-flattened wrapper divs) regressed it to 2 pages, splitting the warranty table again. Grid Zero would need the same wrapper-div audit before this technique could safely apply there — left for a future round if requested.
 
 **Verified**: re-tested off-grid's own heaviest known content (`JORGE_RAMIREZ_DATA` + a full synthetic 12-month chart, and `HYBRID_DATA` — Hybrid renders through the same off_grid templates) — both still 1 page. Henry Garita's real draft re-rendered from the actual template files (not a scratch copy) and visually confirmed: Notas Adicionales/Detalles de Garantía now sit directly above the footer, with the reclaimed whitespace gone from the middle of the page. Full 3-case off-grid/hybrid regression still 1 page.
+
+---
+
+## Phase 16 — VRM Monitor: ONVO billing + public signup (shipped 2026-08-21)
+
+**Note on this file's coverage:** Phases 13–15 (the VRM Monitor Next.js app,
+`vrm_api`, and direct VRM API ingestion) were never given their own entries
+in this file — a pre-existing gap this entry doesn't attempt to backfill.
+`PHASES.md` and the individual `PLAN_PHASE1{3,4,5}.md` files remain the
+record for those. This entry only covers what Phase 16 shipped, per
+`PLAN_PHASE16.md`.
+
+Public self-serve signup and customer self-service subscription billing on
+**ONVO Pay**, for `victron-monitor/web`. `vrm.customers.plan`/`site_limit`
+stop being values Oscar types into `/admin/customers` and become a derived
+consequence of a real, paid, verified ONVO subscription.
+
+- **Read-through, not event-sourced** is the one design decision that
+  shapes everything else (§0.5): ONVO is the source of truth, this repo's
+  database is a cache, and a webhook is a cache-invalidation hint, never
+  something whose payload gets applied to a mirror row. Every mutation this
+  product performs — a customer's own action, a webhook delivery, or the
+  daily scheduled sweep — ends the same way: re-read ONVO with our own
+  secret key and overwrite the mirror wholesale.
+- **Public signup verifies the email before anything of value exists.** A
+  submission to `/signup` writes only a `vrm.signup_requests` staging row
+  and sends one email; the `vrm.customers` row, the ONVO customer, and the
+  ONVO subscription are each created only at a later, gated step, and the
+  account is only promoted to a real tenant once a reconcile observes an
+  entitled subscription. An abandoned signup leaves nothing usable and no
+  ONVO object anywhere.
+- **No card data ever touches our servers.** ONVO's own web SDK renders the
+  card form; `vrm_api` and `victron-monitor/web` hold only opaque ONVO ids,
+  and no ONVO object id is ever accepted from a request body without a
+  fresh re-read confirming it belongs to the session's own customer.
+- **Migration 025** added `vrm.plans`, `vrm.billing_customers`,
+  `vrm.subscriptions`, `vrm.subscription_invoices`, `vrm.billing_events`,
+  `vrm.signup_requests`, `vrm.rate_limits`, plus `site_limit_source`/
+  `provisioning_state`/`origin` columns on `vrm.customers` — all additive,
+  every existing customer's behavior unchanged (defaults `'manual'`/
+  `'active'`/`'admin'`).
+- **`vrm_api/billing.py`** (`reconcile_customer()`/`apply_entitlements()`)
+  and **`vrm_api/onvo.py`** (ONVO transport) hold all the judgement;
+  **`vrm_api/routers/billing.py`** is the customer-facing HTTP surface —
+  full endpoint list in `vrm_api/README.md`.
+- **`.github/workflows/billing-reconcile.yml`** (new — this repo's first
+  GitHub Actions workflow; Phase 12 locked `cron:` as the scheduling
+  mechanism but never actually built one) runs daily: `POST
+  /v1/billing/reconcile-due` (the fourth reconcile trigger — the daily
+  sweep, plus retrying any `vrm.billing_events` row stuck in
+  `status='error'`) and `POST /v1/billing/prune-signups` (the §3.7/§3.8
+  retention sweep for `vrm.signup_requests` and `vrm.rate_limits` — "a
+  retention job that never runs is a retention policy that doesn't exist").
+- **Deliberately deferred, recorded as a conscious risk acceptance, not an
+  oversight:** Costa Rican tax/factura electrónica (Q7) — prices are not
+  confirmed to include or exclude the 13% IVA, and no electronic invoice is
+  issued. Surfaces after the first live (non-test-mode) charge, not before.
+- **Untouched, confirmed at the end of this phase:** `victron/`, `pages/`,
+  `app.py`. `git diff --stat -- pages/ victron/` is empty.
+
+Full design, the verified-vs-unverified ONVO API findings (including two
+that contradicted the plan's original working assumptions — no in-place
+upgrade/downgrade mechanism exists on ONVO's side, and card replacement
+turned out simpler than any candidate the plan had listed), and every
+step's validation gate: [`PLAN_PHASE16.md`](PLAN_PHASE16.md). Not duplicated
+here.

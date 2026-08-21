@@ -24,6 +24,7 @@
 | 13 — VRM Monitor Customer Portal (Streamlit) | 🔶 Superseded by Phase 14 — Step 1 built & validated (migration 021, login, role resolution) |
 | 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | 🔶 Steps 1–7 built & validated (design system, auth, tenancy, vrm_api, upload/reports, admin+invites); Step 8 (deploy/cutover) pending — see PLAN_PHASE14.md |
 | 15 — VRM Monitor: direct VRM API ingestion (customer-connected Victron accounts + Oscar's own admin fleet access) | ✅ Steps 0–6 built & independently verified (see PLAN_PHASE15.md); Step 7 (scheduled sync) deferred at Oscar's request |
+| 16 — VRM Monitor: public signup + customer self-service billing on ONVO Pay | ✅ Complete — Steps 0–7 built & verified (see PLAN_PHASE16.md) |
 
 ---
 
@@ -1047,6 +1048,100 @@ admin-fleet token, added after Step 0, is a separate and already-scoped exceptio
 
 ---
 
+## Phase 16 — VRM Monitor: public signup + customer self-service billing on ONVO Pay (complete, 2026-08-19 → 2026-08-21)
+
+**Goal:** a stranger can sign up from the landing page, verify their email, enter a card, and be a
+working customer minutes later — and an existing customer manages their own subscription (upgrade,
+downgrade, cancel), the card on file, and their billing address from `/app/billing`. And
+`vrm.customers.plan`/`site_limit` stop being values a human types into `/admin/customers` and become a
+derived consequence of a real, paid, verified ONVO subscription.
+
+Full build plan, the verified-vs-unverified ONVO API findings, and per-step validation gates:
+[`PLAN_PHASE16.md`](PLAN_PHASE16.md). Not duplicated in full here.
+
+### Why this phase exists
+
+Every plan change before this phase was Oscar editing a row, and every customer arrived because Oscar
+invited them. That doesn't scale past the people he can remember, and it meant the product had no
+revenue mechanism and no acquisition mechanism of its own — `plan` and `site_limit` were assertions,
+not consequences of anyone having paid.
+
+### What shipped
+
+- **Public self-serve signup** (`/signup` → `/signup/verify` → `/activate`, reusing the existing
+  invite/activation machinery rather than paralleling it). A submission stages a
+  `vrm.signup_requests` row and sends one email; no `vrm.customers` row, Supabase auth user, or ONVO
+  object of any kind exists until a single-use, hashed, 24-hour token is redeemed.
+- **Customer self-service billing** at `/app/billing` (also the first-run checkout surface for a
+  freshly-verified signup): subscribe, upgrade/downgrade (cancel-and-restart — no in-place price
+  change exists on ONVO's side, confirmed at Step 0), cancel (graceful by default), resume, replace
+  the card, edit the billing address, view renewal history. Card entry exists in exactly one place in
+  the codebase — the ONVO web SDK's own card form; no card data ever reaches this product's servers.
+- **Read-through reconciliation, not event-sourced** (§0.5): ONVO is the source of truth, this
+  product's database is a cache, and a webhook (`/api/webhooks/onvo` → `vrm_api`'s
+  `POST /v1/billing/webhook-event`) is a cache-invalidation hint only — never a payload that gets
+  applied to a mirror row. Four reconcile triggers (post-mutation, webhook, on-read staleness, and the
+  new daily `cron:` sweep) keep entitlement correct within one page load or 24 hours, even if every
+  webhook is lost.
+- **Admin visibility**: a billing column and per-customer actions on `/admin/customers` (view,
+  refresh/reconcile, cancel — never card entry by Oscar), a pending-signups filter, a **Promote to
+  active** support escape hatch, and a recent-signups panel.
+- **Scheduling + retention** (Step 7): `.github/workflows/billing-reconcile.yml` — this repo's first
+  GitHub Actions workflow (Phase 12 locked `cron:` as the mechanism but never built one) — runs daily,
+  calling `POST /v1/billing/reconcile-due` (the scheduled sweep) and the new
+  `POST /v1/billing/prune-signups` (retention for `vrm.signup_requests` and `vrm.rate_limits`, §3.7/
+  §3.8) against `vrm_api`, authenticated with repo secrets.
+- Migration 025: `vrm.plans`, `vrm.billing_customers`, `vrm.subscriptions`, `vrm.subscription_invoices`,
+  `vrm.billing_events`, `vrm.signup_requests`, `vrm.rate_limits`, plus `site_limit_source`/
+  `provisioning_state`/`origin` columns on `vrm.customers` — all additive, every existing customer's
+  behavior unchanged.
+
+### Decisions locked (see PLAN_PHASE16.md §0.5, §3, §4, §5.5, §6)
+
+- **ONVO is the source of truth; our database is a cache; webhooks are cache-invalidation hints and
+  nothing more.** ONVO documents no `subscription.created`/`.updated`/`.canceled` event, warns events
+  can arrive out of order, and states no retry policy — so state is never written from an event
+  payload; it is always re-read from ONVO with our own secret key. This also makes a forged webhook
+  structurally unable to change anything.
+- **Public signup verifies the email before anything exists.** A submission writes only a
+  `vrm.signup_requests` staging row and sends one email; the `vrm.customers` row is created only when
+  a single-use, hashed, 24-hour token is redeemed; the ONVO customer and subscription are created only
+  when the visitor enters a card; and the account is promoted to a real tenant only when a *reconcile*
+  observes an entitled subscription. An abandoned signup leaves nothing usable and no ONVO object.
+- **No ONVO object id is ever accepted from a request body.** Every id is looked up from a mirror row
+  already scoped to a tenancy-checked customer — the direct analogue of Phase 15's installation-id
+  binding, and here it is what stands between us and charging the wrong person's card.
+- **No card data ever touches our servers.** ONVO's web SDK renders the card form; our servers hold
+  opaque ids only.
+- **A downgrade never deactivates or deletes a site.** An over-limit customer keeps everything and is
+  simply blocked from adding more.
+- **Deliberately deferred, recorded as a conscious risk acceptance, not an oversight:** Costa Rican
+  tax/factura electrónica (Q7) — prices are not confirmed to include or exclude the 13% IVA, and no
+  electronic invoice is issued. Surfaces after the first live (non-test-mode) charge, not before —
+  worth Oscar's own eyes before flipping `ONVO_MODE` to `live`.
+
+### Explicit non-goals
+
+One-off payments/Checkout Sessions (so the $9.99 single report is not purchasable at signup), the
+Solar Design Tool's unrelated `onvo_commission_pct` columns, social/OAuth login, multi-user accounts,
+self-serve account deletion, disposable-email blocklists, factura electrónica/Hacienda filing,
+refunds/coupons/marketplace/SINPE, dunning and abandoned-signup emails, invoice PDFs, metered billing,
+automatic site deactivation, and any change to `victron/`, `pages/`, or `app.py` — confirmed at the end
+of this phase: `git diff --stat -- pages/ victron/` is empty.
+
+### Validation
+
+Every step validated live against a real test-mode ONVO account and a running `vrm_api`/Next.js dev
+server — see PLAN_PHASE16.md's per-step validation gates for the full list. Step 7 specifically:
+`POST /v1/billing/reconcile-due` and the new `POST /v1/billing/prune-signups` both called live with the
+exact headers/URL shape the GitHub Actions workflow uses; the prune endpoint verified against
+deliberately-backdated throwaway rows in both `vrm.signup_requests` and `vrm.rate_limits` (old rows
+deleted, fresh rows untouched, test rows cleaned up afterward); the workflow YAML validated with
+`actionlint` (zero issues) and greped to confirm every secret is referenced only via `${{ secrets.NAME
+}}`, never a literal value.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -1067,6 +1162,7 @@ admin-fleet token, added after Step 0, is a separate and already-scoped exceptio
 | 13 | VRM Monitor customer portal (Streamlit, superseded) | 5–8 | Step 1 built & validated; superseded by Phase 14 |
 | 14 | VRM Monitor unified Next.js site + Python pipeline API | 12–18 | Whenever needed — triggered by the first self-serve customer |
 | 15 | VRM Monitor: direct VRM API ingestion (customer-connected accounts + Oscar's admin fleet access) | 10–14 | Whenever needed — triggered by a customer who shouldn't have to export a CSV weekly, or by Oscar wanting fleet visibility without one |
+| 16 | VRM Monitor: public signup + customer self-service billing on ONVO Pay | 13–18 | Complete (2026-08-19 → 2026-08-21) — the first phase that gives the product its own revenue and acquisition mechanism |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
@@ -1117,6 +1213,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 14 (VRM Monitor unified Next.js site) is off this critical path as well**, and — like Phase 13 before it — builds a *second application* rather than extending the existing one; `app.py` and `pages/` stay untouched. It depends on the VRM report pipeline (done) and on nothing else; Phases 9 and 12 are complementary but not prerequisites. Phase 14 and Phase 12 overlap in exactly one place — the Resend integration — and whichever lands first should write `victron/mailer.py` generically so the other inherits it. Trigger Phase 14 by the first customer who should be able to upload their own CSV without Oscar doing it for them.
 
 **Phase 15 (direct VRM API ingestion) is off this critical path too**, and is the first phase that *depends* on another off-path phase: it builds on Phase 14's web app, `vrm_api`, and tenancy model rather than standing alone. It is also the first time this product stores a credential belonging to a third party on a customer's behalf, which is why its plan spends more of its length on storage and tenancy than on features. Trigger it by the first customer for whom weekly CSV exports are the thing standing between them and renewing.
+
+**Phase 16 (public signup + ONVO billing) is off this critical path too, and is now complete.** Like Phase 15 it depends on Phase 14's web app, `vrm_api`, and tenancy model. Unlike every previous phase, its failure modes are financial rather than informational, and it opened this system's first door that starts outside it (a stranger with no session, at `/signup`) — which is why its plan spent most of its length on reconciliation, tenancy, and the trust boundary rather than on features. It is the first phase that makes VRM Monitor self-sustaining: a stranger can now sign up, verify, pay, and become a working customer with no action from Oscar, and an existing customer manages their own subscription end to end.
 
 ---
 

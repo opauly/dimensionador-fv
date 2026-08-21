@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { requireCustomer } from '@/lib/server/auth';
-import { getCustomer, getVrmLinkStatus, siteCount } from '@/lib/server/db';
-import { t, type Lang } from '@/lib/i18n/strings';
+import { requireCustomerAllowPending } from '@/lib/server/auth';
+import { getBillingStatus, getCustomer, getVrmLinkStatus, siteCount } from '@/lib/server/db';
+import { t, type Lang, type StringKey } from '@/lib/i18n/strings';
 import { planLabel } from '@/lib/plans';
 import { formatDate, type DateLocale } from '@/lib/dates';
 import { Button } from '@/components/ui';
@@ -12,6 +12,21 @@ import styles from './profile.module.css';
 // Same per-file convention `VrmLinkPanel.tsx` already uses — see its own
 // comment on `DATE_LOCALE` for why this isn't a shared export.
 const DATE_LOCALE: Record<Lang, DateLocale> = { en: 'en-US', es: 'es-CR' };
+
+// Same small per-file mapping `BillingManager.tsx` (`/app/billing`) uses
+// for the exact same closed vocabulary (§0.2b finding 4) — duplicated
+// rather than shared for the same reason `DATE_LOCALE` is duplicated across
+// this app's client components: a two-line const isn't worth a shared
+// module import for something this page only needs once.
+const BILLING_STATUS_LABEL_KEY: Record<string, StringKey> = {
+  trialing: 'billing_status_trialing',
+  active: 'billing_status_active',
+  past_due: 'billing_status_past_due',
+  canceled: 'billing_status_canceled',
+  unpaid: 'billing_status_unpaid',
+  incomplete: 'billing_status_incomplete',
+  incomplete_expired: 'billing_status_incomplete_expired',
+};
 
 export const metadata: Metadata = {
   title: 'Profile',
@@ -28,16 +43,21 @@ function formatMemberSince(createdAt: string, lang: 'en' | 'es'): string {
   }
 }
 
-// `app/(portal)/app/profile` (PLAN_PHASE14.md §2 Step 4). `requireCustomer()`
-// first, per §3. The read-only block below is deliberately built from
-// `session`/`customer`/`siteCount()` directly in this Server Component —
-// none of it is editable, so none of it needs to be client-side state.
+// `app/(portal)/app/profile` (PLAN_PHASE14.md §2 Step 4). One of the three
+// call sites that opt out of `requireCustomer()`'s pending-account gate via
+// `requireCustomerAllowPending()` (PLAN_PHASE16.md §6.4/§8 Step 5.5) — a
+// `pending_subscription` customer still needs to sign out and change their
+// password, and both affordances live on this page. The read-only block
+// below is deliberately built from `session`/`customer`/`siteCount()`
+// directly in this Server Component — none of it is editable, so none of
+// it needs to be client-side state.
 export default async function ProfilePage() {
-  const session = await requireCustomer();
-  const [customer, activeSites, vrmStatus] = await Promise.all([
+  const session = await requireCustomerAllowPending();
+  const [customer, activeSites, vrmStatus, billingStatus] = await Promise.all([
     getCustomer(session.customerId),
     siteCount(session.customerId),
     getVrmLinkStatus(session.customerId),
+    getBillingStatus(session.customerId),
   ]);
 
   const lang = session.uiLanguage;
@@ -89,6 +109,25 @@ export default async function ProfilePage() {
         )}
         <Button href="/app/sites" variant="ghost">
           {t(lang, 'profile_vrm_manage_cta')}
+        </Button>
+      </div>
+
+      {/* Billing status card (PLAN_PHASE16.md §8 Step 5) — same "compact
+         status text + link" shape as the VRM connection card above, not an
+         inline billing flow (that lives entirely at /app/billing). */}
+      <div className={styles.section}>
+        <h2>{t(lang, 'profile_billing_title')}</h2>
+        <p className={styles.readonlyValue}>
+          {billingStatus.plan_key
+            ? `${planLabel(billingStatus.plan_key)} · ${
+                billingStatus.status
+                  ? t(lang, BILLING_STATUS_LABEL_KEY[billingStatus.status] ?? 'billing_status_unknown')
+                  : t(lang, 'billing_status_unknown')
+              }`
+            : t(lang, 'profile_billing_no_plan')}
+        </p>
+        <Button href="/app/billing" variant="ghost">
+          {t(lang, 'profile_billing_manage_cta')}
         </Button>
       </div>
 

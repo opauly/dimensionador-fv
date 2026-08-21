@@ -152,3 +152,73 @@ Bootstrap credentials that can't live in the database (chicken-and-egg — neede
 - Streamlit: `.env` (gitignored)
 
 Everything else — site specs, health thresholds, report email routing, Apps Script URL per site — is DB-driven and requires no redeploy to change.
+
+---
+
+## 5. VRM Monitor billing wiring (Phase 16)
+
+**Scope note:** this doc's earlier sections predate VRM Monitor's Next.js
+app / `vrm_api` (Phase 14) and its own `vrm` schema (Phase 15) — they were
+never added here, a pre-existing gap this phase doesn't attempt to backfill
+in full. This section covers only what Phase 16 (ONVO billing + public
+signup) adds on top of that existing, undocumented wiring: `PLAN_PHASE14.md`
+§1.3 and `vrm_api/README.md` remain the source of truth for the
+Next.js ↔ `vrm_api` relationship itself.
+
+```mermaid
+flowchart TB
+    subgraph Internet["The public internet"]
+        Visitor["A stranger with no session"]
+    end
+
+    subgraph Onvo["ONVO Pay"]
+        OnvoApi["api.onvopay.com<br/>(subscriptions, prices, payment methods)"]
+        OnvoWebhook["ONVO webhook sender"]
+    end
+
+    subgraph Web["victron-monitor/web (Next.js)"]
+        Signup["/signup, /signup/verify<br/>(public, no session)"]
+        WebhookRoute["/api/webhooks/onvo<br/>(shared-secret auth)"]
+        BillingUI["/app/billing<br/>(ONVO SDK card form)"]
+    end
+
+    subgraph Api["vrm_api"]
+        BillingRouter["routers/billing.py<br/>(pipeline-key auth)"]
+        Onvo_py["onvo.py<br/>(ONVO transport)"]
+    end
+
+    subgraph Sched["GitHub Actions cron"]
+        Workflow["billing-reconcile.yml<br/>(daily)"]
+    end
+
+    Visitor -- "stages a signup request,<br/>one email sent — no account<br/>created yet" --> Signup
+    Signup -. "verified email → real customer row<br/>→ redirect into /activate" .-> Web
+
+    BillingUI -- "renders card form with<br/>publishable key + subscriptionId" --> OnvoApi
+    BillingUI -- "customer_id from session,<br/>never from the browser" --> BillingRouter
+    BillingRouter -- "secret key,<br/>server-to-server" --> Onvo_py
+    Onvo_py -- "outbound only" --> OnvoApi
+
+    OnvoWebhook -- "cache-invalidation hint only —<br/>the first arrow into this system<br/>that starts outside it besides /signup" --> WebhookRoute
+    WebhookRoute -- "verified + rate-limited,<br/>then forwarded (pipeline key)" --> BillingRouter
+    BillingRouter -- "re-reads ONVO,<br/>never applies the payload" --> Onvo_py
+
+    Workflow -- "POST /v1/billing/reconcile-due,<br/>POST /v1/billing/prune-signups" --> BillingRouter
+```
+
+**Read-through, restated as wiring, not just policy (`PLAN_PHASE16.md`
+§0.5):** every arrow into `vrm_api` from ONVO — whether it's a webhook
+delivery or the daily sweep — triggers a fresh read from `api.onvopay.com`
+with our own secret key. Nothing upstream of `vrm_api` (not the webhook
+payload, not the browser's `onSuccess` callback) is ever trusted as state by
+itself; it only tells this system *where* to go re-read.
+
+**Two arrows start outside this system entirely, and both are new in this
+phase:** a visitor hitting `/signup` with no session at all, and ONVO's
+webhook sender hitting `/api/webhooks/onvo` with only a shared secret.
+Neither can write anything of value on its own — `/signup` only stages an
+intent and sends one email (§6.6); the webhook route only causes a
+re-read of a subscription that already exists (§4.1/§4.2). Every other
+box/arrow in this diagram still requires either a real session
+(`BillingUI`) or the pipeline key (`vrm_api`'s one and only auth
+mechanism, unchanged since Phase 14).

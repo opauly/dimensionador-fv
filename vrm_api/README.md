@@ -36,9 +36,18 @@ All already present in the repo-root `.env` (never committed; see
 | `SUPABASE_SERVICE_ROLE_KEY` | Same client. This is the secret credential — see "Trust boundary rules." |
 | `ANTHROPIC_API_KEY` | `victron/weekly_report.py:generate_narrative()`. Missing key fails soft (a placeholder paragraph), never an error. |
 | `PIPELINE_API_KEY` | `vrm_api/deps.py` — the bearer token every route but `/health` requires. Long random secret, held only by this service and the Next.js server's env, never in a browser. |
+| `ONVO_MODE` | `routers/billing.py:_onvo_mode()` — `test` or `live`. Scopes every `vrm.plans`/`vrm.subscriptions` read/write to the matching row (`§3.1`'s `mode` column on both tables, so a dev row can never point at a live price). Defaults to `test` if unset. |
+| `ONVO_SECRET_KEY` | `vrm_api/onvo.py` **only** — the server-side ONVO API key (`Authorization: Bearer <key>` on every outbound call to `api.onvopay.com`). Never logged, never returned to a browser, never read by any other module in this repo. Test-mode keys (`onvo_test_secret_key_...`) for everything except a real production deploy — see `.env.example` and `PLAN_PHASE16.md` §0.6 Q9. |
+| `ONVO_PUBLISHABLE_KEY` | `routers/billing.py:_publishable_key()` — handed to the **browser** (as part of `BillingSubscribeOut`/`BillingPaymentMethodSessionOut`) so the ONVO web SDK (`sdk.onvopay.com/sdk.js`) can render its own card form client-side. Safe to expose — it's the public half of the key pair, the same way a Stripe publishable key is. |
 
-In production (Render), the same four vars are set directly in the service's
-environment — no `.env` file is deployed.
+In production (Render), all seven vars above are set directly in the
+service's environment — no `.env` file is deployed.
+
+**`ONVO_WEBHOOK_SECRET` is deliberately NOT in this list — this service never
+reads it.** It's read exclusively by `victron-monitor/web`'s
+`app/api/webhooks/onvo/route.ts` (see `victron-monitor/web/README.md`'s env
+vars section). See "The billing webhook trust boundary" below for why that
+split is the point, not an oversight.
 
 ## Endpoints
 
@@ -208,6 +217,46 @@ $ curl -H "Authorization: Bearer $PIPELINE_API_KEY" http://localhost:8000/v1/lim
 Served here, not hand-copied into TypeScript (`PLAN_PHASE14.md` §1.11) — the
 Detallado/Overview boundary has exactly one source of truth.
 
+### `/v1/billing/*` — ONVO subscription billing (`PLAN_PHASE16.md`)
+
+Added by Phase 16. Full design, tenancy reasoning, and the read-through
+principle behind all of it: `routers/billing.py`'s own module docstring —
+not duplicated here. All the judgement lives in `vrm_api/billing.py`
+(`reconcile_customer()` / `apply_entitlements()`); all the ONVO transport
+lives in `vrm_api/onvo.py`; this router only checks tenancy and calls both.
+
+Same auth as every other router (`Authorization: Bearer $PIPELINE_API_KEY`),
+same "no CORS, no docs" posture — a customer's browser never calls this
+router directly, it always goes through `victron-monitor/web`'s own
+`/api/vrm/billing/*` proxy routes, which inject `customer_id` from the
+session and never from anything the browser sent.
+
+| Route | What it does |
+|---|---|
+| `GET /v1/billing/status` | Current plan/subscription/payment-method/billing-address summary for one customer. Refreshes from ONVO first if the mirror is stale (§4.4) or the subscription is in a transitional status. |
+| `GET /v1/billing/plans` | The sellable catalogue for this customer's `account_type`/`ONVO_MODE`, filtered to `self_serve` plans only if the customer is still `pending_subscription`. |
+| `GET /v1/billing/invoices` | Paginated renewal history, mirrored from ONVO — never a live call on every page view. |
+| `POST /v1/billing/subscription` | First-time subscribe. Creates the ONVO subscription (`paymentBehavior: allow_incomplete`, `trialPeriodDays: 7`, no `paymentMethodId` yet) and returns its id + the publishable key, so the browser can mount the ONVO SDK's card form against a real `subscriptionId`. |
+| `POST /v1/billing/subscription/change` | Upgrade/downgrade. Cancel-and-restart (no in-place price change exists on ONVO's side — §0.2b finding 6), both directions immediate, no proration. |
+| `POST /v1/billing/subscription/cancel` | Graceful (`cancelAtPeriodEnd`) by default; `mode: "immediate"` exists and is tenancy-checked the same as everything else, but has no customer-facing caller — Oscar's admin support action is the only intended caller. |
+| `POST /v1/billing/subscription/resume` | Clears a pending graceful cancellation. |
+| `POST /v1/billing/payment-method/session` | Returns the `subscriptionId`/`customerId`/publishable key the SDK widget needs to render a card-replacement form against an **existing** subscription. |
+| `POST /v1/billing/payment-method` | Attaches a browser-created ONVO payment method id to the customer's subscription — only after re-reading it from ONVO and confirming it belongs to this customer (§6.4 control 3). |
+| `PUT /v1/billing/address` | Updates the billing address on the default payment method. |
+| `POST /v1/billing/refresh` | A plain reconcile — what the browser calls after the SDK's own `onSuccess` fires. Never trusts that callback's payload as state; it's only a hint to go re-read ONVO. |
+| `POST /v1/billing/reconcile-due` | No `customer_id` — the daily scheduled-sweep entry point (§4.4's fourth reconcile trigger), called by `.github/workflows/billing-reconcile.yml`. Reconciles every subscription that's due and retries any `vrm.billing_events` row stuck in `status='error'`. One customer's ONVO error never aborts the sweep for the rest. |
+| `POST /v1/billing/prune-signups` | No `customer_id` — the retention sweep for `vrm.signup_requests` (§3.7: unconsumed rows past `expires_at`+7d, consumed rows past `consumed_at`+30d) and `vrm.rate_limits` (§3.8: rows older than a 2-day safety margin past the longest rate-limit window). Called by the same daily workflow, right after `reconcile-due`. |
+| `POST /v1/billing/webhook-event` | Intake for ONVO webhook deliveries, forwarded by `victron-monitor/web`'s `/api/webhooks/onvo` — see "The billing webhook trust boundary" below. |
+
+```
+$ curl -X POST -H "Authorization: Bearer $PIPELINE_API_KEY" \
+    http://localhost:8000/v1/billing/reconcile-due
+{"checked":0,"results":[]}
+$ curl -X POST -H "Authorization: Bearer $PIPELINE_API_KEY" \
+    http://localhost:8000/v1/billing/prune-signups
+{"signup_requests_deleted":0,"rate_limits_deleted":0}
+```
+
 ## Trust boundary rules (PLAN_PHASE14.md §1.3)
 
 This service holds the same Supabase service-role privilege the Next.js
@@ -244,6 +293,41 @@ weaker door to the same data:
    (`logging.exception`) only; HTTP responses and `vrm.jobs.error` carry a
    typed code or a short, pre-approved sentence (`main.py`'s exception
    handlers, `jobs.py:_safe_error_message()`).
+
+### The billing webhook trust boundary (`PLAN_PHASE16.md` §4.1/§6.5)
+
+`vrm_api` never receives a webhook delivery directly from the public
+internet, and this is deliberate, not incidental. ONVO's dashboard is
+configured to POST to `victron-monitor/web`'s `/api/webhooks/onvo` — **not**
+to any URL on this service — and that Next.js route is the only thing that
+ever talks to ONVO's raw delivery. It verifies `X-Webhook-Secret` against
+`ONVO_WEBHOOK_SECRET` in constant time, rate-limits the request
+(`vrm.rate_limits`, bucket `onvo_webhook`), and only then calls this
+service's own `POST /v1/billing/webhook-event` — authenticated the same way
+every other call from Next.js is, with `PIPELINE_API_KEY`, and carrying a
+`secret_ok` boolean the Next.js layer already determined.
+
+This keeps the two authentication stories cleanly separated instead of
+teaching this service a second, weaker one: `vrm_api` already has exactly
+one trust mechanism (rule 2 above, the pipeline bearer key, `Authorization:
+Bearer $PIPELINE_API_KEY`) and one caller (Next.js's server) for every route
+it exposes — a raw ONVO delivery landing here directly would mean either
+adding a second, ONVO-specific auth check to a router that otherwise only
+ever validates the pipeline key, or trusting `X-Webhook-Secret` in a service
+that was designed around never accepting a request the Next.js layer hasn't
+already vetted. Neither is worth it for one endpoint. If a bug in the
+Next.js route ever did forward a rejected delivery anyway,
+`post_webhook_event()` still records it faithfully (`secret_ok=False`) and
+does no further processing beyond that — the row is what makes an attempted
+forgery visible at all, not a second rejection here.
+
+And because of `PLAN_PHASE16.md` §0.5's read-through principle, none of this
+is actually load-bearing for correctness: a forged or replayed webhook body
+can, at worst, cause this endpoint to re-read a real subscription from ONVO
+with our own secret key — the same read `POST /v1/billing/refresh` and the
+daily sweep already perform. It can never write state directly, because
+nothing in this codebase ever applies a webhook payload's own fields to a
+mirror row.
 
 ## Jobs (PLAN_PHASE14.md §1.6)
 

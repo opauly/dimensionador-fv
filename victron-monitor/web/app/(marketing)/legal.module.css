@@ -1,0 +1,92 @@
+/* Shared prose shell for /terms and /privacy (PLAN_PHASE16.md §8 "critical
+   legal" follow-up, 2026-08-20: Oscar asked for real ToS/Privacy pages
+   after a live signup test surfaced there weren't any). Not a components/
+   ui/* primitive — these two pages are the only consumers, so a page-local
+   module (same pattern as billing.module.css) beats a shared component for
+   two call sites. */
+
+.page {
+  padding: 64px 0 96px;
+}
+
+.header {
+  max-width: 68ch;
+  margin-bottom: 8px;
+}
+.header h1 {
+  font-size: clamp(32px, 4.4vw, 52px);
+  line-height: 1.02;
+  margin-bottom: 14px;
+}
+.updated {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Draft-status callout — every legal page ships with this until Oscar
+   confirms a lawyer has reviewed the content (§8 follow-up: "draft
+   placeholder content ... not a substitute for a lawyer"). Amber, not red —
+   this is a known, disclosed limitation, not an error state. */
+.draftNotice {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--signal) 10%, var(--panel));
+  padding: 16px 20px;
+  margin: 28px 0 48px;
+  max-width: 68ch;
+}
+.draftNotice p {
+  color: var(--paper);
+  max-width: none;
+  font-size: 14px;
+}
+.draftNotice strong {
+  color: var(--signal);
+}
+
+.body {
+  max-width: 68ch;
+}
+.body h2 {
+  font-size: 22px;
+  margin: 40px 0 12px;
+}
+.body h2:first-child {
+  margin-top: 0;
+}
+.body p {
+  max-width: none;
+  margin-bottom: 14px;
+}
+.body ul {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  color: var(--paper-dim);
+}
+.body li {
+  margin-bottom: 8px;
+}
+.body a {
+  color: var(--victron-glow);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.body strong {
+  color: var(--paper);
+}
+
+.backLink {
+  display: inline-block;
+  margin-top: 56px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--paper-dim);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

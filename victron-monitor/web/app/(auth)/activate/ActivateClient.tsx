@@ -15,12 +15,20 @@
 import { startTransition, useActionState, useEffect, useRef, useState } from 'react';
 import { Button, Field, Input } from '@/components/ui';
 import { t } from '@/lib/i18n/strings';
-import { setActivationPasswordAction, type SetPasswordState, type VerifyResult } from './actions';
+import type { SetPasswordState, VerifyResult } from './actions';
 import styles from './activate.module.css';
 
 type Phase = 'verifying' | 'ready' | 'expired';
 
-export function ActivateClient({ verifyAction }: { verifyAction: () => Promise<VerifyResult> }) {
+type SetPasswordAction = (prevState: SetPasswordState, formData: FormData) => Promise<SetPasswordState>;
+
+export function ActivateClient({
+  verifyAction,
+  setPasswordAction,
+}: {
+  verifyAction: () => Promise<VerifyResult>;
+  setPasswordAction: SetPasswordAction;
+}) {
   const [phase, setPhase] = useState<Phase>('verifying');
   // `verify_otp` is single-use server-side — calling it twice for the same
   // token isn't idempotent, it's a *second, different* outcome (the token
@@ -76,16 +84,17 @@ export function ActivateClient({ verifyAction }: { verifyAction: () => Promise<V
     );
   }
 
-  return <SetPasswordForm />;
+  return <SetPasswordForm action={setPasswordAction} />;
 }
 
-function SetPasswordForm() {
-  const [state, formAction, pending] = useActionState<SetPasswordState, FormData>(setActivationPasswordAction, {});
+function SetPasswordForm({ action }: { action: SetPasswordAction }) {
+  const [state, formAction, pending] = useActionState<SetPasswordState, FormData>(action, {});
 
   return (
     <form action={formAction} className={styles.form} noValidate>
       <Field label={t('en', 'activate_password')} htmlFor="activate-password" required>
         <Input id="activate-password" name="password" type="password" autoComplete="new-password" minLength={8} required disabled={pending} />
+        <p className={styles.hint}>{t('en', 'activate_password_hint')}</p>
       </Field>
       <Field label={t('en', 'activate_confirm_password')} htmlFor="activate-confirm" required>
         <Input

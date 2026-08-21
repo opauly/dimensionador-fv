@@ -38,3 +38,46 @@
   font-family: var(--font-mono);
   font-weight: 600;
 }
+
+.subtle {
+  color: var(--mute);
+  font-size: 12px;
+}
+
+/* Billing events / recent signups (PLAN_PHASE16.md §8 Step 6). A rejected
+   webhook secret and a `status='error'` reconcile share `--signal` (this
+   design system's one warning color) — both are "worth a look," same
+   reasoning as `.replacedBadge` above; `secret_ok=false` is additionally
+   spelled out in words (never JUST a color) since it is, per §7's
+   failure-modes table, the only visible evidence a forgery attempt ever
+   happened. */
+.forgedBadge {
+  display: inline-block;
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 12px;
+}
+.appliedBadge {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.subtleBadge {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.payload {
+  margin: 4px 0;
+  padding: 10px 12px;
+  background: var(--ink-2);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--paper-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}

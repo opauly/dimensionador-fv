@@ -54,7 +54,27 @@ export async function verifyActivationTokenAction(tokenHash: string, type: strin
 
 export type SetPasswordState = { error?: string };
 
-export async function setActivationPasswordAction(_prevState: SetPasswordState, formData: FormData): Promise<SetPasswordState> {
+/**
+ * `nextPath` is bound server-side in `page.tsx` (`.bind(null, nextPath)`,
+ * the same pattern `verifyActivationTokenAction.bind(null, tokenHash,
+ * type)` already uses one function up) — never read from a client
+ * component prop, matching this file's own header comment on why the
+ * token/type pair is threaded the same way. Already validated by
+ * `page.tsx`'s own `sanitizeNextPath()` (PLAN_PHASE16.md §5.5 Step 3's
+ * open-redirect guard) before it's ever bound — this function trusts its
+ * bound argument, the same way `verifyActivationTokenAction` trusts the
+ * `tokenHash`/`type` `page.tsx` bound onto it.
+ *
+ * `sanitizeNextPath()` itself lives in `page.tsx`, NOT here, even though
+ * this file is otherwise the natural home for it: every export from a
+ * `'use server'` file becomes a Server Action reference, and Next.js
+ * requires every one of them to be an `async` function — a plain
+ * synchronous helper exported from this file breaks the ENTIRE module at
+ * compile time ("Server Actions must be async functions"), which is not a
+ * theoretical hazard: it broke `/activate` outright during this step's own
+ * validation before being caught and fixed by moving the function out.
+ */
+export async function setActivationPasswordAction(nextPath: string, _prevState: SetPasswordState, formData: FormData): Promise<SetPasswordState> {
   const password = String(formData.get('password') ?? '');
   const confirm = String(formData.get('confirm_password') ?? '');
 
@@ -86,6 +106,10 @@ export async function setActivationPasswordAction(_prevState: SetPasswordState, 
   }
 
   // Outside any try/catch — `redirect()` is a control-flow throw, same
-  // rule `login/actions.ts` follows.
-  redirect('/app');
+  // rule `login/actions.ts` follows. `nextPath` was already validated by
+  // `sanitizeNextPath()` before this action was ever bound (`page.tsx`),
+  // not re-checked here — this function trusts its own bound argument, the
+  // same way `verifyActivationTokenAction` trusts the `tokenHash`/`type`
+  // `page.tsx` bound onto IT.
+  redirect(nextPath);
 }

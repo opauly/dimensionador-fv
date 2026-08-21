@@ -362,3 +362,298 @@ class VrmFleetSyncRequest(BaseModel):
     site_id: str
     start: str
     end: str
+
+
+# ──────────────────────────────────────────────────────────────────────
+# PLAN_PHASE16.md §5.1–5.3 / §8 Step 3 — routers/billing.py request/response
+# models. `extra="forbid"` on every request body, same reasoning as
+# `SiteFieldsIn` above. Restated for billing specifically (§6.4 control 3):
+# NONE of these models has a field that lets an ONVO object id travel INTO
+# this API from a caller — every mutation takes only `vrm.plans.id` /
+# `vrm.customers.id` / a `payment_method_id` the caller obtained directly
+# from ONVO client-side (never generated or looked up on the caller's
+# behalf), and `routers/billing.py` re-verifies that one exception with a
+# fresh `GET /v1/payment-methods/{id}` before ever trusting it. A response
+# model, by contrast, is allowed to carry an ONVO id back OUT when the SDK
+# genuinely needs one to render (`BillingSubscribeOut`,
+# `BillingPaymentMethodSessionOut` — both documented inline below) — that is
+# the one deliberate, narrow exception to "no ONVO id in a response" (§5.1).
+# ──────────────────────────────────────────────────────────────────────
+class BillingStatusOut(BaseModel):
+    """`GET /v1/billing/status`'s response (§5.1). No ONVO id anywhere in
+    this shape — the browser has no legitimate use for
+    `onvo_customer_id`/`onvo_subscription_id` from this endpoint. Also the
+    common "fresh state" response every mutation endpoint in this router
+    returns after it reconciles, so the browser never has to guess what
+    changed from a request it just made (§4.4's post-mutation trigger)."""
+
+    customer_id: str
+    plan_key: str | None = None
+    # `f"billing.plan.{plan_key}"` — an i18n lookup key for `t(lang, key)`
+    # (`lib/i18n/strings.ts`), not a literal label; this API has no concept
+    # of the visitor's language. `None` when the customer has no plan yet.
+    plan_label_key: str | None = None
+    billing_status: str | None = None
+    provisioning_state: str
+    status: str | None = None
+    billing_interval: str | None = None
+    currency: str | None = None
+    amount_minor: int | None = None
+    current_period_end: str | None = None
+    cancel_at_period_end: bool = False
+    trial_end: str | None = None
+    # Display-only mirror fields (§6.2) — never used in any decision.
+    pm_brand: str | None = None
+    pm_last4: str | None = None
+    pm_exp_month: int | None = None
+    pm_exp_year: int | None = None
+    billing_address: dict = {}
+    site_limit: int | None = None
+    active_sites: int = 0
+    over_limit: bool = False
+
+
+class BillingPlanOut(BaseModel):
+    """One `vrm.plans` row (§5.1). Deliberately no `onvo_product_id`/
+    `onvo_price_id` — same reasoning §5.5 step 4 already states for the
+    public signup plan list ("no reason for the public internet to hold a
+    map of our ONVO catalogue"), applied here too even though this endpoint
+    is authenticated."""
+
+    id: str
+    plan_key: str
+    plan_label_key: str
+    billing_interval: str
+    currency: str
+    amount_minor: int
+    site_limit: int | None = None
+    self_serve: bool
+    is_current: bool
+
+
+class BillingPlansOut(BaseModel):
+    plans: list[BillingPlanOut]
+
+
+class BillingInvoiceOut(BaseModel):
+    id: str
+    status: str | None = None
+    currency: str | None = None
+    total_minor: int | None = None
+    subtotal_minor: int | None = None
+    original_total_minor: int | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    attempt_count: int | None = None
+    last_payment_attempt: str | None = None
+    next_payment_attempt: str | None = None
+
+
+class BillingInvoicesOut(BaseModel):
+    invoices: list[BillingInvoiceOut]
+    has_more: bool
+
+
+class BillingSubscribeRequest(BaseModel):
+    """`POST /v1/billing/subscription`'s body (§5.2, corrected at Step 5,
+    2026-08-20 — see `routers/billing.py:post_subscription()`'s own
+    docstring for the full "why"). `plan_id` is OUR OWN `vrm.plans.id`,
+    never an ONVO `priceId` (§6.4). There is deliberately NO
+    `payment_method_id` field here any more: the ONVO subscription this
+    endpoint creates comes back with no payment method attached at all
+    (confirmed live: `status: trialing`, NOT `incomplete` as §5.2 point 3's
+    prose says — see `routers/billing.py:post_subscription()`'s own
+    docstring for the full correction) — the SDK widget that collects the
+    card needs a real `subscriptionId` to render in the first place, so a
+    browser cannot possibly hold a `payment_method_id` before calling this
+    endpoint. The card is attached afterward, by the SDK widget itself
+    against the `onvo_subscription_id` this endpoint returns, and only ever
+    confirmed by a subsequent reconcile (`POST /v1/billing/refresh`) —
+    never by anything this request body carries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+    plan_id: str
+
+
+class BillingSubscribeOut(BaseModel):
+    """The one deliberate, documented exception to 'no ONVO id in a
+    response' — the ONVO web SDK genuinely needs these two to render
+    against (§5.2 step 5: 'the minimum the SDK needs, and nothing else').
+    `onvo_subscription_id` is the just-created subscription — no payment
+    method is attached to it yet (its real ONVO `status` is `trialing`
+    immediately, not `incomplete` — see `routers/billing.py:
+    post_subscription()`'s own docstring)."""
+
+    onvo_subscription_id: str
+    onvo_customer_id: str
+    publishable_key: str
+
+
+class BillingPaymentMethodSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+
+
+class BillingPaymentMethodSessionOut(BaseModel):
+    """`POST /v1/billing/payment-method/session`'s response (§5.3, corrected
+    at Step 5, 2026-08-20 alongside `BillingSubscribeRequest`) — the
+    replace-card path for a customer who ALREADY has a live subscription
+    (first-time subscribe gets its `onvo_subscription_id` straight from
+    `BillingSubscribeOut` and never calls this endpoint at all). Carries
+    `onvo_subscription_id` for the same reason `BillingSubscribeOut` does:
+    the SDK widget will not render a working card form without a real
+    `subscriptionId` to attach the new card to (§5.2 point 3). Refused with
+    `no_active_subscription` if the customer has no live subscription — see
+    `routers/billing.py:post_payment_method_session()`."""
+
+    onvo_subscription_id: str
+    onvo_customer_id: str
+    publishable_key: str
+
+
+class BillingPaymentMethodRequest(BaseModel):
+    """`POST /v1/billing/payment-method`'s body (§5.3) — attaches an
+    already-known `payment_method_id` to the customer's current
+    subscription, re-verifying it (`_verify_payment_method()`) before
+    trusting it (§6.4 control 3). NOT part of the corrected SDK-widget flow
+    (§5.2 point 3 / §5.3, Step 5 2026-08-20): the widget itself attaches a
+    newly-entered card to the `subscriptionId` it was given, and the
+    browser only ever learns that happened via a reconcile
+    (`POST /v1/billing/refresh`), never by calling this endpoint with an id
+    it extracted from the widget's `onSuccess`. Left in place, tenancy-
+    checked and working, as a lower-level primitive — not currently called
+    by any `victron-monitor/web` route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+    payment_method_id: str
+
+
+class BillingChangeRequest(BaseModel):
+    """`POST /v1/billing/subscription/change`'s body (§5.3, Q3 final
+    answer: cancel-and-restart, no proration, both directions immediate).
+    `confirm` is the over-site-limit guard's second call (§5.3's own
+    `requires_confirmation` flow) — the first call without it, when the
+    target plan's site_limit is below the customer's active site count,
+    is refused with `over_site_limit` (see `routers/billing.py`)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+    plan_id: str
+    confirm: bool = False
+
+
+class BillingCancelRequest(BaseModel):
+    """`POST /v1/billing/subscription/cancel`'s body (§5.3, Q4).
+    `mode='at_period_end'` is the only customer-reachable value in v1's UI;
+    `mode='immediate'` is implemented (and still tenancy-checked exactly
+    like every other action here) but has no admin caller yet — Step 6 is
+    expected to be what actually exposes it to Oscar as a support action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+    mode: Literal["at_period_end", "immediate"]
+
+
+class BillingResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+
+
+class BillingAddressIn(BaseModel):
+    """ONVO's own billing-address shape (`billing.address` on a payment
+    method — §3.2, §0.2b finding 1's own note that this is the only place
+    ONVO actually carries a billing address), mirrored field-for-field."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    city: str | None = None
+    country: str | None = None
+    line1: str | None = None
+    line2: str | None = None
+    postalCode: str | None = None
+    state: str | None = None
+
+
+class BillingAddressRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+    address: BillingAddressIn
+
+
+class BillingRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customer_id: str
+
+
+class BillingReconcileDueResult(BaseModel):
+    customer_id: str
+    ok: bool
+    error: str | None = None
+
+
+class BillingReconcileDueOut(BaseModel):
+    """`POST /v1/billing/reconcile-due`'s response (§4.4's scheduled-sweep
+    trigger, §8 Step 3's own note: this step only needs the endpoint to
+    exist and work — Step 4 wires up who calls it, e.g. GitHub Actions
+    `cron:`)."""
+
+    checked: int
+    results: list[BillingReconcileDueResult]
+
+
+class BillingWebhookEventRequest(BaseModel):
+    """`POST /v1/billing/webhook-event`'s body (§4.1, §4.2, §8 Step 4) —
+    sent ONLY by `victron-monitor/web/app/api/webhooks/onvo/route.ts`, after
+    that route has already verified `X-Webhook-Secret` in constant time and
+    rate-limited the request (§6.5). A request that fails EITHER of those
+    checks never reaches this endpoint at all — see that route's own header
+    comment for why (the wrong-secret rejection happens entirely in the
+    Next.js layer, including writing its own `vrm.billing_events` row, so a
+    forged delivery is visible without ever touching `vrm_api`).
+
+    `secret_ok` is still a real field here, forwarded from whatever the
+    Next.js layer determined, rather than this endpoint assuming `True`
+    unconditionally — belt-and-suspenders: if a bug in that route ever DID
+    forward a rejected delivery, this endpoint still records it faithfully
+    (`secret_ok=False`) and does no further processing, rather than trusting
+    it (see `routers/billing.py:post_webhook_event()`).
+
+    `payload` is ONVO's own webhook body, forwarded as-is and never
+    validated against a schema of ONVO's fields — only `type` and `data`
+    are read, defensively, and only to resolve which customer to re-read
+    (§4.2: 'the handler extracts the id only from data ... it never reads
+    status, amount, or any other field from the payload into a column')."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    secret_ok: bool
+    payload: dict
+
+
+class BillingWebhookEventOut(BaseModel):
+    """Deliberately minimal (§6.5: 'the response body is {"ok":true} or
+    nothing... never confirm whether the event resolved to a known
+    customer')."""
+
+    ok: bool = True
+
+
+class BillingPruneSignupsOut(BaseModel):
+    """`POST /v1/billing/prune-signups`'s response (§3.7/§3.8, §8 Step 7) —
+    the retention sweep for `vrm.signup_requests` and `vrm.rate_limits`.
+    Counts only, for the same reason `BillingReconcileDueOut` reports
+    `checked`/`results` rather than nothing: a cron log line that says how
+    much it did is the only visibility this job gets."""
+
+    signup_requests_deleted: int
+    rate_limits_deleted: int

@@ -1,0 +1,186 @@
+/* app/(portal)/app/billing — new dashboard-only rules, same conventions as
+   app/(portal)/app/sites/sites.module.css and profile/profile.module.css
+   (PLAN_PHASE14.md §1.7): built from styles/tokens.css, nothing ported from
+   landing_template.html — the marketing Pricing component's cards are a
+   visual reference (PLAN_PHASE16.md §8 Step 5), not something imported. */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: none;
+  margin-bottom: 20px;
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 24px 26px;
+  margin-bottom: 28px;
+}
+.panel h2 {
+  margin-bottom: 4px;
+}
+
+.statusRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 18px;
+  margin: 16px 0 20px;
+}
+.statusItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.statusLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.statusValue {
+  font-size: 16px;
+  color: var(--paper);
+}
+
+.badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+}
+.badgeGood {
+  color: var(--good);
+  border-color: var(--good);
+}
+.badgeWarn {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+.badgeNeutral {
+  color: var(--mute);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  margin: 16px 0 8px;
+}
+
+/* Base card box — previously undefined (only the `h3` descendant rule
+   below existed), so every card rendered as an unstyled div relying on
+   `.grid`'s gap for spacing. Added alongside the pre-selected variant
+   (Oscar's request, 2026-08-21: the plan chosen during signup should show
+   as already highlighted once the customer reaches this picker after
+   activating), matching the same selected-border treatment `SignupForm`'s
+   own plan cards and the marketing `Pricing.tsx` component both use. */
+.planCard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  background: var(--panel);
+}
+.planCardSelected {
+  border-color: var(--victron);
+  box-shadow: 0 0 0 1px var(--victron);
+}
+.planCard h3 {
+  margin-bottom: 2px;
+}
+.planRange {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--mute);
+}
+.planPrice {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  color: var(--paper);
+  margin: 14px 0 6px;
+}
+.planPer {
+  font-size: 13px;
+  color: var(--mute);
+  margin-left: 4px;
+}
+.planCurrentTag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--good);
+  margin-bottom: 10px;
+}
+
+.sdkContainer {
+  min-height: 240px;
+  margin: 18px 0;
+}
+
+.cardSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--paper);
+  margin-bottom: 6px;
+}
+
+.formActions {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.error {
+  color: var(--signal);
+  font-size: 14px;
+  margin: 10px 0;
+}
+.success {
+  color: var(--good);
+  font-size: 14px;
+  margin: 10px 0;
+}
+.status {
+  color: var(--paper-dim);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 10px;
+}
+.hint {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.confirmBox {
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-md, 8px);
+  padding: 16px 18px;
+  margin-top: 16px;
+}
+.confirmBox p {
+  max-width: none;
+  margin-bottom: 10px;
+}
+
+.invoiceEmpty {
+  color: var(--mute);
+  font-size: 14px;
+}

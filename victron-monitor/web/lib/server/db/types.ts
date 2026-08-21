@@ -75,6 +75,72 @@ export type CustomerRecord = {
    * `VrmRemoteAuthError` handler above and cleared to `NULL` on the next
    * successful customer-token sync. Untouched by a deliberate disconnect. */
   vrm_token_last_error: string | null;
+  // ── PLAN_PHASE16.md §3.6 / §8 Step 6 — four billing/signup columns ────
+  // Read directly off `vrm.customers` here (not through `vrm_api`, unlike
+  // `app/(portal)/app/**`'s own billing reads — see `lib/server/db/billing.ts`'s
+  // header comment) because `/admin/customers` is exactly the "Postgres data
+  // already in scope for a direct admin query" case this file's own header
+  // comment already carves out for the VRM-link columns above, and because
+  // §5.1's `BillingStatusOut` is deliberately a SINGLE-customer read (a
+  // `customer_id` query param) with no bulk/admin variant to call instead.
+  /** `'manual'` (a hand-negotiated `site_limit`) or `'plan'` (tracks
+   * `vrm.plans.site_limit` for the customer's current subscription) —
+   * diagnostic only here, never edited from `/admin/customers` directly. */
+  site_limit_source: 'manual' | 'plan';
+  /** A derived, denormalized cache of the entitlement decision, written
+   * only by `vrm_api/billing.py:apply_entitlements()` — `'none' | 'trialing'
+   * | 'active' | 'past_due' | 'canceled' | 'incomplete' | 'unpaid'` in
+   * practice, but NO CHECK constraint (same reasoning as `vrm.subscriptions
+   * .status`), so this stays `string | null` rather than a closed union. */
+  billing_status: string | null;
+  /** `'active'` = a real tenant. `'pending_subscription'` = an email-verified
+   * self-serve signup with no entitled subscription yet — the "Pending
+   * signup" filter/badge on `/admin/customers`. */
+  provisioning_state: 'pending_subscription' | 'active';
+  /** `'admin'` = Oscar invited/created this account by hand (every
+   * pre-Phase-16 row). `'self_serve'` = created via the public `/signup`
+   * flow. Never used in an authorization decision — filter/diagnostics
+   * only, per migration 025's own column comment. */
+  origin: 'admin' | 'self_serve';
+};
+
+/** One `vrm.billing_events` row (PLAN_PHASE16.md §3.5 / §8 Step 6) — the
+ * append-only webhook receipt log `/admin/activity`'s new "Billing events"
+ * section reads. `secret_ok=false` rows (a rejected/forged delivery) are
+ * the one thing that section must make visibly distinguishable — see that
+ * table's own header comment. `payload` is kept as `unknown` (never typed
+ * against ONVO's own shape, same as `vrm.subscriptions.raw` upstream) —
+ * this view only ever shows it inside an expandable detail row, the same
+ * "raw payload behind a toggle" shape `ActivityTable.tsx`'s own `warnings`
+ * column already uses. */
+export type BillingEventRecord = {
+  id: string;
+  received_at: string;
+  event_type: string | null;
+  secret_ok: boolean;
+  customer_id: string | null;
+  subscription_id: string | null;
+  status: string;
+  processed_at: string | null;
+  error: string | null;
+  payload: unknown;
+};
+
+/** One `vrm.signup_requests` row (PLAN_PHASE16.md §3.7 / §8 Step 6) — the
+ * staging-table read `/admin/activity`'s "Recent signups" panel uses.
+ * `consumed_at` set = the visitor actually redeemed their verification
+ * link (`token_hash` and the raw token itself are never selected here —
+ * see that column's own migration comment on why the token is never even
+ * stored, let alone read back). */
+export type SignupRequestRecord = {
+  id: string;
+  email: string;
+  name: string;
+  account_type: AccountType;
+  created_at: string;
+  expires_at: string;
+  consumed_at: string | null;
+  customer_id: string | null;
 };
 
 export type SiteRecord = {

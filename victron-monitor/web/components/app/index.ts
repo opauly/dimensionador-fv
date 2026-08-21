@@ -6,3 +6,6 @@ export type { JobProgressProps, JobProgressJob } from './JobProgress/JobProgress
 
 export { VrmConnectionBanner } from './VrmConnectionBanner/VrmConnectionBanner';
 export type { VrmConnectionBannerProps } from './VrmConnectionBanner/VrmConnectionBanner';
+
+export { BillingBanners } from './BillingBanners/BillingBanners';
+export type { BillingBannersProps, BillingBannerStatus } from './BillingBanners/BillingBanners';

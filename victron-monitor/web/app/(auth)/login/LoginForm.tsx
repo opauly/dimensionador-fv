@@ -47,6 +47,10 @@ export function LoginForm() {
       <Link href="/forgot" className={styles.forgot}>
         {t('en', 'login_forgot_password')}
       </Link>
+      <p className={styles.signupPrompt}>
+        {t('en', 'login_no_account')}{' '}
+        <Link href="/signup">{t('en', 'login_sign_up_link')}</Link>
+      </p>
     </form>
   );
 }

@@ -35,7 +35,7 @@ from fastapi.responses import JSONResponse
 
 from vrm_api import jobs, storage
 from vrm_api.deps import require_pipeline_key
-from vrm_api.routers import ingest, meta, reports, vrm_fleet, vrm_link, vrm_sync
+from vrm_api.routers import billing, ingest, meta, reports, vrm_fleet, vrm_link, vrm_sync
 from vrm_api.schemas import JobOut
 from vrm_api.tenancy import NotAuthorized, VrmAccountAlreadyLinked
 
@@ -142,3 +142,4 @@ app.include_router(meta.router)
 app.include_router(vrm_link.router)
 app.include_router(vrm_sync.router)
 app.include_router(vrm_fleet.router)
+app.include_router(billing.router)

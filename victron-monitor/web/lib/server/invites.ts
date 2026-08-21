@@ -18,7 +18,7 @@ import { sendEmail } from './resend';
 import { renderActivationEmail } from './emailTemplates';
 import { SITE_URL } from '@/lib/site';
 
-type LinkType = 'invite' | 'recovery' | 'magiclink';
+export type LinkType = 'invite' | 'recovery' | 'magiclink';
 
 function buildActivationUrl(tokenHash: string, type: LinkType): string {
   const url = new URL('/activate', SITE_URL);
@@ -35,8 +35,14 @@ function buildActivationUrl(tokenHash: string, type: LinkType): string {
  * `ADMIN_CUSTOMER_WHITELIST`). This is the one place in the app allowed to
  * write them, matching `createCustomer()`'s own comment that it deliberately
  * does NOT touch them at row-creation time.
+ *
+ * Exported (PLAN_PHASE16.md §5.5 step 2) so `app/(auth)/signup/verify/
+ * route.ts` can call it too, once it has created the `vrm.customers` row
+ * `createOrLinkAuthUser()` below just linked an auth user to — the same
+ * "one place allowed to write these three columns" comment now has a
+ * second sanctioned caller, not a second implementation.
  */
-async function stampInvited(customerId: string, authUserId: string, authEmail: string): Promise<void> {
+export async function stampInvited(customerId: string, authUserId: string, authEmail: string): Promise<void> {
   const { error } = await getSupabaseAdmin()
     .schema('vrm')
     .from('customers')
@@ -73,14 +79,18 @@ export async function getCustomerByAuthUserId(authUserId: string): Promise<{ id:
   return (data?.[0] as { id: string } | undefined) ?? null;
 }
 
-async function findOtherCustomerByEmail(email: string, excludeCustomerId: string): Promise<{ id: string; name: string } | null> {
-  const { data, error } = await getSupabaseAdmin()
-    .schema('vrm')
-    .from('customers')
-    .select('id, name')
-    .ilike('auth_email', email)
-    .neq('id', excludeCustomerId)
-    .limit(1);
+/**
+ * `excludeCustomerId` is optional so `createOrLinkAuthUser()` can be called
+ * for a customer row that doesn't exist yet at the time of the call (the
+ * public signup verify handler creates its `vrm.customers` row FIRST, then
+ * calls this — see that function's own comment on why the exclusion
+ * matters there specifically, not just for `sendInvite()`'s existing
+ * customer).
+ */
+async function findOtherCustomerByEmail(email: string, excludeCustomerId?: string): Promise<{ id: string; name: string } | null> {
+  let query = getSupabaseAdmin().schema('vrm').from('customers').select('id, name').ilike('auth_email', email).limit(1);
+  if (excludeCustomerId) query = query.neq('id', excludeCustomerId);
+  const { data, error } = await query;
   if (error) throw error;
   return (data?.[0] as { id: string; name: string } | undefined) ?? null;
 }
@@ -111,28 +121,45 @@ function isEmailExistsError(err: { code?: string; status?: number; message?: str
   return /already.*(registered|exists)/i.test(err.message ?? '');
 }
 
-export type SendInviteResult =
-  | { ok: true; linkedExistingLogin: boolean; messageId: string }
-  | { ok: false; reason: 'no_login_email' | 'already_linked_elsewhere'; otherCustomerName?: string }
+export type CreateOrLinkAuthUserResult =
+  | { ok: true; userId: string; hashedToken: string; linkType: LinkType; linkedExistingLogin: boolean }
+  | { ok: false; reason: 'already_linked_elsewhere'; otherCustomerName?: string }
   | { ok: false; reason: 'send_failed' };
 
 /**
- * First invite for a customer that has a login email set (`auth_email`,
- * captured on the create-customer form) but no Supabase Auth user yet
- * (`auth_user_id` still null). `generateLink({type:'invite'})` creates that
- * auth user as a side effect and returns a `hashed_token` for the
- * activation link — see the module docstring for the full flow.
+ * The "email already exists" ladder (PLAN_PHASE14.md §2 Step 7) — lifted
+ * out of `sendInvite()` (PLAN_PHASE16.md §5.5 step 2) so BOTH `sendInvite()`
+ * (an already-invited customer, Oscar's own flow — see its call site below)
+ * and `app/(auth)/signup/verify/route.ts` (a stranger's self-serve signup)
+ * get identical behaviour for the same underlying case instead of two
+ * independent copies drifting apart. `generateLink({type:'invite'})` ->
+ * `email_exists` -> `findOtherCustomerByEmail` -> `findAuthUserByEmail` ->
+ * `generateLink({type:'recovery'})`, exactly as before.
+ *
+ * Deliberately does NOT send an email or touch `vrm.customers` — it only
+ * creates/links the Supabase Auth user and mints a `generateLink()`
+ * `hashed_token`. Each caller decides what to do with that token:
+ * `sendInvite()` emails it and calls `stampInvited()`; the signup verify
+ * route redirects straight into `/activate` with it (no second email) and
+ * calls `stampInvited()` itself.
+ *
+ * `excludeCustomerId` is the customer that should never be reported back
+ * as "another customer already claims this email" — `sendInvite()` passes
+ * its own customer's id (unchanged behaviour); the signup verify route
+ * passes the `vrm.customers` row IT JUST INSERTED (with this same
+ * `auth_email`), because without that exclusion `findOtherCustomerByEmail`
+ * would find that brand-new row itself and every self-serve signup would
+ * incorrectly roll back as "already linked elsewhere."
  */
-export async function sendInvite(customerId: string): Promise<SendInviteResult> {
-  const customer = await getCustomer(customerId);
-  if (!customer.auth_email) return { ok: false, reason: 'no_login_email' };
-  const email = customer.auth_email;
-
+export async function createOrLinkAuthUser(email: string, excludeCustomerId?: string): Promise<CreateOrLinkAuthUserResult> {
   const admin = getSupabaseAdmin();
   const first = await admin.auth.admin.generateLink({ type: 'invite', email });
 
   if (!first.error) {
-    return finishSendInvite(customerId, email, first.data, 'invite', false);
+    const hashedToken = first.data.properties?.hashed_token;
+    const userId = first.data.user?.id;
+    if (!hashedToken || !userId) return { ok: false, reason: 'send_failed' };
+    return { ok: true, userId, hashedToken, linkType: 'invite', linkedExistingLogin: false };
   }
 
   if (!isEmailExistsError(first.error)) return { ok: false, reason: 'send_failed' };
@@ -143,7 +170,7 @@ export async function sendInvite(customerId: string): Promise<SendInviteResult> 
   // row points at it — leftover from Phase 13's Streamlit testing, or a
   // customer Oscar deleted and is now re-creating under the same address)
   // -> link it to this customer instead of erroring.
-  const other = await findOtherCustomerByEmail(email, customerId);
+  const other = await findOtherCustomerByEmail(email, excludeCustomerId);
   if (other) return { ok: false, reason: 'already_linked_elsewhere', otherCustomerName: other.name };
 
   const existingAuthUser = await findAuthUserByEmail(email);
@@ -155,22 +182,43 @@ export async function sendInvite(customerId: string): Promise<SendInviteResult> 
   // exactly the mechanism `resendInvite()` uses for a returning customer.
   const second = await admin.auth.admin.generateLink({ type: 'recovery', email });
   if (second.error) return { ok: false, reason: 'send_failed' };
-  return finishSendInvite(customerId, email, second.data, 'recovery', true);
+  const hashedToken = second.data.properties?.hashed_token;
+  const userId = second.data.user?.id;
+  if (!hashedToken || !userId) return { ok: false, reason: 'send_failed' };
+  return { ok: true, userId, hashedToken, linkType: 'recovery', linkedExistingLogin: true };
 }
 
-type GenerateLinkData = { properties?: { hashed_token?: string } | null; user?: { id: string } | null };
+export type SendInviteResult =
+  | { ok: true; linkedExistingLogin: boolean; messageId: string }
+  | { ok: false; reason: 'no_login_email' | 'already_linked_elsewhere'; otherCustomerName?: string }
+  | { ok: false; reason: 'send_failed' };
+
+/**
+ * First invite for a customer that has a login email set (`auth_email`,
+ * captured on the create-customer form) but no Supabase Auth user yet
+ * (`auth_user_id` still null). `createOrLinkAuthUser()` above does the
+ * actual `generateLink()`-plus-fallback work; this function's own job is
+ * just the customer lookup, the email send, and stamping the result.
+ */
+export async function sendInvite(customerId: string): Promise<SendInviteResult> {
+  const customer = await getCustomer(customerId);
+  if (!customer.auth_email) return { ok: false, reason: 'no_login_email' };
+  const email = customer.auth_email;
+
+  const result = await createOrLinkAuthUser(email, customerId);
+  if (!result.ok) return result;
+
+  return finishSendInvite(customerId, email, result.userId, result.hashedToken, result.linkType, result.linkedExistingLogin);
+}
 
 async function finishSendInvite(
   customerId: string,
   email: string,
-  data: GenerateLinkData,
+  userId: string,
+  hashedToken: string,
   linkType: LinkType,
   linkedExistingLogin: boolean,
 ): Promise<SendInviteResult> {
-  const hashedToken = data.properties?.hashed_token;
-  const userId = data.user?.id;
-  if (!hashedToken || !userId) return { ok: false, reason: 'send_failed' };
-
   const ctaUrl = buildActivationUrl(hashedToken, linkType);
   const html = renderActivationEmail({
     heading: 'Activate your VRM Monitor account',

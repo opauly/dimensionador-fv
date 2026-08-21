@@ -18,18 +18,40 @@ import 'server-only';
 import { getSupabaseAdmin } from '@/lib/server/supabase';
 import { slugify } from '@/lib/slug';
 import { planSiteLimit } from '@/lib/plans';
-import type { AccountType, CustomerRecord, Lang, SiteRecord, IngestionLogRecord } from './types';
+import type {
+  AccountType,
+  BillingEventRecord,
+  CustomerRecord,
+  Lang,
+  SiteRecord,
+  IngestionLogRecord,
+  SignupRequestRecord,
+} from './types';
 
 export type AdminCustomerRow = CustomerRecord & {
   siteCount: number;
   lastUploadAt: string | null;
+  /** From the customer's current LIVE `vrm.subscriptions` row
+   * (`canceled_at IS NULL`) — `null` for a customer with no live
+   * subscription (never subscribed, or fully lapsed). Distinct from
+   * `CustomerRecord.billing_status`, which is the entitlement writer's own
+   * cache and carries no date (PLAN_PHASE16.md §8 Step 6: "plan, billing
+   * status, next renewal date, whether a cancellation is pending"). */
+  nextRenewalAt: string | null;
+  /** `vrm.subscriptions.cancel_at_period_end` for the current live
+   * subscription — `false` (not `null`) when there is no live subscription
+   * at all, since "no cancellation is pending" is the correct reading of
+   * that case too. */
+  cancelPending: boolean;
 };
 
 /**
- * Every customer, with the two derived figures every admin list in
+ * Every customer, with the derived figures every admin list in
  * `pages/06_vrm_monitor.py`'s `tab_sites()` shows inline (site count) or
- * that Step 7's `/admin/customers` needs ("last upload") — computed here,
- * once, rather than N+1 queries per row from the page.
+ * that Step 7's `/admin/customers` needs ("last upload"), plus — as of
+ * PLAN_PHASE16.md §8 Step 6 — each customer's current live subscription's
+ * renewal date / cancel-pending flag. Computed here, once, rather than N+1
+ * queries per row from the page.
  */
 export async function listCustomers(): Promise<AdminCustomerRow[]> {
   const admin = getSupabaseAdmin();
@@ -70,11 +92,34 @@ export async function listCustomers(): Promise<AdminCustomerRow[]> {
     if (!lastUploadByCustomer.has(customerId)) lastUploadByCustomer.set(customerId, log.uploaded_at);
   }
 
-  return ((customers ?? []) as CustomerRecord[]).map((c) => ({
-    ...c,
-    siteCount: siteCountByCustomer.get(c.id) ?? 0,
-    lastUploadAt: lastUploadByCustomer.get(c.id) ?? null,
-  }));
+  // The current LIVE subscription per customer only (`canceled_at IS
+  // NULL`) — migration 025's own partial unique index means there is at
+  // most one, so no "most recent wins" tie-break is needed here the way
+  // `vrm_api/billing.py:_current_mirror_subscription()` needs one for its
+  // broader "current, possibly lapsed" reading.
+  const { data: subs, error: subsError } = await admin
+    .schema('vrm')
+    .from('subscriptions')
+    .select('customer_id, current_period_end, cancel_at_period_end')
+    .is('canceled_at', null);
+  if (subsError) throw subsError;
+
+  const liveSubByCustomer = new Map(
+    ((subs ?? []) as { customer_id: string; current_period_end: string | null; cancel_at_period_end: boolean }[]).map(
+      (s) => [s.customer_id, s],
+    ),
+  );
+
+  return ((customers ?? []) as CustomerRecord[]).map((c) => {
+    const liveSub = liveSubByCustomer.get(c.id);
+    return {
+      ...c,
+      siteCount: siteCountByCustomer.get(c.id) ?? 0,
+      lastUploadAt: lastUploadByCustomer.get(c.id) ?? null,
+      nextRenewalAt: liveSub?.current_period_end ?? null,
+      cancelPending: liveSub?.cancel_at_period_end ?? false,
+    };
+  });
 }
 
 export type CreateCustomerFields = {
@@ -304,4 +349,59 @@ export async function listAllIngestions(limit = 100): Promise<IngestionLogRecord
     .limit(limit);
   if (error) throw error;
   return (data ?? []) as IngestionLogRecord[];
+}
+
+/**
+ * `vrm.billing_events`, newest first (PLAN_PHASE16.md §3.5 / §8 Step 6) —
+ * `/admin/activity`'s "Billing events" section, the only place in this
+ * product an attempted webhook forgery (`secret_ok=false`) is ever visible
+ * to a human (§7's failure-modes table, same row). Direct Postgres read,
+ * same reasoning as `listCustomers()`'s new subscription join above — no
+ * `vrm_api` bulk-read endpoint exists for this and none is needed.
+ */
+export async function listBillingEvents(limit = 100): Promise<BillingEventRecord[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('billing_events')
+    .select('*')
+    .order('received_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as BillingEventRecord[];
+}
+
+export type AdminSignupRow = SignupRequestRecord & {
+  /** Computed HERE, once, server-side at read time — not by
+   * `RecentSignupsPanel.tsx` itself, which is a Client Component and would
+   * otherwise need to call `Date.now()` directly inside its render body (an
+   * impure call React's own purity rule, `react-hooks/purity`, correctly
+   * rejects — the same "derived figure computed once in this module"
+   * pattern `listCustomers()`'s own `siteCount`/`lastUploadAt` already
+   * use, for the same reason). `false` once `consumed_at` is set — an
+   * already-redeemed row is never "expired," it succeeded. */
+  expired: boolean;
+};
+
+/**
+ * `vrm.signup_requests`, newest first (PLAN_PHASE16.md §3.7 / §8 Step 6) —
+ * `/admin/activity`'s "Recent signups" panel, "the only place a signup
+ * spam wave is visible before it shows up in the Resend bill" (§8 Step 6's
+ * own framing). Deliberately never selects `token_hash` — that column
+ * exists so a database dump is never a set of working account-creation
+ * links (migration 025's own comment on that column), and this admin view
+ * has no legitimate use for it either.
+ */
+export async function listRecentSignups(limit = 50): Promise<AdminSignupRow[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('signup_requests')
+    .select('id, email, name, account_type, created_at, expires_at, consumed_at, customer_id')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  const now = Date.now();
+  return ((data ?? []) as SignupRequestRecord[]).map((row) => ({
+    ...row,
+    expired: !row.consumed_at && new Date(row.expires_at).getTime() < now,
+  }));
 }

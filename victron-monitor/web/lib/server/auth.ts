@@ -44,19 +44,27 @@ export type AdminSession = {
   uiLanguage: 'es';
 };
 
+/** `'pending_subscription' | 'active'` — mirrors `vrm.customers.
+ * provisioning_state` (PLAN_PHASE16.md §3.6). A signup that verified its
+ * email but has not yet produced an entitled ONVO subscription is
+ * `'pending_subscription'`; every existing/admin-created customer is
+ * `'active'`, unaffected by this phase (§3.6's own protective default). */
+export type ProvisioningState = 'pending_subscription' | 'active';
+
 export type CustomerSession = {
   role: 'customer';
   customerId: string;
   userId: string;
   email: string;
   uiLanguage: Lang;
+  provisioningState: ProvisioningState;
 };
 
 export type SessionContext = AdminSession | CustomerSession;
 
 type RoleResolution =
   | { role: 'admin'; customerId: null }
-  | { role: 'customer'; customerId: string; uiLanguage: Lang };
+  | { role: 'customer'; customerId: string; uiLanguage: Lang; provisioningState: ProvisioningState };
 
 /**
  * Implements §1.5's role-resolution order exactly:
@@ -88,7 +96,7 @@ export async function resolveRole(user: User): Promise<RoleResolution> {
   const { data, error } = await getSupabaseAdmin()
     .schema('vrm')
     .from('customers')
-    .select('id, active, ui_language')
+    .select('id, active, ui_language, provisioning_state')
     .eq('auth_user_id', user.id)
     .limit(1);
 
@@ -98,9 +106,18 @@ export async function resolveRole(user: User): Promise<RoleResolution> {
   // from Step 4 onward; here it just isn't swallowed into a false rejection).
   if (error) throw error;
 
-  const row = data?.[0] as { id: string; active: boolean; ui_language: string } | undefined;
+  const row = data?.[0] as { id: string; active: boolean; ui_language: string; provisioning_state: string } | undefined;
   if (row && row.active) {
-    return { role: 'customer', customerId: row.id, uiLanguage: row.ui_language === 'es' ? 'es' : 'en' };
+    return {
+      role: 'customer',
+      customerId: row.id,
+      uiLanguage: row.ui_language === 'es' ? 'es' : 'en',
+      // Fails to 'active' on any unrecognized value — the DB CHECK
+      // constraint (migration 025) means this should only ever be one of
+      // the two known strings, but a session-resolution helper is the
+      // wrong place to surface a data-integrity surprise as a crash.
+      provisioningState: row.provisioning_state === 'pending_subscription' ? 'pending_subscription' : 'active',
+    };
   }
   throw new NotLinked();
 }
@@ -150,6 +167,7 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
       userId: user.id,
       email: user.email ?? '',
       uiLanguage: resolution.uiLanguage,
+      provisioningState: resolution.provisioningState,
     };
   } catch (err) {
     if (err instanceof NotLinked) return null;
@@ -171,6 +189,37 @@ export const getSessionContext = cache(async (): Promise<SessionContext | null> 
  * (§1.2 rule 4 — "navigation-level gating is UX, never the control").
  */
 export async function requireCustomer(): Promise<CustomerSession> {
+  const session = await getSessionContext();
+  if (session === null) redirect('/login');
+  if (session.role !== 'customer') redirect('/admin');
+  // PLAN_PHASE16.md §6.4's "fourth control," the pending-account gate: a
+  // signup that verified its email but has not yet produced an entitled
+  // ONVO subscription (`provisioning_state = 'pending_subscription'`,
+  // `site_limit = 0`) may sign in — `resolveRole()` requires `active`, not
+  // `provisioning_state = 'active'` — but every existing portal page and
+  // every future one written by someone who never read this comment sends
+  // it straight to `/app/billing`, the only place it's allowed to be.
+  // Placed in the DEFAULT function deliberately (§6.4: "fail-closed for
+  // code that doesn't know about it"). Three call sites opt out via
+  // `requireCustomerAllowPending()` below — `/app/billing`'s own page
+  // (this redirect would otherwise loop back to itself), `/app/profile`
+  // (sign-out and password-change live there), and `app/api/billing/*`
+  // (the only routes a pending customer legitimately calls). Defense in
+  // depth either way: a pending customer's `site_limit` is `0`, so
+  // `canAddSite()` refuses independently of this gate ever running.
+  if (session.provisioningState !== 'active') redirect('/app/billing');
+  return session;
+}
+
+/**
+ * The explicit opt-out from `requireCustomer()`'s pending-account gate
+ * above (PLAN_PHASE16.md §6.4) — everything else about `requireCustomer()`
+ * (redirect to `/login` when signed out, to `/admin` for the wrong role)
+ * stays identical. Used by exactly the three places named in that
+ * function's own comment; a new call site here is a review question, not
+ * a routine addition.
+ */
+export async function requireCustomerAllowPending(): Promise<CustomerSession> {
   const session = await getSessionContext();
   if (session === null) redirect('/login');
   if (session.role !== 'customer') redirect('/admin');
@@ -201,6 +250,24 @@ const FORBIDDEN = () => NextResponse.json({ error: 'Not authorized.' }, { status
  * routes depend on it existing with this exact contract.
  */
 export async function requireCustomerForRoute(): Promise<CustomerSession | NextResponse> {
+  const session = await getSessionContext();
+  if (session === null || session.role !== 'customer') return FORBIDDEN();
+  // Same pending-account gate as `requireCustomer()` — see that function's
+  // comment. A Route Handler has no meaningful redirect target for a
+  // `fetch()` caller, so this collapses to the same generic 403 as any
+  // other rejection (§6.5-style "never a distinguishable body" instinct,
+  // even though this isn't a public/unauthenticated route — no reason to
+  // hand a client-side script a machine-readable "you're pending" signal
+  // it has no legitimate use for outside the UI, which already knows).
+  if (session.provisioningState !== 'active') return FORBIDDEN();
+  return session;
+}
+
+/**
+ * Route Handler counterpart of `requireCustomerAllowPending()` above — the
+ * opt-out used by `app/api/billing/*` specifically (PLAN_PHASE16.md §6.4).
+ */
+export async function requireCustomerForRouteAllowPending(): Promise<CustomerSession | NextResponse> {
   const session = await getSessionContext();
   if (session === null || session.role !== 'customer') return FORBIDDEN();
   return session;

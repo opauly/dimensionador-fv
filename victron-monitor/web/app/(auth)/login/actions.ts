@@ -11,7 +11,13 @@ import 'server-only';
 //      rate limit — surfaces the SAME generic copy. Distinguishing "no
 //      such user" from "wrong password" is precisely what an account-
 //      enumeration attack goes looking for, and there's no legitimate UI
-//      need to tell them apart on a portal with no public signup.
+//      need to tell them apart here. (PLAN_PHASE16.md §8 Step 5.5: this
+//      used to say "on a portal with no public signup" — that's now
+//      stale, since `/signup` exists — but the behaviour this comment
+//      justifies matters MORE now, not less: `/signup` itself is
+//      non-enumerating by the same discipline, §6.6, and this sign-in
+//      form staying that way too is what keeps "does an account exist
+//      for this email" unanswerable from either surface.)
 //   2. If Supabase Auth accepts the credentials but role resolution then
 //      rejects the account (`NotLinked` — unlinked or deactivated), the
 //      session that sign-in just created is torn down with `signOut()`

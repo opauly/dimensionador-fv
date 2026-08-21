@@ -6,13 +6,30 @@ import styles from './Pricing.module.css';
 
 type Mode = 'subscription' | 'single';
 
+export type PricingProps = {
+  /** Real `vrm.plans.id` rows for the MONTHLY Starter/Growth tiers, in the
+   * current `ONVO_MODE` (PLAN_PHASE16.md §8 Step 5.5 build item 7,
+   * `lib/server/db/signup.ts:getFeaturedSelfServePlanIds()`) — fetched by
+   * `app/(marketing)/page.tsx` (a Server Component; this one is a client
+   * component and has no session-free way to reach the database itself).
+   * `null` for a tier that isn't currently seeded/self-serve/active, in
+   * which case that card's button falls back to a bare `/signup` link
+   * rather than a dead id. */
+  starterPlanId: string | null;
+  growthPlanId: string | null;
+};
+
+function signupHref(planId: string | null): string {
+  return planId ? `/signup?plan=${planId}` : '/signup';
+}
+
 // Client component for the same reason ModuleGrid is: which whole block
 // renders (the three-tier grid vs. the one-time single-report card) depends
 // on `mode`, not just the toggle widget. This is also the toggle whose
 // template equivalent (landing_template.html L887-896) went inert because
 // of document-order-dependent querySelectorAll — see ModeToggle's own
 // comment for why a useState component can't reproduce that bug class.
-export function Pricing() {
+export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
   const [mode, setMode] = useState<Mode>('subscription');
 
   return (
@@ -20,7 +37,7 @@ export function Pricing() {
       <div className="wrap">
         <SectionHead
           eyebrow="Pricing"
-          lede="No seats, no per-user math — you pay for what's actually being monitored, whether that's your own home or fifty customers. Or skip the commitment and try one report first."
+          lede="One flat rate per tier — no per-site math, no surprise bill as you add sites. Or skip the commitment and try one report first."
         >
           Subscribe one system,
           <br />
@@ -50,8 +67,11 @@ export function Pricing() {
                 <span className={styles.range}>Up to 10 sites</span>
               </div>
               <div className={styles.num}>
-                $14<span className={styles.per}>/ site / mo</span>
+                $29.99<span className={styles.per}>/ mo</span>
               </div>
+              <p className={styles.singleNote} style={{ marginTop: -8, marginBottom: 12 }}>
+                or $299.99 / yr
+              </p>
               <ul className={styles.features}>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
@@ -70,7 +90,7 @@ export function Pricing() {
                   Automatic email delivery
                 </li>
               </ul>
-              <Button href="#cta" variant="ghost" style={{ justifyContent: 'center' }}>
+              <Button href={signupHref(starterPlanId)} variant="ghost" style={{ justifyContent: 'center' }}>
                 Get started
               </Button>
             </Panel>
@@ -81,8 +101,11 @@ export function Pricing() {
                 <span className={styles.range}>Up to 50 sites</span>
               </div>
               <div className={styles.num}>
-                $9<span className={styles.per}>/ site / mo</span>
+                $99.99<span className={styles.per}>/ mo</span>
               </div>
+              <p className={styles.singleNote} style={{ marginTop: -8, marginBottom: 12 }}>
+                or $999.99 / yr
+              </p>
               <ul className={styles.features}>
                 <li className={styles.carry}>Everything in Starter, plus</li>
                 <li>
@@ -94,7 +117,7 @@ export function Pricing() {
                   Priority support
                 </li>
               </ul>
-              <Button href="#cta" style={{ justifyContent: 'center' }}>
+              <Button href={signupHref(growthPlanId)} style={{ justifyContent: 'center' }}>
                 Get started
               </Button>
             </Panel>
@@ -158,9 +181,21 @@ export function Pricing() {
             </div>
             <div className={styles.singleRight}>
               <div className={styles.num}>
-                $29<span className={styles.per}>/ report</span>
+                $9.99<span className={styles.per}>/ report</span>
               </div>
-              <Button href="#cta" style={{ justifyContent: 'center', width: '100%' }}>
+              {/* Single Report deliberately has no `vrm.plans` row and is
+                  not purchasable from /signup in v1 — PLAN_PHASE16.md §9 /
+                  §0.6 Q1: "not a vrm.plans/subscription row — a one-off
+                  purchase ... unchanged flow." The plan's original text
+                  routed this CTA to the now-deleted `AccessForm`; with that
+                  gone (Oscar's explicit decision, §8 Step 5.5), a direct
+                  mailto — the same pattern Fleet's own "Talk to us" button
+                  already uses — replaces the dangling `#cta` anchor rather
+                  than leaving a dead in-page link. */}
+              <Button
+                href="mailto:proyectos@paulyco.com?subject=VRM%20Monitor%20-%20Single%20report"
+                style={{ justifyContent: 'center', width: '100%' }}
+              >
                 Get a report
               </Button>
               <span className={styles.singleNote}>

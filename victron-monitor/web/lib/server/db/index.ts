@@ -26,6 +26,9 @@ export type { ListIngestionsOptions } from './ingestions';
 export { getVrmLinkStatus } from './vrmLink';
 export type { VrmLinkStatusOut, VrmLinkSiteStatus } from './vrmLink';
 
+export { getBillingStatus, getBillingPlans, getBillingInvoices } from './billing';
+export type { BillingStatusOut, BillingPlanOut, BillingInvoiceOut, BillingInvoicesOut, BillingAddressIn } from './billing';
+
 export { NotAuthorized } from './errors';
 
 export type { CustomerRecord, SiteRecord, IngestionLogRecord, Lang, AccountType, SystemType } from './types';
