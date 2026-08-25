@@ -18,9 +18,20 @@ and `database.*` as top-level packages, and uvicorn needs the CWD to be the
 root for that to resolve):
 
 ```bash
-pip install -r requirements-api.txt
-uvicorn vrm_api.main:app --reload
+python3 -m venv .venv && source .venv/bin/activate   # first time only
+.venv/bin/python -m pip install -r requirements-api.txt
+.venv/bin/python -m uvicorn vrm_api.main:app --reload
 ```
+
+**Invoke the venv's own binaries by path (`.venv/bin/python -m ...`), not the
+bare `pip`/`uvicorn` commands** — even after `source .venv/bin/activate`. On a
+machine with Anaconda installed, a `(base)` conda environment auto-activating
+in the shell's startup can still shadow the venv on `PATH`, so a bare
+`uvicorn` silently resolves to Anaconda's Python (which doesn't have this
+project's dependencies) instead of the venv's — this fails with
+`ModuleNotFoundError: No module named 'supabase'` even though the venv's own
+install is fine. Run `which uvicorn` if unsure; it should print a path
+ending in `.venv/bin/uvicorn`.
 
 Needs the same `.env` the Streamlit app reads (`database/supabase_client.py`
 loads it via `python-dotenv`, cwd-relative) — see "Env vars" below.
@@ -39,8 +50,10 @@ All already present in the repo-root `.env` (never committed; see
 | `ONVO_MODE` | `routers/billing.py:_onvo_mode()` — `test` or `live`. Scopes every `vrm.plans`/`vrm.subscriptions` read/write to the matching row (`§3.1`'s `mode` column on both tables, so a dev row can never point at a live price). Defaults to `test` if unset. |
 | `ONVO_SECRET_KEY` | `vrm_api/onvo.py` **only** — the server-side ONVO API key (`Authorization: Bearer <key>` on every outbound call to `api.onvopay.com`). Never logged, never returned to a browser, never read by any other module in this repo. Test-mode keys (`onvo_test_secret_key_...`) for everything except a real production deploy — see `.env.example` and `PLAN_PHASE16.md` §0.6 Q9. |
 | `ONVO_PUBLISHABLE_KEY` | `routers/billing.py:_publishable_key()` — handed to the **browser** (as part of `BillingSubscribeOut`/`BillingPaymentMethodSessionOut`) so the ONVO web SDK (`sdk.onvopay.com/sdk.js`) can render its own card form client-side. Safe to expose — it's the public half of the key pair, the same way a Stripe publishable key is. |
+| `SITE_URL` | `vrm_api/report_delivery.py:_render_email()` — the base URL for the unsubscribe link embedded in a scheduled report email. Same value as `victron-monitor/web`'s own `SITE_URL`; if unset, scheduled emails simply carry no unsubscribe link (`make_unsubscribe_token()` fails closed by returning `None`, not by breaking the send). |
+| `REPORT_UNSUBSCRIBE_SECRET` | `vrm_api/report_delivery.py:make_unsubscribe_token()` — signs the unsubscribe link. Cross-runtime shared secret: the SAME value must also be set in `victron-monitor/web/.env.local`, since that app independently re-derives the signature (`lib/server/reportUnsubscribe.ts:verifyUnsubscribeToken()`) rather than this service ever calling back into it. If unset, no unsubscribe link is generated (fails closed). |
 
-In production (Render), all seven vars above are set directly in the
+In production (Render), all nine vars above are set directly in the
 service's environment — no `.env` file is deployed.
 
 **`ONVO_WEBHOOK_SECRET` is deliberately NOT in this list — this service never
@@ -147,6 +160,50 @@ exists (§1.11: the Next.js layer must never recompute this math itself).
 `schema: "monitoring"` (Pauly & Co's own Cerbo GX fleet, unrelated to any
 `vrm.customers` tenant) is only accepted with `actor: "admin"` — anything
 else is a `403`, before any work is scheduled.
+
+`result` also carries a `branding` key since `PLAN_PHASE17.md` §8 Step 8
+(the same resolved `vrm_api/branding.py:resolve_branding()` output used to
+render the PDF, additive and JSON-safe) — no existing caller reads it, it
+exists so `POST /v1/reports/run-due` below can reuse the exact branding
+that produced the PDF when it composes the report email, without
+re-resolving it a second time.
+
+### `POST /v1/reports/run-due`
+
+`PLAN_PHASE17.md` §3.4/§8 Steps 6-9 — the scheduled-reports fan-out, called
+hourly by `.github/workflows/scheduled-reports.yml`, never by a browser.
+Batched (a report is slow — an Anthropic call, a weather fetch, a
+WeasyPrint render) and per-site isolated (one site's failure never blocks
+another's).
+
+```json
+// Request
+{"max_sites": 10}
+```
+```json
+// Response — 200
+{
+  "sites_checked": 12,
+  "processed": 4,
+  "remaining": 0,
+  "results": [
+    {"site_id": "acme-casa-principal", "status": "done", "error": null}
+  ]
+}
+```
+
+`remaining > 0` means the wall-clock budget (~240s) or `max_sites` was hit
+before every due site could be reached — the caller (the GitHub Actions
+workflow) loops, calling this again, until `remaining` is `0` or a
+20-iteration cap is hit. `status` is one of `done` / `skipped_not_due` /
+`skipped_no_data` / `skipped_capped` / `skipped_not_entitled` / `failed` /
+`abandoned` — see `vrm_api/report_runs.py`'s own module docstring for the
+full retry semantics, and `vrm.report_runs` for the durable ledger every
+`done`/`skipped_*`/`failed`/`abandoned` outcome (except `skipped_not_due`,
+which never has a period to key a row on) is recorded against. Email
+delivery (`vrm_api/report_delivery.py`) happens INSIDE a `done` outcome,
+never as a separate call — a rendered-but-unsent report is not a state
+that can exist.
 
 ### `GET /v1/jobs/{id}`
 

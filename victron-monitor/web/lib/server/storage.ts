@@ -29,3 +29,18 @@ export async function createReportDownloadUrl(storagePath: string): Promise<stri
   }
   return data.signedUrl;
 }
+
+// Same shape, for `/app/branding`'s live preview of an already-saved logo
+// (PLAN_PHASE17.md §4.5, §8 Step 5) — a longer TTL than a report download,
+// since this URL sits in a rendered page a customer might leave open for a
+// while, not a one-click download link. Still short enough that it isn't a
+// standing public link to the object. Returns `null` (not a thrown error)
+// on failure — a missing/broken logo shouldn't break the whole settings
+// page from loading, just fall back to showing no preview image.
+const LOGO_URL_TTL_SECONDS = 3600;
+
+export async function createBrandingLogoUrl(storagePath: string): Promise<string | null> {
+  const { data, error } = await getSupabaseAdmin().storage.from(BUCKET).createSignedUrl(storagePath, LOGO_URL_TTL_SECONDS);
+  if (error || !data) return null;
+  return data.signedUrl;
+}

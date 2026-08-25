@@ -161,3 +161,37 @@
   border-radius: 2px;
   display: inline-block;
 }
+
+/* ── Report history (PLAN_PHASE17.md §3.7 / §8 Step 7) ─────────────────── */
+.statusDone {
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusNeedsAttention {
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.statusNeutral {
+  color: var(--mute);
+  font-size: 12px;
+}
+.downloadButton {
+  background: none;
+  border: none;
+  color: var(--victron);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.downloadButton:disabled {
+  color: var(--mute);
+  cursor: default;
+  text-decoration: none;
+}

@@ -27,6 +27,7 @@ import type {
   IngestionLogRecord,
   SignupRequestRecord,
 } from './types';
+import type { ReportRunRecord } from './reportRuns';
 
 export type AdminCustomerRow = CustomerRecord & {
   siteCount: number;
@@ -204,6 +205,12 @@ const ADMIN_CUSTOMER_WHITELIST = [
   'site_limit',
   'active',
   'notes',
+  // PLAN_PHASE17.md §4.5 — so Oscar can set a Fleet customer's branding by
+  // hand during onboarding. Untiered on purpose: an admin write bypasses
+  // getBrandingAccess() entirely (this whitelist is the only gate on this
+  // path), the same way every other admin override in this file already
+  // does for site_limit/plan.
+  'branding',
 ] as const;
 
 export type AdminCustomerUpdateFields = Partial<Pick<CustomerRecord, (typeof ADMIN_CUSTOMER_WHITELIST)[number]>>;
@@ -404,4 +411,24 @@ export async function listRecentSignups(limit = 50): Promise<AdminSignupRow[]> {
     ...row,
     expired: !row.consumed_at && new Date(row.expires_at).getTime() < now,
   }));
+}
+
+/**
+ * `vrm.report_runs`, newest first (PLAN_PHASE17.md §5.2 / §8 Step 7) —
+ * `/admin/activity`'s recent-runs panel, the detection surface for "the
+ * scheduled-reports cron silently stopped" (§0.5/§3.7). Same "no bulk
+ * `vrm_api` endpoint exists for this and none is needed" reasoning
+ * `listBillingEvents()` above already states for a different table — every
+ * write to this table happens exclusively in `vrm_api/report_runs.py`,
+ * nothing here ever inserts or updates a row.
+ */
+export async function listAllReportRuns(limit = 100): Promise<ReportRunRecord[]> {
+  const { data, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('report_runs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as ReportRunRecord[];
 }

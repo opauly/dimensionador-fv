@@ -102,7 +102,32 @@ export type CustomerRecord = {
    * flow. Never used in an authorization decision — filter/diagnostics
    * only, per migration 025's own column comment. */
   origin: 'admin' | 'self_serve';
+  /** jsonb, shape documented in migration 026's own `COMMENT ON COLUMN`
+   * and `lib/server/db/branding.ts:BrandingFields` (PLAN_PHASE17.md §4.1)
+   * — company_name/logo_storage_path/primary_color/contact fields/website,
+   * all optional. `{}` on every pre-Phase-17 row. Read here (added 2026-08-21,
+   * this file's own header comment's exception rule: "add a field only
+   * when something in app/(portal) actually needs it" — the branding
+   * settings page, `app/(portal)/app/branding/`, does) but this is NEVER
+   * the value a rendered report sees directly: `vrm_api/branding.py:
+   * resolve_branding()` is the only thing that turns this raw jsonb into
+   * what `victron/weekly_report.py` receives, gated on tier + entitlement.
+   * This app's own read/write path (`lib/server/db/branding.ts`) applies
+   * the SAME two gates independently, for UX only — the real enforcement
+   * stays server-side at render time regardless of what this layer does. */
+  branding: Record<string, unknown> | null;
+  /** Applied by `sites.ts:createSite()` to NEW sites only, and only when
+   * the new site's `source='vrm_api'` (PLAN_PHASE17.md §0.7/§3.1/§5.4) —
+   * never retroactively. `'off'` on every pre-Phase-17 row. */
+  default_report_schedule: ReportSchedule;
 };
+
+/** PLAN_PHASE17.md §3/§5.3. `'off'` is the only legal value for a
+ * `source='csv_upload'` site (migration 026's
+ * `sites_scheduled_reports_require_vrm_api` CHECK) — enforced again,
+ * independently, in `sites.ts:updateSite()`/`createSite()` (§3.1 point 2:
+ * "hide an editor is UX, never the control"). */
+export type ReportSchedule = 'off' | 'daily' | 'weekly' | 'monthly';
 
 /** One `vrm.billing_events` row (PLAN_PHASE16.md §3.5 / §8 Step 6) — the
  * append-only webhook receipt log `/admin/activity`'s new "Billing events"
@@ -191,6 +216,29 @@ export type SiteRecord = {
    * pre-Phase-15 `csv_upload` row (migration 024); flipped `true` only by
    * the connect flow (`vrm_link.py`'s `POST /connect`). */
   vrm_sync_enabled: boolean;
+  // ── PLAN_PHASE17.md §3/§5.3/§8 Step 6-7 — the schedule ──────────────────
+  // Only ever non-`'off'` when `source='vrm_api'` (migration 026's
+  // `sites_scheduled_reports_require_vrm_api` CHECK, §0.7) — a CSV site's
+  // data is only as fresh as the last manual upload, so it can never be
+  // scheduled. `'off'` on every pre-Phase-17 row.
+  report_schedule: ReportSchedule;
+  /** ISO weekday, 1=Monday..7=Sunday. Only meaningful when
+   * `report_schedule='weekly'`. */
+  report_schedule_weekday: number;
+  /** 1-28 (capped by a CHECK — never 29-31, so a monthly schedule never
+   * silently skips February, §3.2). Only meaningful when
+   * `report_schedule='monthly'`. */
+  report_schedule_day_of_month: number;
+  /** 0-23, in the site's own `timezone` column above. */
+  report_schedule_hour: number;
+  /** `NULL`/empty falls back to the customer's own `contact_email` at send
+   * time (Step 8, not built yet) — third-party recipients are §0.6 Q5,
+   * still open. */
+  report_recipients: string[] | null;
+  /** The last successfully-generated SCHEDULED period's end date — never
+   * touched by a manual/admin report run. `NULL` until the first one. */
+  report_last_period_end: string | null;
+  report_last_run_at: string | null;
 };
 
 export type IngestionLogRecord = {

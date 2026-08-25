@@ -5,10 +5,16 @@
 // `vrm.customers.ui_language` column (migration 021) do anything at all.
 // `lang` is always `'en'` or `'es'`.
 //
-// Admin views are Spanish and are ported near-verbatim from
+// Admin views were originally Spanish, ported near-verbatim from
 // `pages/06_vrm_monitor.py`'s own copy instead of going through this file
 // (PLAN_PHASE14.md §1.10, §3) — admin literals stay inline in
-// `app/(admin)/admin/**`.
+// `app/(admin)/admin/**`, never through `t()`. Stale as of PLAN_PHASE15.md's
+// "English-only UI" pass: every admin page has since been rewritten in
+// English (grep `app/(admin)/admin/**` for the current reality rather than
+// trusting this paragraph) — kept here only to explain why admin literals
+// are inline at all rather than pointing to `FORCE_LANG` below, which is
+// unrelated (that override is about a CUSTOMER's own `ui_language`, not
+// admin copy, which never went through this file in either language).
 //
 // Not `lib/server/` — this is plain data with no secret and no Supabase
 // call in it, and it needs to be importable from Client Components (the
@@ -40,6 +46,7 @@ export const STRINGS = {
     nav_reports: 'Reports',
     nav_upload: 'Upload CSV',
     nav_my_sites: 'My Sites',
+    nav_branding: 'Branding',
     nav_profile: 'Profile',
     nav_billing: 'Billing',
 
@@ -76,7 +83,12 @@ export const STRINGS = {
     // enforced until AFTER a vrm.customers row exists, which it doesn't
     // yet at any point on this page).
     signup_title: 'Create your account',
-    signup_subtitle: 'Start with a 7-day trial — a card is required to begin, and you can cancel anytime before it ends.',
+    // Split from the old single sentence (2026-08-21, "good marketing"
+    // request): the trial itself is now a visually distinct banner
+    // (SignupForm.tsx) so it reads as a headline, not buried mid-paragraph.
+    // `signup_subtitle` keeps only the supporting detail.
+    signup_trial_banner: '7-day free trial on every plan',
+    signup_subtitle: 'A card is required to begin, and you can cancel anytime before it ends.',
     signup_name: 'Name',
     signup_email: 'Email',
     signup_account_type_label: 'I am a',
@@ -159,6 +171,38 @@ export const STRINGS = {
     sites_limit_body:
       "Your plan includes {limit} site(s), and you're using all of them. Contact us to add more.",
     sites_limit_cta: 'Contact proyectos@paulyco.com',
+
+    // ── Report schedule (PLAN_PHASE17.md §3.7 / §8 Step 7) ─────────
+    sites_field_report_schedule: 'Automatic report schedule',
+    sites_schedule_off: 'Off',
+    sites_schedule_daily: 'Daily',
+    sites_schedule_weekly: 'Weekly',
+    sites_schedule_monthly: 'Monthly',
+    sites_field_schedule_weekday: 'Day of the week',
+    sites_weekday_1: 'Monday',
+    sites_weekday_2: 'Tuesday',
+    sites_weekday_3: 'Wednesday',
+    sites_weekday_4: 'Thursday',
+    sites_weekday_5: 'Friday',
+    sites_weekday_6: 'Saturday',
+    sites_weekday_7: 'Sunday',
+    sites_field_schedule_day_of_month: 'Day of the month',
+    sites_field_schedule_hour: 'Hour (site’s own timezone)',
+    sites_schedule_help: 'Reports are only generated for complete periods — a weekly schedule delivers the 7 days ending the day before your chosen weekday, a monthly one delivers the previous full calendar month.',
+    sites_schedule_csv_notice: 'Connect this site to the VRM API to enable automatic reports.',
+    sites_bulk_apply_button: 'Apply a schedule to all sites',
+    sites_bulk_apply_title: 'Apply schedule to all VRM API sites',
+    sites_bulk_apply_intro: 'This replaces the automatic report schedule on every active site connected via the VRM API — sites uploaded by CSV are never affected, since their data is never automatically current.',
+    sites_bulk_apply_no_sites: "You don't have any sites connected via the VRM API yet — connect one first (below) to use this.",
+    sites_bulk_apply_projection: 'This would generate approximately {count} report(s) per billing period, across {sites} site(s). Your plan allows {cap} per period.',
+    sites_bulk_apply_over_cap: "This would exceed your plan's scheduled-report limit ({cap} per period). Choose a less frequent cadence, or contact us to discuss a higher limit.",
+    sites_bulk_apply_confirm_button: 'Apply to {count} site(s)',
+    sites_bulk_apply_applying: 'Applying…',
+    sites_bulk_apply_success: 'Schedule applied to {count} site(s).',
+    sites_bulk_apply_error: "Couldn't apply the schedule. Please try again.",
+    sites_field_report_recipients: 'Also send this report to',
+    sites_field_report_recipients_placeholder: 'one email per line',
+    sites_field_report_recipients_help: '{count}/{max} — leave empty to send only to your own account email.',
 
     // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
     vrm_link_title: 'Victron VRM account',
@@ -325,6 +369,8 @@ export const STRINGS = {
     reports_generating: 'Generating…',
     reports_error_generic: "Couldn't generate the report. Please try again.",
     reports_error_unreachable: "Couldn't reach the report service. Please try again in a moment.",
+    reports_error_rate_limited_hour: "You've generated a lot of reports in the last hour — please try again in a bit.",
+    reports_error_rate_limited_day: "You've reached today's report limit for your plan — please try again tomorrow.",
     reports_download_button: 'Download PDF',
     reports_downloading: 'Preparing download…',
     reports_download_error: "Couldn't prepare the download. Please try again.",
@@ -343,6 +389,29 @@ export const STRINGS = {
     reports_energy_mix_battery: 'Battery',
     reports_energy_mix_grid: 'Grid',
     reports_period_caption: 'Period {start} → {end} · {days} days',
+
+    // ── Report history (PLAN_PHASE17.md §3.7 / §8 Step 7) ──────────
+    // Every status `vrm.report_runs.status` can actually hold — see
+    // `vrm_api/report_runs.py`'s module docstring for why `skipped_not_due`
+    // is NOT in this list (it never has a period to key a row on, so it
+    // never reaches this table at all — this is a response-only concept in
+    // `POST /v1/reports/run-due`'s own output, not a stored status).
+    reports_history_title: 'Report history',
+    reports_history_intro: 'Every automatic and manually-triggered report run for your sites, most recent first.',
+    reports_history_empty: 'No scheduled reports yet — set a schedule on a site connected via the VRM API to start seeing them here.',
+    reports_history_col_site: 'Site',
+    reports_history_col_period: 'Period',
+    reports_history_col_status: 'Status',
+    reports_history_col_date: 'Run at',
+    reports_history_download: 'Download',
+    reports_history_downloading: 'Preparing download…',
+    reports_history_download_error: "Couldn't prepare the download. Please try again.",
+    reports_history_status_done: 'Ready',
+    reports_history_status_skipped_no_data: 'No data yet for this period — check back once your system has reported in.',
+    reports_history_status_skipped_capped: "Skipped — you've reached your plan's scheduled-report limit for this billing period.",
+    reports_history_status_skipped_not_entitled: "Skipped — this account isn't currently eligible for automatic reports.",
+    reports_history_status_failed: "Couldn't be generated — it will be retried automatically.",
+    reports_history_status_abandoned: "Failed repeatedly and won't be retried automatically. Contact us if this keeps happening.",
 
     // ── Billing (PLAN_PHASE16.md §8 Step 5) ────────────────────────
     billing_title: 'Billing',
@@ -383,6 +452,7 @@ export const STRINGS = {
     billing_canceling: 'Canceling…',
     billing_action_error_generic: "Couldn't complete that action. Please try again.",
     billing_action_error_unreachable: "Couldn't reach the billing service. Please try again in a moment.",
+    billing_change_error_no_payment_method: 'Add a payment method first — changing plans needs a card on file to charge for the new plan.',
     billing_plans_title: 'Plans',
     billing_plans_loading: 'Loading plans…',
     billing_plans_empty: 'No plans are available right now — contact proyectos@paulyco.com.',
@@ -407,6 +477,9 @@ export const STRINGS = {
     billing_payment_method_none: 'No card on file yet.',
     billing_payment_method_summary: '{brand} •••• {last4} · exp {month}/{year}',
     billing_payment_method_replace_button: 'Replace card',
+    billing_payment_method_add_button: 'Add card',
+    billing_change_after_card_title: 'Card added — confirm your plan change',
+    billing_change_after_card_body: 'Ready to switch to {plan}? This starts a new billing period right away.',
     billing_payment_method_cancel_button: 'Cancel',
     billing_payment_method_loading: 'Loading secure card form…',
     billing_payment_method_save_button: 'Save card',
@@ -450,6 +523,38 @@ export const STRINGS = {
     profile_billing_title: 'Billing',
     profile_billing_no_plan: 'No active plan yet.',
     profile_billing_manage_cta: 'Manage billing',
+
+    // ── Branding (PLAN_PHASE17.md §4.5, §8 Step 5) ──────────────────────
+    profile_branding_title: 'Report branding',
+    profile_branding_enabled: 'Your reports carry your own name, logo, and colors.',
+    profile_branding_not_enabled: 'Your reports carry Pauly & Co. branding.',
+    profile_branding_manage_cta: 'Manage branding',
+    branding_title: 'Report branding',
+    branding_intro: 'Set your own name, logo, and color on every report your customers receive.',
+    branding_upsell_title: 'Available on Growth and Fleet',
+    branding_upsell_body: 'White-label branding — your own logo, colors, and contact details on every report — is included on the Growth and Fleet plans.',
+    branding_upsell_cta: 'View plans',
+    branding_owner_unavailable_title: 'Not available for owner accounts',
+    branding_owner_unavailable_body: 'Report branding is for installers sending reports to their own clients. As a system owner monitoring your own site, this isn’t something you need.',
+    branding_field_company_name: 'Company name',
+    branding_field_contact_email: 'Contact email',
+    branding_field_primary_color: 'Accent color',
+    branding_field_logo: 'Logo',
+    branding_logo_uploading: 'Uploading…',
+    branding_logo_too_large: 'That image is too large — 1 MB maximum.',
+    branding_logo_unsupported_type: 'Please upload a PNG or JPEG image.',
+    branding_logo_upload_error: "Couldn't upload the logo. Please try again.",
+    branding_save_button: 'Save branding',
+    branding_saving: 'Saving…',
+    branding_save_success: 'Branding saved.',
+    branding_save_error: "Couldn't save your branding. Please try again.",
+    branding_error_invalid_email: 'Enter a valid contact email.',
+    branding_error_invalid_color: 'Enter a valid color.',
+    branding_error_color_too_light: 'That color is too light to read as text — choose a darker one.',
+    branding_error_not_allowed: 'Your plan does not include custom branding.',
+    branding_preview_label: 'Preview',
+    branding_preview_period_label: 'Report period',
+    branding_preview_powered_by: 'Monitoring powered by',
   },
   es: {
     login_title: 'VRM Monitor',
@@ -472,6 +577,7 @@ export const STRINGS = {
     nav_reports: 'Reportes',
     nav_upload: 'Cargar CSV',
     nav_my_sites: 'Mis sitios',
+    nav_branding: 'Marca',
     nav_profile: 'Perfil',
     nav_billing: 'Facturación',
 
@@ -506,7 +612,8 @@ export const STRINGS = {
     // aplica hasta que exista una fila vrm.customers, y todavía no existe
     // en ningún punto de esta página).
     signup_title: 'Creá tu cuenta',
-    signup_subtitle: 'Empezá con una prueba de 7 días — se requiere una tarjeta para comenzar, y podés cancelar en cualquier momento antes de que termine.',
+    signup_trial_banner: '7 días de prueba gratis en todos los planes',
+    signup_subtitle: 'Se requiere una tarjeta para comenzar, y podés cancelar en cualquier momento antes de que termine.',
     signup_name: 'Nombre',
     signup_email: 'Correo electrónico',
     signup_account_type_label: 'Soy',
@@ -589,6 +696,38 @@ export const STRINGS = {
     sites_limit_title: 'Alcanzaste el límite de sitios',
     sites_limit_body: 'Tu plan incluye {limit} sitio(s), y ya los estás usando todos. Contactanos para agregar más.',
     sites_limit_cta: 'Contactar a proyectos@paulyco.com',
+
+    // ── Report schedule (PLAN_PHASE17.md §3.7 / §8 Step 7) ─────────
+    sites_field_report_schedule: 'Envío automático de reportes',
+    sites_schedule_off: 'Apagado',
+    sites_schedule_daily: 'Diario',
+    sites_schedule_weekly: 'Semanal',
+    sites_schedule_monthly: 'Mensual',
+    sites_field_schedule_weekday: 'Día de la semana',
+    sites_weekday_1: 'Lunes',
+    sites_weekday_2: 'Martes',
+    sites_weekday_3: 'Miércoles',
+    sites_weekday_4: 'Jueves',
+    sites_weekday_5: 'Viernes',
+    sites_weekday_6: 'Sábado',
+    sites_weekday_7: 'Domingo',
+    sites_field_schedule_day_of_month: 'Día del mes',
+    sites_field_schedule_hour: 'Hora (zona horaria propia del sitio)',
+    sites_schedule_help: 'Los reportes solo se generan para períodos completos — uno semanal entrega los 7 días que terminan el día anterior al elegido, uno mensual entrega el mes calendario anterior completo.',
+    sites_schedule_csv_notice: 'Conectá este sitio a la API de VRM para habilitar reportes automáticos.',
+    sites_bulk_apply_button: 'Aplicar un horario a todos los sitios',
+    sites_bulk_apply_title: 'Aplicar horario a todos los sitios conectados por API VRM',
+    sites_bulk_apply_intro: 'Esto reemplaza el horario de reportes automáticos en cada sitio activo conectado por la API de VRM — los sitios cargados por CSV nunca se ven afectados, ya que sus datos nunca están automáticamente actualizados.',
+    sites_bulk_apply_no_sites: 'Todavía no tenés sitios conectados por la API de VRM — conectá uno primero (abajo) para usar esto.',
+    sites_bulk_apply_projection: 'Esto generaría aproximadamente {count} reporte(s) por período de facturación, en {sites} sitio(s). Tu plan permite {cap} por período.',
+    sites_bulk_apply_over_cap: 'Esto superaría el límite de reportes programados de tu plan ({cap} por período). Elegí una frecuencia menor, o contactanos para hablar de un límite mayor.',
+    sites_bulk_apply_confirm_button: 'Aplicar a {count} sitio(s)',
+    sites_bulk_apply_applying: 'Aplicando…',
+    sites_bulk_apply_success: 'Horario aplicado a {count} sitio(s).',
+    sites_bulk_apply_error: 'No se pudo aplicar el horario. Intentá de nuevo.',
+    sites_field_report_recipients: 'También enviar este reporte a',
+    sites_field_report_recipients_placeholder: 'un email por línea',
+    sites_field_report_recipients_help: '{count}/{max} — dejá vacío para enviar solo al email de tu cuenta.',
 
     // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
     vrm_link_title: 'Cuenta de Victron VRM',
@@ -748,6 +887,8 @@ export const STRINGS = {
     reports_generating: 'Generando…',
     reports_error_generic: 'No se pudo generar el reporte. Intentá de nuevo.',
     reports_error_unreachable: 'No se pudo contactar al servicio de reportes. Intentá de nuevo en un momento.',
+    reports_error_rate_limited_hour: 'Generaste muchos reportes en la última hora — probá de nuevo en un rato.',
+    reports_error_rate_limited_day: 'Alcanzaste el límite diario de reportes de tu plan — probá de nuevo mañana.',
     reports_download_button: 'Descargar PDF',
     reports_downloading: 'Preparando la descarga…',
     reports_download_error: 'No se pudo preparar la descarga. Intentá de nuevo.',
@@ -766,6 +907,24 @@ export const STRINGS = {
     reports_energy_mix_battery: 'Batería',
     reports_energy_mix_grid: 'Red',
     reports_period_caption: 'Periodo {start} → {end} · {days} días',
+
+    // ── Report history (PLAN_PHASE17.md §3.7 / §8 Step 7) ──────────
+    reports_history_title: 'Historial de reportes',
+    reports_history_intro: 'Cada ejecución de reporte automática y manual de tus sitios, más reciente primero.',
+    reports_history_empty: 'Todavía no hay reportes programados — configurá un horario en un sitio conectado por la API de VRM para empezar a verlos acá.',
+    reports_history_col_site: 'Sitio',
+    reports_history_col_period: 'Período',
+    reports_history_col_status: 'Estado',
+    reports_history_col_date: 'Ejecutado',
+    reports_history_download: 'Descargar',
+    reports_history_downloading: 'Preparando descarga…',
+    reports_history_download_error: 'No se pudo preparar la descarga. Intentá de nuevo.',
+    reports_history_status_done: 'Listo',
+    reports_history_status_skipped_no_data: 'Todavía no hay datos para este período — revisá de nuevo cuando tu sistema haya reportado.',
+    reports_history_status_skipped_capped: 'Omitido — alcanzaste el límite de reportes programados de tu plan para este período de facturación.',
+    reports_history_status_skipped_not_entitled: 'Omitido — esta cuenta no es elegible actualmente para reportes automáticos.',
+    reports_history_status_failed: 'No se pudo generar — se reintentará automáticamente.',
+    reports_history_status_abandoned: 'Falló repetidamente y no se reintentará automáticamente. Contactanos si esto sigue pasando.',
 
     // ── Billing (PLAN_PHASE16.md §8 Step 5) ────────────────────────
     billing_title: 'Facturación',
@@ -801,6 +960,7 @@ export const STRINGS = {
     billing_canceling: 'Cancelando…',
     billing_action_error_generic: 'No se pudo completar esa acción. Intentá de nuevo.',
     billing_action_error_unreachable: 'No se pudo contactar al servicio de facturación. Intentá de nuevo en un momento.',
+    billing_change_error_no_payment_method: 'Agregá un método de pago primero — cambiar de plan requiere una tarjeta registrada para cobrar el nuevo plan.',
     billing_plans_title: 'Planes',
     billing_plans_loading: 'Cargando planes…',
     billing_plans_empty: 'No hay planes disponibles en este momento — contactá a proyectos@paulyco.com.',
@@ -825,6 +985,9 @@ export const STRINGS = {
     billing_payment_method_none: 'Todavía no hay una tarjeta registrada.',
     billing_payment_method_summary: '{brand} •••• {last4} · vence {month}/{year}',
     billing_payment_method_replace_button: 'Reemplazar tarjeta',
+    billing_payment_method_add_button: 'Agregar tarjeta',
+    billing_change_after_card_title: 'Tarjeta agregada — confirmá tu cambio de plan',
+    billing_change_after_card_body: '¿Listo para cambiar a {plan}? Esto inicia un nuevo período de facturación de inmediato.',
     billing_payment_method_cancel_button: 'Cancelar',
     billing_payment_method_loading: 'Cargando formulario seguro de tarjeta…',
     billing_payment_method_save_button: 'Guardar tarjeta',
@@ -868,6 +1031,38 @@ export const STRINGS = {
     profile_billing_title: 'Facturación',
     profile_billing_no_plan: 'Todavía no hay un plan activo.',
     profile_billing_manage_cta: 'Gestionar facturación',
+
+    // ── Branding (PLAN_PHASE17.md §4.5, §8 Step 5) ──────────────────────
+    profile_branding_title: 'Marca del reporte',
+    profile_branding_enabled: 'Tus reportes llevan tu propio nombre, logo y colores.',
+    profile_branding_not_enabled: 'Tus reportes llevan la marca de Pauly & Co.',
+    profile_branding_manage_cta: 'Gestionar marca',
+    branding_title: 'Marca del reporte',
+    branding_intro: 'Configurá tu propio nombre, logo y color en cada reporte que reciben tus clientes.',
+    branding_upsell_title: 'Disponible en Growth y Fleet',
+    branding_upsell_body: 'La marca personalizada — tu propio logo, colores y datos de contacto en cada reporte — está incluida en los planes Growth y Fleet.',
+    branding_upsell_cta: 'Ver planes',
+    branding_owner_unavailable_title: 'No disponible para cuentas de dueño de sistema',
+    branding_owner_unavailable_body: 'La marca del reporte es para instaladores que envían reportes a sus propios clientes. Como dueño de un sistema monitoreando tu propio sitio, esto no es algo que necesités.',
+    branding_field_company_name: 'Nombre de la empresa',
+    branding_field_contact_email: 'Correo de contacto',
+    branding_field_primary_color: 'Color de acento',
+    branding_field_logo: 'Logo',
+    branding_logo_uploading: 'Subiendo…',
+    branding_logo_too_large: 'Esa imagen es demasiado grande — 1 MB máximo.',
+    branding_logo_unsupported_type: 'Subí una imagen PNG o JPEG.',
+    branding_logo_upload_error: 'No se pudo subir el logo. Intentá de nuevo.',
+    branding_save_button: 'Guardar marca',
+    branding_saving: 'Guardando…',
+    branding_save_success: 'Marca guardada.',
+    branding_save_error: 'No se pudo guardar la marca. Intentá de nuevo.',
+    branding_error_invalid_email: 'Ingresá un correo de contacto válido.',
+    branding_error_invalid_color: 'Ingresá un color válido.',
+    branding_error_color_too_light: 'Ese color es demasiado claro para leerse como texto — elegí uno más oscuro.',
+    branding_error_not_allowed: 'Tu plan no incluye marca personalizada.',
+    branding_preview_label: 'Vista previa',
+    branding_preview_period_label: 'Período del reporte',
+    branding_preview_powered_by: 'Monitoreo por',
   },
 } as const;
 

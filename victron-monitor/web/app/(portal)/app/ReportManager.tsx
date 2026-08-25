@@ -166,9 +166,15 @@ export function ReportManager({ sites, lang }: ReportManagerProps) {
         // — reachable in practice only via a tampered request, since the
         // Generate button is already disabled past this boundary, but it
         // still deserves the specific message rather than the generic one.
-        const body = (await res.json().catch(() => null)) as { error?: string; maxDays?: number } | null;
+        const body = (await res.json().catch(() => null)) as
+          { error?: string; maxDays?: number; retryAfterSeconds?: number } | null;
         if (body?.error === 'range_too_long') {
           setError(t(lang, 'reports_range_too_long').replace('{days}', String(numDays)).replace('{max}', String(body.maxDays ?? '')));
+        } else if (body?.error === 'report_rate_limited') {
+          // PLAN_PHASE17.md §2.2 Cap A — the retry window tells the customer
+          // something true and actionable rather than a bare "try again".
+          setError(t(lang, body.retryAfterSeconds && body.retryAfterSeconds >= 86400
+            ? 'reports_error_rate_limited_day' : 'reports_error_rate_limited_hour'));
         } else {
           setError(t(lang, 'reports_error_generic'));
         }

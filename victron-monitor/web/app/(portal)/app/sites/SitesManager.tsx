@@ -12,6 +12,7 @@ import { t, type Lang } from '@/lib/i18n/strings';
 import { countryLabel } from '@/lib/countries';
 import type { CanAddSiteResult, SiteRecord } from '@/lib/server/db';
 import { addSiteAction, updateSiteAction } from './actions';
+import { BulkScheduleForm } from './BulkScheduleForm';
 import { SiteForm } from './SiteForm';
 import styles from './sites.module.css';
 
@@ -31,6 +32,13 @@ const SYSTEM_TYPE_KEY = {
 export function SitesManager({ sites, lang, canAdd, siteLimit }: SitesManagerProps) {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [bulkScheduling, setBulkScheduling] = useState(false);
+  const [bulkAppliedCount, setBulkAppliedCount] = useState<number | null>(null);
+
+  function handleOpenBulkSchedule() {
+    setBulkAppliedCount(null);
+    setBulkScheduling(true);
+  }
 
   return (
     <div>
@@ -116,7 +124,25 @@ export function SitesManager({ sites, lang, canAdd, siteLimit }: SitesManagerPro
             </Button>
           </div>
         )}
+        {!bulkScheduling && (
+          <Button type="button" variant="ghost" onClick={handleOpenBulkSchedule}>
+            {t(lang, 'sites_bulk_apply_button')}
+          </Button>
+        )}
       </div>
+
+      {bulkAppliedCount !== null && <p className={styles.success}>{t(lang, 'sites_bulk_apply_success').replace('{count}', String(bulkAppliedCount))}</p>}
+
+      {bulkScheduling && (
+        <BulkScheduleForm
+          lang={lang}
+          onCancel={() => setBulkScheduling(false)}
+          onApplied={(count) => {
+            setBulkScheduling(false);
+            setBulkAppliedCount(count);
+          }}
+        />
+      )}
 
       {adding && canAdd.ok && (
         <div className={styles.panel}>

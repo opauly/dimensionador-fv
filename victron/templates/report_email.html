@@ -1,0 +1,124 @@
+<!--
+  Scheduled report delivery email — PLAN_PHASE17.md §8 Step 8.
+
+  A Jinja2 port of victron-monitor/apps-script/Victron_Events_App_Script_v1p7.js's
+  own buildEmailHtml() (Oscar's own fleet has been getting this exact shape
+  every Monday for months) — table layout, inline styles only, no <style>
+  block, no inline base64 image URIs (Gmail strips both; see
+  invite_email.html's own comment for the same rule stated once already).
+  Rendered and sent by
+  vrm_api/report_delivery.py, never by victron-monitor/web (this only runs
+  for a SCHEDULED report — see that module's own header comment for why a
+  customer's on-demand "Generate" click never reaches this template).
+
+  Branding (PLAN_PHASE17.md §4.2/§4.3): `company_name`/`primary_color`/
+  `contact_email` are ALREADY the output of vrm_api/branding.py:
+  resolve_branding() by the time this template renders — never raw
+  customer-supplied jsonb. The health-score badge colour below is
+  DELIBERATELY NOT branded — same reasoning §4.3/Q8 states for
+  report_svg.py's GREEN/AMBER/RED: a health tier is data, not decoration,
+  and a customer whose brand colour is red must not ship a report where
+  every healthy metric reads as an alarm. `score_color`/`badge_bg`/
+  `badge_text` are computed in Python from fixed thresholds, ported
+  unchanged from the Apps Script original — never touched by this
+  template.
+
+  `unsubscribe_url` (PLAN_PHASE17.md §0.6 Q5) is `None` for the customer's
+  own primary/fallback recipient — a customer removing themselves from
+  their own reports is what turning the schedule to 'off' in the portal is
+  for, not a footer link. It is only ever set for a genuine third-party
+  recipient explicitly listed in `vrm.sites.report_recipients`.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ site_name }} report</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f4f6f8; font-family:Arial, sans-serif; color:#1A2B3C;">
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
+      Your {{ site_name }} report for {{ period_start }} &#8211; {{ period_end }} is attached.
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6f8;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0"
+                 style="width:560px; max-width:100%; background-color:#ffffff; border-radius:10px; overflow:hidden;">
+            <tr>
+              <td style="padding:28px 32px 0 32px;">
+                <table width="100%" cellpadding="0" cellspacing="0" style="border-bottom:3px solid {{ primary_color }}; padding-bottom:12px;">
+                  <tr>
+                    <td style="font-size:11px; font-weight:700; color:{{ primary_color }}; letter-spacing:0.08em; text-transform:uppercase;">
+                      {{ company_name }}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px 0 32px;">
+                <p style="font-size:14px; margin:0 0 18px 0;">
+                  Your report for <strong>{{ site_name }}</strong> ({{ period_start }} &#8211; {{ period_end }}) is ready — attached as a PDF.
+                </p>
+
+                <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+                  <tr>
+                    <td bgcolor="#EEF9F4" style="padding:16px 20px; border-radius:10px;">
+                      <table width="100%" cellpadding="0" cellspacing="0">
+                        <tr>
+                          <td style="vertical-align:middle;">
+                            <div style="font-size:9px; color:#5A6B7C; text-transform:uppercase; font-weight:600; letter-spacing:0.05em; margin-bottom:4px;">Health score</div>
+                            <div style="font-size:30px; font-weight:700; color:{{ score_color }}; line-height:1;">
+                              {{ avg_health if avg_health is not none else '—' }}<span style="font-size:14px; font-weight:400; color:#999;">/100</span>
+                            </div>
+                          </td>
+                          <td style="text-align:right; vertical-align:middle;">
+                            <span style="display:inline-block; font-size:12px; font-weight:600; color:{{ badge_text }}; background:{{ badge_bg }}; padding:4px 12px; border-radius:20px;">
+                              {{ health_status }}
+                            </span>
+                          </td>
+                        </tr>
+                      </table>
+                    </td>
+                  </tr>
+                </table>
+
+                <p style="font-size:12px; font-weight:600; color:#14253B; margin:0 0 8px 0;">Key stats</p>
+                <table width="100%" cellpadding="0" cellspacing="0" style="font-size:12px; border-collapse:collapse; margin-bottom:20px;">
+                  <tr>
+                    <td style="padding:5px 0; color:#5A6B7C; border-bottom:1px solid #F0F3F5;">Solar generated</td>
+                    <td style="text-align:right; font-weight:600; border-bottom:1px solid #F0F3F5;">{{ '%.1f'|format(pv_kwh) if pv_kwh is not none else '—' }} kWh</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:5px 0; color:#5A6B7C; border-bottom:1px solid #F0F3F5;">Consumed</td>
+                    <td style="text-align:right; font-weight:600; border-bottom:1px solid #F0F3F5;">{{ '%.1f'|format(load_kwh) if load_kwh is not none else '—' }} kWh</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:5px 0; color:#5A6B7C;">Grid independence</td>
+                    <td style="text-align:right; font-weight:600;">{{ grid_independence_pct if grid_independence_pct is not none else '—' }}%</td>
+                  </tr>
+                </table>
+
+                <p style="font-size:11px; color:#5A6B7C; margin:0 0 24px 0;">The full report, with every section, is attached as a PDF.</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 24px 32px; border-top:1px solid #E0E5EA;">
+                <p style="padding-top:14px; font-size:10px; color:#9AA5B0; text-align:center; margin:0 0 6px 0;">
+                  Sent by {{ company_name }}{% if contact_email %} &middot; {{ contact_email }}{% endif %}
+                </p>
+                {% if unsubscribe_url %}
+                <p style="font-size:10px; color:#9AA5B0; text-align:center; margin:0;">
+                  <a href="{{ unsubscribe_url }}" style="color:#9AA5B0;">Stop receiving this report</a>
+                </p>
+                {% endif %}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

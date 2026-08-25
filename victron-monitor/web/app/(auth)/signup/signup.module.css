@@ -21,6 +21,34 @@
   margin-bottom: 24px;
 }
 
+/* The 7-day-trial callout (Oscar's request, 2026-08-21: give the trial a
+   real highlight instead of burying it in the subtitle sentence — same
+   visual language as Pricing.tsx's own trial banner, victron-glow accent
+   on a tinted pill). */
+.trialBanner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: color-mix(in srgb, var(--victron) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--victron) 45%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px 6px 12px;
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--victron-glow);
+}
+.trialBannerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--victron-glow);
+  box-shadow: 0 0 6px 1px var(--victron-glow);
+  flex: none;
+}
+
 .body {
   color: var(--paper-dim);
   font-size: 14px;

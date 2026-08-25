@@ -52,6 +52,18 @@ def download_csv(storage_path: str) -> io.BytesIO:
     return io.BytesIO(data)
 
 
+def download_object_bytes(storage_path: str) -> bytes:
+    """Downloads any object in this bucket as raw bytes (PLAN_PHASE17.md
+    §4.4/§8 Step 4) — `vrm_api/branding.py:resolve_branding()`'s only use of
+    Storage, to base64-embed a customer's logo directly into a rendered PDF
+    the same way `proposals/assets/assets.py:get_logo_b64()` embeds the
+    Pauly & Co asset from local disk. Raises on a missing/unreadable object;
+    the caller (`resolve_branding()`) is the one that decides a missing logo
+    is a warning-and-fallback, not a failed report — this function stays a
+    plain, unopinionated read."""
+    return _bucket().download(storage_path)
+
+
 def upload_report_pdf(site_id: str, start: str, end: str, pdf_bytes: bytes) -> str:
     """Uploads a rendered report PDF, returns the Storage path (what
     `routers/reports.py` stores as `result.storage_path`). `upsert=true`

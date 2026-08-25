@@ -670,3 +670,18 @@ export async function billingRefresh(customerId: string): Promise<BillingStatusO
 export async function billingWebhookEvent(body: { secret_ok: true; payload: Record<string, unknown> }): Promise<{ ok: boolean }> {
   return pipelineJson('/v1/billing/webhook-event', jsonInit(body));
 }
+
+// ── Scheduled reports (PLAN_PHASE17.md §3.4, §8 Step 6/7) ───────────────
+// `POST /v1/reports/run-due` is the scheduled-reports fan-out — normally
+// called by `.github/workflows/scheduled-reports.yml` (Step 9, not built
+// yet), never by a browser. The ONLY caller in this app is the
+// `/admin/activity` "Run due now" button, gated by `requireAdminForRoute()`
+// one layer up (`app/api/admin/pipeline/reports/run-due/route.ts`) — the
+// same manual-spot-check affordance `workflow_dispatch:` gives the GitHub
+// Actions side.
+export type ReportRunDueResult = { site_id: string; status: string; error?: string | null };
+export type ReportsRunDueOut = { sites_checked: number; processed: number; remaining: number; results: ReportRunDueResult[] };
+
+export async function reportsRunDue(maxSites = 10): Promise<ReportsRunDueOut> {
+  return pipelineJson('/v1/reports/run-due', jsonInit({ max_sites: maxSites }));
+}

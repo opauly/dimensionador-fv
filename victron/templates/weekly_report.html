@@ -19,7 +19,7 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 .hdr { width: 100%; border-bottom: 2px solid #1FAE6E; padding-bottom: 13px; margin-bottom: 18px; display: table; }
 .hdr-l { display: table-cell; vertical-align: bottom; }
 .hdr-r { display: table-cell; text-align: right; vertical-align: bottom; }
-.brand { font-size: 9.5px; font-weight: 600; color: #1FAE6E; letter-spacing: 0.08em; text-transform: uppercase; }
+.brand { font-size: 9.5px; font-weight: 600; color: {{ brand_color }}; letter-spacing: 0.08em; text-transform: uppercase; }
 .site { font-size: 15px; font-weight: 600; color: #111; margin-top: 3px; }
 .period { font-size: 10px; color: #999; margin-top: 2px; }
 .rlabel { font-size: 10px; color: #999; }
@@ -30,7 +30,7 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 .fr { display: table-cell; font-size: 8.5px; color: #ccc; text-align: right; vertical-align: middle; }
 .ftr-logo { height: 13px; width: auto; vertical-align: middle; margin-right: 6px; }
 .p2hdr { border-bottom: 2px solid #1FAE6E; padding-bottom: 10px; margin-bottom: 18px; display: table; width: 100%; }
-.p2hdr-l { display: table-cell; font-size: 9.5px; font-weight: 600; color: #1FAE6E; letter-spacing: 0.08em; text-transform: uppercase; }
+.p2hdr-l { display: table-cell; font-size: 9.5px; font-weight: 600; color: {{ brand_color }}; letter-spacing: 0.08em; text-transform: uppercase; }
 .p2hdr-r { display: table-cell; text-align: right; font-size: 10px; color: #999; }
 </style>
 </head>
@@ -38,7 +38,7 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 
 <div class="hdr">
   <div class="hdr-l">
-    <div class="brand">Pauly &amp; Co.</div>
+    <div class="brand">{{ company_name }}</div>
     <div class="site">{{ site_name }}</div>
     <div class="period">{{ t.dateRange }}: {{ start_str }} &#8212; {{ end_str }}</div>
   </div>
@@ -61,7 +61,7 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 
 <div style="page-break-before:always; padding-top:20px;">
   <div class="p2hdr">
-    <span class="p2hdr-l">Pauly &amp; Co.</span>
+    <span class="p2hdr-l">{{ company_name }}</span>
     <span class="p2hdr-r">{{ site_name }} &middot; {{ start_str }} &#8212; {{ end_str }}</span>
   </div>
 
@@ -75,9 +75,9 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 </div>
 
 <div class="ftr">
-  <span class="fl">{{ t.poweredBy }} &middot; proyectos@paulyco.com</span>
+  <span class="fl">{{ t.poweredBy }} &middot; {{ contact_email }}</span>
   <span class="fr">
-    {% if logo_b64 %}<img src="{{ logo_b64 }}" class="ftr-logo" alt="Pauly &amp; Co.">{% endif %}
+    {% if logo_b64 %}<img src="{{ logo_b64 }}" class="ftr-logo" alt="{{ company_name }}">{% endif %}
     {{ t.pageOf }} 1
   </span>
 </div>

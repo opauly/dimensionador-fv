@@ -73,6 +73,12 @@ export async function getSite(customerId: string, siteId: string): Promise<SiteR
 // whitelist, but the whitelist genuinely excludes it rather than leaning on
 // that as the real defence (PLAN_PHASE14.md is explicit that this must not
 // be the only thing catching a mistake here).
+// PLAN_PHASE17.md §3/§5.3/§8 Step 7 — the five schedule columns joined
+// this whitelist. `report_schedule*` writes get a SECOND, independent check
+// below (`assertScheduleAllowed()`) beyond just being whitelisted: §3.1
+// point 2 requires that a non-`vrm_api` site's schedule can never be
+// written from here, server-side, regardless of what `SiteForm.tsx` shows
+// — "hide an editor is UX, never the control," restated for this feature.
 const SITE_WHITELIST = [
   'display_name',
   'pv_kwp',
@@ -89,7 +95,22 @@ const SITE_WHITELIST = [
   'savings_currency',
   'exports_to_grid',
   'active',
+  'report_schedule',
+  'report_schedule_weekday',
+  'report_schedule_day_of_month',
+  'report_schedule_hour',
+  'report_recipients',
 ] as const;
+
+// PLAN_PHASE17.md §0.6 Q5 (Oscar's decision, 2026-08-25: third-party
+// recipients allowed, capped at 5 per site) / §8 Step 8. Enforced HERE,
+// server-side, independent of `SiteForm.tsx`'s own client-side cap — "hide
+// an editor is UX, never the control," restated for a numeric limit rather
+// than a boolean gate. `vrm_api/report_delivery.py:MAX_RECIPIENTS` is the
+// same number, independently enforced a second time at send time (that
+// module's own docstring: the database value is never trusted alone).
+export const MAX_REPORT_RECIPIENTS = 5;
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 export type SiteUpdateFields = Partial<Pick<SiteRecord, (typeof SITE_WHITELIST)[number]>>;
 
@@ -103,6 +124,40 @@ function pickWhitelisted<T extends Record<string, unknown>>(
     if (allowedSet.has(key)) out[key] = fields[key];
   }
   return out;
+}
+
+/** PLAN_PHASE17.md §3.1 point 2 / §0.7 — thrown when a write would set
+ * `report_schedule` to anything but `'off'` on a `source='csv_upload'`
+ * site. This is enforcement layer 2 of 3 (migration 026's own CHECK
+ * constraint is layer 1; `SiteForm.tsx` not rendering the cadence fields
+ * for a CSV site at all is layer 3, UX only). Independent of the UI: a
+ * tampered request body reaches this check regardless of what any form
+ * shows. */
+export class ScheduleRequiresVrmApi extends Error {
+  constructor() {
+    super('A report schedule can only be set on a site connected via the VRM API.');
+    this.name = 'ScheduleRequiresVrmApi';
+  }
+}
+
+function schedulingRequested(payload: Record<string, unknown>): boolean {
+  return 'report_schedule' in payload && payload.report_schedule !== 'off';
+}
+
+/** PLAN_PHASE17.md §0.6 Q5 / §8 Step 8 — caps `report_recipients` at
+ * `MAX_REPORT_RECIPIENTS` and drops anything that doesn't look like an
+ * email, rather than rejecting the whole write. A malformed value already
+ * saved before this check existed, or a value a tampered request tried to
+ * sneak past the client-side cap, must not become a 500 — it just never
+ * lands. Mutates nothing if the field isn't present in `payload` at all. */
+function sanitizeRecipients(payload: Record<string, unknown>): void {
+  if (!('report_recipients' in payload)) return;
+  const raw = payload.report_recipients;
+  const list = Array.isArray(raw) ? raw : [];
+  payload.report_recipients = list
+    .filter((e): e is string => typeof e === 'string' && EMAIL_RE.test(e.trim()))
+    .map((e) => e.trim())
+    .slice(0, MAX_REPORT_RECIPIENTS);
 }
 
 export async function updateSite(
@@ -120,6 +175,20 @@ export async function updateSite(
   const payload = pickWhitelisted(fields as Record<string, unknown>, SITE_WHITELIST as readonly string[]);
   if (Object.keys(payload).length === 0) {
     return getSite(customerId, siteId);
+  }
+  sanitizeRecipients(payload);
+
+  // Only pays for the extra read when a schedule is actually being turned
+  // on — a plain field edit on an already-'off' site never hits this.
+  if (schedulingRequested(payload)) {
+    const { data: sourceRow, error: sourceError } = await getSupabaseAdmin()
+      .schema('vrm')
+      .from('sites')
+      .select('source')
+      .eq('site_id', siteId)
+      .single();
+    if (sourceError) throw sourceError;
+    if (sourceRow.source !== 'vrm_api') throw new ScheduleRequiresVrmApi();
   }
 
   // `.select('*')` after `.update()` returns the post-write row in the same
@@ -187,6 +256,16 @@ export type CreateSiteFields = SiteUpdateFields;
  * `site_limit` itself, the same division of responsibility
  * `PLAN_PHASE13.md §2 Step 3`'s original design used (the UI decides
  * whether to show the form at all; this is just the write).
+ *
+ * PLAN_PHASE17.md §3.1/§0.7 — this function ALWAYS creates a
+ * `source='csv_upload'` site (there is no `source` field in
+ * `CreateSiteFields`/`SITE_WHITELIST` — a `vrm_api`-sourced site is only
+ * ever created by `vrm_api/routers/vrm_link.py:post_connect()`, which
+ * applies `default_report_schedule` itself, on the Python side). A
+ * `report_schedule` in `fields` is therefore always rejected here, the same
+ * `ScheduleRequiresVrmApi` a tampered `updateSite()` call gets — never
+ * silently dropped, and never silently accepted for a site this function
+ * cannot create as anything but `csv_upload`.
  */
 export async function createSite(
   customerId: string,
@@ -196,6 +275,8 @@ export async function createSite(
   const customer = await getCustomer(customerId);
   const siteId = makeSiteId(customer.slug, slugify(displayName));
   const payload = pickWhitelisted(fields as Record<string, unknown>, SITE_WHITELIST as readonly string[]);
+  if (schedulingRequested(payload)) throw new ScheduleRequiresVrmApi();
+  sanitizeRecipients(payload);
 
   const { data, error } = await getSupabaseAdmin()
     .schema('vrm')
@@ -210,4 +291,47 @@ export async function createSite(
     .single();
   if (error) throw error;
   return data as SiteRecord;
+}
+
+export type BulkScheduleFields = Pick<
+  SiteRecord,
+  'report_schedule' | 'report_schedule_weekday' | 'report_schedule_day_of_month' | 'report_schedule_hour'
+>;
+
+/**
+ * "Apply this schedule to all my sites" (PLAN_PHASE17.md §3.7) — one write
+ * targeting every ACTIVE `source='vrm_api'` site this customer owns. Never
+ * touches a `csv_upload` site (§0.7 makes that write invalid regardless;
+ * this function simply never attempts it, by filtering the query rather
+ * than relying on `updateSite()`'s own rejection to catch it one row at a
+ * time). Returns the number of sites actually updated — `0` is a legitimate
+ * outcome (a customer with no `vrm_api` sites yet) and the caller should
+ * say so, not treat it as an error.
+ */
+export async function applyScheduleToAllSites(customerId: string, fields: BulkScheduleFields): Promise<number> {
+  const { data, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('sites')
+    .update(fields)
+    .eq('customer_id', customerId)
+    .eq('source', 'vrm_api')
+    .eq('active', true)
+    .select('site_id');
+  if (error) throw error;
+  return (data ?? []).length;
+}
+
+/** Read-only count of this customer's ACTIVE `vrm_api` sites — what the
+ * bulk action's Cap B projection (§2.2 "moment 1") multiplies the chosen
+ * cadence's per-site estimate by, before anything is saved. */
+export async function countSchedulableSites(customerId: string): Promise<number> {
+  const { count, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('sites')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .eq('source', 'vrm_api')
+    .eq('active', true);
+  if (error) throw error;
+  return count ?? 0;
 }

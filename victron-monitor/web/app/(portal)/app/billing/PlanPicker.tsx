@@ -63,6 +63,26 @@ function intervalKey(interval: string): 'billing_plan_per_month' | 'billing_plan
   return null;
 }
 
+/** Same computation as `app/(auth)/signup/SignupForm.tsx`'s own
+ * `annualSavingsPct()` (Oscar's report, 2026-08-21: the in-app "change
+ * plan" picker wasn't showing the same savings badge signup already does)
+ * — duplicated rather than shared for the same reason `DATE_LOCALE` is
+ * duplicated across this app's client components (see e.g.
+ * `profile/page.tsx`'s own comment): a ~10-line pure function isn't worth a
+ * shared module for two call sites, and `BillingPlanOut`/`SelfServePlanOut`
+ * are structurally compatible but not the same type. Computed from the
+ * real monthly/annual prices, not hardcoded, so it stays correct if
+ * pricing ever changes. */
+function annualSavingsPct(plan: BillingPlanOut, allPlans: BillingPlanOut[]): number | null {
+  if (plan.billing_interval !== 'year') return null;
+  const monthly = allPlans.find((p) => p.plan_key === plan.plan_key && p.billing_interval === 'month' && p.currency === plan.currency);
+  if (!monthly || monthly.amount_minor <= 0) return null;
+  const annualizedMonthly = monthly.amount_minor * 12;
+  const savings = annualizedMonthly - plan.amount_minor;
+  if (savings <= 0) return null;
+  return Math.round((savings / annualizedMonthly) * 100);
+}
+
 export function PlanPicker({ lang, mode, onSelect, onCancel, busy = false, initialPlanId = null }: PlanPickerProps) {
   const [plans, setPlans] = useState<BillingPlanOut[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,14 +133,20 @@ export function PlanPicker({ lang, mode, onSelect, onCancel, busy = false, initi
             // parallel dynamic-i18n-key mechanism for one field.
             const disabled = busy || plan.is_current;
             const preSelected = plan.id === initialPlanId;
+            const savingsPct = annualSavingsPct(plan, plans);
             return (
               <div key={plan.id} className={[styles.planCard, preSelected && styles.planCardSelected].filter(Boolean).join(' ')}>
                 {plan.is_current && <span className={styles.planCurrentTag}>{t(lang, 'billing_plan_current_tag')}</span>}
                 <h3>{planLabelFromKey(plan.plan_key)}</h3>
                 <span className={styles.planRange}>{sitesLabel}</span>
                 <div className={styles.planPrice}>
-                  {formatMoney(plan.amount_minor, plan.currency)}
-                  {perKey && <span className={styles.planPer}>{t(lang, perKey)}</span>}
+                  <span className={styles.planPriceAmount}>
+                    {formatMoney(plan.amount_minor, plan.currency)}
+                    {perKey && <span className={styles.planPer}>{t(lang, perKey)}</span>}
+                  </span>
+                  {savingsPct !== null && (
+                    <span className={styles.planSavings}>{t(lang, 'billing_plan_annual_savings').replace('{pct}', String(savingsPct))}</span>
+                  )}
                 </div>
                 <Button type="button" variant="ghost" disabled={disabled} onClick={() => onSelect(plan)}>
                   {t(lang, 'billing_plan_select_button')}

@@ -91,6 +91,21 @@ SIGNUP_IP_SALT=...              # server-side pepper for vrm.signup_requests.ip_
                                        # fail closed — see that function's own comment.
 ```
 
+Phase 17 Step 8 addition (`lib/server/reportUnsubscribe.ts`,
+`app/(auth)/unsubscribe/*` — the "stop receiving this report" link in a
+scheduled report email, `PLAN_PHASE17.md` §0.6 Q5/§8 Step 8):
+
+```bash
+REPORT_UNSUBSCRIBE_SECRET=...   # cross-runtime shared secret, same shape as
+                                 # PIPELINE_API_KEY above — the SAME value must
+                                 # also be set in the repo-root .env, since
+                                 # vrm_api/report_delivery.py:make_unsubscribe_token()
+                                 # signs a token in that OTHER process that this
+                                 # one independently re-verifies
+                                 # (verifyUnsubscribeToken()). Generate with
+                                 # `python3 -c "import secrets; print(secrets.token_hex(32))"`.
+```
+
 `ONVO_SECRET_KEY`/`ONVO_PUBLISHABLE_KEY`/`ONVO_MODE` are **not** read by this
 app at all — they live in the root `.env` and are read only by `vrm_api`
 (`vrm_api/onvo.py`, `vrm_api/routers/billing.py`); see `vrm_api/README.md`.
@@ -113,6 +128,7 @@ the answer here, in one place, without reading the plan doc:
 | `/signup` (page + its Server Action) | none | stages a signup request, sends one email. Writes only `vrm.signup_requests` |
 | `/signup/verify` | token | redeems a single-use token; creates the `vrm.customers` row; redirects into `/activate` |
 | `/api/webhooks/onvo` | shared secret (`ONVO_WEBHOOK_SECRET`) | machine-to-machine, forwards to `vrm_api`'s `POST /v1/billing/webhook-event` after verifying the secret and rate-limiting |
+| `/unsubscribe` (page + its Server Action) | signed token (`REPORT_UNSUBSCRIBE_SECRET`) | removes one email from one site's `vrm.sites.report_recipients` — `PLAN_PHASE17.md` §0.6 Q5/§8 Step 8 |
 
 Anything not on this list requires a session (`requireCustomer()` /
 `requireAdmin()` / their `ForRoute` counterparts). A request with no session
@@ -121,8 +137,10 @@ stages an intent and sends one email; `/signup/verify` requires possession of
 a single-use token already emailed to the address being claimed; the webhook
 route only re-triggers a read-through reconcile against a customer resolved
 from **our own** mirror tables, never from anything in the request body
-(§0.5, §4.2). Adding a row to this table means editing both this section and
-`PLAN_PHASE16.md` §1.1/§6.6.
+(§0.5, §4.2); `/unsubscribe` can only ever remove the ONE `(site_id, email)`
+pair its token was signed for — the signature is the whole authorization, and
+it grants nothing beyond that single, narrow, idempotent write. Adding a row
+to this table means editing both this section and `PLAN_PHASE16.md` §1.1/§6.6.
 
 ## Node version
 

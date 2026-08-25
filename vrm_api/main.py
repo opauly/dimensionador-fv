@@ -35,6 +35,7 @@ from fastapi.responses import JSONResponse
 
 from vrm_api import jobs, storage
 from vrm_api.deps import require_pipeline_key
+from vrm_api.report_limits import ReportRateLimited
 from vrm_api.routers import billing, ingest, meta, reports, vrm_fleet, vrm_link, vrm_sync
 from vrm_api.schemas import JobOut
 from vrm_api.tenancy import NotAuthorized, VrmAccountAlreadyLinked
@@ -72,6 +73,24 @@ async def _vrm_account_already_linked_handler(
     return JSONResponse(
         status_code=409,
         content={"code": "vrm_account_already_linked", "message": str(exc)},
+    )
+
+
+@app.exception_handler(ReportRateLimited)
+async def _report_rate_limited_handler(request: Request, exc: ReportRateLimited) -> JSONResponse:
+    # PLAN_PHASE17.md §2.2 Cap A's `vrm_api`-side ceiling — same
+    # typed-exception-to-clean-response pattern as NotAuthorized/
+    # VrmAccountAlreadyLinked above. Nothing about which customer or which
+    # window tripped leaves this process; the response carries only a
+    # retry hint.
+    logger.info("report rate limit exceeded on %s %s: %s", request.method, request.url.path, exc)
+    # Nested `detail` shape, matching routers/billing.py's own
+    # over_site_limit convention — lib/server/pipeline.ts:pipelineJson()
+    # already knows to pull extra fields (retry_after_seconds here) out of
+    # `detail` and hand them to the caller as PipelineError.detail.
+    return JSONResponse(
+        status_code=429,
+        content={"code": "report_rate_limited", "detail": {"retry_after_seconds": exc.retry_after_seconds}},
     )
 
 

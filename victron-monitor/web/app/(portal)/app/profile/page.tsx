@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { requireCustomerAllowPending } from '@/lib/server/auth';
-import { getBillingStatus, getCustomer, getVrmLinkStatus, siteCount } from '@/lib/server/db';
+import { getBillingStatus, getBrandingAccess, getCustomer, getVrmLinkStatus, siteCount } from '@/lib/server/db';
 import { t, type Lang, type StringKey } from '@/lib/i18n/strings';
 import { planLabel } from '@/lib/plans';
 import { formatDate, type DateLocale } from '@/lib/dates';
@@ -59,6 +59,11 @@ export default async function ProfilePage() {
     getVrmLinkStatus(session.customerId),
     getBillingStatus(session.customerId),
   ]);
+  // A pending_subscription customer has no plan/entitlement for branding to
+  // be gated on yet (PLAN_PHASE17.md §4.5) — skip the plan_limits/entitlement
+  // read entirely rather than resolving it against a customer who can't have
+  // it either way.
+  const brandingAllowed = customer.provisioning_state === 'active' ? await getBrandingAccess(customer) : false;
 
   const lang = session.uiLanguage;
   // Same condition `VrmConnectionBanner.tsx` uses — see its own comment for
@@ -128,6 +133,20 @@ export default async function ProfilePage() {
         </p>
         <Button href="/app/billing" variant="ghost">
           {t(lang, 'profile_billing_manage_cta')}
+        </Button>
+      </div>
+
+      {/* Branding status card (PLAN_PHASE17.md §4.5, §8 Step 5) — same
+         "compact status text + link" shape as VRM/billing above, not the
+         editor itself (that's its own page, /app/branding, since a logo
+         uploader + colour picker + live preview isn't a compact form). */}
+      <div className={styles.section}>
+        <h2>{t(lang, 'profile_branding_title')}</h2>
+        <p className={styles.readonlyValue}>
+          {brandingAllowed ? t(lang, 'profile_branding_enabled') : t(lang, 'profile_branding_not_enabled')}
+        </p>
+        <Button href="/app/branding" variant="ghost">
+          {t(lang, 'profile_branding_manage_cta')}
         </Button>
       </div>
 

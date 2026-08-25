@@ -107,6 +107,29 @@ class JobOut(BaseModel):
     finished_at: str | None = None
 
 
+class BrandingFields(BaseModel):
+    """The shape of `vrm.customers.branding` (PLAN_PHASE17.md §4.1) —
+    documented in three places, this being one: this model, the
+    `COMMENT ON COLUMN vrm.customers.branding` in migration 026, and the Zod
+    schema `lib/server/db/branding.ts` will carry once Step 5 builds the
+    settings page's write path. Every key optional — a missing key falls
+    back to the Pauly & Co default individually, never all-or-nothing
+    (`vrm_api/branding.py:resolve_branding()`'s own rule). Not currently
+    used to validate an inbound request in this API — Step 5's write path is
+    server-only Next.js code writing directly to Supabase, the same pattern
+    `updateCustomerProfile()` already uses for the rest of `vrm.customers`.
+    This model exists so the shape has one Python-side name to import from,
+    should a future admin/API write path need it, rather than a shape that
+    only ever exists as three independently-typed copies."""
+    company_name: str | None = None
+    logo_storage_path: str | None = None
+    primary_color: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    website: str | None = None
+
+
 class LimitsOut(BaseModel):
     # PLAN_PHASE14.md §1.11: served here, never duplicated as a hardcoded TS
     # constant, so the Detallado/Overview boundary can't drift between the
@@ -270,6 +293,31 @@ class VrmSyncSiteResult(BaseModel):
 class VrmSyncRunDueOut(BaseModel):
     sites_checked: int
     results: list[VrmSyncSiteResult]
+
+
+class ReportsRunDueRequest(BaseModel):
+    """PLAN_PHASE17.md §3.4 — batched on purpose, since a report is slow
+    (an Anthropic call + a weather fetch + a WeasyPrint render). Body-only,
+    no query params, matching every other POST in this router."""
+
+    max_sites: int = 10
+
+
+class ReportRunSiteResult(BaseModel):
+    site_id: str
+    status: str
+    error: str | None = None
+
+
+class ReportsRunDueOut(BaseModel):
+    """§3.4's response shape. `remaining > 0` means the wall-clock budget or
+    `max_sites` was hit before every due site could be reached this call —
+    the workflow's own bounded loop (§3.8) keeps calling until this is 0."""
+
+    sites_checked: int
+    processed: int
+    remaining: int
+    results: list[ReportRunSiteResult]
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -391,12 +391,20 @@ def _upsert_subscription(customer_id: str, sub: dict, mode: str, fetched_at: dat
         # (§3.3, §4.3 step 7).
         "plan_key": plan_row["plan_key"] if plan_row else None,
         "onvo_price_id": price_id,
-        # Sourced from ONVO's own embedded price/recurring object (always
-        # present when items[] is), not from vrm.plans — so currency/amount
-        # never go NULL just because our own catalogue hasn't seeded this
-        # price yet. Only plan_key (our own vocabulary) requires the
-        # vrm.plans lookup above.
-        "billing_interval": ((items[0].get("price") or {}).get("recurring") or {}).get("interval") if items else None,
+        # Sourced from vrm.plans (plan_row), NOT from ONVO's own response —
+        # fixed 2026-08-21, live-testing finding: the original code assumed
+        # ONVO's price object carried a nested `recurring.interval` field
+        # (a reasonable-looking guess, never checked against a real
+        # payload). A real subscription's raw JSON, inspected directly,
+        # shows ONVO's price object has no `recurring` key at all — just
+        # `type: "recurring"` as a flat string alongside `currency`/
+        # `unitAmount`, with the actual interval (month/year) exposed
+        # nowhere on this object. `currency`/`amount_minor` stay sourced
+        # from ONVO's response below (those fields genuinely ARE there);
+        # only `billing_interval` needed the vrm.plans fallback, which is
+        # `NULL` in the same "unrecognized price" case `plan_key` already
+        # handles, not a new failure mode.
+        "billing_interval": plan_row["billing_interval"] if plan_row else None,
         "currency": (items[0].get("price") or {}).get("currency") if items else None,
         "amount_minor": (items[0].get("price") or {}).get("unitAmount") if items else None,
         "status": sub.get("status"),

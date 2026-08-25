@@ -325,13 +325,25 @@ def _minmax(rows: list[dict], key: str) -> tuple[float | None, float | None]:
 
 def build_report_data(site_id: str, start: str | date, end: str | date, schema: str,
                       with_narrative: bool = True,
-                      with_weather: bool = True) -> dict:
+                      with_weather: bool = True,
+                      branding: dict | None = None) -> dict:
     """Everything the template needs. Port of `weeklyReport()`'s computation.
 
     `(start, end)` is an inclusive window of any length up to
     `db.MAX_CUSTOM_RANGE_DAYS` — `monitoring` callers pass `db.week_bounds()`
     to keep the fixed 7-day cadence unchanged; `vrm` callers may pass any
     operator-chosen range (plan doc §21, Phase A).
+
+    `branding` (PLAN_PHASE17.md §4, additive, 2026-08-21): the RENDER-READY
+    output of `vrm_api/branding.py:resolve_branding()` — `company_name`,
+    `contact_email`, `primary_color`, `logo_b64` (already base64-encoded, or
+    `None`) — or `None` for the default Pauly & Co branding, which is the
+    default here and is what every `monitoring`-schema report and every
+    pre-Phase-17 caller gets, byte-for-byte unchanged. This function never
+    resolves branding itself — it only carries the ALREADY-RESOLVED dict
+    through to `render_html()` via the returned dict's own `"branding"` key,
+    the same way every other computed value here flows through one `d`
+    dict rather than as a second parallel argument list.
     """
     window = db.fetch_report_window(site_id, start, end, schema)
     site = window["site"]
@@ -626,6 +638,9 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         # above (see that variable's own comment, a few lines up in this
         # function, for why it's no longer `sum(daily_health.alarms_count)`).
         "alarmEpisodesByCategory": window["alarm_episode_counts_by_category"],
+        # PLAN_PHASE17.md §4 — see this function's own docstring. `None`
+        # unless a caller explicitly resolved and passed one.
+        "branding": branding,
     }
 
 
@@ -764,6 +779,20 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
 
 def render_html(d: dict) -> str:
     t = d["t"]
+    # PLAN_PHASE17.md §4 — `d["branding"]` is either `None` (every
+    # `monitoring` report, every pre-Phase-17 caller, and any `vrm` report
+    # whose customer isn't white-labeled/entitled — see
+    # vrm_api/branding.py:resolve_branding()) or the already-validated,
+    # render-ready dict that function returns. `.get(...)` on `branding`
+    # itself (not `d`) is what makes every one of these four lines a no-op
+    # when `branding` is `None` — the template's own defaults (the literal
+    # "Pauly & Co." / #1FAE6E / proyectos@paulyco.com strings, unchanged
+    # from before this feature existed) apply exactly as they always have.
+    branding = d.get("branding") or {}
+    company_name = branding.get("company_name") or "Pauly & Co."
+    brand_color = branding.get("primary_color") or "#1FAE6E"
+    contact_email = branding.get("contact_email") or "proyectos@paulyco.com"
+    logo_b64 = branding.get("logo_b64") or get_logo_b64()
     batt, grid, events, perf, weather = _rows(d)
     has_grid = d["systemType"] in ("grid_zero", "hybrid")
     has_batt = d["systemType"] in ("off_grid", "hybrid")
@@ -833,10 +862,16 @@ def render_html(d: dict) -> str:
     return tpl.render(
         lang=d["lang"], t=t, site_name=d["siteName"],
         start_str=d["startStr"], end_str=d["endStr"],
-        # Same asset + base64 helper the proposal PDFs already use
-        # (proposals/assets/assets.py) — one shared source, so the logo can
-        # never drift between the two PDF families.
-        logo_b64=get_logo_b64(),
+        # `logo_b64` is either the customer's own uploaded logo (already
+        # base64-encoded by resolve_branding()) or, same as before this
+        # feature existed, the shared Pauly & Co asset the proposal PDFs
+        # also use (proposals/assets/assets.py) — one shared source, so an
+        # UNBRANDED report's logo can never drift between the two PDF
+        # families (PLAN_PHASE17.md §4).
+        logo_b64=logo_b64,
+        company_name=company_name,
+        brand_color=brand_color,
+        contact_email=contact_email,
         narrative_paragraphs=[p for p in (d["narrative"] or "").split("\n") if p.strip()],
         # Pre-built SVG must not be HTML-escaped by autoescape.
         kpi_svg=_safe(S.kpi_svg(d, t)),

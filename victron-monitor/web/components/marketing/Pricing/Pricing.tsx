@@ -60,7 +60,12 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
         </div>
 
         {mode === 'subscription' ? (
-          <div className={styles.grid}>
+          <>
+            <div className={styles.trialBanner}>
+              <span className={styles.trialBannerDot} aria-hidden="true" />
+              Every plan starts with a 7-day free trial — cancel before it ends and you won&apos;t be charged.
+            </div>
+            <div className={styles.grid}>
             <Panel variant="price">
               <div className={styles.head}>
                 <h3>Starter</h3>
@@ -71,6 +76,7 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
               </div>
               <p className={styles.singleNote} style={{ marginTop: -8, marginBottom: 12 }}>
                 or $299.99 / yr
+                <span className={styles.yearlySavings}>Save 17%</span>
               </p>
               <ul className={styles.features}>
                 <li>
@@ -105,6 +111,7 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
               </div>
               <p className={styles.singleNote} style={{ marginTop: -8, marginBottom: 12 }}>
                 or $999.99 / yr
+                <span className={styles.yearlySavings}>Save 17%</span>
               </p>
               <ul className={styles.features}>
                 <li className={styles.carry}>Everything in Starter, plus</li>
@@ -153,7 +160,8 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 Talk to us
               </Button>
             </Panel>
-          </div>
+            </div>
+          </>
         ) : (
           <div className={styles.single}>
             <div>

@@ -17,8 +17,12 @@ export {
   siteCount,
   canAddSite,
   createSite,
+  applyScheduleToAllSites,
+  countSchedulableSites,
+  ScheduleRequiresVrmApi,
+  MAX_REPORT_RECIPIENTS,
 } from './sites';
-export type { SiteUpdateFields, CreateSiteFields, CanAddSiteResult } from './sites';
+export type { SiteUpdateFields, CreateSiteFields, CanAddSiteResult, BulkScheduleFields } from './sites';
 
 export { listIngestions } from './ingestions';
 export type { ListIngestionsOptions } from './ingestions';
@@ -29,6 +33,15 @@ export type { VrmLinkStatusOut, VrmLinkSiteStatus } from './vrmLink';
 export { getBillingStatus, getBillingPlans, getBillingInvoices } from './billing';
 export type { BillingStatusOut, BillingPlanOut, BillingInvoiceOut, BillingInvoicesOut, BillingAddressIn } from './billing';
 
+export { getManualReportLimits, getWhiteLabelAllowed, getScheduledCapLimit, estimatedReportsPerPeriod } from './reportLimits';
+export type { ManualReportLimits } from './reportLimits';
+
+export { getBranding, getBrandingAccess, updateBranding, BrandingNotAllowed } from './branding';
+export type { BrandingFields } from './branding';
+
+export { listReportRuns, getReportRunScoped } from './reportRuns';
+export type { ReportRunRecord } from './reportRuns';
+
 export { NotAuthorized } from './errors';
 
-export type { CustomerRecord, SiteRecord, IngestionLogRecord, Lang, AccountType, SystemType } from './types';
+export type { CustomerRecord, SiteRecord, IngestionLogRecord, Lang, AccountType, SystemType, ReportSchedule } from './types';

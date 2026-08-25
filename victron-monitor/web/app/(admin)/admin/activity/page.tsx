@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
 import { requireAdmin } from '@/lib/server/auth';
-import { listAllIngestions, listAllSites, listBillingEvents, listCustomers, listRecentSignups } from '@/lib/server/db/admin';
+import { listAllIngestions, listAllReportRuns, listAllSites, listBillingEvents, listCustomers, listRecentSignups } from '@/lib/server/db/admin';
 import { ActivityTable } from './ActivityTable';
 import { BillingEventsTable } from './BillingEventsTable';
 import { RecentSignupsPanel } from './RecentSignupsPanel';
+import { ReportRunsTable } from './ReportRunsTable';
 
 export const metadata: Metadata = {
   title: 'Activity — Admin',
@@ -21,12 +22,13 @@ export const metadata: Metadata = {
 // failure-modes table, same two rows).
 export default async function AdminActivityPage() {
   await requireAdmin();
-  const [ingestions, sites, customers, billingEvents, signups] = await Promise.all([
+  const [ingestions, sites, customers, billingEvents, signups, reportRuns] = await Promise.all([
     listAllIngestions(200),
     listAllSites(),
     listCustomers(),
     listBillingEvents(100),
     listRecentSignups(50),
+    listAllReportRuns(100),
   ]);
 
   const customerNameBySite = new Map<string, string>();
@@ -57,6 +59,19 @@ export default async function AdminActivityPage() {
         spam wave is visible before it shows up in the Resend bill.
       </p>
       <RecentSignupsPanel signups={signups} customerNameById={Object.fromEntries(customerNameById)} />
+
+      <h2 style={{ marginTop: 36 }}>Scheduled reports</h2>
+      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+        <code>vrm.report_runs</code>, most recent first — the detection surface for &quot;the scheduled-reports
+        cron silently stopped&quot; (a GitHub Actions workflow with no commits for 60 days gets disabled
+        automatically). &quot;Run due reports now&quot; is the same manual spot-check a <code>workflow_dispatch</code>{' '}
+        trigger gives the GitHub Actions side.
+      </p>
+      <ReportRunsTable
+        runs={reportRuns}
+        customerNameById={Object.fromEntries(customerNameById)}
+        displayNameBySite={Object.fromEntries(displayNameBySite)}
+      />
     </div>
   );
 }

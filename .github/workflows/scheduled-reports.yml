@@ -1,0 +1,95 @@
+name: Scheduled reports
+
+# PLAN_PHASE17.md §3.8, §8 Step 9. Shaped exactly like billing-reconcile.yml
+# (repo secrets for PIPELINE_API_URL/PIPELINE_API_KEY, `curl -sS -f` so any
+# non-2xx response fails the job visibly in the Actions tab — GitHub
+# Actions runs a bash `run:` step with `-e` by default, so a failed curl
+# aborts the step on its own, no extra error handling needed).
+#
+# Three steps, in order:
+#   1. Sync due VRM-API sites (`POST /v1/vrm-sync/run-due`, §3.5/§0.6 Q9 —
+#      Phase 15's own deferred Step 7, finally wired). `continue-on-error:
+#      true` on PURPOSE: every schedulable site is `source='vrm_api'` by
+#      construction (§0.7 — a CSV-sourced site can never carry a live
+#      schedule at all), so there is no separate "sync-independent" class
+#      of report that survives this step failing outright — but one site's
+#      sync failure must still not abort the workflow before the report
+#      step runs for every OTHER site. The report step's own per-site
+#      isolation (§3.4's try/except in `post_run_due()`) is what actually
+#      protects the rest; this flag just keeps the workflow alive long
+#      enough to reach it.
+#   2. Run due reports — a bounded loop over `POST /v1/reports/run-due`
+#      (§3.4: batched, because a report is slow — an Anthropic call, a
+#      weather fetch, a WeasyPrint render). Loops until `remaining == 0` or
+#      a 20-iteration cap is hit (at `max_sites: 10` per call, 200 sites'
+#      worth of headroom in one run — a runaway can never loop forever).
+#   3. (Step 8) Nothing extra — email happens INSIDE the report run
+#      (`vrm_api/report_delivery.py`, called from `post_run_due()` itself),
+#      not as a separate pass, so a rendered-but-unsent report is not a
+#      state that can exist.
+#
+# Two GitHub Actions realities worth stating here, not just in the plan doc:
+#   - Scheduled runs are best-effort and routinely delayed 5-15+ minutes
+#     under GitHub's own load. Harmless here — §0.5 Decision 1's whole
+#     design ("due-ness computed from the calendar and the ledger, never a
+#     timer") is exactly what makes a late or even a missed tick self-heal
+#     on the next one, silently.
+#   - GitHub disables a scheduled workflow outright after 60 days with no
+#     commits to the repository. Not harmless — the `/admin/activity`
+#     recent-runs panel (§3.7) plus its own "Run due now" button is the
+#     detection surface for "the cron silently stopped," and Oscar's own
+#     eye on that page is the only thing that notices this particular
+#     failure mode.
+#
+# Cost, since it's a real constraint on a private repo: hourly is ~24
+# runs/day x the 1-minute GitHub Actions billing minimum per job (a run-due
+# call typically finishes in seconds, but GitHub still bills whole minutes)
+# ~= 720 minutes/month, against a 2,000-minute free tier and
+# billing-reconcile.yml's own ~30/month. Comfortable, but stated here so
+# the next person doesn't add a fourth hourly workflow without noticing. If
+# this ever becomes a real problem, `0 */3 * * *` plus constraining
+# `report_schedule_hour` to multiples of 3 is the documented fallback —
+# see PLAN_PHASE17.md §3.8.
+
+on:
+  schedule:
+    # Hourly, on the hour. Per-site local-hour scheduling across timezones
+    # is meaningless at daily granularity — this is the coarsest cadence
+    # that still makes "report_schedule_hour" mean anything.
+    - cron: "0 * * * *"
+  workflow_dispatch: {} # manual trigger from the Actions tab, for a spot check
+
+jobs:
+  run-scheduled-reports:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync due VRM-API sites
+        continue-on-error: true
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/vrm-sync/run-due" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}"
+
+      - name: Run due reports
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          for i in $(seq 1 20); do
+            echo "run-due iteration $i..."
+            response=$(curl -sS -f \
+              -X POST "${PIPELINE_API_URL}/v1/reports/run-due" \
+              -H "Authorization: Bearer ${PIPELINE_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d '{"max_sites": 10}')
+            echo "$response"
+            remaining=$(echo "$response" | jq -r '.remaining')
+            if [ "$remaining" -eq 0 ]; then
+              echo "No due sites remaining — stopping after $i iteration(s)."
+              exit 0
+            fi
+          done
+          echo "Reached the 20-iteration cap with sites still remaining — the next hourly tick will pick up where this one left off (PLAN_PHASE17.md §0.5 Decision 1: due-ness is computed from the calendar and the ledger, never a timer, so this is safe to leave for later, not a failure)."

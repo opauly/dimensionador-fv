@@ -17,6 +17,15 @@
 // cap, this is the one line to revisit.
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+// Branding logo cap (PLAN_PHASE17.md §4.4/§8 Step 5) — matches
+// vrm_api/branding.py's own _LOGO_MAX_BYTES exactly, so a file this app's
+// own upload form accepts is never later silently dropped by the renderer.
+// Shared for the same reason MAX_UPLOAD_BYTES is: the sign route (server)
+// and BrandingForm (the client component that rejects an oversized file
+// before ever asking for a signed URL) both need the identical number.
+export const LOGO_MAX_BYTES = 1_000_000;
+export const LOGO_ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg'];
+
 export function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return `${mb % 1 === 0 ? mb.toFixed(0) : mb.toFixed(1)} MB`;

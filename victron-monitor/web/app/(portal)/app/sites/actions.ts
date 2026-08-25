@@ -12,7 +12,19 @@ import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requireCustomer } from '@/lib/server/auth';
-import { canAddSite, createSite, updateSite, type SiteUpdateFields } from '@/lib/server/db';
+import {
+  applyScheduleToAllSites,
+  canAddSite,
+  countSchedulableSites,
+  createSite,
+  estimatedReportsPerPeriod,
+  getScheduledCapLimit,
+  getCustomer,
+  updateSite,
+  type BulkScheduleFields,
+  type ReportSchedule,
+  type SiteUpdateFields,
+} from '@/lib/server/db';
 import { reverseGeocode } from '@/lib/server/geocode';
 import { t } from '@/lib/i18n/strings';
 
@@ -30,6 +42,45 @@ const numberOrNull = z.preprocess((v) => {
 
 const stringOrNull = z.preprocess((v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null), z.string().nullable());
 
+// PLAN_PHASE17.md §3.7 — these four are CONDITIONALLY rendered in
+// `SiteForm.tsx` (the schedule section only shows for an existing
+// `source='vrm_api'` site; the weekday/day-of-month fields only show for
+// their own matching cadence), so `FormData` genuinely omits them in most
+// submissions — a plain, non-optional `z.enum`/`z.number()` would fail
+// every csv_upload-site edit and the whole add-site flow. Each preprocessor
+// falls back to migration 026's own column default (`'off'`/1/1/6) for
+// anything missing or out of range, rather than rejecting the submission —
+// `sites.ts:updateSite()`'s `ScheduleRequiresVrmApi` check is what actually
+// matters for a csv_upload site, not this shape check.
+const reportScheduleField = z.preprocess(
+  (v) => (typeof v === 'string' && ['off', 'daily', 'weekly', 'monthly'].includes(v) ? v : 'off'),
+  z.enum(['off', 'daily', 'weekly', 'monthly']),
+);
+const weekdayField = z.preprocess((v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 7 ? n : 1;
+}, z.number().int().min(1).max(7));
+const dayOfMonthField = z.preprocess((v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 28 ? n : 1;
+}, z.number().int().min(1).max(28));
+const hourField = z.preprocess((v) => {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 6;
+}, z.number().int().min(0).max(23));
+
+// PLAN_PHASE17.md §0.6 Q5 / §8 Step 8 — `SiteForm.tsx` submits this as one
+// newline-separated textarea value (also always absent for a csv_upload
+// site's edit form and the add form, same as the four schedule fields
+// above — hence the same "default to the safe empty value when missing"
+// shape). The real cap/format enforcement is `sites.ts:sanitizeRecipients()`,
+// server-side, independent of this parse — this only turns the textarea
+// string into an array Zod can validate the SHAPE of.
+const reportRecipientsField = z.preprocess((v) => {
+  if (typeof v !== 'string') return [];
+  return v.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+}, z.array(z.string()));
+
 const siteFormSchema = z.object({
   display_name: z.string().trim().min(1),
   pv_kwp: numberOrNull,
@@ -46,6 +97,11 @@ const siteFormSchema = z.object({
   savings_currency: stringOrNull,
   exports_to_grid: z.boolean(),
   active: z.boolean(),
+  report_schedule: reportScheduleField,
+  report_schedule_weekday: weekdayField,
+  report_schedule_day_of_month: dayOfMonthField,
+  report_schedule_hour: hourField,
+  report_recipients: reportRecipientsField,
 });
 
 /** Every field in `siteFormSchema` is always present on submit — the edit
@@ -53,7 +109,8 @@ const siteFormSchema = z.object({
  * a checkbox's *absence* from `FormData` unambiguously means "unchecked,"
  * not "leave unchanged." That's what makes it safe to always send the full
  * set through `updateSite()`'s whitelist rather than only the fields that
- * changed. */
+ * changed. (The four schedule fields above are the one exception — see
+ * their own comment.) */
 function parseSiteForm(formData: FormData) {
   const raw = {
     display_name: formData.get('display_name'),
@@ -71,6 +128,11 @@ function parseSiteForm(formData: FormData) {
     savings_currency: formData.get('savings_currency'),
     exports_to_grid: formData.get('exports_to_grid') === 'true',
     active: formData.get('active') === 'true',
+    report_schedule: formData.get('report_schedule'),
+    report_schedule_weekday: formData.get('report_schedule_weekday'),
+    report_schedule_day_of_month: formData.get('report_schedule_day_of_month'),
+    report_schedule_hour: formData.get('report_schedule_hour'),
+    report_recipients: formData.get('report_recipients'),
   };
   return siteFormSchema.safeParse(raw);
 }
@@ -130,6 +192,43 @@ export async function addSiteAction(_prevState: SiteFormState, formData: FormDat
   }
   revalidatePath('/app/sites');
   return { success: true };
+}
+
+// ── Bulk "apply schedule to all sites" (PLAN_PHASE17.md §3.7, §2.2 "moment
+// 1") — two separate actions, not one: the projection is a pure read (no
+// `<form>`, invoked the same "onClick wrapped in startTransition" way
+// `reverseGeocodeAction` above already is), so `SitesManager.tsx` can show
+// the customer the real numbers BEFORE the confirm button even exists,
+// exactly the "refused with the projected number named, before anything is
+// saved" requirement — this is a UI-side ESTIMATE (`estimatedReportsPerPeriod()`'s
+// own comment), not a live count; the actual enforcement is
+// `vrm_api/report_limits.py:check_scheduled_cap()`, unaffected by anything
+// in this file.
+export type BulkScheduleProjection =
+  | { ok: true; siteCount: number; projectedPerPeriod: number; cap: number; overCap: boolean }
+  | { error: string };
+
+export async function getBulkScheduleProjectionAction(schedule: ReportSchedule): Promise<BulkScheduleProjection> {
+  const session = await requireCustomer();
+  try {
+    const [customer, siteCount] = await Promise.all([getCustomer(session.customerId), countSchedulableSites(session.customerId)]);
+    const cap = await getScheduledCapLimit(customer.plan);
+    const projectedPerPeriod = Math.round(estimatedReportsPerPeriod(schedule) * siteCount);
+    return { ok: true, siteCount, projectedPerPeriod, cap, overCap: projectedPerPeriod > cap };
+  } catch {
+    return { error: t(session.uiLanguage, 'sites_bulk_apply_error') };
+  }
+}
+
+export async function applyScheduleToAllSitesAction(fields: BulkScheduleFields): Promise<{ count: number } | { error: string }> {
+  const session = await requireCustomer();
+  try {
+    const count = await applyScheduleToAllSites(session.customerId, fields);
+    revalidatePath('/app/sites');
+    return { count };
+  } catch {
+    return { error: t(session.uiLanguage, 'sites_bulk_apply_error') };
+  }
 }
 
 export type GeocodeResult = { location: string | null; countryCode: string | null } | { error: string };

@@ -48,7 +48,8 @@ class MailerError(Exception):
 
 
 def send(to: str, subject: str, html: str, from_: str | None = None,
-         reply_to: str | None = None) -> str:
+         reply_to: str | None = None,
+         attachments: list[dict[str, str]] | None = None) -> str:
     """Sends one email via Resend. Returns Resend's message id on success.
 
     `from_` defaults to `PORTAL_FROM_EMAIL` (env) — the shared "reports@" /
@@ -57,6 +58,14 @@ def send(to: str, subject: str, html: str, from_: str | None = None,
     re-sends/password resets — and, once Phase 12 lands, weekly report
     delivery too)"). Passing `from_` explicitly is for a future caller that
     needs a different sender identity, not something invites need today.
+
+    `attachments` (PLAN_PHASE17.md §8 Step 8, additive — every existing
+    caller passes nothing and gets exactly today's behaviour): a list of
+    `{"filename": ..., "content": <base64-encoded bytes>}` dicts, Resend's
+    own documented shape. `vrm_api/report_delivery.py` is the only caller
+    that ever passes one (the rendered report PDF) — base64-encoding is
+    that caller's job, not this function's, so this module stays a thin,
+    content-agnostic wrapper.
     """
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
@@ -73,6 +82,8 @@ def send(to: str, subject: str, html: str, from_: str | None = None,
     }
     if reply_to:
         payload["reply_to"] = reply_to
+    if attachments:
+        payload["attachments"] = attachments
 
     try:
         resp = requests.post(

@@ -25,6 +25,7 @@
 | 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | 🔶 Steps 1–7 built & validated (design system, auth, tenancy, vrm_api, upload/reports, admin+invites); Step 8 (deploy/cutover) pending — see PLAN_PHASE14.md |
 | 15 — VRM Monitor: direct VRM API ingestion (customer-connected Victron accounts + Oscar's own admin fleet access) | ✅ Steps 0–6 built & independently verified (see PLAN_PHASE15.md); Step 7 (scheduled sync) deferred at Oscar's request |
 | 16 — VRM Monitor: public signup + customer self-service billing on ONVO Pay | ✅ Complete — Steps 0–7 built & verified (see PLAN_PHASE16.md) |
+| 17 — VRM Monitor: scheduled reports, report cost limits, tiered white-label branding, visible trial | ✅ Complete — Steps 0–9 built & live-verified (see PLAN_PHASE17.md); CSV-sourced sites are structurally excluded from scheduling (§0.7) |
 
 ---
 
@@ -1142,6 +1143,99 @@ deleted, fresh rows untouched, test rows cleaned up afterward); the workflow YAM
 
 ---
 
+## Phase 17 — VRM Monitor: scheduled reports, report cost limits, tiered branding, visible trial (complete, 2026-08-21 → 2026-08-25)
+
+**Goal:** the four things VRM Monitor sold on the Pricing page but did not have. A customer puts a site
+on a daily/weekly/monthly schedule and the report arrives on its own — rendered, archived, emailed,
+logged, with one site's failure never touching another's. Report generation stopped being an unbounded
+cost, via two independent per-tier caps that live in a table Oscar can `UPDATE`. A Growth/Fleet
+customer's report finally carries their own branding and a Starter customer's provably does not. And the
+7-day trial is now visible on the Pricing cards and the signup form.
+
+Full build plan, the confirmed-context tables, and per-step validation gates:
+[`PLAN_PHASE17.md`](PLAN_PHASE17.md). Not duplicated in full here.
+
+### Why this phase existed
+
+Three of the four features were already on the Pricing page with **no automated report generation for
+`vrm` customers at all** — reports existed only as an on-demand click — and `vrm.customers.branding` had
+been an empty jsonb column since migration 012 that nothing read and no UI wrote. Meanwhile every report
+cost a real Anthropic call with nothing bounding how many a customer could trigger. Phase 16 gave the
+product a revenue mechanism; this phase made the thing being paid for actually run by itself.
+
+### Where this sits relative to other phases
+
+- Depended on Phases 14/15/16 (the web app, `vrm_api`, the tenancy model, `vrm.plans`,
+  `vrm.rate_limits`, `apply_entitlements()`'s `billing_status`).
+- **Closed Phase 15's deferred Step 7**: `POST /v1/vrm-sync/run-due` existed and had never been called —
+  `.github/workflows/scheduled-reports.yml` now calls it every hour, ahead of the report step.
+- **Is not Phase 12.** Phase 12 (the `monitoring` schema, Oscar's own bureau clients) remains unbuilt.
+  This phase reused Phase 12's mechanism decision (GitHub Actions `cron:`) and left
+  `victron/templates/report_email.html`/`cap_reached_email.html` plus `victron/mailer.py`'s attachment
+  support behind for it.
+- Touched `victron/` for the first time since Phase 15 — three files (`mailer.py`, two new templates),
+  additively, behind a byte-identical-PDF gate for the unbranded/`monitoring` case.
+
+### Decisions locked (see PLAN_PHASE17.md §0.5–§0.7, §2, §3, §4, §5)
+
+- **The scheduler is a stateless due-check over durable state, not a queue.** "Due" is computed from the
+  calendar and a ledger (`vrm.report_runs`), never from a timer, so a missed run, a late run, or two
+  overlapping runs all produce the same result as one on-time run. Idempotency is a partial unique index
+  in Postgres, not a lock in a process — proven live with 5 simultaneous claim attempts on the same
+  period producing exactly 1 winner.
+- **Every per-tier number is a database row** (`vrm.plan_limits`), not a constant. The fallback row is
+  the most restrictive, deliberately the opposite of `lib/plans.ts:planSiteLimit()`'s fail-open
+  behaviour.
+- **Two independent report caps**: a short-window rate limit on manual regeneration (fails open — an
+  abuse control) and a per-billing-period cap on scheduled runs (a UI-side projection at schedule-set
+  time; a real backstop at run time).
+- **Branding is resolved in exactly one server-side function** (`vrm_api/branding.py:resolve_branding()`)
+  and the renderer never sees the raw jsonb. The chart palette is semantic and is never recolored — proven
+  by rendering a low health score under a bright-amber brand colour and confirming the health badge stayed
+  the fixed semantic red, not the brand colour, in both the PDF and the report email.
+- **The entitlement gate is a denylist, not an allowlist** — `billing_status='none'` (every legacy,
+  hand-created customer) keeps receiving reports, confirmed live rather than assumed.
+- **Schedules are per-site**, and **CSV-sourced sites are structurally excluded from scheduling** at
+  three independent layers (a database CHECK constraint, the write path, and the UI) — proven live by
+  directly attempting the forbidden write and watching Postgres itself reject it.
+- **Third-party report recipients are allowed, capped at 5 per site** (Q5, resolved 2026-08-25), with a
+  stateless, HMAC-signed, cross-runtime unsubscribe link — no login required to opt out.
+
+### Explicit non-goals
+
+A real job queue, sub-hourly or cron-expression schedules, custom date ranges on a schedule, scheduled
+reports for CSV-sourced sites at all, a report *template* system (branding is name/logo/colour/contact
+only), recoloring the chart palette, fetching a customer-supplied URL at render time, multi-user accounts
+or per-user notification preferences, a full unsubscribe preference centre beyond the one footer link,
+any billing change, metered billing, backfilling the report ledger from `vrm.jobs`, RLS policies, a test
+framework, and any change to `pages/`, `app.py`, the `monitoring` schema, Node-RED, or Apps Script.
+
+### Validation
+
+Every step validated live, not just typechecked — real Supabase writes against disposable fixtures
+created and torn down by the tests themselves, confirmed zero leftovers each time. The headline ones: a
+full end-to-end scheduled run producing a real Anthropic-narrated PDF, uploaded to real Storage, and a
+real branded email landing in a real inbox with that PDF attached (confirmed by Oscar, screenshot and PDF
+both); a `billing_status='none'` legacy customer's site generating normally; a CSV-sourced site rejected
+by the database itself when a live schedule is attempted on it; 5 simultaneous scheduler claims on one
+period producing exactly 1 winner; a customer hitting their scheduled-report cap across two sites in one
+tick, and again on a second tick, triggering exactly one notification email for the whole billing period,
+not two; and the `scheduled-reports.yml` workflow's own bash+`jq` loop run for real against the live API,
+correctly stopping once `remaining` reached 0. Not verified this session: a real 48-hour unattended cron
+run and a real GitHub-hosted `workflow_dispatch` trigger — both require the workflow to be pushed and
+live on GitHub, which this session did not do without being asked.
+
+### Decisions Oscar made 2026-08-21 → 2026-08-25 (see PLAN_PHASE17.md §0.6–§0.7)
+
+Per-site schedules (Q1); Oscar's own limit-numbers table (Q2); report email in this phase, not a
+fast-follow (Q4); logo to real storage, customer-editable fields confirmed as color + header text only
+(Q6, Q8); CSV-sourced sites never eligible for scheduling at all, enforced at three independent layers,
+which also settled Q9 (the deferred Phase 15 VRM sync) as load-bearing rather than optional (§0.7); and,
+2026-08-25, **third-party report recipients allowed, capped at 5 per site**, with an unsubscribe footer
+link (Q5) — the fuller option, not the "customer's own address only" fallback.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -1163,6 +1257,7 @@ deleted, fresh rows untouched, test rows cleaned up afterward); the workflow YAM
 | 14 | VRM Monitor unified Next.js site + Python pipeline API | 12–18 | Whenever needed — triggered by the first self-serve customer |
 | 15 | VRM Monitor: direct VRM API ingestion (customer-connected accounts + Oscar's admin fleet access) | 10–14 | Whenever needed — triggered by a customer who shouldn't have to export a CSV weekly, or by Oscar wanting fleet visibility without one |
 | 16 | VRM Monitor: public signup + customer self-service billing on ONVO Pay | 13–18 | Complete (2026-08-19 → 2026-08-21) — the first phase that gives the product its own revenue and acquisition mechanism |
+| 17 | VRM Monitor: scheduled reports, report cost limits, tiered branding, visible trial | 9–13 | Complete (2026-08-21 → 2026-08-25) — the phase where the product's marketing copy and its behaviour were made to agree |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
@@ -1215,6 +1310,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 15 (direct VRM API ingestion) is off this critical path too**, and is the first phase that *depends* on another off-path phase: it builds on Phase 14's web app, `vrm_api`, and tenancy model rather than standing alone. It is also the first time this product stores a credential belonging to a third party on a customer's behalf, which is why its plan spends more of its length on storage and tenancy than on features. Trigger it by the first customer for whom weekly CSV exports are the thing standing between them and renewing.
 
 **Phase 16 (public signup + ONVO billing) is off this critical path too, and is now complete.** Like Phase 15 it depends on Phase 14's web app, `vrm_api`, and tenancy model. Unlike every previous phase, its failure modes are financial rather than informational, and it opened this system's first door that starts outside it (a stranger with no session, at `/signup`) — which is why its plan spent most of its length on reconciliation, tenancy, and the trust boundary rather than on features. It is the first phase that makes VRM Monitor self-sustaining: a stranger can now sign up, verify, pay, and become a working customer with no action from Oscar, and an existing customer manages their own subscription end to end.
+
+**Phase 17 (scheduled reports, report cost limits, tiered branding, visible trial) is off this critical path too, and is now complete.** It depends on 14/15/16. It is the phase where the product's marketing copy and the product's behaviour were made to agree: three of its four features were already on the Pricing page and none of the three existed. It is also the first phase whose primary deliverable runs when nobody is watching (`.github/workflows/scheduled-reports.yml`, hourly), which is why its plan spent more of its length on failure visibility, idempotency, and timezone arithmetic than on features. Triggered by the first customer who should not have to click Generate every Monday morning.
 
 ---
 

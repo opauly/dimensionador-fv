@@ -222,3 +222,68 @@ re-read of a subscription that already exists (§4.1/§4.2). Every other
 box/arrow in this diagram still requires either a real session
 (`BillingUI`) or the pipeline key (`vrm_api`'s one and only auth
 mechanism, unchanged since Phase 14).
+
+---
+
+## 6. VRM Monitor scheduled reports wiring (Phase 17)
+
+```mermaid
+flowchart TB
+    subgraph Sched["GitHub Actions cron (hourly)"]
+        Workflow["scheduled-reports.yml"]
+    end
+
+    subgraph Api["vrm_api"]
+        SyncRouter["routers/vrm_sync.py<br/>POST /v1/vrm-sync/run-due"]
+        ReportsRouter["routers/reports.py<br/>POST /v1/reports/run-due"]
+        Delivery["report_delivery.py"]
+    end
+
+    subgraph Victron["Victron VRM cloud"]
+        VrmApi["vrm.victronenergy.com API"]
+    end
+
+    subgraph External["Third-party services"]
+        Anthropic["Anthropic (narrative)"]
+        Resend["Resend (email)"]
+        Storage["Supabase Storage (PDF)"]
+    end
+
+    subgraph Web["victron-monitor/web (Next.js)"]
+        Unsub["/unsubscribe<br/>(no session — signed token only)"]
+    end
+
+    subgraph Recipient["Anyone with a report email"]
+        ThirdParty["An installer's own client<br/>(never had an account)"]
+    end
+
+    Workflow -- "1. sync due sites first<br/>(continue-on-error)" --> SyncRouter
+    SyncRouter -- "pulls fresh telemetry" --> VrmApi
+    Workflow -- "2. bounded loop until<br/>remaining == 0" --> ReportsRouter
+    ReportsRouter -- "per-site try/except —<br/>one failure never blocks another" --> Anthropic
+    ReportsRouter --> Storage
+    ReportsRouter -- "on success, still inside<br/>the same run" --> Delivery
+    Delivery --> Resend
+    Delivery -. "signs an HMAC token,<br/>REPORT_UNSUBSCRIBE_SECRET —<br/>same value, two runtimes" .-> ThirdParty
+    ThirdParty -- "clicks the link in their inbox —<br/>never had a session, never will" --> Unsub
+```
+
+**Read-through:** the hourly cron is the third arrow this system has that
+starts on a timer rather than a click (after Phase 16's daily
+`billing-reconcile.yml`) — and, per §0.5's own design, a late or even a
+missed tick is harmless: "due" is recomputed from the calendar and
+`vrm.report_runs` every time, never carried in a timer's own state. The
+sync step runs first and is allowed to fail without stopping the workflow
+(`continue-on-error`) — every schedulable site is `source='vrm_api'` by
+construction (§0.7), so stale-but-not-broken data is the worst case, never
+a crash that skips every other site's report.
+
+**A third arrow that starts outside this system, after `/signup` and the
+ONVO webhook:** a third-party report recipient who has never had a VRM
+Monitor account, clicking "stop receiving this report" in their inbox. It
+carries no session and needs none — the signed token IS the authorization,
+and it can only ever do the one thing it was signed for (remove itself from
+one site's recipient list). `REPORT_UNSUBSCRIBE_SECRET` is the same
+cross-runtime-shared-secret shape `PIPELINE_API_KEY` already established:
+one value, two processes, never sent between them — `vrm_api` signs, the
+Next.js app independently re-verifies.

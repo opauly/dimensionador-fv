@@ -1,0 +1,147 @@
+/* app/(portal)/app/branding (PLAN_PHASE17.md §4.5, §8 Step 5) — new
+   dashboard-only rules, same conventions as sites/profile/billing's own
+   modules (styles/tokens.css only, nothing ported from landing_template.html). */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: 60ch;
+  margin-bottom: 24px;
+}
+
+.upsell {
+  max-width: 480px;
+  padding: 26px 28px;
+}
+.upsell h2 {
+  margin-bottom: 10px;
+}
+.upsell p {
+  color: var(--paper-dim);
+  margin-bottom: 18px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.colorRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.colorSwatch {
+  width: 44px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+.colorHex {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--paper-dim);
+}
+
+.hint {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.error {
+  color: var(--signal);
+  font-size: 14px;
+}
+.success {
+  color: var(--good);
+  font-size: 14px;
+}
+
+/* ---------- live preview ---------- */
+.preview {
+  position: sticky;
+  top: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 22px 24px;
+}
+.previewLabel {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin-bottom: 14px;
+}
+
+/* A rough, scaled-down mock of the report header (victron/templates/
+   weekly_report.html's own .hdr/.brand/.site/.period rules) — not a pixel
+   match, just close enough to judge a colour/logo choice by, per this
+   feature's whole reason for existing (§4.5: avoid spending a real report
+   generation on every iteration). Colors are deliberately literal here
+   (#111/#999), mirroring the template's own hardcoded values exactly,
+   rather than reaching for this app's dark-UI tokens — the preview is
+   meant to look like the report (white background, dark text), not like
+   the rest of this dashboard. */
+.previewHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  background: #fff;
+  border-radius: var(--radius-sm);
+  padding: 20px 22px;
+  border-bottom: 3px solid var(--line);
+}
+.previewBrand {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.previewSite {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111;
+  margin-top: 4px;
+}
+.previewPeriod {
+  font-size: 11px;
+  color: #999;
+  margin-top: 3px;
+}
+.previewLogo {
+  max-height: 28px;
+  max-width: 120px;
+  width: auto;
+  object-fit: contain;
+}
+.previewFooter {
+  background: #fff;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding: 10px 22px 16px;
+  font-size: 10px;
+  color: #ccc;
+}
+
+@media (max-width: 820px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .preview {
+    position: static;
+  }
+}

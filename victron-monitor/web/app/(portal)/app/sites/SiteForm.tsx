@@ -11,7 +11,7 @@
 // through the Server Actions in `./actions.ts`, never a client-side
 // Supabase call (there is no Supabase import anywhere in this file).
 import { startTransition, useActionState, useEffect, useState } from 'react';
-import { Button, Field, Input, Select } from '@/components/ui';
+import { Button, Field, Input, Select, Textarea } from '@/components/ui';
 import { t, type Lang } from '@/lib/i18n/strings';
 import { listTimezones } from '@/lib/timezones';
 import { COUNTRIES, DEFAULT_COUNTRY } from '@/lib/countries';
@@ -37,6 +37,23 @@ export type SiteFormProps = {
 
 const TIMEZONES = listTimezones();
 const COUNTRY_CODES = Object.keys(COUNTRIES);
+// Indexed by (isoWeekday - 1) — a plain template-literal key
+// (`sites_weekday_${d}`) doesn't narrow to a `StringKey` union member for
+// `t()`, so this is the lookup that keeps the mapping type-safe.
+const WEEKDAY_STRING_KEYS = [
+  'sites_weekday_1', 'sites_weekday_2', 'sites_weekday_3', 'sites_weekday_4',
+  'sites_weekday_5', 'sites_weekday_6', 'sites_weekday_7',
+] as const;
+// A local copy of `sites.ts:MAX_REPORT_RECIPIENTS` — NOT imported from
+// `@/lib/server/db`: this is a Client Component, and importing even a
+// plain constant (not just a type) from that barrel pulls its `server-only`
+// modules into the client bundle graph, which Next.js correctly refuses to
+// build. Same "each file keeps its own copy rather than sharing one" shape
+// `sites.ts`'s own whitelist comment already states for a different
+// reason; the real enforcement is server-side either way
+// (`sanitizeRecipients()`), so this is UX-only and drifting by one digit
+// would be a display nit, not a security gap.
+const MAX_REPORT_RECIPIENTS = 5;
 
 export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: SiteFormProps) {
   const [state, formAction, pending] = useActionState(action, {} as SiteFormState);
@@ -49,6 +66,20 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
     if (!nominal || !dod || !Number.isFinite(n) || !Number.isFinite(d)) return null;
     return Math.round(((n * d) / 100) * 100) / 100;
   })();
+
+  // PLAN_PHASE17.md §3.7 — only ever rendered as a real editor when editing
+  // an EXISTING `source='vrm_api'` site (see the JSX below); `mode='add'`
+  // never shows it at all, because `createSite()` only ever creates a
+  // `source='csv_upload'` site (§3.1) and would reject a schedule anyway.
+  const [reportSchedule, setReportSchedule] = useState<string>(initial?.report_schedule ?? 'off');
+  const [scheduleWeekday, setScheduleWeekday] = useState<string>(String(initial?.report_schedule_weekday ?? 1));
+  const [scheduleDayOfMonth, setScheduleDayOfMonth] = useState<string>(String(initial?.report_schedule_day_of_month ?? 1));
+  const [scheduleHour, setScheduleHour] = useState<string>(String(initial?.report_schedule_hour ?? 6));
+  // PLAN_PHASE17.md §0.6 Q5 — one recipient per line; `actions.ts`'s
+  // `reportRecipientsField` also accepts commas, but a textarea's own
+  // Enter-per-line affordance is the more discoverable one to show back.
+  const [recipients, setRecipients] = useState<string>((initial?.report_recipients ?? []).join('\n'));
+  const recipientCount = recipients.split('\n').map((s) => s.trim()).filter(Boolean).length;
 
   const [latitude, setLatitude] = useState<string>(initial?.latitude?.toString() ?? '');
   const [longitude, setLongitude] = useState<string>(initial?.longitude?.toString() ?? '');
@@ -239,6 +270,102 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
           </Select>
         </Field>
       </div>
+
+      {/* PLAN_PHASE17.md §3.7 — only for an EXISTING site (mode='edit');
+         `mode='add'` never shows this, since `createSite()` only ever
+         creates `source='csv_upload'` sites (§3.1) and would reject a
+         schedule write regardless. For a csv_upload site, one sentence
+         instead of a disabled control — "hiding an editor is UX, never a
+         control," but a disabled control that explains nothing invites a
+         support email a plain sentence naming the actual next action
+         doesn't (§3.7's own reasoning). */}
+      {mode === 'edit' && initial && initial.source !== 'vrm_api' && (
+        <p className={styles.sectionCaption}>{t(lang, 'sites_schedule_csv_notice')}</p>
+      )}
+      {mode === 'edit' && initial && initial.source === 'vrm_api' && (
+        <>
+          <div className={styles.fieldRow}>
+            <Field label={t(lang, 'sites_field_report_schedule')} htmlFor="site-report-schedule">
+              <Select
+                id="site-report-schedule"
+                name="report_schedule"
+                value={reportSchedule}
+                onChange={(e) => setReportSchedule(e.target.value)}
+                disabled={pending}
+              >
+                <option value="off">{t(lang, 'sites_schedule_off')}</option>
+                <option value="daily">{t(lang, 'sites_schedule_daily')}</option>
+                <option value="weekly">{t(lang, 'sites_schedule_weekly')}</option>
+                <option value="monthly">{t(lang, 'sites_schedule_monthly')}</option>
+              </Select>
+            </Field>
+            {reportSchedule === 'weekly' && (
+              <Field label={t(lang, 'sites_field_schedule_weekday')} htmlFor="site-schedule-weekday">
+                <Select
+                  id="site-schedule-weekday"
+                  name="report_schedule_weekday"
+                  value={scheduleWeekday}
+                  onChange={(e) => setScheduleWeekday(e.target.value)}
+                  disabled={pending}
+                >
+                  {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                    <option key={d} value={d}>
+                      {t(lang, WEEKDAY_STRING_KEYS[d - 1])}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {reportSchedule === 'monthly' && (
+              <Field label={t(lang, 'sites_field_schedule_day_of_month')} htmlFor="site-schedule-day-of-month">
+                <Input
+                  id="site-schedule-day-of-month"
+                  name="report_schedule_day_of_month"
+                  type="number"
+                  min="1"
+                  max="28"
+                  value={scheduleDayOfMonth}
+                  onChange={(e) => setScheduleDayOfMonth(e.target.value)}
+                  disabled={pending}
+                />
+              </Field>
+            )}
+            {reportSchedule !== 'off' && (
+              <Field label={t(lang, 'sites_field_schedule_hour')} htmlFor="site-schedule-hour">
+                <Select
+                  id="site-schedule-hour"
+                  name="report_schedule_hour"
+                  value={scheduleHour}
+                  onChange={(e) => setScheduleHour(e.target.value)}
+                  disabled={pending}
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, '0')}:00
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </div>
+          {reportSchedule !== 'off' && <p className={styles.sectionCaption}>{t(lang, 'sites_schedule_help')}</p>}
+
+          <Field label={t(lang, 'sites_field_report_recipients')} htmlFor="site-report-recipients">
+            <Textarea
+              id="site-report-recipients"
+              name="report_recipients"
+              rows={3}
+              placeholder={t(lang, 'sites_field_report_recipients_placeholder')}
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+              disabled={pending}
+            />
+          </Field>
+          <p className={recipientCount > MAX_REPORT_RECIPIENTS ? styles.error : styles.sectionCaption}>
+            {t(lang, 'sites_field_report_recipients_help').replace('{max}', String(MAX_REPORT_RECIPIENTS)).replace('{count}', String(recipientCount))}
+          </p>
+        </>
+      )}
 
       <div className={styles.checkboxRow}>
         <label className={styles.checkboxLabel}>

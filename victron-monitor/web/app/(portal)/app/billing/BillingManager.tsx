@@ -110,6 +110,16 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
   const [changeConfirm, setChangeConfirm] = useState<ChangeConfirm | null>(null);
   const [changeBusy, setChangeBusy] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
+  // The "Select a plan, but no card on file yet" flow (Oscar's request,
+  // 2026-08-21): `pendingPlanChange` remembers what the customer was
+  // actually trying to do while `panel` auto-switches to `payment_method`
+  // — no second click on Add/Replace Card required, the customer already
+  // clicked Select once. Once a card is saved, `pendingPlanConfirm` holds
+  // the SAME plan for one explicit confirmation step (never auto-applies a
+  // billing change right after a card save) before `submitChange()` runs
+  // for real.
+  const [pendingPlanChange, setPendingPlanChange] = useState<BillingPlanOut | null>(null);
+  const [pendingPlanConfirm, setPendingPlanConfirm] = useState<BillingPlanOut | null>(null);
 
   // §5.2, corrected at Step 5 (2026-08-20): a first-time (or re-)subscribe
   // now creates the ONVO subscription HERE, before `PaymentMethodPanel` ever
@@ -138,6 +148,8 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
     setChangeError(null);
     setSubscribeSession(null);
     setSubscribeError(null);
+    setPendingPlanChange(null);
+    setPendingPlanConfirm(null);
   }
 
   async function handlePlanSelected(plan: BillingPlanOut) {
@@ -203,11 +215,37 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
           | { error?: string; requires_confirmation?: boolean; current_site_count?: number; new_site_limit?: number | null }
           | null;
         if (body?.error === 'over_site_limit' && body.requires_confirmation) {
+          // Clears the post-card confirmation box, if that's how we got
+          // here (a plan that needed BOTH a card and a limit override) —
+          // one confirmation box at a time, not two stacked.
+          setPendingPlanConfirm(null);
           setChangeConfirm({
             plan,
             currentSiteCount: body.current_site_count ?? status.active_sites,
             newSiteLimit: body.new_site_limit === undefined ? plan.site_limit : body.new_site_limit,
           });
+          return;
+        }
+        // A customer with no card on file yet (e.g. a trial that was never
+        // completed) gets a real, actionable sentence here rather than the
+        // generic one — `vrm_api/routers/billing.py:post_subscription_
+        // change()`'s own `400 no_payment_method`, found 2026-08-21: this
+        // branch previously set `changeError` correctly but nothing in the
+        // "plans" panel ever rendered it, so every change failure — this
+        // one included — looked like the Select button silently did
+        // nothing.
+        if (body?.error === 'no_payment_method') {
+          // Auto-open the card form right away — the customer already
+          // clicked Select once, they shouldn't have to click Add Card
+          // separately too (Oscar's request, 2026-08-21).
+          // `pendingPlanChange` is what lets `handlePaymentMethodChanged`
+          // pick this back up as a confirmation step once the card saves,
+          // instead of just closing the panel like a normal card-replace
+          // does.
+          setChangeError(t(lang, 'billing_change_error_no_payment_method'));
+          setSelectedPlan(null);
+          setPendingPlanChange(plan);
+          setPanel('payment_method');
           return;
         }
         setChangeError(t(lang, 'billing_action_error_generic'));
@@ -245,6 +283,20 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
 
   function handlePaymentMethodChanged(next: BillingStatusOut) {
     setStatus(next);
+    if (pendingPlanChange) {
+      // A card was just added specifically to unblock the plan change the
+      // customer already asked for (Select, back when `submitChange` first
+      // hit `no_payment_method`) — pick that back up as an explicit
+      // confirmation step rather than silently applying it now that a card
+      // exists (Oscar's request, 2026-08-21: "remember to add a
+      // confirmation modal before the change is in place").
+      setPanel('none');
+      setChangeError(null);
+      setPendingPlanConfirm(pendingPlanChange);
+      setPendingPlanChange(null);
+      router.refresh();
+      return;
+    }
     closePanel();
     router.refresh();
   }
@@ -414,9 +466,36 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
         )}
       </div>
 
+      {/* Rendered directly under the Subscription panel above, where the
+         "Cancel subscription" button that opens it actually lives (Oscar's
+         report, 2026-08-21: this used to sit at the very bottom of the
+         page, after Payment Method / Billing Address / Billing History —
+         a customer who clicked Cancel had to scroll past three unrelated
+         sections to see the confirmation they just asked for). */}
+      {cancelOpen && (
+        <CancelDialog
+          lang={lang}
+          currentPeriodEnd={status.current_period_end}
+          busy={cancelBusy}
+          error={cancelError}
+          onConfirm={handleCancelConfirm}
+          onDismiss={() => {
+            setCancelOpen(false);
+            setCancelError(null);
+          }}
+        />
+      )}
+
       {panel === 'plans' && (
         <>
           {subscribeError && <p className={styles.error}>{subscribeError}</p>}
+          {/* `changeError` (mode="change" — a customer with a live
+             subscription) was previously set but never rendered anywhere
+             on this panel — found 2026-08-21 from a real "Select does
+             nothing" report. `changeConfirm`'s own confirm box (below)
+             renders it separately in the over-limit case; this covers
+             every OTHER failure (e.g. no_payment_method). */}
+          {changeError && <p className={styles.error}>{changeError}</p>}
           <PlanPicker
             lang={lang}
             mode={hasLiveSubscription ? 'change' : 'subscribe'}
@@ -446,6 +525,36 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
           </div>
         </div>
       )}
+
+      {/* The confirmation step after a card was just added specifically to
+         unblock a plan change (Oscar's request, 2026-08-21) — a different
+         box than `changeConfirm` above (that one is the over-site-limit
+         case), but the same "never apply a billing change without an
+         explicit confirm click" shape. */}
+      {pendingPlanConfirm && (
+        <div className={styles.confirmBox}>
+          <h3>{t(lang, 'billing_change_after_card_title')}</h3>
+          <p>{t(lang, 'billing_change_after_card_body').replace('{plan}', planLabel(pendingPlanConfirm.plan_key))}</p>
+          {changeError && <p className={styles.error}>{changeError}</p>}
+          <div className={styles.formActions}>
+            <Button type="button" onClick={() => submitChange(pendingPlanConfirm, false)} disabled={changeBusy}>
+              {changeBusy ? t(lang, 'billing_change_applying') : t(lang, 'billing_change_confirm_button')}
+            </Button>
+            <Button type="button" variant="ghost" onClick={() => setPendingPlanConfirm(null)} disabled={changeBusy}>
+              {t(lang, 'billing_back_button')}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* `changeError` here specifically (not the copy inside the
+         `pendingPlanConfirm` box above) covers the moment right after
+         Select discovers `no_payment_method` and auto-opens this panel —
+         positioned directly above it, and above the static "Payment
+         Method" status block below, per Oscar's explicit request
+         (2026-08-21) that this read as one connected flow instead of an
+         error at the top of the page disconnected from the card form. */}
+      {panel === 'payment_method' && pendingPlanChange && changeError && <p className={styles.error}>{changeError}</p>}
 
       {panel === 'payment_method' &&
         (selectedPlan && subscribeSession ? (
@@ -487,7 +596,11 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
               setPanel(panel === 'payment_method' ? 'none' : 'payment_method');
             }}
           >
-            {t(lang, 'billing_payment_method_replace_button')}
+            {/* "Add card" when there's genuinely nothing on file yet,
+               "Replace card" once there is (Oscar's request, 2026-08-21 —
+               this always said "Replace card", even for a trial customer
+               who has never entered one). */}
+            {status.pm_last4 ? t(lang, 'billing_payment_method_replace_button') : t(lang, 'billing_payment_method_add_button')}
           </Button>
         </div>
       </div>
@@ -500,20 +613,6 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
       />
 
       <InvoiceList lang={lang} />
-
-      {cancelOpen && (
-        <CancelDialog
-          lang={lang}
-          currentPeriodEnd={status.current_period_end}
-          busy={cancelBusy}
-          error={cancelError}
-          onConfirm={handleCancelConfirm}
-          onDismiss={() => {
-            setCancelOpen(false);
-            setCancelError(null);
-          }}
-        />
-      )}
     </div>
   );
 }

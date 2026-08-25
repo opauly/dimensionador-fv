@@ -98,16 +98,36 @@
   font-size: 12px;
   color: var(--mute);
 }
+/* Column, not the single-line rule this used to be — the savings badge
+   sits under the price, same restructure Oscar asked for on the signup
+   plan cards (SignupForm.tsx, 2026-08-21), applied here too for the
+   in-app "change plan" picker so the two surfaces stay consistent. */
 .planPrice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin: 14px 0 6px;
+}
+.planPriceAmount {
   font-family: var(--font-mono);
   font-size: 26px;
   color: var(--paper);
-  margin: 14px 0 6px;
 }
 .planPer {
   font-size: 13px;
   color: var(--mute);
   margin-left: 4px;
+}
+.planSavings {
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 .planCurrentTag {
   display: inline-block;

@@ -207,6 +207,18 @@ def post_connect(body: VrmLinkConnectRequest) -> VrmLinkConnectOut:
         site_fields["vrm_installation_id"] = mapping.vrm_installation_id
         site_fields["source"] = "vrm_api"
         site_fields["vrm_sync_enabled"] = True
+        # PLAN_PHASE17.md §3.1/§5.4: the customer's own scheduling default
+        # applies to a BRAND-NEW vrm_api site only — never retroactively to
+        # one being reconnected (existing_site is not None here), and this
+        # whole branch only ever creates source='vrm_api' sites anyway
+        # (§0.7: a csv_upload site can never be scheduled, so its creation
+        # path — lib/server/db/sites.ts:createSite() — never touches this
+        # column at all). The other three schedule columns
+        # (weekday/day_of_month/hour) are intentionally left unset here —
+        # there is no per-customer default for those, only for the cadence
+        # itself, so they fall back to migration 026's own column defaults.
+        if existing_site is None:
+            site_fields["report_schedule"] = customer.get("default_report_schedule", "off")
 
         victron_ingest.upsert_site(body.customer_id, site_id, display_name, **site_fields)
         results.append(VrmLinkSiteResult(

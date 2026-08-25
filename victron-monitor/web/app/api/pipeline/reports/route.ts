@@ -8,8 +8,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireCustomerForRoute } from '@/lib/server/auth';
-import { assertOwnsSite, NotAuthorized } from '@/lib/server/db';
+import { assertOwnsSite, getCustomer, getManualReportLimits, NotAuthorized } from '@/lib/server/db';
 import { createReport, getLimits, toErrorResponse } from '@/lib/server/pipeline';
+import { checkRateLimit } from '@/lib/server/ratelimit';
 
 function daysBetween(start: string, end: string): number {
   const a = new Date(`${start}T00:00:00Z`).getTime();
@@ -38,6 +39,24 @@ export async function POST(request: Request) {
     // `vrm.sites` before it schedules any work, regardless of what this
     // call already confirmed.
     await assertOwnsSite(session.customerId, parsed.data.siteId);
+
+    // Cap A's lower, Next.js-side ceiling (PLAN_PHASE17.md §2.2 point 1) —
+    // checked BEFORE vrm_api is ever called, so a customer who's already
+    // over the limit costs nothing (no vrm_api round trip, no Anthropic
+    // call). `vrm_api/routers/reports.py:post_report()` re-checks a SECOND,
+    // higher ceiling independently once this call reaches it — not
+    // redundant, `vrm_api` holds its own trust boundary and this route is
+    // only today's caller (see `vrm_api/report_limits.py`'s own docstring).
+    const customer = await getCustomer(session.customerId);
+    const limits = await getManualReportLimits(customer.plan);
+    const withinHour = await checkRateLimit('report_manual_hour', session.customerId, 3600, limits.perHour);
+    if (!withinHour) {
+      return NextResponse.json({ error: 'report_rate_limited', retryAfterSeconds: 3600 }, { status: 429 });
+    }
+    const withinDay = await checkRateLimit('report_manual_day', session.customerId, 86400, limits.perDay);
+    if (!withinDay) {
+      return NextResponse.json({ error: 'report_rate_limited', retryAfterSeconds: 86400 }, { status: 429 });
+    }
 
     // `database/vrm_report_db.py:fetch_report_window()` also enforces
     // `MAX_OVERVIEW_RANGE_DAYS`, but it does so by raising a plain

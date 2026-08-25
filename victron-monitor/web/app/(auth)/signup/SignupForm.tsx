@@ -93,6 +93,10 @@ export function SignupForm({ plansByAccountType, initialAccountType, initialPlan
   return (
     <form action={formAction} className={styles.form} noValidate>
       <h1 className={styles.title}>{t('en', 'signup_title')}</h1>
+      <div className={styles.trialBanner}>
+        <span className={styles.trialBannerDot} aria-hidden="true" />
+        {t('en', 'signup_trial_banner')}
+      </div>
       <p className={styles.subtitle}>{t('en', 'signup_subtitle')}</p>
 
       {/* The honeypot (§6.6) — a real visitor never tabs into or sees this

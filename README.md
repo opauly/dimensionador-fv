@@ -70,9 +70,38 @@ Read these three, in that order, before making architectural changes.
 
 Fleet monitoring for Victron Energy installations — Cerbo GX devices running Node-RED push telemetry to this project's `monitoring` schema and to Google Sheets, with a Claude-narrated weekly PDF report.
 
-See [`victron-monitor/README.md`](victron-monitor/README.md) for architecture, setup, onboarding a new site, and troubleshooting.
+See [`victron-monitor/README.md`](victron-monitor/README.md) for the original Node-RED/Apps-Script fleet architecture, onboarding a new site, and troubleshooting.
 
 **Status:** internally deployed across a handful of Pauly&Co-owned sites. Not yet ready to sell as a paid subscription to external customers — see Phase 9 in [PHASES.md](PHASES.md) for what's needed first (per-site Row-Level Security and per-device credential provisioning, replacing the current shared-key model).
+
+### VRM Monitor — the SaaS product (web + API)
+
+Starting with `PLAN_PHASE14.md`, Victron Monitor grew a second, customer-facing surface: a Next.js app (marketing site + customer portal + admin dashboard — this is today's actual **landing page**, replacing the static one under `victron-monitor/landing-page/`) backed by a FastAPI service that wraps the existing report pipeline. They're two separate local processes:
+
+```bash
+# Terminal 1 — vrm_api (FastAPI, port 8000). From the REPO ROOT — it
+# imports victron.* and database.* as top-level packages.
+python3 -m venv .venv && source .venv/bin/activate   # first time only
+.venv/bin/python -m pip install -r requirements-api.txt
+.venv/bin/python -m uvicorn vrm_api.main:app --reload
+```
+
+Use `.venv/bin/python -m ...` rather than the bare `pip`/`uvicorn` commands, even right after activating — on a machine with Anaconda installed, its `(base)` environment can shadow the venv on `PATH`, so `uvicorn` silently runs Anaconda's Python (missing this project's dependencies) instead. See [`vrm_api/README.md`](vrm_api/README.md#run-locally) if that happens.
+
+```bash
+# Terminal 2 — the web app (Next.js, port 3000 — the landing page,
+# /app customer portal, and /admin dashboard all live here).
+cd victron-monitor/web
+source "$HOME/.nvm/nvm.sh" && nvm use   # pins Node 20.20.0 via .nvmrc — Next.js 16 needs ≥20.9
+npm install                             # first time, or after a dependency change
+npm run dev
+```
+
+Then open `http://localhost:3000` for the landing page/app, and `http://localhost:8000/health` to confirm the API is up.
+
+Both need real environment variables before anything works — `vrm_api` reads the repo-root `.env` (see [`vrm_api/README.md`](vrm_api/README.md#env-vars)); the web app reads its own `victron-monitor/web/.env.local` (see [`victron-monitor/web/README.md`](victron-monitor/web/README.md#environment-variables)). At minimum, the web app needs `PIPELINE_API_URL=http://localhost:8000` and a `PIPELINE_API_KEY` matching the value in the root `.env`, so it can actually reach the API.
+
+**One-click alternative:** once `.venv` and `node_modules` exist (the one-time setup above), double-click **[`start_vrm_monitor.command`](start_vrm_monitor.command)** in Finder — or run `./start_vrm_monitor.command` from Terminal — to launch both in their own Terminal windows and open the landing page automatically once it's up. Safe to run again while both are already running; it detects each port already listening and skips starting a duplicate instead of erroring.
 
 ---
 

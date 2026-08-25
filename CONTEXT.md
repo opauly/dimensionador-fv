@@ -1257,3 +1257,64 @@ upgrade/downgrade mechanism exists on ONVO's side, and card replacement
 turned out simpler than any candidate the plan had listed), and every
 step's validation gate: [`PLAN_PHASE16.md`](PLAN_PHASE16.md). Not duplicated
 here.
+
+## Phase 17 — VRM Monitor: scheduled reports, report cost limits, tiered branding, visible trial (shipped 2026-08-25)
+
+Automatic daily/weekly/monthly reports for `victron-monitor/web` customers, two independent per-tier
+caps on report generation cost, tiered white-label branding, and a visible 7-day trial. `vrm.report_runs`
+becomes the ledger every scheduled report — generated or skipped, with a stated reason — is recorded
+against.
+
+- **A stateless due-check over durable state, not a queue** (§0.5 Decision 1) — `vrm_api/report_schedule.py`
+  computes "is this cadence due right now, in the site's own timezone" from pure calendar arithmetic, with
+  no I/O; `vrm_api/report_runs.py`'s partial unique index on `(site_id, period_end) WHERE trigger='scheduled'`
+  is the real idempotency guarantee. Verified live: 5 simultaneous claim attempts on one contested period
+  produced exactly 1 winner.
+- **CSV-sourced sites are structurally excluded from scheduling** (§0.7, Oscar's own decision, raised
+  independently of the architect's original questions) — a CSV site's data is only ever as fresh as its
+  last manual upload, so scheduling against it schedules against data that usually isn't there yet.
+  Enforced at three independent layers: a database CHECK constraint (`sites_scheduled_reports_require_vrm_api`),
+  the write path (`sites.ts:updateSite()`/`createSite()`), and the UI (`SiteForm.tsx` shows a sentence, not
+  a disabled control). Verified live: attempting the forbidden write via a direct Postgres update was
+  rejected by the CHECK constraint itself, not just application code.
+- **Two independent report-cost caps**: Cap A (manual regeneration, `vrm_api/report_limits.py:check_manual_cap()`)
+  is a short-window rate limit that fails OPEN (an abuse control, not an auth boundary); Cap B (scheduled
+  runs, `check_scheduled_cap()`) is a per-billing-period cap that fails CLOSED (a database error skips the
+  run rather than allowing it) and triggers exactly one notification email per customer per period when
+  first hit — never one per skipped run.
+- **Migration 026** added `vrm.plan_limits` (per-tier caps + the white-label gate, every number a real row,
+  not a constant), `vrm.report_runs` (the ledger), seven schedule columns on `vrm.sites`, and
+  `vrm.customers.default_report_schedule` — all additive, every existing site/customer's behavior
+  unchanged (`report_schedule` defaults `'off'`). **Migration 027** added one more column,
+  `vrm.customers.report_cap_notified_period_end` — found necessary mid-build when the first design
+  (reusing `vrm.rate_limits`) turned out wrong: that table's own 2-day retention sweep would have silently
+  reset a ~30-day billing-period notification gate on day 3, sending duplicate notices. A real bug caught
+  before it shipped, not a hypothetical.
+- **Branding resolves in exactly one server-side function** (`vrm_api/branding.py:resolve_branding()`) —
+  gated on account type (`installer` only — an `owner` account has no third party for a report to be
+  "branded" at, a rule added mid-build from live testing, not in the original design), tier
+  (`vrm.plan_limits.white_label`), and entitlement. The renderer never sees the raw `vrm.customers.branding`
+  jsonb directly. The health/battery/grid-quality color palette in `report_svg.py` is never touched by
+  branding — verified live by rendering a low health score under a bright-amber brand color and confirming
+  the health badge stayed the fixed semantic red in both the PDF and the report email, not the brand color.
+- **Third-party report recipients, capped at 5 per site** (Q5, resolved 2026-08-25 — the fuller option,
+  not the "customer's own address only" fallback) — `vrm_api/report_delivery.py` resolves
+  `vrm.sites.report_recipients` → else the customer's own `contact_email` → else `auth_email`, re-validates
+  and re-caps at send time regardless of what's already in the database. A stateless, HMAC-signed
+  unsubscribe link (`REPORT_UNSUBSCRIBE_SECRET`, a cross-runtime shared secret — same shape as
+  `PIPELINE_API_KEY`) lets a third-party recipient who has never had an account remove themselves via a new
+  public `/unsubscribe` route, no login required. Verified live: a token signed in Python correctly verified
+  in TypeScript with the shared secret; a tampered token and a missing secret both correctly rejected.
+- **`.github/workflows/scheduled-reports.yml`** (new) — hourly: syncs due `vrm_api`-sourced sites first
+  (`continue-on-error`, since every schedulable site depends on fresh data by construction), then a bounded
+  loop (≤20 iterations) over `POST /v1/reports/run-due` until `remaining == 0`. `actionlint` clean; every
+  secret referenced only via `${{ secrets.NAME }}`.
+- **A full, genuine end-to-end send verified live, confirmed by Oscar directly** (screenshot + the actual
+  received PDF): a disposable Growth-plan, installer-type, custom-branded test customer's scheduled report
+  landed in a real inbox with the PDF attached, matching branding in both.
+- **Not verified this session:** a real 48-hour unattended cron run and a real GitHub-hosted
+  `workflow_dispatch` trigger — both require the workflow pushed and live on GitHub, not done without being
+  asked.
+
+Full design, the resolved open questions (Q1–Q11), and every step's validation gate:
+[`PLAN_PHASE17.md`](PLAN_PHASE17.md). Not duplicated here.
