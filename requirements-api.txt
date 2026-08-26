@@ -11,6 +11,16 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 pydantic>=2.7.0
 
+# PLAN_PHASE17.md §3.3 / §8 Step 6's own named risk: `zoneinfo` needs a real
+# IANA tzdata source, and `python:3.11-slim` (Dockerfile.api's base image)
+# does not ship the system tzdata package the way a full Debian image does.
+# `vrm_api/report_schedule.py:compute_due_period()` (every scheduled
+# report's period arithmetic) raises `ZoneInfoNotFoundError` at RUNTIME, not
+# at build time, if this is missing — this PyPI package is the fix, and
+# macOS/most local dev machines already have a system tzdata source so this
+# is a no-op locally, only load-bearing in the container.
+tzdata>=2024.1
+
 # `vrm_api/schemas.py` starts `from __future__ import annotations` (this
 # repo's convention, §3 of PLAN_PHASE14.md) and uses `X | None` unions.
 # Pydantic v2 evaluates those postponed (string) annotations at class-

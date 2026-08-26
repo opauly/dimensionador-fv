@@ -52,8 +52,11 @@ All already present in the repo-root `.env` (never committed; see
 | `ONVO_PUBLISHABLE_KEY` | `routers/billing.py:_publishable_key()` — handed to the **browser** (as part of `BillingSubscribeOut`/`BillingPaymentMethodSessionOut`) so the ONVO web SDK (`sdk.onvopay.com/sdk.js`) can render its own card form client-side. Safe to expose — it's the public half of the key pair, the same way a Stripe publishable key is. |
 | `SITE_URL` | `vrm_api/report_delivery.py:_render_email()` — the base URL for the unsubscribe link embedded in a scheduled report email. Same value as `victron-monitor/web`'s own `SITE_URL`; if unset, scheduled emails simply carry no unsubscribe link (`make_unsubscribe_token()` fails closed by returning `None`, not by breaking the send). |
 | `REPORT_UNSUBSCRIBE_SECRET` | `vrm_api/report_delivery.py:make_unsubscribe_token()` — signs the unsubscribe link. Cross-runtime shared secret: the SAME value must also be set in `victron-monitor/web/.env.local`, since that app independently re-derives the signature (`lib/server/reportUnsubscribe.ts:verifyUnsubscribeToken()`) rather than this service ever calling back into it. If unset, no unsubscribe link is generated (fails closed). |
+| `RESEND_API_KEY` | `victron/mailer.py:send()` — the Resend API key `vrm_api/report_delivery.py` sends scheduled report emails through. Same value as `victron-monitor/web`'s own `RESEND_API_KEY` (that app uses it independently for invite/password-reset emails), but each process reads its own copy — neither ever calls the other to send mail. |
+| `PORTAL_FROM_EMAIL` | `victron/mailer.py:send()`'s default `from` address when no `from_` is passed explicitly — every scheduled report email and the Cap B "limit reached" notice use this. |
+| `VRM_ADMIN_TOKEN` | `routers/vrm_fleet.py` — Oscar's own Victron VRM personal access token, used only by the admin fleet flow (`/admin/vrm-fleet`) to read/link installations under his own VRM account. Never a customer's own token (that's `secrets.read_customer_vrm_token()`, Vault-backed, unrelated to this var). |
 
-In production (Render), all nine vars above are set directly in the
+In production (Render), all twelve vars above are set directly in the
 service's environment — no `.env` file is deployed.
 
 **`ONVO_WEBHOOK_SECRET` is deliberately NOT in this list — this service never
