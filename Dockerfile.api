@@ -44,13 +44,27 @@ COPY requirements.txt requirements-api.txt ./
 RUN pip install --no-cache-dir -r requirements-api.txt
 
 # Only what vrm_api actually imports (victron.*, database.*, config.py,
-# utils/*) plus itself — not the Streamlit app, not victron-monitor/web, not
-# this repo's plan docs. Keeps the image (and what it could leak if
-# compromised) to the pipeline this service exists to run.
+# utils/*, calculations.tariff_calculator) plus itself — not the Streamlit
+# app, not victron-monitor/web, not this repo's plan docs. Keeps the image
+# (and what it could leak if compromised) to the pipeline this service
+# exists to run.
 COPY victron/ ./victron/
 COPY database/ ./database/
 COPY utils/ ./utils/
 COPY config.py ./config.py
+# victron/savings.py imports calculations.tariff_calculator (ARESEP T-RE
+# tariff math, shared with the Streamlit proposal tool) — missed in the
+# original Step 5 COPY list because nothing exercised the real,
+# non-mocked import graph until this service actually ran in a container
+# for the first time (PLAN_PHASE14.md §2 Step 8). calculations/__init__.py
+# is empty (confirmed before fixing this), so importing
+# tariff_calculator alone never pulls in the rest of the package's own
+# heavier submodules (financials.py's numpy_financial, pvgis.py's network
+# call, etc.) — copying the whole directory anyway, same "one small
+# directory, not a hand-picked file" shape every other COPY line here
+# already uses, so a future addition to victron/savings.py's own imports
+# doesn't silently repeat this exact failure.
+COPY calculations/ ./calculations/
 # victron/weekly_report.py imports proposals.assets.assets:get_logo_b64() for
 # the PDF header logo — the only thing this service needs from proposals/.
 COPY proposals/__init__.py ./proposals/__init__.py
