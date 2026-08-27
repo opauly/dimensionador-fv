@@ -36,6 +36,17 @@ from database import vrm_report_db as db
 from proposals.assets.assets import get_logo_b64
 from victron import report_i18n, report_svg as S, savings as savings_mod
 
+# The 9 optional report modules render_html() knows how to build
+# independently (PLAN_PHASE18.md's Decisions section). KPI header / AI
+# narrative / daily bar chart are the report's fixed spine and are never in
+# this set — `vrm_api/report_modules.py` imports this tuple rather than
+# keeping its own copy, so this file (which actually implements each
+# block) is the one source of truth for what a "module id" even means.
+ALL_MODULES = (
+    "energy_mix", "battery_health", "grid_quality", "events",
+    "soc_chart", "solar_performance", "weather", "trend", "savings",
+)
+
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _SYSTEM_EFF = 0.80          # same derating the original uses
 _FALLBACK_PEAK_SUN_HRS = 4.5  # CR average, used when weather is unavailable
@@ -787,7 +798,32 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
     return batt, grid, events, perf, weather
 
 
-def render_html(d: dict) -> str:
+def render_html(d: dict, selected: set[str] | None = None) -> str:
+    """`selected` is the OUTPUT of `vrm_api.report_modules.resolve_report_modules()`
+    (PLAN_PHASE18.md §3) — a set of module ids to actually render, already
+    resolved against tier/entitlement by that function. This function never
+    resolves entitlement itself and never reads a customer's raw
+    `report_modules` column — same "receives the ALREADY-RESOLVED output,
+    never the raw stored value" shape `branding` (below) already uses.
+    `None` (every caller before this feature existed, and any caller that
+    hasn't been updated yet) means "every module on," today's exact,
+    unchanged behavior — not an entitlement decision made here.
+
+    KPI header / narrative / daily bar chart are never gated by `selected`
+    at all — they're the report's fixed spine (PLAN_PHASE18.md's Decisions
+    section), not a selectable module.
+
+    One real, documented limitation (PLAN_PHASE18.md §7's Step 4 note): on
+    a `has_batt` system, choosing `energy_mix` WITHOUT `battery_health`
+    still renders both together. `energy_mix_full_svg()` below is a
+    Solar/Grid-only 2-way donut, built for `grid_zero` systems that have no
+    battery hardware at all — reusing it here would misrepresent a
+    has_batt system's real battery contribution as if it were 100% grid, a
+    wrong number, not just an unwanted extra block. Showing more than
+    asked is the lesser error until a real full-width 3-way donut exists.
+    """
+    if selected is None:
+        selected = set(ALL_MODULES)
     t = d["t"]
     # PLAN_PHASE17.md §4 — `d["branding"]` is either `None` (every
     # `monitoring` report, every pre-Phase-17 caller, and any `vrm` report
@@ -829,7 +865,15 @@ def render_html(d: dict) -> str:
         groups.append((savings_rows, full))
     row_size = S.uniform_row_size(groups)
 
-    if savings_rows:
+    # Every "want_*" flag below folds selection together with the SAME
+    # system_type gate the pre-Phase-18 code already applied unconditionally
+    # (has_grid/has_batt) — a deselected module never re-enables something
+    # system_type already ruled out, and system_type never overrides a real
+    # deselection either.
+    want_savings = "savings" in selected
+    if not want_savings:
+        savings_svg = ""
+    elif savings_rows:
         # Off-grid sites have no counterfactual "what you'd have paid the
         # utility" without spelling out that it IS a counterfactual — the
         # formula (avoided grid purchase) doesn't change, only the label,
@@ -849,22 +893,58 @@ def render_html(d: dict) -> str:
     # caught by inspecting the actual rendered PDF, not just the code).
     events_sub = (t["subEventsOffGrid"] if d["systemType"] == "off_grid"
                  else t["subEvents"])
-    if has_grid:
+    want_grid_quality = "grid_quality" in selected and has_grid
+    want_events = "events" in selected
+    if want_grid_quality and want_events:
         row2 = S.two_block_row_svg(t["sectionGrid"], grid, t["subGrid"],
                                    t["sectionEvents"], events, events_sub,
                                    row_size=row_size)
-    else:
-        # No grid to assess — Events takes the full width rather than sitting
-        # beside an empty half.
+    elif want_events:
+        # No grid to assess, or grid_quality deselected — Events takes the
+        # full width rather than sitting beside an empty half.
         row2 = S.single_block_row_svg(t["sectionEvents"], events, events_sub,
                                       row_size=row_size)
+    elif want_grid_quality:
+        row2 = S.single_block_row_svg(t["sectionGrid"], grid, t["subGrid"],
+                                      row_size=row_size)
+    else:
+        row2 = ""
 
-    row3 = S.two_block_row_svg(
-        t["solarPerformance"], perf, t["subSolarPerf"],
-        t["weatherTitle"], weather, t["subWeather"],
-        right_bg=S.BG_MINT if d["weather"] else S.BG_GREY,
-        row_size=row_size,
-    )
+    want_solar_perf = "solar_performance" in selected
+    want_weather = "weather" in selected
+    if want_solar_perf and want_weather:
+        row3 = S.two_block_row_svg(
+            t["solarPerformance"], perf, t["subSolarPerf"],
+            t["weatherTitle"], weather, t["subWeather"],
+            right_bg=S.BG_MINT if d["weather"] else S.BG_GREY,
+            row_size=row_size,
+        )
+    elif want_solar_perf:
+        row3 = S.single_block_row_svg(t["solarPerformance"], perf, t["subSolarPerf"], row_size=row_size)
+    elif want_weather:
+        row3 = S.single_block_row_svg(t["weatherTitle"], weather, t["subWeather"], row_size=row_size)
+    else:
+        row3 = ""
+
+    # Row 1 — energy mix + battery health. See this function's own
+    # docstring for the one documented gap here: energy_mix selected
+    # without battery_health on a has_batt system still renders both,
+    # since `energy_mix_full_svg()` is a Solar/Grid-only 2-way donut that
+    # would misrepresent a real battery contribution as 100% grid if
+    # reused for that case.
+    want_energy_mix = "energy_mix" in selected
+    want_battery_health = "battery_health" in selected and has_batt
+    if not has_batt:
+        # grid_zero — battery_health never applies regardless of selection.
+        row1_svg = S.energy_mix_full_svg(d, t) if want_energy_mix else ""
+    elif want_energy_mix and want_battery_health:
+        row1_svg = S.row1_svg(d, t, batt, row_size=row_size)
+    elif want_battery_health:
+        row1_svg = S.single_block_row_svg(t["sectionBattery"], batt, t["subBattery"], row_size=row_size)
+    elif want_energy_mix:
+        row1_svg = S.row1_svg(d, t, batt, row_size=row_size)  # documented gap above
+    else:
+        row1_svg = ""
 
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR),
                       autoescape=select_autoescape(["html"]))
@@ -883,7 +963,8 @@ def render_html(d: dict) -> str:
         brand_color=brand_color,
         contact_email=contact_email,
         narrative_paragraphs=[p for p in (d["narrative"] or "").split("\n") if p.strip()],
-        # Pre-built SVG must not be HTML-escaped by autoescape.
+        # Pre-built SVG must not be HTML-escaped by autoescape. KPI header /
+        # bar chart are the fixed spine — never gated by `selected` at all.
         kpi_svg=_safe(S.kpi_svg(d, t)),
         bar_svg=_safe(S.bar_chart_svg(d, t)),
         # A system with no battery (grid_zero) still has a meaningful energy
@@ -894,13 +975,12 @@ def render_html(d: dict) -> str:
         # Grid Quality block row2 already renders for any grid-connected
         # system — found by checking system_type behaviour end to end, not
         # by a report ever actually being generated for a grid_zero site.
-        row1_svg=_safe(S.row1_svg(d, t, batt, row_size=row_size) if has_batt
-                       else S.energy_mix_full_svg(d, t)),
-        row2_svg=_safe(row2),
-        soc_svg=_safe(S.soc_chart_svg(d, t)) if has_batt else "",
-        row3_svg=_safe(row3),
-        trend_svg=_safe(S.four_week_trend_svg(d["trend"], t)),
-        savings_svg=_safe(savings_svg),
+        row1_svg=_safe(row1_svg) if row1_svg else "",
+        row2_svg=_safe(row2) if row2 else "",
+        soc_svg=(_safe(S.soc_chart_svg(d, t)) if (has_batt and "soc_chart" in selected) else ""),
+        row3_svg=_safe(row3) if row3 else "",
+        trend_svg=(_safe(S.four_week_trend_svg(d["trend"], t)) if "trend" in selected else ""),
+        savings_svg=_safe(savings_svg) if savings_svg else "",
     )
 
 
@@ -909,15 +989,19 @@ def _safe(s: str):
     return Markup(s)
 
 
-def render_pdf(d: dict) -> bytes:
+def render_pdf(d: dict, selected: set[str] | None = None) -> bytes:
     """HTML → PDF via WeasyPrint, replacing Apps Script's
-    `newBlob(html, 'text/html').getAs('application/pdf')`."""
+    `newBlob(html, 'text/html').getAs('application/pdf')`. `selected` is
+    plain pass-through to `render_html()` — see that function's own
+    docstring."""
     from weasyprint import HTML
-    return HTML(string=render_html(d)).write_pdf()
+    return HTML(string=render_html(d, selected)).write_pdf()
 
 
 def generate(site_id: str, start: str | date, end: str | date, schema: str,
-             with_narrative: bool = True, with_weather: bool = True) -> bytes:
+             with_narrative: bool = True, with_weather: bool = True,
+             selected: set[str] | None = None) -> bytes:
     return render_pdf(build_report_data(site_id, start, end, schema,
                                         with_narrative=with_narrative,
-                                        with_weather=with_weather))
+                                        with_weather=with_weather),
+                      selected)

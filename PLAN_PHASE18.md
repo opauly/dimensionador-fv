@@ -78,7 +78,23 @@ All 9 optional blocks' data is already computed unconditionally in `build_report
 nothing there changes. `render_html()` (`victron/weekly_report.py:780`) accepts a `selected:
 set[str]` and skips building any block not in it.
 
-## §4 — Layout reflow (the real risk)
+## §4 — Layout reflow
+
+**Narrower than originally scoped** — Step 3's implementation found that
+`row2`/`row3` already use the generic `two_block_row_svg`/`single_block_row_svg`
+pairing functions, so full independent per-module toggling for 8 of the 9
+modules shipped in Step 3 itself, not deferred here. What's actually left:
+1. A real full-width, 3-way (solar/battery/grid) energy-mix donut, for a
+   `has_batt` system that selects `energy_mix` without `battery_health` —
+   today that combination still renders both, documented in
+   `render_html()`'s own docstring, since the existing full-width donut
+   (`energy_mix_full_svg()`) is Solar/Grid-only and would misrepresent a
+   real battery contribution as 100% grid if reused for this case.
+2. Page 2's header (`weekly_report.html`) always renders regardless of
+   whether anything below it is selected — a customer who deselects every
+   page-2 module (SOC chart, row3, trend, savings) still gets a
+   near-blank second page. Found live during Step 3's own verification,
+   not yet fixed — a real but low-priority polish item.
 
 Today's layout is fixed pairs (`row1`=energy-mix+battery, `row2`=grid+events,
 `row3`=perf+weather), each hand-sized together via `S.uniform_row_size()`

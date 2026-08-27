@@ -55,9 +55,9 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
 
 <div style="margin-top:14px; margin-bottom:12px;">{{ bar_svg }}</div>
 
-{{ row1_svg }}
+{% if row1_svg %}{{ row1_svg }}{% endif %}
 
-<div style="margin-top:10px;">{{ row2_svg }}</div>
+{% if row2_svg %}<div style="margin-top:10px;">{{ row2_svg }}</div>{% endif %}
 
 <div style="page-break-before:always; padding-top:20px;">
   <div class="p2hdr">
@@ -65,13 +65,13 @@ body { font-family: Arial, 'Helvetica Neue', sans-serif; color: #111; font-size:
     <span class="p2hdr-r">{{ site_name }} &middot; {{ start_str }} &#8212; {{ end_str }}</span>
   </div>
 
-  <div style="margin-top:10px;">{{ soc_svg }}</div>
+  {% if soc_svg %}<div style="margin-top:10px;">{{ soc_svg }}</div>{% endif %}
 
-  <div style="margin-top:10px;">{{ row3_svg }}</div>
+  {% if row3_svg %}<div style="margin-top:10px;">{{ row3_svg }}</div>{% endif %}
 
-  <div style="margin-top:10px;">{{ trend_svg }}</div>
+  {% if trend_svg %}<div style="margin-top:10px;">{{ trend_svg }}</div>{% endif %}
 
-  <div style="margin-top:10px;">{{ savings_svg }}</div>
+  {% if savings_svg %}<div style="margin-top:10px;">{{ savings_svg }}</div>{% endif %}
 </div>
 
 <div class="ftr">

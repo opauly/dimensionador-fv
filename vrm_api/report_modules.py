@@ -24,20 +24,22 @@ change here, not a schema migration.
 importing it — same reasoning `lib/server/db/admin.ts`'s own
 `ADMIN_SITE_WHITELIST` restatement gives for not sharing a tenancy-adjacent
 check across module boundaries via an underscore-prefixed internal.
+
+`ALL_MODULES` itself is NOT defined here — it's imported from
+`victron.weekly_report`, which actually implements each block. `victron/`
+never imports from `vrm_api/` anywhere in this codebase (the dependency
+runs the other way: `vrm_api` is the FastAPI layer built on top of the
+`victron` pipeline), so the module-id list has to live on the `victron`
+side for this file to depend on it without introducing the only reverse
+import in the project.
 """
 import logging
 
+from victron.weekly_report import ALL_MODULES
 from vrm_api.report_limits import resolve_limits
 
 logger = logging.getLogger("vrm_api.report_modules")
 
-# The 9 selectable modules (PLAN_PHASE18.md's Decisions section) — KPI
-# header / narrative / daily bar chart are the report's fixed spine and are
-# never in this set at all, matching migration 028's own CHECK constraint.
-ALL_MODULES = (
-    "energy_mix", "battery_health", "grid_quality", "events",
-    "soc_chart", "solar_performance", "weather", "trend", "savings",
-)
 _ALL_MODULES_SET = frozenset(ALL_MODULES)
 
 # Same denylist branding.py and PLAN_PHASE17.md §3.6's scheduler gate use —
