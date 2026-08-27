@@ -1,0 +1,77 @@
+/* app/(portal)/app/help — same conventions as sites/profile/billing's own
+   modules (styles/tokens.css only, nothing ported from landing_template.html). */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: 60ch;
+  margin-bottom: 24px;
+}
+
+.section {
+  max-width: 720px;
+  padding: 22px 26px;
+  margin-bottom: 20px;
+}
+.section h2 {
+  margin-bottom: 10px;
+}
+.section p {
+  color: var(--paper-dim);
+  max-width: 68ch;
+}
+.section p + p {
+  margin-top: 10px;
+}
+
+.faqList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.faqItem {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.faqItem:first-child {
+  border-top: none;
+  padding-top: 6px;
+}
+.faqItem summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.faqItem summary::-webkit-details-marker {
+  display: none;
+}
+.faqItem summary::before {
+  content: '+';
+  display: inline-block;
+  width: 1.2em;
+  color: var(--victron-glow);
+}
+.faqItem[open] summary::before {
+  content: '−';
+}
+.faqItem p {
+  color: var(--paper-dim);
+  max-width: 68ch;
+  margin: 10px 0 0 1.2em;
+}
+
+.contact {
+  max-width: 720px;
+  padding: 22px 26px;
+}
+.contact h2 {
+  margin-bottom: 6px;
+}
+.contact p {
+  color: var(--paper-dim);
+  margin-bottom: 10px;
+}
+.contactLink {
+  color: var(--victron-glow);
+  font-weight: 600;
+}

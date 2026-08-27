@@ -263,6 +263,12 @@ export async function listAllSites(): Promise<SiteRecord[]> {
 // below (`reassignSite`), a deliberate, explicit action rather than one
 // more field in a generic update, the same "setActive() vs. a generic field
 // edit" split this file already uses for `active`.
+// The four schedule columns plus recipients joined this whitelist so an
+// admin can see and fix a customer's own schedule directly, instead of
+// walking them through re-doing it themselves — the same five columns
+// `sites.ts:SITE_WHITELIST` carries, restated here for the same reason the
+// rest of this whitelist is restated rather than imported (see this
+// constant's own header comment above).
 const ADMIN_SITE_WHITELIST = [
   'display_name',
   'pv_kwp',
@@ -279,6 +285,11 @@ const ADMIN_SITE_WHITELIST = [
   'savings_currency',
   'exports_to_grid',
   'active',
+  'report_schedule',
+  'report_schedule_weekday',
+  'report_schedule_day_of_month',
+  'report_schedule_hour',
+  'report_recipients',
 ] as const;
 
 export type AdminSiteUpdateFields = Partial<Pick<SiteRecord, (typeof ADMIN_SITE_WHITELIST)[number]>>;
@@ -290,6 +301,34 @@ function pickWhitelisted<T extends Record<string, unknown>>(fields: T, allowed: 
     if (allowedSet.has(key)) out[key] = fields[key];
   }
   return out;
+}
+
+// Same rule as `sites.ts:ScheduleRequiresVrmApi` / `sanitizeRecipients()` —
+// restated here rather than imported (same reasoning as the whitelist
+// above). This isn't a tenant-trust check being loosened for admin: a
+// `source='csv_upload'` site has no live connection for a schedule to ever
+// fire against, migration 026's own CHECK constraint rejects the write at
+// the database level regardless of which app surface sent it, and an admin
+// bypassing that here would just trade a clear error message for a raw
+// Postgres constraint violation instead of actually enabling anything.
+export class AdminScheduleRequiresVrmApi extends Error {
+  constructor() {
+    super('A report schedule can only be set on a site connected via the VRM API.');
+    this.name = 'AdminScheduleRequiresVrmApi';
+  }
+}
+
+const ADMIN_MAX_REPORT_RECIPIENTS = 5;
+const ADMIN_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function sanitizeRecipients(payload: Record<string, unknown>): void {
+  if (!('report_recipients' in payload)) return;
+  const raw = payload.report_recipients;
+  const list = Array.isArray(raw) ? raw : [];
+  payload.report_recipients = list
+    .filter((e): e is string => typeof e === 'string' && ADMIN_EMAIL_RE.test(e.trim()))
+    .map((e) => e.trim())
+    .slice(0, ADMIN_MAX_REPORT_RECIPIENTS);
 }
 
 export async function getAnySite(siteId: string): Promise<SiteRecord> {
@@ -305,6 +344,19 @@ export async function getAnySite(siteId: string): Promise<SiteRecord> {
 export async function updateAnySite(siteId: string, fields: AdminSiteUpdateFields): Promise<SiteRecord> {
   const payload = pickWhitelisted(fields as Record<string, unknown>, ADMIN_SITE_WHITELIST as readonly string[]);
   if (Object.keys(payload).length === 0) return getAnySite(siteId);
+  sanitizeRecipients(payload);
+
+  if ('report_schedule' in payload && payload.report_schedule !== 'off') {
+    const { data: sourceRow, error: sourceError } = await getSupabaseAdmin()
+      .schema('vrm')
+      .from('sites')
+      .select('source')
+      .eq('site_id', siteId)
+      .single();
+    if (sourceError) throw sourceError;
+    if (sourceRow.source !== 'vrm_api') throw new AdminScheduleRequiresVrmApi();
+  }
+
   const { data, error } = await getSupabaseAdmin().schema('vrm').from('sites').update(payload).eq('site_id', siteId).select('*').single();
   if (error) throw error;
   return data as SiteRecord;

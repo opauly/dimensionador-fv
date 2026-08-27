@@ -30,6 +30,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
     { href: '/app/branding', label: t(session.uiLanguage, 'nav_branding') },
     { href: '/app/billing', label: t(session.uiLanguage, 'nav_billing') },
     { href: '/app/profile', label: t(session.uiLanguage, 'nav_profile') },
+    { href: '/app/help', label: t(session.uiLanguage, 'nav_help') },
   ];
 
   return (

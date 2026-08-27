@@ -49,6 +49,7 @@ export const STRINGS = {
     nav_branding: 'Branding',
     nav_profile: 'Profile',
     nav_billing: 'Billing',
+    nav_help: 'Help',
 
     // ── Activate / Forgot password (PLAN_PHASE14.md §2 Step 7) ────
     // Always rendered with t('en', ...) — same convention as /login
@@ -190,6 +191,10 @@ export const STRINGS = {
     sites_field_schedule_hour: 'Hour (site’s own timezone)',
     sites_schedule_help: 'Reports are only generated for complete periods — a weekly schedule delivers the 7 days ending the day before your chosen weekday, a monthly one delivers the previous full calendar month.',
     sites_schedule_csv_notice: 'Connect this site to the VRM API to enable automatic reports.',
+    sites_schedule_review_notice: 'Review before saving:',
+    sites_schedule_confirmed_notice: 'Confirmed:',
+    sites_schedule_confirm_link: 'Confirm this schedule',
+    sites_schedule_confirm_save_button: 'Confirm & save',
     sites_bulk_apply_button: 'Apply a schedule to all sites',
     sites_bulk_apply_title: 'Apply schedule to all VRM API sites',
     sites_bulk_apply_intro: 'This replaces the automatic report schedule on every active site connected via the VRM API — sites uploaded by CSV are never affected, since their data is never automatically current.',
@@ -555,6 +560,60 @@ export const STRINGS = {
     branding_preview_label: 'Preview',
     branding_preview_period_label: 'Report period',
     branding_preview_powered_by: 'Monitoring powered by',
+
+    // ── Help (customer-facing guide + FAQ + support contact) ────────────
+    help_title: 'Help & guide',
+    help_intro:
+      'Everything you need to get sites connected, reports scheduled, and your account set up the way you want it.',
+    help_section_sites_title: 'Getting a site into your account',
+    help_section_sites_body_1:
+      "There are two ways to get data into VRM Monitor. Connect your VRM account on My Sites to sync a site automatically and enable scheduled reports — this is the path for any site you want reported on a recurring basis. Or upload a CSV export from VRM directly on Upload CSV for a one-off report — uploaded sites can't be scheduled, since there's no live connection to pull new data from.",
+    help_section_sites_body_2:
+      "If your VRM connection ever breaks (an expired or revoked token), you'll see a banner on Reports and on Profile — reconnect from My Sites to pick back up.",
+    help_section_schedule_title: 'Scheduling reports',
+    help_section_schedule_body_1:
+      'Each site connected via VRM can have its own schedule — off, daily, weekly, or monthly — set independently on My Sites. A weekly schedule delivers the 7 days ending the day before your chosen weekday; a monthly one delivers the previous full calendar month. If you manage several sites, "Apply to all sites" on My Sites sets the same cadence across every one in a single step, without needing to open each site individually.',
+    help_section_schedule_body_2:
+      "You can add up to 5 report recipients per site, so a report can go to a client or property manager instead of (or in addition to) your own inbox. Scheduled reports also count against a per-period limit tied to your plan — if you reach it, scheduled sends pause until your next billing period and you'll get a one-time email letting you know.",
+    help_section_branding_title: 'Branding your reports',
+    help_section_branding_body:
+      "Installer accounts on the Growth and Fleet plans can add their own logo, colors, and contact details to every report sent to a client, from the Branding tab. If you're monitoring your own system rather than sending reports to someone else, this tab won't apply to your account.",
+    help_section_billing_title: 'Billing & plans',
+    help_section_billing_body:
+      "Your current plan, payment method, and past invoices all live under Billing. Your site limit and how many you're currently using are shown on Profile — if you're close to the limit, upgrading your plan from Billing raises it.",
+    help_section_account_title: 'Your account',
+    help_section_account_body:
+      "Change your password from Profile at any time. Each site also has its own report language (English or Spanish), independent of the dashboard's language, set when you add or edit that site.",
+    help_faq_title: 'Frequently asked questions',
+    help_faq_q1: "What's the difference between a report generated automatically and one I upload a CSV for?",
+    help_faq_a1:
+      "A VRM-connected site pulls its own data and can run on a recurring schedule with no action from you. A CSV upload is a one-off report from a file you export from VRM yourself — useful for a site you're not ready to connect live, or a report you just need once.",
+    help_faq_q2: "Why can't I set a schedule on one of my sites?",
+    help_faq_a2:
+      'Only sites connected through VRM can be scheduled. A site added by CSV upload has no live connection for the system to pull new data from automatically, so its schedule control is disabled.',
+    help_faq_q3: 'What happens when I hit my scheduled reports limit for the period?',
+    help_faq_a3:
+      "Scheduled sends pause for the rest of the current billing period once you reach your plan's limit — you'll get a one-time notice by email when that happens. Reports resume automatically at the start of your next period, and manual uploads are never affected.",
+    help_faq_q4: 'Can reports be delivered in Spanish?',
+    help_faq_a4:
+      "Yes — each site has its own report language, set independently of the dashboard, which is currently English-only.",
+    help_faq_q5: 'How many people can receive a report?',
+    help_faq_a5: "Up to 5 email addresses per site, set on that site's edit form on My Sites.",
+    help_faq_q6: "I don't see a Branding tab option for my account — why?",
+    help_faq_a6:
+      'Branding is for installer accounts sending reports to their own clients, on the Growth or Fleet plan. If you’re monitoring your own system, there’s nothing to brand a report "for," so this tab won’t show anything to configure.',
+    help_faq_q7: 'How do I add more sites than my plan allows?',
+    help_faq_a7: 'Upgrade your plan from Billing — your new site limit takes effect immediately.',
+    help_faq_q8: 'What’s the difference between the "Detallado" and "Resumen" report format?',
+    help_faq_a8:
+      "The report switches itself automatically based on the period you choose — 31 days or fewer gets the detailed, day-by-day version; 32 days to 6 months gets a summarized Overview instead. There's no setting to remember.",
+    help_faq_q9: 'My VRM connection shows as broken — what do I do?',
+    help_faq_a9:
+      'Go to My Sites and reconnect your VRM account from there. This usually happens when a VRM access token expires or is revoked from the VRM side, not from anything wrong on our end.',
+    help_faq_q10: 'How do I change my password?',
+    help_faq_a10: 'From Profile, under "Change password."',
+    help_contact_title: 'Still need help?',
+    help_contact_body: "Email us directly and we'll get back to you.",
   },
   es: {
     login_title: 'VRM Monitor',
@@ -580,6 +639,7 @@ export const STRINGS = {
     nav_branding: 'Marca',
     nav_profile: 'Perfil',
     nav_billing: 'Facturación',
+    nav_help: 'Ayuda',
 
     // ── Activate / Forgot password (PLAN_PHASE14.md §2 Step 7) ────
     activate_verifying: 'Verificando tu enlace…',
@@ -715,6 +775,10 @@ export const STRINGS = {
     sites_field_schedule_hour: 'Hora (zona horaria propia del sitio)',
     sites_schedule_help: 'Los reportes solo se generan para períodos completos — uno semanal entrega los 7 días que terminan el día anterior al elegido, uno mensual entrega el mes calendario anterior completo.',
     sites_schedule_csv_notice: 'Conectá este sitio a la API de VRM para habilitar reportes automáticos.',
+    sites_schedule_review_notice: 'Revisá antes de guardar:',
+    sites_schedule_confirmed_notice: 'Confirmado:',
+    sites_schedule_confirm_link: 'Confirmar este horario',
+    sites_schedule_confirm_save_button: 'Confirmar y guardar',
     sites_bulk_apply_button: 'Aplicar un horario a todos los sitios',
     sites_bulk_apply_title: 'Aplicar horario a todos los sitios conectados por API VRM',
     sites_bulk_apply_intro: 'Esto reemplaza el horario de reportes automáticos en cada sitio activo conectado por la API de VRM — los sitios cargados por CSV nunca se ven afectados, ya que sus datos nunca están automáticamente actualizados.',
@@ -1063,6 +1127,59 @@ export const STRINGS = {
     branding_preview_label: 'Vista previa',
     branding_preview_period_label: 'Período del reporte',
     branding_preview_powered_by: 'Monitoreo por',
+
+    // ── Help (customer-facing guide + FAQ + support contact) ────────────
+    help_title: 'Ayuda y guía',
+    help_intro: 'Todo lo que necesitás para conectar sitios, programar reportes y configurar tu cuenta como querés.',
+    help_section_sites_title: 'Cómo agregar un sitio a tu cuenta',
+    help_section_sites_body_1:
+      'Hay dos formas de traer datos a VRM Monitor. Conectá tu cuenta de VRM en Mis sitios para sincronizar un sitio automáticamente y habilitar reportes programados — este es el camino para cualquier sitio que querás reportar de forma recurrente. O subí un CSV exportado desde VRM en Cargar CSV para un reporte puntual — los sitios cargados por CSV no se pueden programar, ya que no hay una conexión en vivo de la que traer datos nuevos.',
+    help_section_sites_body_2:
+      'Si tu conexión a VRM se rompe alguna vez (un token vencido o revocado), vas a ver un aviso en Reportes y en Perfil — reconectá desde Mis sitios para retomar.',
+    help_section_schedule_title: 'Programar reportes',
+    help_section_schedule_body_1:
+      'Cada sitio conectado por VRM puede tener su propio horario — apagado, diario, semanal o mensual — configurado de forma independiente en Mis sitios. Uno semanal entrega los 7 días que terminan el día anterior al elegido; uno mensual entrega el mes calendario anterior completo. Si manejás varios sitios, "Aplicar a todos los sitios" en Mis sitios pone el mismo horario en todos de una sola vez, sin tener que abrir cada sitio por separado.',
+    help_section_schedule_body_2:
+      'Podés agregar hasta 5 destinatarios de reporte por sitio, para que un reporte le llegue a un cliente o administrador de propiedad en vez de (o además de) tu propio correo. Los reportes programados también cuentan contra un límite por período según tu plan — si lo alcanzás, los envíos programados se pausan hasta tu próximo período de facturación y vas a recibir un correo único avisándote.',
+    help_section_branding_title: 'Personalizar tus reportes',
+    help_section_branding_body:
+      'Las cuentas de instalador en los planes Growth y Fleet pueden agregar su propio logo, colores y datos de contacto a cada reporte enviado a un cliente, desde la pestaña Marca. Si estás monitoreando tu propio sistema en vez de enviarle reportes a alguien más, esta pestaña no aplica a tu cuenta.',
+    help_section_billing_title: 'Facturación y planes',
+    help_section_billing_body:
+      'Tu plan actual, método de pago y facturas anteriores están en Facturación. Tu límite de sitios y cuántos estás usando aparecen en Perfil — si estás cerca del límite, subir de plan desde Facturación lo aumenta.',
+    help_section_account_title: 'Tu cuenta',
+    help_section_account_body:
+      'Cambiá tu contraseña desde Perfil cuando quieras. Cada sitio también tiene su propio idioma de reporte (inglés o español), independiente del idioma del panel, que se elige al agregar o editar ese sitio.',
+    help_faq_title: 'Preguntas frecuentes',
+    help_faq_q1: '¿Cuál es la diferencia entre un reporte generado automáticamente y uno que subo por CSV?',
+    help_faq_a1:
+      'Un sitio conectado por VRM trae sus propios datos y puede correr con un horario recurrente sin que hagas nada. Un CSV cargado es un reporte puntual a partir de un archivo que exportás vos mismo desde VRM — útil para un sitio que todavía no querés conectar en vivo, o un reporte que solo necesitás una vez.',
+    help_faq_q2: '¿Por qué no puedo poner un horario en uno de mis sitios?',
+    help_faq_a2:
+      'Solo los sitios conectados por VRM se pueden programar. Un sitio agregado por CSV no tiene una conexión en vivo de la que el sistema pueda traer datos nuevos automáticamente, así que su control de horario aparece deshabilitado.',
+    help_faq_q3: '¿Qué pasa cuando alcanzo mi límite de reportes programados del período?',
+    help_faq_a3:
+      'Los envíos programados se pausan por el resto del período de facturación actual una vez que alcanzás el límite de tu plan — vas a recibir un aviso único por correo cuando eso pase. Los reportes se reanudan automáticamente al inicio de tu próximo período, y las cargas manuales nunca se ven afectadas.',
+    help_faq_q4: '¿Los reportes se pueden entregar en español?',
+    help_faq_a4:
+      'Sí — cada sitio tiene su propio idioma de reporte, configurado de forma independiente del panel, que por ahora está solo en inglés.',
+    help_faq_q5: '¿Cuántas personas pueden recibir un reporte?',
+    help_faq_a5: 'Hasta 5 correos por sitio, configurados en el formulario de edición de ese sitio en Mis sitios.',
+    help_faq_q6: 'No veo la opción de la pestaña Marca en mi cuenta — ¿por qué?',
+    help_faq_a6:
+      'La Marca es para cuentas de instalador que envían reportes a sus propios clientes, en el plan Growth o Fleet. Si estás monitoreando tu propio sistema, no hay un "para quién" personalizar el reporte, así que esta pestaña no te muestra nada que configurar.',
+    help_faq_q7: '¿Cómo agrego más sitios de los que permite mi plan?',
+    help_faq_a7: 'Subí de plan desde Facturación — tu nuevo límite de sitios aplica de inmediato.',
+    help_faq_q8: '¿Cuál es la diferencia entre el formato de reporte "Detallado" y "Resumen"?',
+    help_faq_a8:
+      'El reporte cambia automáticamente según el período que elijas — 31 días o menos usa la versión detallada, día por día; de 32 días a 6 meses usa un Resumen en su lugar. No hay ninguna opción que recordar.',
+    help_faq_q9: 'Mi conexión a VRM aparece como rota — ¿qué hago?',
+    help_faq_a9:
+      'Andá a Mis sitios y reconectá tu cuenta de VRM desde ahí. Esto suele pasar cuando un token de acceso de VRM vence o se revoca del lado de VRM, no por algo de nuestro lado.',
+    help_faq_q10: '¿Cómo cambio mi contraseña?',
+    help_faq_a10: 'Desde Perfil, en "Cambiar contraseña."',
+    help_contact_title: '¿Todavía necesitás ayuda?',
+    help_contact_body: 'Escribinos directamente y te respondemos.',
   },
 } as const;
 

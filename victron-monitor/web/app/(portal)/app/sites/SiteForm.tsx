@@ -75,6 +75,42 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
   const [scheduleWeekday, setScheduleWeekday] = useState<string>(String(initial?.report_schedule_weekday ?? 1));
   const [scheduleDayOfMonth, setScheduleDayOfMonth] = useState<string>(String(initial?.report_schedule_day_of_month ?? 1));
   const [scheduleHour, setScheduleHour] = useState<string>(String(initial?.report_schedule_hour ?? 6));
+
+  // A real change to the schedule itself (cadence/day/hour) — not
+  // recipients, not any other field — requires reviewing the plain-language
+  // summary below before Save is allowed to apply it (Oscar's own request:
+  // "all with a prior confirmation message"). Any further schedule edit
+  // after confirming re-arms this, so a changed mind never saves on a stale
+  // confirmation. Never true for `mode === 'add'` — there's no `initial` to
+  // have changed away from, and this section never renders there anyway.
+  const scheduleChanged =
+    mode === 'edit' &&
+    Boolean(initial) &&
+    (reportSchedule !== (initial?.report_schedule ?? 'off') ||
+      (reportSchedule === 'weekly' && Number(scheduleWeekday) !== (initial?.report_schedule_weekday ?? 1)) ||
+      (reportSchedule === 'monthly' && Number(scheduleDayOfMonth) !== (initial?.report_schedule_day_of_month ?? 1)) ||
+      (reportSchedule !== 'off' && Number(scheduleHour) !== (initial?.report_schedule_hour ?? 6)));
+  const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
+  const [trackedSchedule, setTrackedSchedule] = useState({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
+  if (
+    reportSchedule !== trackedSchedule.reportSchedule ||
+    scheduleWeekday !== trackedSchedule.scheduleWeekday ||
+    scheduleDayOfMonth !== trackedSchedule.scheduleDayOfMonth ||
+    scheduleHour !== trackedSchedule.scheduleHour
+  ) {
+    setTrackedSchedule({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
+    setScheduleConfirmed(false);
+  }
+
+  function describeSchedule(): string {
+    if (reportSchedule === 'off') return t(lang, 'sites_schedule_off');
+    const hourLabel = `${String(scheduleHour).padStart(2, '0')}:00`;
+    if (reportSchedule === 'daily') return `${t(lang, 'sites_schedule_daily')} · ${hourLabel}`;
+    if (reportSchedule === 'weekly') {
+      return `${t(lang, 'sites_schedule_weekly')} · ${t(lang, WEEKDAY_STRING_KEYS[Number(scheduleWeekday) - 1])} · ${hourLabel}`;
+    }
+    return `${t(lang, 'sites_schedule_monthly')} · ${t(lang, 'sites_field_schedule_day_of_month')} ${scheduleDayOfMonth} · ${hourLabel}`;
+  }
   // PLAN_PHASE17.md §0.6 Q5 — one recipient per line; `actions.ts`'s
   // `reportRecipientsField` also accepts commas, but a textarea's own
   // Enter-per-line affordance is the more discoverable one to show back.
@@ -350,6 +386,20 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
           </div>
           {reportSchedule !== 'off' && <p className={styles.sectionCaption}>{t(lang, 'sites_schedule_help')}</p>}
 
+          {scheduleChanged && (
+            <p className={scheduleConfirmed ? styles.sectionCaption : styles.error}>
+              {t(lang, scheduleConfirmed ? 'sites_schedule_confirmed_notice' : 'sites_schedule_review_notice')} {describeSchedule()}
+              {!scheduleConfirmed && (
+                <>
+                  {' '}
+                  <button type="button" className={styles.linkButton} onClick={() => setScheduleConfirmed(true)}>
+                    {t(lang, 'sites_schedule_confirm_link')}
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+
           <Field label={t(lang, 'sites_field_report_recipients')} htmlFor="site-report-recipients">
             <Textarea
               id="site-report-recipients"
@@ -381,8 +431,10 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button type="submit" disabled={pending}>
-          {pending ? t(lang, 'sites_saving') : t(lang, mode === 'add' ? 'sites_create_button' : 'sites_save_button')}
+        <Button type="submit" disabled={pending || (scheduleChanged && !scheduleConfirmed)}>
+          {pending
+            ? t(lang, 'sites_saving')
+            : t(lang, scheduleChanged ? 'sites_schedule_confirm_save_button' : mode === 'add' ? 'sites_create_button' : 'sites_save_button')}
         </Button>
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>

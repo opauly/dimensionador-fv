@@ -72,6 +72,17 @@
   margin-bottom: 14px;
 }
 
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--victron-glow);
+  font-weight: 600;
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .formActions {
   display: flex;
   gap: 12px;

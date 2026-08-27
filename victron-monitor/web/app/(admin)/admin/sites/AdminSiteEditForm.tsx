@@ -8,7 +8,7 @@
 // button optimizes for) — kept intentionally simpler rather than
 // duplicating that client-side geocoding flow for a rarely-used surface.
 import { useActionState, useEffect, useState } from 'react';
-import { Button, Field, Input, Select } from '@/components/ui';
+import { Button, Field, Input, Select, Textarea } from '@/components/ui';
 import { listTimezones } from '@/lib/timezones';
 import { COUNTRIES } from '@/lib/countries';
 import { SUPPORTED_FLAT_CURRENCIES } from '@/lib/currencies';
@@ -18,6 +18,23 @@ import styles from './sites.module.css';
 
 const TIMEZONES = listTimezones();
 const COUNTRY_CODES = Object.keys(COUNTRIES);
+// ISO weekday order (1 = Monday), same as `app/(portal)/app/sites/SiteForm.tsx`'s
+// own `WEEKDAY_STRING_KEYS` — plain English here since this whole panel is
+// (admin views are English-only, see `lib/i18n/strings.ts`'s own header).
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const MAX_REPORT_RECIPIENTS = 5;
+
+/** Plain-language summary of a schedule choice, shown before it's saved —
+ * same purpose as `SiteForm.tsx`'s own confirmation copy, restated in
+ * English here rather than imported since nothing else in this admin panel
+ * goes through `t()`. */
+function describeSchedule(schedule: string, weekday: number, dayOfMonth: number, hour: number): string {
+  if (schedule === 'off') return 'No scheduled reports (paused).';
+  const hourLabel = `${String(hour).padStart(2, '0')}:00`;
+  if (schedule === 'daily') return `Daily, at ${hourLabel}.`;
+  if (schedule === 'weekly') return `Weekly on ${WEEKDAYS[weekday - 1]}, at ${hourLabel}.`;
+  return `Monthly on day ${dayOfMonth}, at ${hourLabel}.`;
+}
 
 export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: () => void }) {
   const boundAction = updateAnySiteAction.bind(null, site.site_id);
@@ -31,6 +48,39 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
     if (!nominal || !dod || !Number.isFinite(n) || !Number.isFinite(d)) return null;
     return Math.round(((n * d) / 100) * 100) / 100;
   })();
+
+  // Only ever a real editor for a `source='vrm_api'` site — same rule
+  // `SiteForm.tsx` enforces (client-side UX; `updateAnySite()`'s
+  // `AdminScheduleRequiresVrmApi` is the actual control, see that file).
+  const [reportSchedule, setReportSchedule] = useState<string>(site.report_schedule);
+  const [scheduleWeekday, setScheduleWeekday] = useState(String(site.report_schedule_weekday));
+  const [scheduleDayOfMonth, setScheduleDayOfMonth] = useState(String(site.report_schedule_day_of_month));
+  const [scheduleHour, setScheduleHour] = useState(String(site.report_schedule_hour));
+  const [recipients, setRecipients] = useState((site.report_recipients ?? []).join('\n'));
+  const recipientCount = recipients.split('\n').map((s) => s.trim()).filter(Boolean).length;
+
+  // A real change to the SCHEDULE itself (cadence/day/hour) — not
+  // recipients, not any other field — requires reviewing the plain-language
+  // summary below before Save is allowed to actually apply it (Oscar's own
+  // request: "all with a prior confirmation message"). Any further edit to
+  // a schedule field after confirming re-arms this, so a changed mind isn't
+  // saved on a stale confirmation.
+  const scheduleChanged =
+    reportSchedule !== site.report_schedule ||
+    (reportSchedule === 'weekly' && Number(scheduleWeekday) !== site.report_schedule_weekday) ||
+    (reportSchedule === 'monthly' && Number(scheduleDayOfMonth) !== site.report_schedule_day_of_month) ||
+    (reportSchedule !== 'off' && Number(scheduleHour) !== site.report_schedule_hour);
+  const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
+  const [trackedSchedule, setTrackedSchedule] = useState({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
+  if (
+    reportSchedule !== trackedSchedule.reportSchedule ||
+    scheduleWeekday !== trackedSchedule.scheduleWeekday ||
+    scheduleDayOfMonth !== trackedSchedule.scheduleDayOfMonth ||
+    scheduleHour !== trackedSchedule.scheduleHour
+  ) {
+    setTrackedSchedule({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
+    setScheduleConfirmed(false);
+  }
 
   useEffect(() => {
     if (state.success) onDone();
@@ -156,6 +206,108 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
         </Field>
       </div>
 
+      {site.source !== 'vrm_api' && (
+        <p className={styles.caption}>This site was added by CSV upload, so it has no live connection for a schedule to run against.</p>
+      )}
+      {site.source === 'vrm_api' && (
+        <>
+          <div className={styles.fieldRow}>
+            <Field label="Report schedule" htmlFor={`as-schedule-${site.site_id}`}>
+              <Select
+                id={`as-schedule-${site.site_id}`}
+                name="report_schedule"
+                value={reportSchedule}
+                onChange={(e) => setReportSchedule(e.target.value)}
+                disabled={pending}
+              >
+                <option value="off">No schedule (paused)</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </Select>
+            </Field>
+            {reportSchedule === 'weekly' && (
+              <Field label="Weekday" htmlFor={`as-weekday-${site.site_id}`}>
+                <Select
+                  id={`as-weekday-${site.site_id}`}
+                  name="report_schedule_weekday"
+                  value={scheduleWeekday}
+                  onChange={(e) => setScheduleWeekday(e.target.value)}
+                  disabled={pending}
+                >
+                  {WEEKDAYS.map((label, i) => (
+                    <option key={label} value={i + 1}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+            {reportSchedule === 'monthly' && (
+              <Field label="Day of month" htmlFor={`as-dom-${site.site_id}`}>
+                <Input
+                  id={`as-dom-${site.site_id}`}
+                  name="report_schedule_day_of_month"
+                  type="number"
+                  min="1"
+                  max="28"
+                  value={scheduleDayOfMonth}
+                  onChange={(e) => setScheduleDayOfMonth(e.target.value)}
+                  disabled={pending}
+                />
+              </Field>
+            )}
+            {reportSchedule !== 'off' && (
+              <Field label="Hour" htmlFor={`as-hour-${site.site_id}`}>
+                <Select
+                  id={`as-hour-${site.site_id}`}
+                  name="report_schedule_hour"
+                  value={scheduleHour}
+                  onChange={(e) => setScheduleHour(e.target.value)}
+                  disabled={pending}
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>
+                      {String(h).padStart(2, '0')}:00
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+          </div>
+
+          {scheduleChanged && (
+            <p className={scheduleConfirmed ? styles.caption : styles.error}>
+              {scheduleConfirmed ? 'Confirmed: ' : 'Review before saving: '}
+              {describeSchedule(reportSchedule, Number(scheduleWeekday), Number(scheduleDayOfMonth), Number(scheduleHour))}
+              {!scheduleConfirmed && (
+                <>
+                  {' '}
+                  <button type="button" className={styles.linkButton} onClick={() => setScheduleConfirmed(true)}>
+                    Confirm this schedule
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+
+          <Field label="Report recipients" htmlFor={`as-recipients-${site.site_id}`}>
+            <Textarea
+              id={`as-recipients-${site.site_id}`}
+              name="report_recipients"
+              rows={3}
+              placeholder="One email per line"
+              value={recipients}
+              onChange={(e) => setRecipients(e.target.value)}
+              disabled={pending}
+            />
+          </Field>
+          <p className={recipientCount > MAX_REPORT_RECIPIENTS ? styles.error : styles.caption}>
+            {recipientCount} / {MAX_REPORT_RECIPIENTS} recipients
+          </p>
+        </>
+      )}
+
       <div className={styles.checkboxRow}>
         <label className={styles.checkboxLabel}>
           <input type="checkbox" name="exports_to_grid" value="true" defaultChecked={site.exports_to_grid} disabled={pending} />
@@ -170,8 +322,8 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button type="submit" disabled={pending}>
-          {pending ? 'Saving…' : 'Save'}
+        <Button type="submit" disabled={pending || (scheduleChanged && !scheduleConfirmed)}>
+          {pending ? 'Saving…' : scheduleChanged ? 'Confirm & save' : 'Save'}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
