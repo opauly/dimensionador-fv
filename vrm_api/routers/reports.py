@@ -25,6 +25,7 @@ from vrm_api.branding import resolve_branding
 from vrm_api.deps import require_pipeline_key
 from vrm_api.report_delivery import notify_cap_reached_once, send_report_email
 from vrm_api.report_limits import check_manual_cap, check_scheduled_cap, resolve_billing_period, resolve_limits
+from vrm_api.report_modules import resolve_report_modules
 from vrm_api.report_schedule import compute_due_period
 from vrm_api.schemas import (
     JobCreated, ReportRequest, ReportRunSiteResult, ReportsRunDueOut, ReportsRunDueRequest,
@@ -120,7 +121,7 @@ def _report_summary(data: dict) -> dict:
 
 
 def _do_report(site_id: str, start: str, end: str, schema_: str, customer_id: str,
-               *, include_pdf_bytes: bool = False) -> dict:
+               *, include_pdf_bytes: bool = False, site: dict | None = None) -> dict:
     # PLAN_PHASE17.md §4.2/§8 Step 4 — resolved ONCE, here, at the top of
     # every report path, regardless of who asked for it (`actor='customer'`
     # or `'admin'` both get the customer's real branding, since this is the
@@ -129,9 +130,25 @@ def _do_report(site_id: str, start: str, end: str, schema_: str, customer_id: st
     # always get `None` — the Pauly & Co defaults, unconditionally.
     # `victron/weekly_report.py` never sees `customer_row['branding']`
     # directly — only this function's resolved output, or `None`.
-    branding = resolve_branding(tenancy.get_customer(customer_id)) if schema_ == "vrm" else None
+    #
+    # PLAN_PHASE18.md §2/§3 — `selected` is resolved the SAME way, right
+    # here, for the identical reason: this is the one function every real
+    # report path (manual `post_report()`, scheduled `post_run_due()`) goes
+    # through, so it's the only place that can guarantee personalization is
+    # never silently skipped. Found live (2026-08-27): Steps 1-5 built the
+    # whole selection/entitlement/UI chain but never wired THIS call site to
+    # actually read it — `render_pdf()` was always called with its default
+    # (`selected=None`, every module on), so a saved selection had zero
+    # effect on any real report. `site` is optional and defaults to `None`
+    # (falls back to "every module on," the identical pre-fix behavior) only
+    # because a future caller might not have it handy yet — both of TODAY's
+    # real callers already fetch the full site row for other reasons and
+    # pass it in below, at zero extra query cost.
+    customer = tenancy.get_customer(customer_id) if schema_ == "vrm" else None
+    branding = resolve_branding(customer) if customer else None
+    selected = resolve_report_modules(customer, site) if (customer and site) else None
     data = weekly_report.build_report_data(site_id, start, end, schema_, branding=branding)
-    pdf_bytes = weekly_report.render_pdf(data)
+    pdf_bytes = weekly_report.render_pdf(data, selected)
     storage_path = storage.upload_report_pdf(site_id, start, end, pdf_bytes)
     result = {
         "storage_path": storage_path,
@@ -171,13 +188,19 @@ def post_report(body: ReportRequest, background_tasks: BackgroundTasks) -> JobCr
         # should be able to tell the two apart.
         raise HTTPException(status_code=403, detail="monitoring schema requires actor=admin")
 
+    # PLAN_PHASE18.md §3 — captured (not discarded) specifically so
+    # `_do_report()` below can resolve this customer's module selection
+    # without a second `vrm.sites` query, per `assert_owns_site()`'s own
+    # docstring ("Returns the site row on success so callers that need it
+    # (report generation, ...) don't pay for a second query").
+    site_row: dict | None = None
     if body.schema_ == "vrm":
         # The real tenancy re-check (PLAN_PHASE14.md §1.3): customer_id must
         # own site_id in vrm.sites, independently of whatever Next.js
         # already checked. `monitoring` sites have no vrm.customers owner —
         # the actor=="admin" gate above is the only guard that applies to
         # them, by design (PLAN_PHASE14.md §1.12 rule 2).
-        tenancy.assert_owns_site(body.customer_id, body.site_id)
+        site_row = tenancy.assert_owns_site(body.customer_id, body.site_id)
     else:
         tenancy.get_customer(body.customer_id)
 
@@ -196,7 +219,7 @@ def post_report(body: ReportRequest, background_tasks: BackgroundTasks) -> JobCr
                           params=body.model_dump(by_alias=True))
     background_tasks.add_task(
         jobs.run_job, job["id"],
-        lambda: _do_report(body.site_id, body.start, body.end, body.schema_, body.customer_id),
+        lambda: _do_report(body.site_id, body.start, body.end, body.schema_, body.customer_id, site=site_row),
     )
     return JobCreated(job_id=job["id"])
 
@@ -364,7 +387,7 @@ def post_run_due(body: ReportsRunDueRequest) -> ReportsRunDueOut:
                 continue
 
             report_result = _do_report(site_id, period_start.isoformat(), period_end.isoformat(),
-                                       "vrm", site["customer_id"], include_pdf_bytes=True)
+                                       "vrm", site["customer_id"], include_pdf_bytes=True, site=site)
             # PLAN_PHASE17.md §8 Step 8 — never raises (see its own module
             # docstring): a delivery failure must never lose the already-
             # generated, already-uploaded report. `email_status`/
