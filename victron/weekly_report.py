@@ -410,6 +410,16 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     min_v, _ = _minmax(days, "min_voltage")
     _, max_v = _minmax(days, "max_voltage")
     _, max_temp = _minmax(days, "max_temperature")
+    # `_rows()`'s "avg temperature" row displayed `max_temp` under that label
+    # until this fix — a real bug, not a naming choice (found while surveying
+    # `energy_daily`'s columns for the report-personalization project;
+    # `avg_temperature` has been ingested and stored on every row all along,
+    # just never read anywhere in this file). Mean of each day's own stored
+    # average, not a min/max of daily averages — matches what "average
+    # temperature over the period" actually means.
+    avg_temp_vals = [_num(r.get("avg_temperature"), None) for r in days]
+    avg_temp_vals = [v for v in avg_temp_vals if v is not None]
+    avg_temp = round(sum(avg_temp_vals) / len(avg_temp_vals), 1) if avg_temp_vals else None
     min_f, _ = _minmax(days, "min_grid_freq")
     _, max_f = _minmax(days, "max_grid_freq")
     min_l1, _ = _minmax(days, "min_grid_v_l1")
@@ -602,7 +612,7 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         "alarmEpisodesTotal": alarm_total,
         "gridIndependencePct": grid_independence, "batteryCycles": battery_cycles,
         "minSoc": min_soc, "maxSoc": max_soc,
-        "minVoltage": min_v, "maxVoltage": max_v, "maxTemp": max_temp,
+        "minVoltage": min_v, "maxVoltage": max_v, "maxTemp": max_temp, "avgTemp": avg_temp,
         "minFreq": min_f, "maxFreq": max_f,
         "minVL1": min_l1, "maxVL1": max_l1, "minVL2": min_l2, "maxVL2": max_l2,
         "bestDay": best_day, "worstDay": worst_day,
@@ -669,7 +679,7 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
          "valueColor": S.GREEN},
         {"label": t["lowestSoc"],
          "value": f"{d['minSoc']:.0f}%" if d["minSoc"] is not None else "—"},
-        {"label": t["avgTemp"], "value": fmt(d["maxTemp"], 1, " °C")},
+        {"label": t["avgTemp"], "value": fmt(d["avgTemp"], 1, " °C")},
         {"label": t["batteryHealthLabel"],
          # No "(N cyc)" suffix when cycles genuinely can't be computed —
          # "Sin datos (0.0 cyc)" would still assert a number that isn't real.
