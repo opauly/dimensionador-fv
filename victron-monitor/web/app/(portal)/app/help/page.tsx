@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { requireCustomerAllowPending } from '@/lib/server/auth';
-import { t, type Lang, type StringKey } from '@/lib/i18n/strings';
+import { t, type StringKey } from '@/lib/i18n/strings';
 import { Panel } from '@/components/ui';
+import { HelpManager } from './HelpManager';
 import styles from './help.module.css';
 
 export const metadata: Metadata = {
@@ -12,6 +13,11 @@ const SUPPORT_EMAIL = 'proyectos@paulyco.com';
 
 // One (question key, answer key) pair per FAQ entry — kept as plain data
 // so the list below is just a `.map()`, not 10 repeated <details> blocks.
+// Deliberately its OWN card, not folded into a topic above (Oscar's own
+// call, 2026-08-26): some of these questions span more than one topic
+// (e.g. the cadence-vs-CSV question touches both Getting started and
+// Scheduling), so picking a single topic to attach each one to would be
+// arbitrary either way — a separate, always-visible FAQ avoids that.
 const FAQ_KEYS: Array<{ q: StringKey; a: StringKey }> = [
   { q: 'help_faq_q1', a: 'help_faq_a1' },
   { q: 'help_faq_q2', a: 'help_faq_a2' },
@@ -25,24 +31,15 @@ const FAQ_KEYS: Array<{ q: StringKey; a: StringKey }> = [
   { q: 'help_faq_q10', a: 'help_faq_a10' },
 ];
 
-// `app/(portal)/app/help` — a static guide, so a plain Server Component
-// with no client-side state at all (the FAQ list uses native
-// <details>/<summary>, which needs no JS for expand/collapse).
+// `app/(portal)/app/help` — the topic switcher (`HelpManager`) is the only
+// client-side piece; the FAQ and contact cards below it are static content,
+// so they stay server-rendered here rather than joining that client
+// bundle for no reason (same split `/app` itself uses for
+// `VrmConnectionBanner`/`BillingBanners` vs. `ReportManager`).
 // `requireCustomerAllowPending()`, same as `/app/profile` and
 // `/app/billing`: a pending_subscription customer stuck setting up billing
 // should still be able to read how the product works, not get bounced
 // back to /app/billing by the normal gate.
-function Section({ lang, titleKey, bodyKeys }: { lang: Lang; titleKey: StringKey; bodyKeys: StringKey[] }) {
-  return (
-    <Panel className={styles.section}>
-      <h2>{t(lang, titleKey)}</h2>
-      {bodyKeys.map((key) => (
-        <p key={key}>{t(lang, key)}</p>
-      ))}
-    </Panel>
-  );
-}
-
 export default async function HelpPage() {
   const session = await requireCustomerAllowPending();
   const lang = session.uiLanguage;
@@ -52,15 +49,7 @@ export default async function HelpPage() {
       <h1>{t(lang, 'help_title')}</h1>
       <p className={styles.intro}>{t(lang, 'help_intro')}</p>
 
-      <Section lang={lang} titleKey="help_section_sites_title" bodyKeys={['help_section_sites_body_1', 'help_section_sites_body_2']} />
-      <Section
-        lang={lang}
-        titleKey="help_section_schedule_title"
-        bodyKeys={['help_section_schedule_body_1', 'help_section_schedule_body_2']}
-      />
-      <Section lang={lang} titleKey="help_section_branding_title" bodyKeys={['help_section_branding_body']} />
-      <Section lang={lang} titleKey="help_section_billing_title" bodyKeys={['help_section_billing_body']} />
-      <Section lang={lang} titleKey="help_section_account_title" bodyKeys={['help_section_account_body']} />
+      <HelpManager lang={lang} />
 
       <Panel className={styles.section}>
         <h2>{t(lang, 'help_faq_title')}</h2>

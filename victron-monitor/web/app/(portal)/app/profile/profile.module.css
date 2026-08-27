@@ -34,6 +34,11 @@
 
 .form {
   max-width: 560px;
+  /* Same rhythm as .section (margin-top: 36px) — this form has no .section
+     wrapper of its own in page.tsx, so without this it sits flush against
+     the Branding status card right above it, reading as one continuous
+     block instead of two separate sections. */
+  margin-top: 36px;
 }
 
 .fieldRow {

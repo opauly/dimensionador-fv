@@ -61,7 +61,12 @@ export function SitesManager({ sites, lang, canAdd, siteLimit }: SitesManagerPro
           <tbody>
             {sites.map((site) => (
               <tr key={site.site_id}>
-                <td>{site.display_name}</td>
+                <td>
+                  {site.display_name}
+                  <span className={`${styles.sourceBadge} ${site.source === 'vrm_api' ? styles.sourceVrmApi : styles.sourceCsv}`}>
+                    {t(lang, site.source === 'vrm_api' ? 'sites_source_vrm_api' : 'sites_source_csv')}
+                  </span>
+                </td>
                 <td>{t(lang, SYSTEM_TYPE_KEY[site.system_type])}</td>
                 <td>{site.pv_kwp ?? '—'}</td>
                 <td>{site.battery_usable_kwh ?? '—'}</td>

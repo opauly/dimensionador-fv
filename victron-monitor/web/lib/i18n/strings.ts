@@ -127,6 +127,8 @@ export const STRINGS = {
     sites_table_status: 'Status',
     sites_status_active: 'Active',
     sites_status_inactive: 'Inactive',
+    sites_source_vrm_api: 'VRM API',
+    sites_source_csv: 'CSV upload',
     sites_none_yet: "You don't have any sites yet.",
     sites_edit_button: 'Edit',
     sites_edit_title: 'Edit site',
@@ -565,25 +567,48 @@ export const STRINGS = {
     help_title: 'Help & guide',
     help_intro:
       'Everything you need to get sites connected, reports scheduled, and your account set up the way you want it.',
+    help_nav_sites: 'Getting started',
+    help_nav_schedule: 'Scheduling',
+    help_nav_branding: 'Branding',
+    help_nav_billing: 'Billing & plans',
+    help_nav_account: 'Account',
     help_section_sites_title: 'Getting a site into your account',
-    help_section_sites_body_1:
-      "There are two ways to get data into VRM Monitor. Connect your VRM account on My Sites to sync a site automatically and enable scheduled reports — this is the path for any site you want reported on a recurring basis. Or upload a CSV export from VRM directly on Upload CSV for a one-off report — uploaded sites can't be scheduled, since there's no live connection to pull new data from.",
-    help_section_sites_body_2:
-      "If your VRM connection ever breaks (an expired or revoked token), you'll see a banner on Reports and on Profile — reconnect from My Sites to pick back up.",
+    help_section_sites_lead: 'There are two ways to get a site into VRM Monitor:',
+    help_sites_step_1:
+      'Connect via VRM — go to My Sites and connect your VRM account. This syncs automatically and enables scheduled reports.',
+    help_sites_step_2:
+      "Or upload a CSV — go to Upload CSV and upload a file exported from VRM. This is a one-off report; the site can't be scheduled, since there's no live connection to pull new data from.",
+    help_sites_bullet_reconnect:
+      "If your VRM connection breaks (an expired or revoked token), you'll see a banner on Reports and on Profile — reconnect from My Sites to pick back up.",
     help_section_schedule_title: 'Scheduling reports',
-    help_section_schedule_body_1:
-      'Each site connected via VRM can have its own schedule — off, daily, weekly, or monthly — set independently on My Sites. A weekly schedule delivers the 7 days ending the day before your chosen weekday; a monthly one delivers the previous full calendar month. If you manage several sites, "Apply to all sites" on My Sites sets the same cadence across every one in a single step, without needing to open each site individually.',
-    help_section_schedule_body_2:
-      "You can add up to 5 report recipients per site, so a report can go to a client or property manager instead of (or in addition to) your own inbox. Scheduled reports also count against a per-period limit tied to your plan — if you reach it, scheduled sends pause until your next billing period and you'll get a one-time email letting you know.",
+    help_section_schedule_lead: 'Each site connected via VRM can run its own recurring schedule:',
+    help_schedule_step_1: 'Go to My Sites.',
+    help_schedule_step_2: 'Click Edit on the site.',
+    help_schedule_step_3: 'Choose a cadence — Off, Daily, Weekly, or Monthly.',
+    help_schedule_step_4: 'Pick the day (for Weekly or Monthly) and the hour.',
+    help_schedule_step_5: 'Review the summary shown and click "Confirm & save."',
+    help_schedule_bullet_recipients:
+      'Add up to 5 report recipients per site, so a report can go to a client or property manager.',
+    help_schedule_bullet_cap:
+      "Scheduled reports count against a per-period limit on your plan — if you reach it, sends pause until your next billing period and you'll get a one-time email.",
+    help_schedule_bullet_bulk:
+      'Managing several sites? "Apply to all sites" on My Sites sets the same cadence across every one in a single step.',
     help_section_branding_title: 'Branding your reports',
-    help_section_branding_body:
-      "Installer accounts on the Growth and Fleet plans can add their own logo, colors, and contact details to every report sent to a client, from the Branding tab. If you're monitoring your own system rather than sending reports to someone else, this tab won't apply to your account.",
+    help_section_branding_lead: 'Installer accounts on the Growth and Fleet plans can white-label every report:',
+    help_branding_bullet_who:
+      "For installers sending reports to their own clients — not for a system owner monitoring their own site.",
+    help_branding_bullet_what: 'Your own logo, colors, and contact details, shown on every report a customer receives.',
+    help_branding_bullet_where: 'Set it up from the Branding tab.',
     help_section_billing_title: 'Billing & plans',
-    help_section_billing_body:
-      "Your current plan, payment method, and past invoices all live under Billing. Your site limit and how many you're currently using are shown on Profile — if you're close to the limit, upgrading your plan from Billing raises it.",
+    help_section_billing_lead: 'Everything about your plan lives under Billing:',
+    help_billing_bullet_plan: 'Your current plan, payment method, and past invoices.',
+    help_billing_bullet_limit: "Your site limit and how many you're using are shown on Profile.",
+    help_billing_bullet_upgrade: 'Upgrading your plan from Billing raises your site limit immediately.',
     help_section_account_title: 'Your account',
-    help_section_account_body:
-      "Change your password from Profile at any time. Each site also has its own report language (English or Spanish), independent of the dashboard's language, set when you add or edit that site.",
+    help_section_account_lead: 'A few things live on Profile:',
+    help_account_bullet_password: 'Change your password at any time, under "Change password."',
+    help_account_bullet_language:
+      "Each site has its own report language (English or Spanish), independent of the dashboard's language, set when you add or edit that site.",
     help_faq_title: 'Frequently asked questions',
     help_faq_q1: "What's the difference between a report generated automatically and one I upload a CSV for?",
     help_faq_a1:
@@ -711,6 +736,8 @@ export const STRINGS = {
     sites_table_status: 'Estado',
     sites_status_active: 'Activo',
     sites_status_inactive: 'Inactivo',
+    sites_source_vrm_api: 'API de VRM',
+    sites_source_csv: 'Carga CSV',
     sites_none_yet: 'Todavía no tenés sitios.',
     sites_edit_button: 'Editar',
     sites_edit_title: 'Editar sitio',
@@ -1131,25 +1158,48 @@ export const STRINGS = {
     // ── Help (customer-facing guide + FAQ + support contact) ────────────
     help_title: 'Ayuda y guía',
     help_intro: 'Todo lo que necesitás para conectar sitios, programar reportes y configurar tu cuenta como querés.',
+    help_nav_sites: 'Primeros pasos',
+    help_nav_schedule: 'Programación',
+    help_nav_branding: 'Marca',
+    help_nav_billing: 'Facturación y planes',
+    help_nav_account: 'Cuenta',
     help_section_sites_title: 'Cómo agregar un sitio a tu cuenta',
-    help_section_sites_body_1:
-      'Hay dos formas de traer datos a VRM Monitor. Conectá tu cuenta de VRM en Mis sitios para sincronizar un sitio automáticamente y habilitar reportes programados — este es el camino para cualquier sitio que querás reportar de forma recurrente. O subí un CSV exportado desde VRM en Cargar CSV para un reporte puntual — los sitios cargados por CSV no se pueden programar, ya que no hay una conexión en vivo de la que traer datos nuevos.',
-    help_section_sites_body_2:
-      'Si tu conexión a VRM se rompe alguna vez (un token vencido o revocado), vas a ver un aviso en Reportes y en Perfil — reconectá desde Mis sitios para retomar.',
+    help_section_sites_lead: 'Hay dos formas de agregar un sitio a VRM Monitor:',
+    help_sites_step_1:
+      'Conectá por VRM — andá a Mis sitios y conectá tu cuenta de VRM. Esto sincroniza automáticamente y habilita reportes programados.',
+    help_sites_step_2:
+      'O subí un CSV — andá a Cargar CSV y subí un archivo exportado desde VRM. Es un reporte puntual; el sitio no se puede programar, ya que no hay una conexión en vivo de la que traer datos nuevos.',
+    help_sites_bullet_reconnect:
+      'Si tu conexión a VRM se rompe (un token vencido o revocado), vas a ver un aviso en Reportes y en Perfil — reconectá desde Mis sitios para retomar.',
     help_section_schedule_title: 'Programar reportes',
-    help_section_schedule_body_1:
-      'Cada sitio conectado por VRM puede tener su propio horario — apagado, diario, semanal o mensual — configurado de forma independiente en Mis sitios. Uno semanal entrega los 7 días que terminan el día anterior al elegido; uno mensual entrega el mes calendario anterior completo. Si manejás varios sitios, "Aplicar a todos los sitios" en Mis sitios pone el mismo horario en todos de una sola vez, sin tener que abrir cada sitio por separado.',
-    help_section_schedule_body_2:
-      'Podés agregar hasta 5 destinatarios de reporte por sitio, para que un reporte le llegue a un cliente o administrador de propiedad en vez de (o además de) tu propio correo. Los reportes programados también cuentan contra un límite por período según tu plan — si lo alcanzás, los envíos programados se pausan hasta tu próximo período de facturación y vas a recibir un correo único avisándote.',
+    help_section_schedule_lead: 'Cada sitio conectado por VRM puede tener su propio horario recurrente:',
+    help_schedule_step_1: 'Andá a Mis sitios.',
+    help_schedule_step_2: 'Hacé clic en Editar en el sitio.',
+    help_schedule_step_3: 'Elegí una frecuencia — Apagado, Diario, Semanal o Mensual.',
+    help_schedule_step_4: 'Elegí el día (para Semanal o Mensual) y la hora.',
+    help_schedule_step_5: 'Revisá el resumen que aparece y hacé clic en "Confirmar y guardar."',
+    help_schedule_bullet_recipients:
+      'Agregá hasta 5 destinatarios de reporte por sitio, para que le llegue a un cliente o administrador de propiedad.',
+    help_schedule_bullet_cap:
+      'Los reportes programados cuentan contra un límite por período según tu plan — si lo alcanzás, los envíos se pausan hasta tu próximo período y vas a recibir un correo único.',
+    help_schedule_bullet_bulk:
+      '¿Manejás varios sitios? "Aplicar a todos los sitios" en Mis sitios pone la misma frecuencia en todos de una sola vez.',
     help_section_branding_title: 'Personalizar tus reportes',
-    help_section_branding_body:
-      'Las cuentas de instalador en los planes Growth y Fleet pueden agregar su propio logo, colores y datos de contacto a cada reporte enviado a un cliente, desde la pestaña Marca. Si estás monitoreando tu propio sistema en vez de enviarle reportes a alguien más, esta pestaña no aplica a tu cuenta.',
+    help_section_branding_lead: 'Las cuentas de instalador en los planes Growth y Fleet pueden personalizar cada reporte:',
+    help_branding_bullet_who:
+      'Para instaladores que envían reportes a sus propios clientes — no para un dueño de sistema monitoreando su propio sitio.',
+    help_branding_bullet_what: 'Tu propio logo, colores y datos de contacto, en cada reporte que recibe un cliente.',
+    help_branding_bullet_where: 'Configuralo desde la pestaña Marca.',
     help_section_billing_title: 'Facturación y planes',
-    help_section_billing_body:
-      'Tu plan actual, método de pago y facturas anteriores están en Facturación. Tu límite de sitios y cuántos estás usando aparecen en Perfil — si estás cerca del límite, subir de plan desde Facturación lo aumenta.',
+    help_section_billing_lead: 'Todo sobre tu plan está en Facturación:',
+    help_billing_bullet_plan: 'Tu plan actual, método de pago y facturas anteriores.',
+    help_billing_bullet_limit: 'Tu límite de sitios y cuántos estás usando aparecen en Perfil.',
+    help_billing_bullet_upgrade: 'Subir de plan desde Facturación aumenta tu límite de sitios de inmediato.',
     help_section_account_title: 'Tu cuenta',
-    help_section_account_body:
-      'Cambiá tu contraseña desde Perfil cuando quieras. Cada sitio también tiene su propio idioma de reporte (inglés o español), independiente del idioma del panel, que se elige al agregar o editar ese sitio.',
+    help_section_account_lead: 'Algunas cosas están en Perfil:',
+    help_account_bullet_password: 'Cambiá tu contraseña cuando quieras, en "Cambiar contraseña."',
+    help_account_bullet_language:
+      'Cada sitio tiene su propio idioma de reporte (inglés o español), independiente del idioma del panel, que se elige al agregar o editar ese sitio.',
     help_faq_title: 'Preguntas frecuentes',
     help_faq_q1: '¿Cuál es la diferencia entre un reporte generado automáticamente y uno que subo por CSV?',
     help_faq_a1:

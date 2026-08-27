@@ -7,6 +7,33 @@
   margin-bottom: 24px;
 }
 
+.topicGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  max-width: 720px;
+  margin-bottom: 16px;
+}
+.topicCard,
+.topicCardActive {
+  cursor: pointer;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.topicCardActive {
+  background: var(--panel-2);
+  border-color: var(--victron);
+  color: var(--victron-glow);
+}
+
 .section {
   max-width: 720px;
   padding: 22px 26px;
@@ -21,6 +48,22 @@
 }
 .section p + p {
   margin-top: 10px;
+}
+
+.stepList,
+.bulletList {
+  color: var(--paper-dim);
+  max-width: 68ch;
+  margin-top: 12px;
+  padding-left: 22px;
+}
+.stepList li,
+.bulletList li {
+  margin-bottom: 8px;
+}
+.stepList li:last-child,
+.bulletList li:last-child {
+  margin-bottom: 0;
 }
 
 .faqList {

@@ -24,6 +24,33 @@
   letter-spacing: 0.05em;
 }
 
+/* Distinguishes a VRM-connected site (schedulable) from a CSV-uploaded one
+   (never schedulable — see SiteForm.tsx's own CSV notice) right in the
+   table, instead of only after opening Edit — otherwise every row looks
+   identical regardless of source, which is exactly what made "why can't I
+   set a schedule on this site" a real point of confusion. */
+.sourceBadge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  margin-left: 8px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.sourceVrmApi {
+  color: var(--victron-glow);
+  border: 1px solid var(--victron);
+  background: rgba(var(--victron-rgb), 0.12);
+}
+.sourceCsv {
+  color: var(--mute);
+  border: 1px solid var(--line);
+}
+
 .actionsRow {
   display: flex;
   justify-content: space-between;
