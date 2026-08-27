@@ -813,14 +813,12 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     at all — they're the report's fixed spine (PLAN_PHASE18.md's Decisions
     section), not a selectable module.
 
-    One real, documented limitation (PLAN_PHASE18.md §7's Step 4 note): on
-    a `has_batt` system, choosing `energy_mix` WITHOUT `battery_health`
-    still renders both together. `energy_mix_full_svg()` below is a
-    Solar/Grid-only 2-way donut, built for `grid_zero` systems that have no
-    battery hardware at all — reusing it here would misrepresent a
-    has_batt system's real battery contribution as if it were 100% grid, a
-    wrong number, not just an unwanted extra block. Showing more than
-    asked is the lesser error until a real full-width 3-way donut exists.
+    `energy_mix` and `battery_health` are independent even though they
+    share a row when both are on: `energy_mix_full_svg()` (Solar/Grid,
+    `grid_zero` only) and `energy_mix_full_svg_3way()` (Solar/Battery/Grid,
+    any `has_batt` system) both exist as real full-width-alone renderers
+    (PLAN_PHASE18.md §4), so no combination of the two falls back to
+    showing more than was actually selected.
     """
     if selected is None:
         selected = set(ALL_MODULES)
@@ -926,12 +924,7 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     else:
         row3 = ""
 
-    # Row 1 — energy mix + battery health. See this function's own
-    # docstring for the one documented gap here: energy_mix selected
-    # without battery_health on a has_batt system still renders both,
-    # since `energy_mix_full_svg()` is a Solar/Grid-only 2-way donut that
-    # would misrepresent a real battery contribution as 100% grid if
-    # reused for that case.
+    # Row 1 — energy mix + battery health, independently selectable.
     want_energy_mix = "energy_mix" in selected
     want_battery_health = "battery_health" in selected and has_batt
     if not has_batt:
@@ -942,7 +935,7 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     elif want_battery_health:
         row1_svg = S.single_block_row_svg(t["sectionBattery"], batt, t["subBattery"], row_size=row_size)
     elif want_energy_mix:
-        row1_svg = S.row1_svg(d, t, batt, row_size=row_size)  # documented gap above
+        row1_svg = S.energy_mix_full_svg_3way(d, t)
     else:
         row1_svg = ""
 

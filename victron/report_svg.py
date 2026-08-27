@@ -723,6 +723,76 @@ def energy_mix_full_svg(d: dict, t: dict) -> str:
     return _svg(s, PW, h)
 
 
+def energy_mix_full_svg_3way(d: dict, t: dict) -> str:
+    """Energy mix donut alone, full width, Solar/Battery/Grid — the
+    `has_batt` counterpart of `energy_mix_full_svg()` above (PLAN_PHASE18.md
+    §4, Step 3's documented gap, closed here). Same donut/legend math
+    `row1_svg()` uses for its own paired version — this is that same
+    3-way split, just drawn at full width with no battery info block beside
+    it, for a customer who selected `energy_mix` without `battery_health`.
+
+    Never used for a `grid_zero` system — that system type has no battery
+    hardware at all, and stays on `energy_mix_full_svg()`'s genuine 2-way
+    split, unchanged.
+    """
+    tot = d["totals"]
+    # Same battery_kwh_available guard row1_svg() uses — see
+    # weekly_report.py:build_report_data's own comment on why a fabricated
+    # 0.0 here would be worse than omitting the slice.
+    batt_available = tot.get("batteryKwhAvailable", True)
+    total_energy = tot["pv"] + tot["grid"] + tot["discharge"]
+    solar_pct = round(tot["pv"] / total_energy * 100) if total_energy else 0
+    grid_pct = round(tot["grid"] / total_energy * 100) if total_energy else 0
+    batt_pct = max(0, 100 - solar_pct - grid_pct) if batt_available else 0
+    sd = _f(tot["pv"] / total_energy * 100) if total_energy else "0.0"
+    bd = ((_f(tot["discharge"] / total_energy * 100) if total_energy else "0.0")
+          if batt_available else None)
+    gd = _f(tot["grid"] / total_energy * 100) if total_energy else "0.0"
+
+    legend_rows = [
+        (t["labelSolar"], GREEN, sd, tot["pv"]),
+        (t["labelBattery"], BLUE, bd, tot["discharge"]),
+        (t["labelGrid"], MINT, gd, tot["grid"]),
+    ]
+
+    em_sub = wrap_svg_lines(t["subEnergyMix"], int((PW - 2 * IPAD) / 3.4))
+    em_head_h = 16 + len(em_sub) * 9 + 12
+    h = em_head_h + 72 + 8
+    DX = _donut_dx(PW, legend_rows, t)
+    DY = em_head_h
+    LX = DX + 80
+
+    s = (f"<rect x='0' y='0' width='{PW}' height='{h}' rx='8' fill='{BG_GREY}'/>"
+         f"<text x='{IPAD}' y='16' font-size='8' font-weight='700' fill='#777'>"
+         f"{esc(t['energyMix'].upper())}</text>")
+    for li, line in enumerate(em_sub):
+        s += (f"<text x='{IPAD}' y='{16 + (li + 1) * 9}' font-size='7' "
+              f"fill='#bbb'>{esc(line)}</text>")
+
+    s += (f"<g transform='translate({DX},{DY:.0f})'>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{LINE}' stroke-width='11'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{GREEN}' "
+          f"stroke-width='11' {_seg(solar_pct, 0)} stroke-linecap='butt'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{BLUE}' "
+          f"stroke-width='11' {_seg(batt_pct, solar_pct)} stroke-linecap='butt'/>"
+          f"<circle cx='36' cy='36' r='28' fill='none' stroke='{MINT}' "
+          f"stroke-width='11' {_seg(grid_pct, solar_pct + batt_pct)} stroke-linecap='butt'/>"
+          f"<text x='36' y='39' text-anchor='middle' font-size='12' "
+          f"font-weight='700' fill='#111'>{sd}%</text>"
+          f"<text x='36' y='50' text-anchor='middle' font-size='8' fill='#999'>solar</text>"
+          f"</g>")
+
+    for i, (lbl, col, pctd, kwh) in enumerate(legend_rows):
+        cy = DY + 22 + i * 20
+        s += (f"<circle cx='{LX + 4}' cy='{cy}' r='4' fill='{col}'/>"
+              f"<text x='{LX + 12}' y='{cy + 4}' font-size='9' fill='#555'>"
+              f"{esc(lbl)}</text>"
+              f"<text x='{LX + 55}' y='{cy + 4}' font-size='9' font-weight='600' "
+              f"fill='#222'>{esc(_legend_value_text(pctd, kwh, t))}</text>")
+
+    return _svg(s, PW, h)
+
+
 # ══════════════════════════════════════════════════════════════════
 # Row 2 — grid quality + events
 # ══════════════════════════════════════════════════════════════════
