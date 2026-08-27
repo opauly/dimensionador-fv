@@ -81,6 +81,18 @@ const reportRecipientsField = z.preprocess((v) => {
   return v.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
 }, z.array(z.string()));
 
+// PLAN_PHASE18.md §5. Genuinely optional in this schema — NOT "default to
+// an empty array when missing" like the schedule fields above. An empty
+// checkbox group (report_modules_present absent, so `parseSiteForm()`
+// below never puts this key in `raw` at all) and "the customer unchecked
+// every box" (report_modules_present present, `report_modules` genuinely
+// `[]`) must stay distinguishable all the way to `updateSite()` — the
+// first must never touch the stored value, the second is a real, valid
+// "zero optional modules" choice. Real validation (known ids only, the
+// Growth/Fleet gate) is `sites.ts:sanitizeReportModules()`, server-side,
+// same "Zod only checks the shape" split every other field here uses.
+const reportModulesField = z.array(z.string()).optional();
+
 const siteFormSchema = z.object({
   display_name: z.string().trim().min(1),
   pv_kwp: numberOrNull,
@@ -102,6 +114,7 @@ const siteFormSchema = z.object({
   report_schedule_day_of_month: dayOfMonthField,
   report_schedule_hour: hourField,
   report_recipients: reportRecipientsField,
+  report_modules: reportModulesField,
 });
 
 /** Every field in `siteFormSchema` is always present on submit — the edit
@@ -133,6 +146,13 @@ function parseSiteForm(formData: FormData) {
     report_schedule_day_of_month: formData.get('report_schedule_day_of_month'),
     report_schedule_hour: formData.get('report_schedule_hour'),
     report_recipients: formData.get('report_recipients'),
+    // Deliberately NOT `formData.getAll('report_modules')` unconditionally —
+    // see `reportModulesField`'s own comment. Only included at all when
+    // `SiteForm.tsx`'s hidden sentinel confirms the checklist actually
+    // rendered; otherwise this key is genuinely absent from `raw`, and Zod's
+    // `.optional()` then leaves it absent from `parsed.data` too, so
+    // `updateSite()`'s whitelist never touches the column.
+    ...(formData.has('report_modules_present') ? { report_modules: formData.getAll('report_modules') } : {}),
   };
   return siteFormSchema.safeParse(raw);
 }

@@ -66,6 +66,19 @@
   color: var(--paper);
 }
 
+.moduleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+
+.moduleCaption {
+  font-size: 13px;
+  color: var(--mute);
+  margin-bottom: 4px;
+}
+
 .error {
   color: var(--signal);
   font-size: 14px;

@@ -101,6 +101,19 @@
   color: var(--paper);
 }
 
+.subheading {
+  font-size: 15px;
+  color: var(--paper);
+  margin: 4px 0 2px;
+}
+
+.moduleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+
 .error {
   color: var(--signal);
   font-size: 14px;

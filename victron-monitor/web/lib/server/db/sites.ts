@@ -10,8 +10,9 @@ import 'server-only';
 import { getSupabaseAdmin } from '@/lib/server/supabase';
 import { slugify, makeSiteId } from '@/lib/slug';
 import { getCustomer } from './customers';
+import { getWhiteLabelAllowed } from './reportLimits';
 import { NotAuthorized } from './errors';
-import type { SiteRecord } from './types';
+import type { CustomerRecord, SiteRecord } from './types';
 
 /**
  * Throws `NotAuthorized` unless `siteId` belongs to `customerId`. This is
@@ -100,6 +101,7 @@ const SITE_WHITELIST = [
   'report_schedule_day_of_month',
   'report_schedule_hour',
   'report_recipients',
+  'report_modules',
 ] as const;
 
 // PLAN_PHASE17.md §0.6 Q5 (Oscar's decision, 2026-08-25: third-party
@@ -160,6 +162,63 @@ function sanitizeRecipients(payload: Record<string, unknown>): void {
     .slice(0, MAX_REPORT_RECIPIENTS);
 }
 
+// PLAN_PHASE18.md's Decisions section — same 9 ids `victron/weekly_report.py:
+// ALL_MODULES` and migration 028's CHECK constraint use. Duplicated here
+// rather than shared across the language boundary, same call every other
+// tenancy-adjacent check in this codebase already makes (this file's own
+// SITE_WHITELIST restatement in lib/server/db/admin.ts, for one).
+export const REPORT_MODULES = [
+  'energy_mix', 'battery_health', 'grid_quality', 'events',
+  'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+] as const;
+const REPORT_MODULES_SET = new Set<string>(REPORT_MODULES);
+
+// Same denylist branding.ts / vrm_api/report_modules.py use — a denylist ON
+// PURPOSE, so a legacy hand-created customer with billing_status='none'
+// isn't accidentally excluded by a naive allowlist.
+const NOT_ENTITLED_STATUSES = new Set(['incomplete', 'unpaid', 'canceled']);
+
+/** Whether `/app/sites`' per-site edit form should show the module
+ * checklist (`true`) or hide it entirely (`false`) for this customer — and
+ * the same check `updateSite()` uses to decide whether a `report_modules`
+ * write actually lands. Mirrors `branding.ts:getBrandingAccess()` exactly:
+ * same tier/account-type population, reusing the same `white_label`
+ * plan_limits flag rather than a second identically-seeded column (both
+ * features are scoped to the same real population — an installer curating
+ * what THEIR clients see). Duplicated rather than imported from
+ * branding.ts, same reasoning that file's own header comment gives for
+ * never importing `db/admin.ts`. */
+export async function getReportModulesAccess(customer: CustomerRecord): Promise<boolean> {
+  if (customer.account_type !== 'installer') return false;
+  if (!customer.active) return false;
+  if (customer.provisioning_state !== 'active') return false;
+  if (customer.billing_status && NOT_ENTITLED_STATUSES.has(customer.billing_status)) return false;
+  return getWhiteLabelAllowed(customer.plan);
+}
+
+/** Filters `report_modules` down to known ids only (a stale/renamed id, or
+ * a tampered request, never reaches the database) and — the real control,
+ * not just client-side hiding — drops the field entirely for a customer
+ * `getReportModulesAccess()` says isn't entitled, rather than failing the
+ * whole update. `updateSite()` handles many unrelated fields in one call;
+ * silently ignoring the one field this customer can't use matches
+ * `sanitizeRecipients()`'s own "never a 500 over this" shape, not
+ * `ScheduleRequiresVrmApi`'s "reject the write" shape — there is no invalid
+ * *state* being prevented here, only an entitlement a UI should not have
+ * offered in the first place. */
+async function sanitizeReportModules(payload: Record<string, unknown>, customerId: string): Promise<void> {
+  if (!('report_modules' in payload)) return;
+  const customer = await getCustomer(customerId);
+  if (!(await getReportModulesAccess(customer))) {
+    delete payload.report_modules;
+    return;
+  }
+  const raw = payload.report_modules;
+  const list = Array.isArray(raw) ? raw : [];
+  const valid = list.filter((m): m is string => typeof m === 'string' && REPORT_MODULES_SET.has(m));
+  payload.report_modules = valid.length > 0 ? valid : null;
+}
+
 export async function updateSite(
   customerId: string,
   siteId: string,
@@ -177,6 +236,10 @@ export async function updateSite(
     return getSite(customerId, siteId);
   }
   sanitizeRecipients(payload);
+  // Only pays for the extra customer read when report_modules is actually
+  // part of this write — a plain field edit that never touches it skips
+  // this entirely.
+  await sanitizeReportModules(payload, customerId);
 
   // Only pays for the extra read when a schedule is actually being turned
   // on — a plain field edit on an already-'off' site never hits this.

@@ -12,13 +12,34 @@
 // Supabase call (there is no Supabase import anywhere in this file).
 import { startTransition, useActionState, useEffect, useState } from 'react';
 import { Button, Field, Input, Select, Textarea } from '@/components/ui';
-import { t, type Lang } from '@/lib/i18n/strings';
+import { t, type Lang, type StringKey } from '@/lib/i18n/strings';
 import { listTimezones } from '@/lib/timezones';
 import { COUNTRIES, DEFAULT_COUNTRY } from '@/lib/countries';
 import { SUPPORTED_FLAT_CURRENCIES } from '@/lib/currencies';
 import type { SiteRecord } from '@/lib/server/db';
 import { reverseGeocodeAction, type SiteFormState } from './actions';
 import styles from './sites.module.css';
+
+// A local copy of `sites.ts:REPORT_MODULES` — NOT imported from
+// `@/lib/server/db`, same reasoning `MAX_REPORT_RECIPIENTS` below already
+// gives (this is a Client Component; that barrel pulls in `server-only`
+// modules). Real enforcement is server-side either way
+// (`sanitizeReportModules()`), so drifting here would be a display nit.
+const REPORT_MODULES = [
+  'energy_mix', 'battery_health', 'grid_quality', 'events',
+  'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+] as const;
+const MODULE_LABEL_KEYS: Record<(typeof REPORT_MODULES)[number], StringKey> = {
+  energy_mix: 'sites_module_energy_mix',
+  battery_health: 'sites_module_battery_health',
+  grid_quality: 'sites_module_grid_quality',
+  events: 'sites_module_events',
+  soc_chart: 'sites_module_soc_chart',
+  solar_performance: 'sites_module_solar_performance',
+  weather: 'sites_module_weather',
+  trend: 'sites_module_trend',
+  savings: 'sites_module_savings',
+};
 
 // React 19's `useActionState` return type — imported this way (rather than
 // destructuring the hook itself here) so `page.tsx`'s server-rendered
@@ -31,6 +52,14 @@ export type SiteFormProps = {
   lang: Lang;
   action: BoundAction;
   initial?: SiteRecord;
+  /** PLAN_PHASE18.md §5 — resolved server-side (`getReportModulesAccess()`)
+   * by the Server Component that renders this form; `false` for any
+   * customer not Growth/Fleet-installer-entitled hides the section
+   * entirely, same "hide the editor is UX, the write path is the control"
+   * split `sites.ts:sanitizeReportModules()` enforces independently.
+   * Defaults to `false` so the 'add' mode call site (which never shows
+   * this section regardless) doesn't need to pass it. */
+  moduleSelectionAllowed?: boolean;
   onCancel?: () => void;
   onSaved?: () => void;
 };
@@ -55,7 +84,7 @@ const WEEKDAY_STRING_KEYS = [
 // would be a display nit, not a security gap.
 const MAX_REPORT_RECIPIENTS = 5;
 
-export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: SiteFormProps) {
+export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed = false, onCancel, onSaved }: SiteFormProps) {
   const [state, formAction, pending] = useActionState(action, {} as SiteFormState);
 
   const [nominal, setNominal] = useState<string>(initial?.battery_nominal_kwh?.toString() ?? '');
@@ -111,6 +140,38 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
     }
     return `${t(lang, 'sites_schedule_monthly')} · ${t(lang, 'sites_field_schedule_day_of_month')} ${scheduleDayOfMonth} · ${hourLabel}`;
   }
+
+  // PLAN_PHASE18.md §5. `NULL` in the database means "every module on" —
+  // the initial checkbox state mirrors that exactly rather than starting
+  // from an empty set, so an entitled customer opening this form for the
+  // first time on an already-existing site sees today's real behavior
+  // (everything included), not a blank slate that reads as "nothing sends."
+  const initialModules = new Set<string>(initial?.report_modules && initial.report_modules.length > 0 ? initial.report_modules : REPORT_MODULES);
+  const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
+  function toggleModule(id: string) {
+    setSelectedModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const modulesChanged =
+    mode === 'edit' &&
+    Boolean(initial) &&
+    (selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m)));
+  const [modulesConfirmed, setModulesConfirmed] = useState(false);
+  const [trackedModules, setTrackedModules] = useState(selectedModules);
+  if (selectedModules !== trackedModules && (selectedModules.size !== trackedModules.size || [...selectedModules].some((m) => !trackedModules.has(m)))) {
+    setTrackedModules(selectedModules);
+    setModulesConfirmed(false);
+  }
+  function describeModules(): string {
+    if (selectedModules.size === REPORT_MODULES.length) return t(lang, 'sites_modules_summary_all');
+    if (selectedModules.size === 0) return t(lang, 'sites_modules_summary_none');
+    return t(lang, 'sites_modules_summary_count').replace('{count}', String(selectedModules.size));
+  }
+
   // PLAN_PHASE17.md §0.6 Q5 — one recipient per line; `actions.ts`'s
   // `reportRecipientsField` also accepts commas, but a textarea's own
   // Enter-per-line affordance is the more discoverable one to show back.
@@ -417,6 +478,56 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
         </>
       )}
 
+      {/* PLAN_PHASE18.md §5 — only for an EXISTING source='vrm_api' site (same
+         gate the schedule section above uses), AND only when the server
+         already resolved this customer as entitled. A non-entitled customer
+         never sees this section at all — the write path independently
+         ignores a tampered submission regardless (`sanitizeReportModules()`). */}
+      {mode === 'edit' && initial && initial.source === 'vrm_api' && moduleSelectionAllowed && (
+        <>
+          <h3 className={styles.subheading}>{t(lang, 'sites_modules_title')}</h3>
+          <p className={styles.sectionCaption}>{t(lang, 'sites_modules_intro')}</p>
+          {/* Distinguishes "this section rendered and the customer
+             unchecked every box" (a real, valid choice — zero optional
+             modules) from "this section never rendered at all" (report_modules
+             absent from FormData either way) — `actions.ts`'s parseSiteForm()
+             checks for this key's presence before including report_modules
+             in the parsed object at all, so a submission from a form that
+             never showed this section can never overwrite an existing
+             selection with an empty one. */}
+          <input type="hidden" name="report_modules_present" value="true" />
+          <div className={styles.moduleGrid}>
+            {REPORT_MODULES.map((id) => (
+              <label key={id} className={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  name="report_modules"
+                  value={id}
+                  checked={selectedModules.has(id)}
+                  onChange={() => toggleModule(id)}
+                  disabled={pending}
+                />
+                {t(lang, MODULE_LABEL_KEYS[id])}
+              </label>
+            ))}
+          </div>
+
+          {modulesChanged && (
+            <p className={modulesConfirmed ? styles.sectionCaption : styles.error}>
+              {t(lang, modulesConfirmed ? 'sites_modules_confirmed_notice' : 'sites_modules_review_notice')} {describeModules()}
+              {!modulesConfirmed && (
+                <>
+                  {' '}
+                  <button type="button" className={styles.linkButton} onClick={() => setModulesConfirmed(true)}>
+                    {t(lang, 'sites_modules_confirm_link')}
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+        </>
+      )}
+
       <div className={styles.checkboxRow}>
         <label className={styles.checkboxLabel}>
           <input type="checkbox" name="exports_to_grid" value="true" defaultChecked={initial?.exports_to_grid ?? false} disabled={pending} />
@@ -431,10 +542,22 @@ export function SiteForm({ mode, lang, action, initial, onCancel, onSaved }: Sit
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button type="submit" disabled={pending || (scheduleChanged && !scheduleConfirmed)}>
+        <Button
+          type="submit"
+          disabled={pending || (scheduleChanged && !scheduleConfirmed) || (modulesChanged && !modulesConfirmed)}
+        >
           {pending
             ? t(lang, 'sites_saving')
-            : t(lang, scheduleChanged ? 'sites_schedule_confirm_save_button' : mode === 'add' ? 'sites_create_button' : 'sites_save_button')}
+            : t(
+                lang,
+                scheduleChanged
+                  ? 'sites_schedule_confirm_save_button'
+                  : modulesChanged
+                    ? 'sites_modules_confirm_save_button'
+                    : mode === 'add'
+                      ? 'sites_create_button'
+                      : 'sites_save_button',
+              )}
         </Button>
         {onCancel && (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>

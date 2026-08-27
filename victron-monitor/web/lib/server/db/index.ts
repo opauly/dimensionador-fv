@@ -21,6 +21,8 @@ export {
   countSchedulableSites,
   ScheduleRequiresVrmApi,
   MAX_REPORT_RECIPIENTS,
+  getReportModulesAccess,
+  REPORT_MODULES,
 } from './sites';
 export type { SiteUpdateFields, CreateSiteFields, CanAddSiteResult, BulkScheduleFields } from './sites';
 

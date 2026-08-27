@@ -290,7 +290,16 @@ const ADMIN_SITE_WHITELIST = [
   'report_schedule_day_of_month',
   'report_schedule_hour',
   'report_recipients',
+  'report_modules',
 ] as const;
+
+// PLAN_PHASE18.md's Decisions section — same 9 ids `sites.ts:REPORT_MODULES`,
+// `victron/weekly_report.py:ALL_MODULES`, and migration 028's CHECK
+// constraint use.
+const ADMIN_REPORT_MODULES = new Set([
+  'energy_mix', 'battery_health', 'grid_quality', 'events',
+  'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+]);
 
 export type AdminSiteUpdateFields = Partial<Pick<SiteRecord, (typeof ADMIN_SITE_WHITELIST)[number]>>;
 
@@ -331,6 +340,21 @@ function sanitizeRecipients(payload: Record<string, unknown>): void {
     .slice(0, ADMIN_MAX_REPORT_RECIPIENTS);
 }
 
+// Deliberately NO tier/entitlement check here, unlike
+// `sites.ts:sanitizeReportModules()` — same "the admin write path is
+// separate and untiered" precedent `branding.ts`'s own header comment
+// states for branding (Oscar setting a Fleet customer's selection by hand,
+// or a hand-negotiated exception, during onboarding or support). Only known
+// module ids are validated; an empty result is stored as `null` (falls back
+// to "every module on" when resolved), same as the customer-facing path.
+function sanitizeReportModules(payload: Record<string, unknown>): void {
+  if (!('report_modules' in payload)) return;
+  const raw = payload.report_modules;
+  const list = Array.isArray(raw) ? raw : [];
+  const valid = list.filter((m): m is string => typeof m === 'string' && ADMIN_REPORT_MODULES.has(m));
+  payload.report_modules = valid.length > 0 ? valid : null;
+}
+
 export async function getAnySite(siteId: string): Promise<SiteRecord> {
   const { data, error } = await getSupabaseAdmin().schema('vrm').from('sites').select('*').eq('site_id', siteId).single();
   if (error) throw error;
@@ -345,6 +369,7 @@ export async function updateAnySite(siteId: string, fields: AdminSiteUpdateField
   const payload = pickWhitelisted(fields as Record<string, unknown>, ADMIN_SITE_WHITELIST as readonly string[]);
   if (Object.keys(payload).length === 0) return getAnySite(siteId);
   sanitizeRecipients(payload);
+  sanitizeReportModules(payload);
 
   if ('report_schedule' in payload && payload.report_schedule !== 'off') {
     const { data: sourceRow, error: sourceError } = await getSupabaseAdmin()

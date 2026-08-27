@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { requireCustomer } from '@/lib/server/auth';
-import { canAddSite, getCustomer, getVrmLinkStatus, listSites } from '@/lib/server/db';
+import { canAddSite, getCustomer, getReportModulesAccess, getVrmLinkStatus, listSites } from '@/lib/server/db';
 import { t } from '@/lib/i18n/strings';
 import { VrmConnectionBanner } from '@/components/app';
 import { SitesManager } from './SitesManager';
@@ -32,6 +32,11 @@ export default async function SitesPage() {
     getCustomer(session.customerId),
     getVrmLinkStatus(session.customerId),
   ]);
+  // PLAN_PHASE18.md §5 — resolved once, here, same "Server Component
+  // decides, client just renders what it's told" shape `canAdd`/`siteLimit`
+  // already use. `SiteForm.tsx` never calls this itself (it's a Client
+  // Component; the function is server-only regardless).
+  const moduleSelectionAllowed = await getReportModulesAccess(customer);
 
   return (
     <div>
@@ -39,7 +44,13 @@ export default async function SitesPage() {
       <p className={styles.intro}>{t(session.uiLanguage, 'sites_intro')}</p>
       <VrmConnectionBanner status={vrmStatus} lang={session.uiLanguage} />
       <VrmLinkPanel status={vrmStatus} sites={sites} lang={session.uiLanguage} canAdd={canAdd} siteLimit={customer.site_limit} />
-      <SitesManager sites={sites} lang={session.uiLanguage} canAdd={canAdd} siteLimit={customer.site_limit} />
+      <SitesManager
+        sites={sites}
+        lang={session.uiLanguage}
+        canAdd={canAdd}
+        siteLimit={customer.site_limit}
+        moduleSelectionAllowed={moduleSelectionAllowed}
+      />
     </div>
   );
 }

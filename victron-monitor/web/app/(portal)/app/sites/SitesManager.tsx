@@ -21,6 +21,7 @@ export type SitesManagerProps = {
   lang: Lang;
   canAdd: CanAddSiteResult;
   siteLimit: number | null;
+  moduleSelectionAllowed: boolean;
 };
 
 const SYSTEM_TYPE_KEY = {
@@ -29,7 +30,7 @@ const SYSTEM_TYPE_KEY = {
   grid_zero: 'system_type_grid_zero',
 } as const;
 
-export function SitesManager({ sites, lang, canAdd, siteLimit }: SitesManagerProps) {
+export function SitesManager({ sites, lang, canAdd, siteLimit, moduleSelectionAllowed }: SitesManagerProps) {
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [bulkScheduling, setBulkScheduling] = useState(false);
@@ -104,6 +105,7 @@ export function SitesManager({ sites, lang, canAdd, siteLimit }: SitesManagerPro
                 lang={lang}
                 initial={site}
                 action={updateSiteAction.bind(null, site.site_id)}
+                moduleSelectionAllowed={moduleSelectionAllowed}
                 onCancel={() => setEditingSiteId(null)}
                 onSaved={() => setEditingSiteId(null)}
               />

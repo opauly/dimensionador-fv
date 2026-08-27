@@ -41,6 +41,13 @@ const reportRecipientsField = z.preprocess((v) => {
   if (typeof v !== 'string') return [];
   return v.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
 }, z.array(z.string()));
+// PLAN_PHASE18.md §5. Optional, not defaulted — same reasoning
+// `app/(portal)/app/sites/actions.ts`'s own `reportModulesField` comment
+// gives: an empty checkbox group and "this section never rendered" (a
+// non-vrm_api site) must stay distinguishable, so this field is only
+// included in `raw` at all when the form's hidden sentinel confirms the
+// checklist actually rendered.
+const reportModulesField = z.array(z.string()).optional();
 
 const siteFormSchema = z.object({
   display_name: z.string().trim().min(1),
@@ -63,6 +70,7 @@ const siteFormSchema = z.object({
   report_schedule_day_of_month: dayOfMonthField,
   report_schedule_hour: hourField,
   report_recipients: reportRecipientsField,
+  report_modules: reportModulesField,
 });
 
 export type AdminSiteFormState = { error?: string; success?: boolean };
@@ -91,6 +99,7 @@ export async function updateAnySiteAction(siteId: string, _prevState: AdminSiteF
     report_schedule_day_of_month: formData.get('report_schedule_day_of_month'),
     report_schedule_hour: formData.get('report_schedule_hour'),
     report_recipients: formData.get('report_recipients'),
+    ...(formData.has('report_modules_present') ? { report_modules: formData.getAll('report_modules') } : {}),
   });
   if (!parsed.success) return { error: 'Could not save the site.' };
 

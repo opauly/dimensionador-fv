@@ -23,6 +23,21 @@ const COUNTRY_CODES = Object.keys(COUNTRIES);
 // (admin views are English-only, see `lib/i18n/strings.ts`'s own header).
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const MAX_REPORT_RECIPIENTS = 5;
+// Same 9 ids `sites.ts:REPORT_MODULES` / `victron/weekly_report.py:
+// ALL_MODULES` / migration 028's CHECK constraint use, with plain English
+// labels — same "restated, not imported" reasoning this file's other
+// constants already give.
+const REPORT_MODULES: Array<{ id: string; label: string }> = [
+  { id: 'energy_mix', label: 'Where your energy came from' },
+  { id: 'battery_health', label: 'Battery health' },
+  { id: 'grid_quality', label: 'Grid quality' },
+  { id: 'events', label: 'Events' },
+  { id: 'soc_chart', label: 'Battery charge over time' },
+  { id: 'solar_performance', label: 'Solar performance' },
+  { id: 'weather', label: 'Weather' },
+  { id: 'trend', label: '4-week trend' },
+  { id: 'savings', label: 'Tariff savings' },
+];
 
 /** Plain-language summary of a schedule choice, shown before it's saved —
  * same purpose as `SiteForm.tsx`'s own confirmation copy, restated in
@@ -34,6 +49,12 @@ function describeSchedule(schedule: string, weekday: number, dayOfMonth: number,
   if (schedule === 'daily') return `Daily, at ${hourLabel}.`;
   if (schedule === 'weekly') return `Weekly on ${WEEKDAYS[weekday - 1]}, at ${hourLabel}.`;
   return `Monthly on day ${dayOfMonth}, at ${hourLabel}.`;
+}
+
+function describeModules(selected: Set<string>): string {
+  if (selected.size === REPORT_MODULES.length) return 'All modules included.';
+  if (selected.size === 0) return 'No optional modules — only the core summary.';
+  return `${selected.size} of ${REPORT_MODULES.length} modules included.`;
 }
 
 export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: () => void }) {
@@ -58,6 +79,29 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
   const [scheduleHour, setScheduleHour] = useState(String(site.report_schedule_hour));
   const [recipients, setRecipients] = useState((site.report_recipients ?? []).join('\n'));
   const recipientCount = recipients.split('\n').map((s) => s.trim()).filter(Boolean).length;
+
+  // PLAN_PHASE18.md §5. `NULL` in the database means "every module on" —
+  // same initial-state rule `SiteForm.tsx` uses.
+  const initialModules = new Set<string>(
+    site.report_modules && site.report_modules.length > 0 ? site.report_modules : REPORT_MODULES.map((m) => m.id),
+  );
+  const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
+  function toggleModule(id: string) {
+    setSelectedModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  const modulesChanged =
+    selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m));
+  const [modulesConfirmed, setModulesConfirmed] = useState(false);
+  const [trackedModules, setTrackedModules] = useState(selectedModules);
+  if (selectedModules !== trackedModules && (selectedModules.size !== trackedModules.size || [...selectedModules].some((m) => !trackedModules.has(m)))) {
+    setTrackedModules(selectedModules);
+    setModulesConfirmed(false);
+  }
 
   // A real change to the SCHEDULE itself (cadence/day/hour) — not
   // recipients, not any other field — requires reviewing the plain-language
@@ -305,6 +349,41 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
           <p className={recipientCount > MAX_REPORT_RECIPIENTS ? styles.error : styles.caption}>
             {recipientCount} / {MAX_REPORT_RECIPIENTS} recipients
           </p>
+
+          {/* PLAN_PHASE18.md §5 — untiered on the admin side, unlike the
+             customer-facing form (`updateAnySite()`'s `sanitizeReportModules()`
+             has no entitlement check, same "admin write path is separate
+             and untiered" precedent branding.ts states). Sentinel input is
+             still needed here, for the same reason it is on the customer
+             side: distinguishing "unchecked everything" from "this section
+             never rendered" (a non-vrm_api site). */}
+          <input type="hidden" name="report_modules_present" value="true" />
+          <p className={styles.moduleCaption}>Report modules — {describeModules(selectedModules)}</p>
+          <div className={styles.moduleGrid}>
+            {REPORT_MODULES.map((m) => (
+              <label key={m.id} className={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  name="report_modules"
+                  value={m.id}
+                  checked={selectedModules.has(m.id)}
+                  onChange={() => toggleModule(m.id)}
+                  disabled={pending}
+                />
+                {m.label}
+              </label>
+            ))}
+          </div>
+          {modulesChanged && (
+            <p className={modulesConfirmed ? styles.caption : styles.error}>
+              {modulesConfirmed ? 'Confirmed. ' : 'Review before saving. '}
+              {!modulesConfirmed && (
+                <button type="button" className={styles.linkButton} onClick={() => setModulesConfirmed(true)}>
+                  Confirm these modules
+                </button>
+              )}
+            </p>
+          )}
         </>
       )}
 
@@ -322,8 +401,11 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button type="submit" disabled={pending || (scheduleChanged && !scheduleConfirmed)}>
-          {pending ? 'Saving…' : scheduleChanged ? 'Confirm & save' : 'Save'}
+        <Button
+          type="submit"
+          disabled={pending || (scheduleChanged && !scheduleConfirmed) || (modulesChanged && !modulesConfirmed)}
+        >
+          {pending ? 'Saving…' : scheduleChanged || modulesChanged ? 'Confirm & save' : 'Save'}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
           Cancel

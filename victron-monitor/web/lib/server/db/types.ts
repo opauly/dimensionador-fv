@@ -120,6 +120,11 @@ export type CustomerRecord = {
    * the new site's `source='vrm_api'` (PLAN_PHASE17.md §0.7/§3.1/§5.4) —
    * never retroactively. `'off'` on every pre-Phase-17 row. */
   default_report_schedule: ReportSchedule;
+  /** PLAN_PHASE18.md §1. Applied to a customer's NEW sites only, at
+   * creation, never retroactively — same rule `default_report_schedule`
+   * follows. `NULL` (every pre-Phase-18 row) means "no default," which
+   * itself means "every module on" once resolved. */
+  default_report_modules: string[] | null;
 };
 
 /** PLAN_PHASE17.md §3/§5.3. `'off'` is the only legal value for a
@@ -235,6 +240,11 @@ export type SiteRecord = {
    * time (Step 8, not built yet) — third-party recipients are §0.6 Q5,
    * still open. */
   report_recipients: string[] | null;
+  /** PLAN_PHASE18.md §1. `NULL` (every pre-Phase-18 row) means every one
+   * of the 9 selectable modules renders — today's exact behavior,
+   * unchanged. Only ever honored for a Growth/Fleet-installer customer;
+   * `getReportModulesAccess()` is the gate, not this column alone. */
+  report_modules: string[] | null;
   /** The last successfully-generated SCHEDULED period's end date — never
    * touched by a manual/admin report run. `NULL` until the first one. */
   report_last_period_end: string | null;

@@ -211,6 +211,26 @@ export const STRINGS = {
     sites_field_report_recipients_placeholder: 'one email per line',
     sites_field_report_recipients_help: '{count}/{max} — leave empty to send only to your own account email.',
 
+    // ── Report module selection (PLAN_PHASE18.md §5, Growth/Fleet installer only) ──
+    sites_modules_title: 'Report modules',
+    sites_modules_intro: 'Choose which sections appear in this site’s report. Everything is included by default.',
+    sites_module_energy_mix: 'Where your energy came from',
+    sites_module_battery_health: 'Battery health',
+    sites_module_grid_quality: 'Grid quality',
+    sites_module_events: 'Events',
+    sites_module_soc_chart: 'Battery charge over time',
+    sites_module_solar_performance: 'Solar performance',
+    sites_module_weather: 'Weather',
+    sites_module_trend: '4-week trend',
+    sites_module_savings: 'Tariff savings',
+    sites_modules_review_notice: 'Review before saving:',
+    sites_modules_confirmed_notice: 'Confirmed:',
+    sites_modules_confirm_link: 'Confirm these modules',
+    sites_modules_confirm_save_button: 'Confirm & save',
+    sites_modules_summary_all: 'All modules included',
+    sites_modules_summary_none: 'No optional modules — only the core summary',
+    sites_modules_summary_count: '{count} of 9 modules included',
+
     // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
     vrm_link_title: 'Victron VRM account',
     vrm_link_disconnected_intro:
@@ -819,6 +839,26 @@ export const STRINGS = {
     sites_field_report_recipients: 'También enviar este reporte a',
     sites_field_report_recipients_placeholder: 'un email por línea',
     sites_field_report_recipients_help: '{count}/{max} — dejá vacío para enviar solo al email de tu cuenta.',
+
+    // ── Report module selection (PLAN_PHASE18.md §5, solo instaladores Growth/Fleet) ──
+    sites_modules_title: 'Módulos del reporte',
+    sites_modules_intro: 'Elegí qué secciones aparecen en el reporte de este sitio. Por defecto se incluyen todas.',
+    sites_module_energy_mix: 'De dónde vino tu energía',
+    sites_module_battery_health: 'Salud de la batería',
+    sites_module_grid_quality: 'Calidad de la red',
+    sites_module_events: 'Eventos',
+    sites_module_soc_chart: 'Carga de la batería en el tiempo',
+    sites_module_solar_performance: 'Desempeño solar',
+    sites_module_weather: 'Clima',
+    sites_module_trend: 'Tendencia de 4 semanas',
+    sites_module_savings: 'Ahorros de tarifa',
+    sites_modules_review_notice: 'Revisá antes de guardar:',
+    sites_modules_confirmed_notice: 'Confirmado:',
+    sites_modules_confirm_link: 'Confirmar estos módulos',
+    sites_modules_confirm_save_button: 'Confirmar y guardar',
+    sites_modules_summary_all: 'Se incluyen todos los módulos',
+    sites_modules_summary_none: 'Sin módulos opcionales — solo el resumen principal',
+    sites_modules_summary_count: '{count} de 9 módulos incluidos',
 
     // ── Victron VRM account panel (PLAN_PHASE15.md §3.1 / §8 Step 5) ─
     vrm_link_title: 'Cuenta de Victron VRM',
