@@ -26,17 +26,21 @@ FROM python:3.11-slim
 # it to sniff embedded image types) and real fonts so PDFs don't fall back
 # to Debian's default (no) fonts.
 #
-# fonts-liberation specifically: victron/templates/weekly_report.html pins
+# fonts-croscore specifically: victron/templates/weekly_report.html pins
 # `font-family: Arial, 'Helvetica Neue', sans-serif` deliberately, to match
 # the exact text metrics of reports already sent to real customers (its own
 # comment explains why). Neither Arial nor Helvetica Neue exists on Linux,
-# so without this package the request silently falls through to
-# fonts-dejavu-core's DejaVu Sans — a real font, but metrically different
-# from Arial (confirmed: a report generated on Render visibly differed from
-# the same report generated locally on macOS, where WeasyPrint finds real
-# Arial/Helvetica Neue). Liberation Sans is Arial-metric-compatible by
-# design, and Debian's fontconfig aliases bare "Arial" requests to it
-# automatically once installed — no template change needed.
+# so without an Arial-metric-compatible package the request silently falls
+# through to fonts-dejavu-core's DejaVu Sans — a real font, but metrically
+# different from Arial (confirmed: a report generated on Render visibly
+# differed from the same report generated locally on macOS, where WeasyPrint
+# finds real Arial/Helvetica Neue). fonts-croscore's Arimo is metric-
+# compatible with Arial by design, same as fonts-liberation's Liberation
+# Sans (tried first, still not visually close enough); Debian's fontconfig
+# aliases bare "Arial" requests to whichever metric-compatible family is
+# installed, automatically — no template change needed either way. Only one
+# of the two should be installed at a time, to keep that alias resolution
+# unambiguous.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libpango-1.0-0 \
       libpangocairo-1.0-0 \
@@ -46,7 +50,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libffi-dev \
       shared-mime-info \
       fonts-dejavu-core \
-      fonts-liberation \
+      fonts-croscore \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
