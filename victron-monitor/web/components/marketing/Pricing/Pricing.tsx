@@ -93,7 +93,7 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
-                  CSV upload · Spanish / English
+                  CSV upload or VRM API auto-sync · Spanish / English
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
@@ -154,10 +154,6 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
                   Up to 2,000 scheduled reports / mo
-                </li>
-                <li>
-                  <span className={styles.dot} aria-hidden="true" />
-                  VRM API auto-ingestion
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
