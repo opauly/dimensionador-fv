@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ModeToggle, Panel, SectionHead } from '@/components/ui';
+import { FIXED_MODULE_ICONS, REPORT_MODULE_ICONS } from '@/lib/reportModuleThumbnails';
 import styles from './ModuleGrid.module.css';
 
 type Mode = 'detallado' | 'overview';
@@ -22,7 +23,7 @@ export function ModuleGrid() {
       <div className="wrap">
         <SectionHead
           eyebrow="What's inside"
-          lede="Twelve modules, computed once. Every plan gets the full set by default — Growth and Fleet installers can choose which ones appear on each site's report. Two of them also read differently depending on the range you pick — try the toggle."
+          lede="Sixteen sections, computed once. Every plan gets a solid default report automatically, safety alerts included — Growth and Fleet installers can choose exactly which sections appear on each site's report, including a few that only apply if you've got a generator, tank, or physical grid meter wired in. Two sections also read differently depending on the range you pick — try the toggle."
         >
           Every section a report
           <br />
@@ -44,6 +45,7 @@ export function ModuleGrid() {
 
         <div className={styles.grid}>
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.kpi}</span>
             <span className={styles.tag}>Scoring</span>
             <h3>Health score</h3>
             <p className={styles.body}>
@@ -53,6 +55,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.narrative}</span>
             <span className={styles.tag}>Narrative</span>
             <h3>AI narrative</h3>
             <p className={styles.body}>
@@ -63,6 +66,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.bar_chart}</span>
             <span className={styles.adapts}>Adapts to range</span>
             <h3>{mode === 'detallado' ? 'Daily solar vs. consumption' : 'Solar vs. consumption'}</h3>
             <p className={styles.body}>
@@ -73,6 +77,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.energy_mix}</span>
             <span className={styles.tag}>Energy mix</span>
             <h3>Where your energy came from</h3>
             <p className={styles.body}>
@@ -82,6 +87,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.battery_health}</span>
             <span className={styles.tag}>Battery</span>
             <h3>Battery health</h3>
             <p className={styles.body}>
@@ -91,6 +97,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.grid_quality}</span>
             <span className={styles.tag}>Grid</span>
             <h3>Grid quality</h3>
             <p className={styles.body}>
@@ -100,15 +107,17 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.events}</span>
             <span className={styles.tag}>Events</span>
             <h3>Outages &amp; alarms</h3>
             <p className={styles.body}>
               Logs grid outages and alarm episodes recorded by the system during this period — the same definition
-              your live monitoring uses.
+              your live monitoring uses. Scored toward the health score above.
             </p>
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.soc_chart}</span>
             <span className={styles.adapts}>Adapts to range</span>
             <h3>Battery SOC timeline</h3>
             <p className={styles.body}>
@@ -119,6 +128,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.solar_performance}</span>
             <span className={styles.tag}>Performance</span>
             <h3>Solar performance</h3>
             <p className={styles.body}>
@@ -128,6 +138,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.weather}</span>
             <span className={styles.tag}>Weather</span>
             <h3>Weather context</h3>
             <p className={styles.body}>
@@ -137,6 +148,7 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.trend}</span>
             <span className={styles.fixedBadge}>Always weekly</span>
             <h3>4-week solar trend</h3>
             <p className={styles.body}>
@@ -146,11 +158,54 @@ export function ModuleGrid() {
           </Panel>
 
           <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.savings}</span>
             <span className={styles.tag}>Savings</span>
             <h3>Estimated savings</h3>
             <p className={styles.body}>
               Estimated electricity cost avoided this period by using solar instead of buying from the grid — a
               real number, never a placeholder.
+            </p>
+          </Panel>
+
+          {/* PLAN_PHASE18.md §7 (2026-08-29) — critical_alerts is the one
+             module below in the default report for everyone; the other
+             three are opt-in and depend on hardware most systems don't
+             have, so both get said outright rather than implied. */}
+          <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.critical_alerts}</span>
+            <span className={styles.tag}>Safety</span>
+            <h3>Critical alerts</h3>
+            <p className={styles.body}>
+              DC ripple, cell imbalance, and temperature faults on the battery system — tracked separately from the
+              health score, included by default on every plan.
+            </p>
+          </Panel>
+
+          <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.grid_meter_detail}</span>
+            <span className={styles.conditional}>If a meter is installed</span>
+            <h3>Grid meter detail</h3>
+            <p className={styles.body}>
+              Per-phase voltage, current, and power factor from a real physical grid meter, where one is wired into
+              the system.
+            </p>
+          </Panel>
+
+          <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.generator_runtime}</span>
+            <span className={styles.conditional}>If a generator is installed</span>
+            <h3>Generator runtime</h3>
+            <p className={styles.body}>
+              Hours the backup generator ran during the period.
+            </p>
+          </Panel>
+
+          <Panel variant="card" interactive led>
+            <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.tank_level}</span>
+            <span className={styles.conditional}>If a tank sensor is installed</span>
+            <h3>Tank level</h3>
+            <p className={styles.body}>
+              Fuel or water tank capacity, fluid type, and last known status.
             </p>
           </Panel>
         </div>

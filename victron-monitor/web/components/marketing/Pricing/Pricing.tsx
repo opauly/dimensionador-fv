@@ -93,7 +93,11 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
-                  CSV upload or VRM API auto-sync · Spanish / English
+                  CSV upload or VRM API auto-sync
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  Spanish / English
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />

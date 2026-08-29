@@ -1035,49 +1035,63 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     want_generator = "generator_runtime" in selected
     want_tank = "tank_level" in selected
 
-    half, full = S.IW - 2 * S.IPAD, S.PW - 2 * S.IPAD
-    groups = [(batt, half), (events, half), (perf, half), (weather, half)]
-    groups.append((grid, half if has_grid else full))
-    if savings_rows:
-        groups.append((savings_rows, full))
+    # Page 2's "pool" — every plain info-block module below the SOC/trend
+    # charts (PLAN_PHASE18.md §7, real live-test feedback 2026-08-29:
+    # Weather/Critical Alerts/Generator Runtime each rendered full-width
+    # ALONE whenever their old fixed partner — solar_performance/grid_meter_
+    # detail/tank_level respectively — wasn't also selected, wasting half
+    # the page). Rather than 4 fixed pairs, every selected pool module packs
+    # two-per-row in this fixed priority order, with only a genuinely odd
+    # one out ever going full-width. `want_solar_perf`/`want_weather` are
+    # computed here (they used to be computed just before `row3` further
+    # down) so `pool_specs` can be built once, in the same place `groups`
+    # reads it — see `_pack_pool()` below for how a spec becomes SVG.
+    want_solar_perf = "solar_performance" in selected
+    want_weather = "weather" in selected
+    want_savings = "savings" in selected
+    events_sub = (t["subEventsOffGrid"] if d["systemType"] == "off_grid"
+                 else t["subEvents"])
+    savings_sub = (t["subSavingsOffGrid"] if d["systemType"] == "off_grid"
+                  else t["subSavings"])
+
+    pool_specs: list[dict] = []
+    if want_solar_perf:
+        pool_specs.append({"title": t["solarPerformance"], "rows": perf, "sub": t["subSolarPerf"]})
+    if want_weather:
+        pool_specs.append({"title": t["weatherTitle"], "rows": weather, "sub": t["subWeather"],
+                           "right_bg": S.BG_MINT if d["weather"] else S.BG_GREY})
+    # Only the REAL savings block is poolable — the "not configured yet"
+    # placeholder (`savings_placeholder_svg`) is a bespoke full-width-only
+    # SVG with no half-width form, so it stays its own always-full-width row
+    # exactly as before, outside the pool.
+    if want_savings and savings_rows:
+        pool_specs.append({"title": t["tariffSavings"], "rows": savings_rows, "sub": savings_sub})
     if want_critical:
-        groups.append((critical, half))
+        pool_specs.append({"title": t["sectionCriticalAlerts"], "rows": critical, "sub": t["subCriticalAlerts"]})
     if want_grid_meter:
-        groups.append((grid_meter_rows, half))
+        pool_specs.append({"title": t["sectionGridMeter"], "rows": grid_meter_rows, "sub": t["subGridMeter"]})
     if want_generator:
-        groups.append((generator_hours_rows, half))
+        pool_specs.append({"title": t["sectionGenerator"], "rows": generator_hours_rows, "sub": t["subGenerator"]})
     if want_tank:
-        groups.append((tank_rows, half))
+        pool_specs.append({"title": t["sectionTank"], "rows": tank_rows, "sub": t["subTank"]})
+
+    half, full = S.IW - 2 * S.IPAD, S.PW - 2 * S.IPAD
+    groups = [(batt, half), (events, half)]
+    groups.append((grid, half if has_grid else full))
+    groups.extend((spec["rows"], half) for spec in pool_specs)
     row_size = S.uniform_row_size(groups)
 
-    # Every "want_*" flag below folds selection together with the SAME
-    # system_type gate the pre-Phase-18 code already applied unconditionally
-    # (has_grid/has_batt) — a deselected module never re-enables something
-    # system_type already ruled out, and system_type never overrides a real
-    # deselection either.
-    want_savings = "savings" in selected
-    if not want_savings:
-        savings_svg = ""
-    elif savings_rows:
-        # Off-grid sites have no counterfactual "what you'd have paid the
-        # utility" without spelling out that it IS a counterfactual — the
-        # formula (avoided grid purchase) doesn't change, only the label,
-        # since the whole point is telling the reader that number is
-        # hypothetical rather than a real avoided bill.
-        savings_sub = (t["subSavingsOffGrid"] if d["systemType"] == "off_grid"
-                       else t["subSavings"])
-        savings_svg = S.single_block_row_svg(t["tariffSavings"], savings_rows,
-                                             savings_sub, row_size=row_size)
-    else:
-        savings_svg = S.savings_placeholder_svg(t)
+    # The savings placeholder ("not configured yet") has no half-width form
+    # (see the pool-building comment above) — rendered on its own, outside
+    # the pool, exactly as before. When real savings data exists, it was
+    # already appended to `pool_specs` above instead.
+    savings_svg = S.savings_placeholder_svg(t) if (want_savings and not savings_rows) else ""
 
     # Same pattern as `subSavingsOffGrid` above: the Events caption still
     # said "Registra los cortes de red..." even after the outages row itself
     # was dropped from `events` for off_grid (Bug 2's fix removed the row but
     # missed this static caption, which then contradicted its own section —
     # caught by inspecting the actual rendered PDF, not just the code).
-    events_sub = (t["subEventsOffGrid"] if d["systemType"] == "off_grid"
-                 else t["subEvents"])
     want_grid_quality = "grid_quality" in selected and has_grid
     want_events = "events" in selected
     if want_grid_quality and want_events:
@@ -1095,21 +1109,31 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     else:
         row2 = ""
 
-    want_solar_perf = "solar_performance" in selected
-    want_weather = "weather" in selected
-    if want_solar_perf and want_weather:
-        row3 = S.two_block_row_svg(
-            t["solarPerformance"], perf, t["subSolarPerf"],
-            t["weatherTitle"], weather, t["subWeather"],
-            right_bg=S.BG_MINT if d["weather"] else S.BG_GREY,
-            row_size=row_size,
-        )
-    elif want_solar_perf:
-        row3 = S.single_block_row_svg(t["solarPerformance"], perf, t["subSolarPerf"], row_size=row_size)
-    elif want_weather:
-        row3 = S.single_block_row_svg(t["weatherTitle"], weather, t["subWeather"], row_size=row_size)
-    else:
-        row3 = ""
+    # Pack `pool_specs` two-per-row (PLAN_PHASE18.md §7, 2026-08-29 live-test
+    # feedback) — a genuinely odd one out is the ONLY case that still goes
+    # full-width alone. `right_bg` (currently only Weather sets it) only
+    # applies when that spec lands in the RIGHT slot of a pair —
+    # `two_block_row_svg` has no equivalent left-side param, so a spec that
+    # lands on the left keeps the function's own default background. A
+    # cosmetic limitation (Weather's "real data" mint tint doesn't show up
+    # when Weather happens to pack on the left), not a correctness one.
+    packed_svgs: list[str] = []
+    i = 0
+    while i < len(pool_specs):
+        if i + 1 < len(pool_specs):
+            left, right = pool_specs[i], pool_specs[i + 1]
+            packed_svgs.append(S.two_block_row_svg(
+                left["title"], left["rows"], left["sub"],
+                right["title"], right["rows"], right["sub"],
+                right_bg=right.get("right_bg", S.BG_GREY),
+                row_size=row_size,
+            ))
+            i += 2
+        else:
+            only = pool_specs[i]
+            packed_svgs.append(S.single_block_row_svg(
+                only["title"], only["rows"], only["sub"], row_size=row_size))
+            i += 1
 
     # Row 1 — energy mix + battery health, independently selectable.
     want_energy_mix = "energy_mix" in selected
@@ -1125,40 +1149,6 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
         row1_svg = S.energy_mix_full_svg_3way(d, t)
     else:
         row1_svg = ""
-
-    # Row 4 — Critical alerts + Grid meter detail (PLAN_PHASE18.md §7):
-    # never gated by has_batt/has_grid the way rows 1-3 are — a deselected
-    # module is the only reason either half is empty, matching Oscar's own
-    # "always renders, even with nothing to show" instruction for these
-    # four modules. `want_critical`/`want_grid_meter` were already computed
-    # above, ahead of the `groups`/`row_size` pass.
-    if want_critical and want_grid_meter:
-        row4 = S.two_block_row_svg(
-            t["sectionCriticalAlerts"], critical, t["subCriticalAlerts"],
-            t["sectionGridMeter"], grid_meter_rows, t["subGridMeter"],
-            row_size=row_size,
-        )
-    elif want_critical:
-        row4 = S.single_block_row_svg(t["sectionCriticalAlerts"], critical, t["subCriticalAlerts"], row_size=row_size)
-    elif want_grid_meter:
-        row4 = S.single_block_row_svg(t["sectionGridMeter"], grid_meter_rows, t["subGridMeter"], row_size=row_size)
-    else:
-        row4 = ""
-
-    # Row 5 — Generator runtime + Tank level. `want_generator`/`want_tank`
-    # were already computed above, ahead of the `groups`/`row_size` pass.
-    if want_generator and want_tank:
-        row5 = S.two_block_row_svg(
-            t["sectionGenerator"], generator_hours_rows, t["subGenerator"],
-            t["sectionTank"], tank_rows, t["subTank"],
-            row_size=row_size,
-        )
-    elif want_generator:
-        row5 = S.single_block_row_svg(t["sectionGenerator"], generator_hours_rows, t["subGenerator"], row_size=row_size)
-    elif want_tank:
-        row5 = S.single_block_row_svg(t["sectionTank"], tank_rows, t["subTank"], row_size=row_size)
-    else:
-        row5 = ""
 
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR),
                       autoescape=select_autoescape(["html"]))
@@ -1192,11 +1182,12 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
         row1_svg=_safe(row1_svg) if row1_svg else "",
         row2_svg=_safe(row2) if row2 else "",
         soc_svg=(_safe(S.soc_chart_svg(d, t)) if (has_batt and "soc_chart" in selected) else ""),
-        row3_svg=_safe(row3) if row3 else "",
         trend_svg=(_safe(S.four_week_trend_svg(d["trend"], t)) if "trend" in selected else ""),
         savings_svg=_safe(savings_svg) if savings_svg else "",
-        row4_svg=_safe(row4) if row4 else "",
-        row5_svg=_safe(row5) if row5 else "",
+        # PLAN_PHASE18.md §7, 2026-08-29 live-test feedback — replaces the
+        # old fixed row3/row4/row5 slots with a dynamically-sized, packed
+        # list (see `packed_svgs`'s own construction above).
+        packed_svgs=[_safe(s) for s in packed_svgs],
     )
 
 

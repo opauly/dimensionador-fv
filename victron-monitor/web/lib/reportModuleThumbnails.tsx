@@ -24,6 +24,32 @@ const ICON_PROPS = {
   strokeLinejoin: 'round' as const,
 };
 
+// The report's fixed spine (PLAN_PHASE18.md's Decisions section) — never
+// selectable, but the marketing landing page's own module grid
+// (components/marketing/ModuleGrid/ModuleGrid.tsx) shows them alongside
+// the 13 selectable ones for a complete picture of what a report contains,
+// so they get matching icon treatment too (2026-08-29 live-test feedback).
+export const FIXED_MODULE_ICONS: Record<string, ReactElement> = {
+  kpi: (
+    <svg {...ICON_PROPS}>
+      <path d="M4 20 V13 M9.3 20 V9 M14.7 20 V15.5 M20 20 V6" />
+      <path d="M3 20 h18" />
+    </svg>
+  ),
+  narrative: (
+    <svg {...ICON_PROPS}>
+      <path d="M4 5.5 h16 v10.5 H9.5 L5.5 20 V16 H4 Z" />
+      <path d="M7.5 9 h9 M7.5 12.2 h6" />
+    </svg>
+  ),
+  bar_chart: (
+    <svg {...ICON_PROPS}>
+      <path d="M3 20 h18" />
+      <path d="M5.5 20 v-6.5 M9.8 20 V8 M14.1 20 v-9.5 M18.4 20 V11" />
+    </svg>
+  ),
+};
+
 export const REPORT_MODULE_ICONS: Record<string, ReactElement> = {
   energy_mix: (
     <svg {...ICON_PROPS}>

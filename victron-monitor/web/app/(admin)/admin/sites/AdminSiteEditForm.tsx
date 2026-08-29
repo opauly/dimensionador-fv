@@ -88,7 +88,8 @@ function describeSchedule(schedule: string, weekday: number, dayOfMonth: number,
   return `Monthly on day ${dayOfMonth}, at ${hourLabel}.`;
 }
 
-function describeModules(selected: Set<string>): string {
+function describeModules(mode: 'default' | 'custom', selected: Set<string>): string {
+  if (mode === 'default') return 'Default modules (core sections + critical alerts).';
   if (selected.size === REPORT_MODULES.length) return 'All modules included.';
   if (selected.size === 0) return 'No optional modules — only the core summary.';
   return `${selected.size} of ${REPORT_MODULES.length} modules included.`;
@@ -124,6 +125,12 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
     site.report_modules && site.report_modules.length > 0 ? site.report_modules : DEFAULT_REPORT_MODULES,
   );
   const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
+  // Default/Custom mode — see SiteForm.tsx's own comment for the full
+  // reasoning. Switching to "Default" and saving submits the sentinel with
+  // no report_modules values, which sanitizeReportModules() (admin.ts)
+  // already turns into `null`.
+  const initialModuleMode: 'default' | 'custom' = site.report_modules && site.report_modules.length > 0 ? 'custom' : 'default';
+  const [moduleMode, setModuleMode] = useState<'default' | 'custom'>(initialModuleMode);
   function toggleModule(id: string) {
     setSelectedModules((prev) => {
       const next = new Set(prev);
@@ -133,7 +140,9 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
     });
   }
   const modulesChanged =
-    selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m));
+    moduleMode !== initialModuleMode ||
+    (moduleMode === 'custom' &&
+      (selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m))));
 
   // A real change to the SCHEDULE itself (cadence/day/hour) — not
   // recipients, not any other field — shows a plain-language summary of
@@ -372,37 +381,49 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
              side: distinguishing "unchecked everything" from "this section
              never rendered" (a non-vrm_api site). */}
           <input type="hidden" name="report_modules_present" value="true" />
-          <p className={styles.moduleCaption}>Report modules — {describeModules(selectedModules)}</p>
-          <div className={styles.moduleGrid}>
-            {/* Always included, never selectable — shown alongside the real
-               checkboxes (checked + greyed out) so it's visually obvious
-               what's fixed vs. optional. No `name`: display only, never
-               submitted. */}
-            {FIXED_MODULE_LABELS.map((label) => (
-              <label key={label} className={styles.checkboxLabelDisabled}>
-                <input type="checkbox" checked disabled />
-                {label}
-              </label>
-            ))}
-            {REPORT_MODULES.map((m) => (
-              <label key={m.id} className={styles.moduleCard}>
-                <div className={styles.moduleCardHeader}>
-                  <input
-                    type="checkbox"
-                    name="report_modules"
-                    value={m.id}
-                    checked={selectedModules.has(m.id)}
-                    onChange={() => toggleModule(m.id)}
-                    disabled={pending}
-                  />
-                  <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[m.id]}</span>
-                  <span>{m.label}</span>
-                </div>
-                <p className={styles.moduleDesc}>{m.desc}</p>
-              </label>
-            ))}
+          <p className={styles.moduleCaption}>Report modules — {describeModules(moduleMode, selectedModules)}</p>
+          <div className={styles.moduleModeRow}>
+            <label className={styles.checkboxLabel}>
+              <input type="radio" name="_module_mode" checked={moduleMode === 'default'} onChange={() => setModuleMode('default')} disabled={pending} />
+              Default
+            </label>
+            <label className={styles.checkboxLabel}>
+              <input type="radio" name="_module_mode" checked={moduleMode === 'custom'} onChange={() => setModuleMode('custom')} disabled={pending} />
+              Custom
+            </label>
           </div>
-          {modulesChanged && <p className={styles.caption}>Review before saving — {describeModules(selectedModules)}</p>}
+          {moduleMode === 'custom' && (
+            <div className={styles.moduleGrid}>
+              {/* Always included, never selectable — shown alongside the real
+                 checkboxes (checked + greyed out) so it's visually obvious
+                 what's fixed vs. optional. No `name`: display only, never
+                 submitted. */}
+              {FIXED_MODULE_LABELS.map((label) => (
+                <label key={label} className={styles.checkboxLabelDisabled}>
+                  <input type="checkbox" checked disabled />
+                  {label}
+                </label>
+              ))}
+              {REPORT_MODULES.map((m) => (
+                <label key={m.id} className={styles.moduleCard}>
+                  <div className={styles.moduleCardHeader}>
+                    <input
+                      type="checkbox"
+                      name="report_modules"
+                      value={m.id}
+                      checked={selectedModules.has(m.id)}
+                      onChange={() => toggleModule(m.id)}
+                      disabled={pending}
+                    />
+                    <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[m.id]}</span>
+                    <span>{m.label}</span>
+                  </div>
+                  <p className={styles.moduleDesc}>{m.desc}</p>
+                </label>
+              ))}
+            </div>
+          )}
+          {modulesChanged && <p className={styles.caption}>Review before saving — {describeModules(moduleMode, selectedModules)}</p>}
         </>
       )}
 

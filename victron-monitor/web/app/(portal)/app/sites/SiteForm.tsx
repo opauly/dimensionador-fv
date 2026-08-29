@@ -186,6 +186,17 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
   // (everything included), not a blank slate that reads as "nothing sends."
   const initialModules = new Set<string>(initial?.report_modules && initial.report_modules.length > 0 ? initial.report_modules : DEFAULT_REPORT_MODULES);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
+  // Default/Custom mode (2026-08-29 live-test feedback): a stored NULL
+  // `report_modules` (nothing customized) means "Default" — the backend's
+  // own DEFAULT_MODULES fallback (`resolve_report_modules()`) applies, no
+  // checklist shown. A non-null stored value means this site was already
+  // customized, so the checklist opens straight into "Custom" showing
+  // exactly what's saved. Switching back to "Default" and saving submits
+  // the sentinel with no `report_modules` values at all — `sanitize
+  // ReportModules()` (lib/server/db/sites.ts) already turns an empty array
+  // into `null`, so this needs no new server-side plumbing.
+  const initialModuleMode: 'default' | 'custom' = initial?.report_modules && initial.report_modules.length > 0 ? 'custom' : 'default';
+  const [moduleMode, setModuleMode] = useState<'default' | 'custom'>(initialModuleMode);
   function toggleModule(id: string) {
     setSelectedModules((prev) => {
       const next = new Set(prev);
@@ -197,8 +208,11 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
   const modulesChanged =
     mode === 'edit' &&
     Boolean(initial) &&
-    (selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m)));
+    (moduleMode !== initialModuleMode ||
+      (moduleMode === 'custom' &&
+        (selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m)))));
   function describeModules(): string {
+    if (moduleMode === 'default') return t(lang, 'sites_modules_summary_default');
     if (selectedModules.size === REPORT_MODULES.length) return t(lang, 'sites_modules_summary_all');
     if (selectedModules.size === 0) return t(lang, 'sites_modules_summary_none');
     return t(lang, 'sites_modules_summary_count').replace('{count}', String(selectedModules.size));
@@ -520,36 +534,62 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
              never showed this section can never overwrite an existing
              selection with an empty one. */}
           <input type="hidden" name="report_modules_present" value="true" />
-          <div className={styles.moduleGrid}>
-            {/* Always included, never selectable — shown the same way as
-               the real checkboxes (checked + greyed out) so it's visually
-               obvious what's fixed vs. optional, rather than the spine
-               simply not appearing anywhere in this list at all. No
-               `name` attribute: these never submit, they're display only. */}
-            {FIXED_MODULE_KEYS.map((key) => (
-              <label key={key} className={styles.checkboxLabelDisabled}>
-                <input type="checkbox" checked disabled />
-                {t(lang, key)}
-              </label>
-            ))}
-            {REPORT_MODULES.map((id) => (
-              <label key={id} className={styles.moduleCard}>
-                <div className={styles.moduleCardHeader}>
-                  <input
-                    type="checkbox"
-                    name="report_modules"
-                    value={id}
-                    checked={selectedModules.has(id)}
-                    onChange={() => toggleModule(id)}
-                    disabled={pending}
-                  />
-                  <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[id]}</span>
-                  <span>{t(lang, MODULE_LABEL_KEYS[id])}</span>
-                </div>
-                <p className={styles.moduleDesc}>{t(lang, MODULE_DESC_KEYS[id])}</p>
-              </label>
-            ))}
+          <div className={styles.moduleModeRow}>
+            <label className={styles.checkboxLabel}>
+              <input
+                type="radio"
+                name="_module_mode"
+                checked={moduleMode === 'default'}
+                onChange={() => setModuleMode('default')}
+                disabled={pending}
+              />
+              {t(lang, 'sites_modules_mode_default')}
+            </label>
+            <label className={styles.checkboxLabel}>
+              <input
+                type="radio"
+                name="_module_mode"
+                checked={moduleMode === 'custom'}
+                onChange={() => setModuleMode('custom')}
+                disabled={pending}
+              />
+              {t(lang, 'sites_modules_mode_custom')}
+            </label>
           </div>
+          {moduleMode === 'default' ? (
+            <p className={styles.sectionCaption}>{t(lang, 'sites_modules_mode_default_desc')}</p>
+          ) : (
+            <div className={styles.moduleGrid}>
+              {/* Always included, never selectable — shown the same way as
+                 the real checkboxes (checked + greyed out) so it's visually
+                 obvious what's fixed vs. optional, rather than the spine
+                 simply not appearing anywhere in this list at all. No
+                 `name` attribute: these never submit, they're display only. */}
+              {FIXED_MODULE_KEYS.map((key) => (
+                <label key={key} className={styles.checkboxLabelDisabled}>
+                  <input type="checkbox" checked disabled />
+                  {t(lang, key)}
+                </label>
+              ))}
+              {REPORT_MODULES.map((id) => (
+                <label key={id} className={styles.moduleCard}>
+                  <div className={styles.moduleCardHeader}>
+                    <input
+                      type="checkbox"
+                      name="report_modules"
+                      value={id}
+                      checked={selectedModules.has(id)}
+                      onChange={() => toggleModule(id)}
+                      disabled={pending}
+                    />
+                    <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[id]}</span>
+                    <span>{t(lang, MODULE_LABEL_KEYS[id])}</span>
+                  </div>
+                  <p className={styles.moduleDesc}>{t(lang, MODULE_DESC_KEYS[id])}</p>
+                </label>
+              ))}
+            </div>
+          )}
 
           {modulesChanged && (
             <p className={styles.sectionCaption}>

@@ -247,6 +247,15 @@ export const STRINGS = {
     sites_module_desc_grid_meter_detail: 'Per-phase voltage, current, and power factor from a real physical grid meter, where installed.',
     sites_module_desc_generator_runtime: 'Hours the backup generator ran during the period.',
     sites_module_desc_tank_level: 'Fuel or water tank capacity, fluid type, and last known status.',
+    // Default/Custom mode (2026-08-29 live-test feedback): "Default" hides
+    // the checklist entirely and stores no explicit selection at all
+    // (NULL), so the backend's own default set — the 9 core modules plus
+    // critical alerts — always applies, automatically picking up any future
+    // change to what "default" means. "Custom" opens the full checklist.
+    sites_modules_mode_default: 'Default',
+    sites_modules_mode_custom: 'Custom',
+    sites_modules_mode_default_desc: 'Includes the core report sections plus critical safety alerts. Switch to Custom to add or remove sections.',
+    sites_modules_summary_default: 'Default modules',
     sites_modules_review_notice: 'Review before saving:',
     sites_modules_confirm_save_button: 'Confirm & save',
     sites_modules_summary_all: 'All modules included',
@@ -892,6 +901,10 @@ export const STRINGS = {
     sites_module_desc_grid_meter_detail: 'Voltaje, corriente y factor de potencia por fase de un medidor de red físico real, donde exista.',
     sites_module_desc_generator_runtime: 'Horas que operó el generador de respaldo durante el período.',
     sites_module_desc_tank_level: 'Capacidad del tanque de combustible o agua, tipo de fluido y último estado conocido.',
+    sites_modules_mode_default: 'Por defecto',
+    sites_modules_mode_custom: 'Personalizado',
+    sites_modules_mode_default_desc: 'Incluye las secciones principales del reporte más las alertas críticas de seguridad. Cambiá a Personalizado para agregar o quitar secciones.',
+    sites_modules_summary_default: 'Módulos por defecto',
     sites_modules_review_notice: 'Revisá antes de guardar:',
     sites_modules_confirm_save_button: 'Confirmar y guardar',
     sites_modules_summary_all: 'Se incluyen todos los módulos',
