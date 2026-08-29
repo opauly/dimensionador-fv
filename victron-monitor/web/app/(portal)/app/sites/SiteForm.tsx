@@ -40,6 +40,12 @@ const MODULE_LABEL_KEYS: Record<(typeof REPORT_MODULES)[number], StringKey> = {
   trend: 'sites_module_trend',
   savings: 'sites_module_savings',
 };
+// The report's fixed spine (PLAN_PHASE18.md's Decisions section) — never
+// selectable, shown alongside the real checkboxes as always-checked and
+// disabled so it's visually obvious what's always included, rather than
+// the spine simply not appearing in this list at all (real feedback from a
+// live test, 2026-08-28).
+const FIXED_MODULE_KEYS: StringKey[] = ['sites_module_fixed_kpi', 'sites_module_fixed_narrative', 'sites_module_fixed_bar_chart'];
 
 // React 19's `useActionState` return type — imported this way (rather than
 // destructuring the hook itself here) so `page.tsx`'s server-rendered
@@ -106,12 +112,15 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
   const [scheduleHour, setScheduleHour] = useState<string>(String(initial?.report_schedule_hour ?? 6));
 
   // A real change to the schedule itself (cadence/day/hour) — not
-  // recipients, not any other field — requires reviewing the plain-language
-  // summary below before Save is allowed to apply it (Oscar's own request:
-  // "all with a prior confirmation message"). Any further schedule edit
-  // after confirming re-arms this, so a changed mind never saves on a stale
-  // confirmation. Never true for `mode === 'add'` — there's no `initial` to
-  // have changed away from, and this section never renders there anyway.
+  // recipients, not any other field — shows a plain-language summary of
+  // what's about to be applied (Oscar's own request: "a prior confirmation
+  // message"). Originally gated Save behind a separate "confirm this"
+  // click before the button itself would even work — found confusing in a
+  // real live test (2026-08-28) and simplified: the summary is shown, the
+  // button itself is relabeled to say what it's about to do, and clicking
+  // it both confirms and saves in one action. Never true for `mode ===
+  // 'add'` — there's no `initial` to have changed away from, and this
+  // section never renders there anyway.
   const scheduleChanged =
     mode === 'edit' &&
     Boolean(initial) &&
@@ -119,17 +128,6 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
       (reportSchedule === 'weekly' && Number(scheduleWeekday) !== (initial?.report_schedule_weekday ?? 1)) ||
       (reportSchedule === 'monthly' && Number(scheduleDayOfMonth) !== (initial?.report_schedule_day_of_month ?? 1)) ||
       (reportSchedule !== 'off' && Number(scheduleHour) !== (initial?.report_schedule_hour ?? 6)));
-  const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
-  const [trackedSchedule, setTrackedSchedule] = useState({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
-  if (
-    reportSchedule !== trackedSchedule.reportSchedule ||
-    scheduleWeekday !== trackedSchedule.scheduleWeekday ||
-    scheduleDayOfMonth !== trackedSchedule.scheduleDayOfMonth ||
-    scheduleHour !== trackedSchedule.scheduleHour
-  ) {
-    setTrackedSchedule({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
-    setScheduleConfirmed(false);
-  }
 
   function describeSchedule(): string {
     if (reportSchedule === 'off') return t(lang, 'sites_schedule_off');
@@ -160,12 +158,6 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
     mode === 'edit' &&
     Boolean(initial) &&
     (selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m)));
-  const [modulesConfirmed, setModulesConfirmed] = useState(false);
-  const [trackedModules, setTrackedModules] = useState(selectedModules);
-  if (selectedModules !== trackedModules && (selectedModules.size !== trackedModules.size || [...selectedModules].some((m) => !trackedModules.has(m)))) {
-    setTrackedModules(selectedModules);
-    setModulesConfirmed(false);
-  }
   function describeModules(): string {
     if (selectedModules.size === REPORT_MODULES.length) return t(lang, 'sites_modules_summary_all');
     if (selectedModules.size === 0) return t(lang, 'sites_modules_summary_none');
@@ -448,16 +440,8 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
           {reportSchedule !== 'off' && <p className={styles.sectionCaption}>{t(lang, 'sites_schedule_help')}</p>}
 
           {scheduleChanged && (
-            <p className={scheduleConfirmed ? styles.sectionCaption : styles.error}>
-              {t(lang, scheduleConfirmed ? 'sites_schedule_confirmed_notice' : 'sites_schedule_review_notice')} {describeSchedule()}
-              {!scheduleConfirmed && (
-                <>
-                  {' '}
-                  <button type="button" className={styles.linkButton} onClick={() => setScheduleConfirmed(true)}>
-                    {t(lang, 'sites_schedule_confirm_link')}
-                  </button>
-                </>
-              )}
+            <p className={styles.sectionCaption}>
+              {t(lang, 'sites_schedule_review_notice')} {describeSchedule()}
             </p>
           )}
 
@@ -497,6 +481,17 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
              selection with an empty one. */}
           <input type="hidden" name="report_modules_present" value="true" />
           <div className={styles.moduleGrid}>
+            {/* Always included, never selectable — shown the same way as
+               the real checkboxes (checked + greyed out) so it's visually
+               obvious what's fixed vs. optional, rather than the spine
+               simply not appearing anywhere in this list at all. No
+               `name` attribute: these never submit, they're display only. */}
+            {FIXED_MODULE_KEYS.map((key) => (
+              <label key={key} className={styles.checkboxLabelDisabled}>
+                <input type="checkbox" checked disabled />
+                {t(lang, key)}
+              </label>
+            ))}
             {REPORT_MODULES.map((id) => (
               <label key={id} className={styles.checkboxLabel}>
                 <input
@@ -513,16 +508,8 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
           </div>
 
           {modulesChanged && (
-            <p className={modulesConfirmed ? styles.sectionCaption : styles.error}>
-              {t(lang, modulesConfirmed ? 'sites_modules_confirmed_notice' : 'sites_modules_review_notice')} {describeModules()}
-              {!modulesConfirmed && (
-                <>
-                  {' '}
-                  <button type="button" className={styles.linkButton} onClick={() => setModulesConfirmed(true)}>
-                    {t(lang, 'sites_modules_confirm_link')}
-                  </button>
-                </>
-              )}
+            <p className={styles.sectionCaption}>
+              {t(lang, 'sites_modules_review_notice')} {describeModules()}
             </p>
           )}
         </>
@@ -542,10 +529,7 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button
-          type="submit"
-          disabled={pending || (scheduleChanged && !scheduleConfirmed) || (modulesChanged && !modulesConfirmed)}
-        >
+        <Button type="submit" disabled={pending}>
           {pending
             ? t(lang, 'sites_saving')
             : t(

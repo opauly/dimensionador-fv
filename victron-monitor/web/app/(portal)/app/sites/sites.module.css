@@ -101,6 +101,14 @@
   color: var(--paper);
 }
 
+.checkboxLabelDisabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--mute);
+}
+
 .subheading {
   font-size: 15px;
   color: var(--paper);
@@ -118,17 +126,6 @@
   color: var(--signal);
   font-size: 14px;
   margin-bottom: 14px;
-}
-
-.linkButton {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--victron-glow);
-  font-weight: 600;
-  font-size: inherit;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 .success {

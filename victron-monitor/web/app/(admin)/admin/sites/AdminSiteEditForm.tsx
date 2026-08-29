@@ -38,6 +38,13 @@ const REPORT_MODULES: Array<{ id: string; label: string }> = [
   { id: 'trend', label: '4-week trend' },
   { id: 'savings', label: 'Tariff savings' },
 ];
+// The report's fixed spine (PLAN_PHASE18.md's Decisions section) — never
+// selectable, shown alongside REPORT_MODULES as always-checked/disabled.
+const FIXED_MODULE_LABELS = [
+  'Summary cards (always included)',
+  'AI narrative (always included)',
+  'Solar vs. consumption chart (always included)',
+];
 
 /** Plain-language summary of a schedule choice, shown before it's saved —
  * same purpose as `SiteForm.tsx`'s own confirmation copy, restated in
@@ -96,35 +103,20 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
   }
   const modulesChanged =
     selectedModules.size !== initialModules.size || [...selectedModules].some((m) => !initialModules.has(m));
-  const [modulesConfirmed, setModulesConfirmed] = useState(false);
-  const [trackedModules, setTrackedModules] = useState(selectedModules);
-  if (selectedModules !== trackedModules && (selectedModules.size !== trackedModules.size || [...selectedModules].some((m) => !trackedModules.has(m)))) {
-    setTrackedModules(selectedModules);
-    setModulesConfirmed(false);
-  }
 
   // A real change to the SCHEDULE itself (cadence/day/hour) — not
-  // recipients, not any other field — requires reviewing the plain-language
-  // summary below before Save is allowed to actually apply it (Oscar's own
-  // request: "all with a prior confirmation message"). Any further edit to
-  // a schedule field after confirming re-arms this, so a changed mind isn't
-  // saved on a stale confirmation.
+  // recipients, not any other field — shows a plain-language summary of
+  // what's about to be applied (Oscar's own request: "a prior confirmation
+  // message"). Originally gated Save behind a separate "confirm this"
+  // click before the button would even work — found confusing in a real
+  // live test (2026-08-28) and simplified: the summary is shown, the
+  // button is relabeled to say what it's about to do, and clicking it
+  // both confirms and saves in one action.
   const scheduleChanged =
     reportSchedule !== site.report_schedule ||
     (reportSchedule === 'weekly' && Number(scheduleWeekday) !== site.report_schedule_weekday) ||
     (reportSchedule === 'monthly' && Number(scheduleDayOfMonth) !== site.report_schedule_day_of_month) ||
     (reportSchedule !== 'off' && Number(scheduleHour) !== site.report_schedule_hour);
-  const [scheduleConfirmed, setScheduleConfirmed] = useState(false);
-  const [trackedSchedule, setTrackedSchedule] = useState({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
-  if (
-    reportSchedule !== trackedSchedule.reportSchedule ||
-    scheduleWeekday !== trackedSchedule.scheduleWeekday ||
-    scheduleDayOfMonth !== trackedSchedule.scheduleDayOfMonth ||
-    scheduleHour !== trackedSchedule.scheduleHour
-  ) {
-    setTrackedSchedule({ reportSchedule, scheduleWeekday, scheduleDayOfMonth, scheduleHour });
-    setScheduleConfirmed(false);
-  }
 
   useEffect(() => {
     if (state.success) onDone();
@@ -321,17 +313,8 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
           </div>
 
           {scheduleChanged && (
-            <p className={scheduleConfirmed ? styles.caption : styles.error}>
-              {scheduleConfirmed ? 'Confirmed: ' : 'Review before saving: '}
-              {describeSchedule(reportSchedule, Number(scheduleWeekday), Number(scheduleDayOfMonth), Number(scheduleHour))}
-              {!scheduleConfirmed && (
-                <>
-                  {' '}
-                  <button type="button" className={styles.linkButton} onClick={() => setScheduleConfirmed(true)}>
-                    Confirm this schedule
-                  </button>
-                </>
-              )}
+            <p className={styles.caption}>
+              Review before saving: {describeSchedule(reportSchedule, Number(scheduleWeekday), Number(scheduleDayOfMonth), Number(scheduleHour))}
             </p>
           )}
 
@@ -360,6 +343,16 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
           <input type="hidden" name="report_modules_present" value="true" />
           <p className={styles.moduleCaption}>Report modules — {describeModules(selectedModules)}</p>
           <div className={styles.moduleGrid}>
+            {/* Always included, never selectable — shown alongside the real
+               checkboxes (checked + greyed out) so it's visually obvious
+               what's fixed vs. optional. No `name`: display only, never
+               submitted. */}
+            {FIXED_MODULE_LABELS.map((label) => (
+              <label key={label} className={styles.checkboxLabelDisabled}>
+                <input type="checkbox" checked disabled />
+                {label}
+              </label>
+            ))}
             {REPORT_MODULES.map((m) => (
               <label key={m.id} className={styles.checkboxLabel}>
                 <input
@@ -374,16 +367,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
               </label>
             ))}
           </div>
-          {modulesChanged && (
-            <p className={modulesConfirmed ? styles.caption : styles.error}>
-              {modulesConfirmed ? 'Confirmed. ' : 'Review before saving. '}
-              {!modulesConfirmed && (
-                <button type="button" className={styles.linkButton} onClick={() => setModulesConfirmed(true)}>
-                  Confirm these modules
-                </button>
-              )}
-            </p>
-          )}
+          {modulesChanged && <p className={styles.caption}>Review before saving — {describeModules(selectedModules)}</p>}
         </>
       )}
 
@@ -401,10 +385,7 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
       {state.error && <p className={styles.error}>{state.error}</p>}
 
       <div className={styles.formActions}>
-        <Button
-          type="submit"
-          disabled={pending || (scheduleChanged && !scheduleConfirmed) || (modulesChanged && !modulesConfirmed)}
-        >
+        <Button type="submit" disabled={pending}>
           {pending ? 'Saving…' : scheduleChanged || modulesChanged ? 'Confirm & save' : 'Save'}
         </Button>
         <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>

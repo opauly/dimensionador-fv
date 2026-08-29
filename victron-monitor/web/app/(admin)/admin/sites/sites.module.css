@@ -66,6 +66,14 @@
   color: var(--paper);
 }
 
+.checkboxLabelDisabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--mute);
+}
+
 .moduleGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -83,17 +91,6 @@
   color: var(--signal);
   font-size: 14px;
   margin-bottom: 14px;
-}
-
-.linkButton {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--victron-glow);
-  font-weight: 600;
-  font-size: inherit;
-  cursor: pointer;
-  text-decoration: underline;
 }
 
 .formActions {

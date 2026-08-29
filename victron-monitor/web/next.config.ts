@@ -25,7 +25,12 @@ const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' https://sdk.onvopay.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https://*.supabase.co",
+  // `blob:` is required for BrandingForm.tsx's instant local logo preview
+  // (`URL.createObjectURL(file)`, before the upload round trip completes) —
+  // found missing 2026-08-28 from a real live test: the preview silently
+  // failed to render the just-picked file with no console error, since a
+  // blocked `blob:` <img> src fails quietly rather than throwing.
+  "img-src 'self' data: blob: https://*.supabase.co",
   "connect-src 'self' https://*.supabase.co https://sdk.onvopay.com https://api.onvopay.com",
   "frame-src https://sdk.onvopay.com",
   "font-src 'self' data:",
