@@ -125,6 +125,17 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
     events = [dict(e) for e in parsed["alarm_events"]]
     for e in events:
         e["site_id"] = site_id
+    # PLAN_PHASE18.md §7 item 9 — same episode shape as `events` above, but
+    # `source` becomes `category` and these go to vrm.critical_alerts, a
+    # table vrm.count_alarm_episodes() never reads (see that table's own
+    # migration comment for why they must never share alarm_events).
+    # `.get(..., [])` keeps this call site working for any older `parsed`
+    # dict that predates this key (there are none in this codebase today,
+    # but `ingest_parsed()` is a public function and this costs nothing).
+    critical_events = [dict(e) for e in parsed.get("critical_alerts", [])]
+    for e in critical_events:
+        e["site_id"] = site_id
+        e["category"] = e.pop("source")
 
     # 1. Alarm events first — the energy_daily trigger reads them.
     if replace_alarms and rows:
@@ -135,6 +146,15 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
          .execute())
     for chunk in _chunks(events):
         _t("alarm_events").insert(chunk).execute()
+
+    if replace_alarms and rows:
+        (_t("critical_alerts").delete()
+         .eq("site_id", site_id)
+         .gte("timestamp", parsed["period_start"])
+         .lte("timestamp", parsed["period_end"])
+         .execute())
+    for chunk in _chunks(critical_events):
+        _t("critical_alerts").insert(chunk).execute()
 
     # PLAN_PHASE15.md §5.3/§5.4: look up what dump_type (if any) already
     # occupies each touched (site_id, date) BEFORE the upsert below
@@ -201,6 +221,7 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
         "sample_count": parsed["sample_count"],
         "rows_written": written,
         "alarm_events_written": len(events),
+        "critical_alerts_written": len(critical_events),
         "warnings": {"messages": parsed.get("warnings", []),
                      "missing_signals": parsed.get("missing_signals", []),
                      "unscored_alarms": parsed.get("unscored_alarms", {}),
@@ -214,6 +235,7 @@ def ingest_parsed(parsed: dict, site_id: str, filename: str = "",
     _t("ingestion_log").insert(log).execute()
 
     return {"rows_written": written, "alarm_events_written": len(events),
+            "critical_alerts_written": len(critical_events),
             "period_start": parsed["period_start"], "period_end": parsed["period_end"],
             "days_replacing_csv": days_replacing_csv}
 

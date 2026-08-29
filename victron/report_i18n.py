@@ -143,6 +143,36 @@ EN = {
     "narrativeLang": "Respond in English, in a professional but approachable tone.",
     "narrativeUnavailable": "Narrative unavailable this week.",
     "narrativeNoKey": "Narrative unavailable (API key not configured).",
+
+    # PLAN_PHASE18.md §7 item 9 / items 4a-c — Phase 2 selectable modules.
+    # Period-neutral wording throughout (no "this week"), same reasoning
+    # `subGrid`/`subEventsOffGrid`/`subSolarPerf` already follow — none of
+    # these four need a `_PERIOD_OVERRIDES` entry below.
+    "sectionCriticalAlerts": "Critical Alerts",
+    "subCriticalAlerts": "DC ripple, cell imbalance, and temperature faults "
+                         "detected on the battery system — safety-relevant "
+                         "conditions tracked separately from the health score.",
+    "criticalDcRipple": "DC ripple events",
+    "criticalCellImbalance": "Cell imbalance events",
+    "criticalTempFault": "Temperature fault events",
+    "sectionGridMeter": "Grid Meter Detail",
+    "subGridMeter": "Per-phase voltage, current, and power factor from a real "
+                    "physical grid meter, where one is installed.",
+    "gridMeterUnavailable": "No physical grid meter detected on this system",
+    "gridMeterPhaseL1": "Phase L1",
+    "gridMeterPhaseL2": "Phase L2",
+    "gridMeterPhaseL3": "Phase L3",
+    "sectionGenerator": "Generator Runtime",
+    "subGenerator": "Hours the backup generator ran during this period.",
+    "generatorHours": "Runtime",
+    "generatorHoursUnit": "hrs",
+    "sectionTank": "Tank Level",
+    "subTank": "Fuel or water tank capacity, fluid type, and last known status.",
+    "tankCapacity": "Capacity",
+    "tankFluidType": "Fluid type",
+    "tankStatus": "Status",
+    "tankLevel": "Level",
+    "tankUnavailable": "No tank sensor detected on this system",
 }
 
 ES = dict(EN, **{
@@ -254,6 +284,34 @@ ES = dict(EN, **{
     "narrativeLang": "Responde en español, en un tono profesional pero cercano.",
     "narrativeUnavailable": "Resumen no disponible esta semana.",
     "narrativeNoKey": "Resumen no disponible (clave API no configurada).",
+
+    "sectionCriticalAlerts": "Alertas Críticas",
+    "subCriticalAlerts": "Rizado de CD, desbalance de celdas y fallas de "
+                         "temperatura detectados en el sistema de baterías — "
+                         "condiciones de seguridad que se registran aparte "
+                         "del puntaje de salud.",
+    "criticalDcRipple": "Eventos de rizado de CD",
+    "criticalCellImbalance": "Eventos de desbalance de celdas",
+    "criticalTempFault": "Eventos de falla de temperatura",
+    "sectionGridMeter": "Detalle del Medidor de Red",
+    "subGridMeter": "Voltaje, corriente y factor de potencia por fase de un "
+                    "medidor de red físico real, donde exista uno instalado.",
+    "gridMeterUnavailable": "No se detectó un medidor de red físico en este sistema",
+    "gridMeterPhaseL1": "Fase L1",
+    "gridMeterPhaseL2": "Fase L2",
+    "gridMeterPhaseL3": "Fase L3",
+    "sectionGenerator": "Horas de Generador",
+    "subGenerator": "Horas que operó el generador de respaldo durante este período.",
+    "generatorHours": "Horas de operación",
+    "generatorHoursUnit": "hrs",
+    "sectionTank": "Nivel de Tanque",
+    "subTank": "Capacidad del tanque de combustible o agua, tipo de fluido y "
+              "último estado conocido.",
+    "tankCapacity": "Capacidad",
+    "tankFluidType": "Tipo de fluido",
+    "tankStatus": "Estado",
+    "tankLevel": "Nivel",
+    "tankUnavailable": "No se detectó un sensor de tanque en este sistema",
 })
 
 TRANSLATIONS = {"en": EN, "es": ES}

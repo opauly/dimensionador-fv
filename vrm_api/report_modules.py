@@ -25,17 +25,17 @@ importing it — same reasoning `lib/server/db/admin.ts`'s own
 `ADMIN_SITE_WHITELIST` restatement gives for not sharing a tenancy-adjacent
 check across module boundaries via an underscore-prefixed internal.
 
-`ALL_MODULES` itself is NOT defined here — it's imported from
+`ALL_MODULES`/`DEFAULT_MODULES` are NOT defined here — they're imported from
 `victron.weekly_report`, which actually implements each block. `victron/`
 never imports from `vrm_api/` anywhere in this codebase (the dependency
 runs the other way: `vrm_api` is the FastAPI layer built on top of the
-`victron` pipeline), so the module-id list has to live on the `victron`
-side for this file to depend on it without introducing the only reverse
+`victron` pipeline), so the module-id lists have to live on the `victron`
+side for this file to depend on them without introducing the only reverse
 import in the project.
 """
 import logging
 
-from victron.weekly_report import ALL_MODULES
+from victron.weekly_report import ALL_MODULES, DEFAULT_MODULES
 from vrm_api.report_limits import resolve_limits
 
 logger = logging.getLogger("vrm_api.report_modules")
@@ -64,29 +64,35 @@ def resolve_report_modules(customer_row: dict, site_row: dict) -> set[str]:
     `ALL_MODULES` regardless of what's actually stored in either row.
 
     Rule 0 (account-type), rule 1 (tier), rule 2 (entitlement) all return
-    the FULL default set and ignore `report_modules`/`default_report_modules`
-    entirely — same "ignore the customer's own stored value entirely,
-    don't merge with it" shape `resolve_branding()` uses for its own three
-    gates. Only a white-labeled, entitled INSTALLER customer's stored
+    `DEFAULT_MODULES` — NOT the full `ALL_MODULES` — and ignore
+    `report_modules`/`default_report_modules` entirely — same "ignore the
+    customer's own stored value entirely, don't merge with it" shape
+    `resolve_branding()` uses for its own three gates. `DEFAULT_MODULES`
+    (PLAN_PHASE18.md §7, Oscar's decision 2026-08-29) is the original 9
+    modules plus `critical_alerts` — every non-customizing customer
+    (that's everyone below Growth/Fleet, and any not-yet-customized
+    installer) gets that, never the 3 hardware-conditional Phase 2 modules
+    (grid_meter_detail/generator_runtime/tank_level), which are opt-in
+    only. Only a white-labeled, entitled INSTALLER customer's stored
     selection is ever read at all.
     """
     if customer_row.get("account_type") != "installer":
-        return set(ALL_MODULES)
+        return set(DEFAULT_MODULES)
     if not resolve_limits(customer_row.get("plan")).get("white_label"):
-        return set(ALL_MODULES)
+        return set(DEFAULT_MODULES)
     if not _is_entitled(customer_row):
-        return set(ALL_MODULES)
+        return set(DEFAULT_MODULES)
 
     selected = site_row.get("report_modules") or customer_row.get("default_report_modules")
     if not selected:
-        return set(ALL_MODULES)
+        return set(DEFAULT_MODULES)
 
-    # Defensive re-validation, independent of migration 028's own CHECK
+    # Defensive re-validation, independent of migration 029's own CHECK
     # constraint — same "hide an editor is UX, never the control"
     # discipline PLAN_PHASE17.md §3.1 point 2 already established for
     # schedules. A stored id outside today's known set (a future rename, a
     # row written before a module was renamed/removed) is dropped rather
     # than trusted blindly; an empty result after filtering falls back to
-    # the full set rather than rendering a report with nothing in it.
+    # DEFAULT_MODULES rather than rendering a report with nothing in it.
     valid = {m for m in selected if m in _ALL_MODULES_SET}
-    return valid if valid else set(ALL_MODULES)
+    return valid if valid else set(DEFAULT_MODULES)

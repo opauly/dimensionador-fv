@@ -153,6 +153,59 @@ UNSCORED_ALARM_SIGNALS = [
 _OK_VALUES = {"ok", "no alarm", "0", "0.0", "nan", "no", "inactive",
               "off", "none", "normal", "grid ok"}
 
+# Critical alerts (PLAN_PHASE18.md §7 item 9) — a NAMED, 3-category subset
+# of UNSCORED_ALARM_SIGNALS above, re-grouped so it can produce discrete
+# WARNING/CLEARED episodes (via vrm_daily.alarm_episode_events(), same as
+# ALARM_CATEGORIES) rather than only a per-column sample count. Deliberately
+# excludes UNSCORED_ALARM_SIGNALS' other entries (Low voltage alarm, High
+# charge/discharge current alarm, Internal Failure, High cell voltage) —
+# PLAN_PHASE18.md §7 item 9 names exactly DC ripple, cell imbalance, and
+# temperature faults as the safety-relevant trio to surface as their own
+# report section; unscored_alarm_summary() below still catches the full,
+# wider list as an ingestion-log-only warning, unchanged.
+CRITICAL_ALARM_CATEGORIES = {
+    "dc_ripple": ("High DC Ripple", [("VE.Bus System", "High DC Ripple")]),
+    "cell_imbalance": ("Cell Imbalance Alarm", [("Battery Monitor", "Cell Imbalance alarm")]),
+    "temp_fault": ("Battery Temperature Alarm", [
+        ("VE.Bus System", "Temperature L1"), ("VE.Bus System", "Temperature L2"),
+        ("Battery Monitor", "High battery temperature alarm"),
+    ]),
+}
+
+# ── Phase 2 hardware-conditional columns (PLAN_PHASE18.md §7 items 4a-c) ──
+# UNVERIFIED against a real CSV export, unlike everything above this
+# comment: none of the 13 real installations this product manages have a
+# live-reporting generator or tank sensor (confirmed via a 90-day VRM API
+# probe, 2026-08-29), so there is no real CSV export containing these
+# columns to check the exact "Device::Description" spelling against.
+# `("Grid meter", ...)` is the one exception — that device name is already
+# confirmed correct (SIGNALS above already uses it for grid_l1_w/l2/l3), so
+# only the voltage/current/power-factor DESCRIPTION strings below are
+# unverified, inferred from Victron's own VRM API `description` field seen
+# on a real installation (Emtec, 2026-08-26) on the assumption CSV export
+# labels match the API's description text — true everywhere else this
+# module was checked, but not confirmed for these specific new columns.
+# If a future subscriber's export doesn't match, `_pick_all()` simply finds
+# nothing and these columns read `None` — the same safe "missing, not
+# wrong" failure mode every other optional signal in this module already
+# has, so shipping this ahead of a real sample costs nothing.
+GENERATOR_ACCUMULATED_TIME = ("Generator", "Accumulated time")
+GRID_METER_VOLTAGE = {"l1": ("Grid meter", "Grid meter voltage L1"),
+                       "l2": ("Grid meter", "Grid meter voltage L2"),
+                       "l3": ("Grid meter", "Grid meter voltage L3")}
+GRID_METER_CURRENT = {"l1": ("Grid meter", "Grid meter current L1"),
+                       "l2": ("Grid meter", "Grid meter current L2"),
+                       "l3": ("Grid meter", "Grid meter current L3")}
+GRID_METER_POWER_FACTOR = {"l1": ("Grid meter", "Grid Power factor - L1"),
+                            "l2": ("Grid meter", "Grid Power factor - L2"),
+                            "l3": ("Grid meter", "Grid Power factor - L3")}
+GRID_METER_FREQUENCY = ("Grid meter", "Grid meter frequency L1")
+GRID_METER_PEN_VOLTAGE = ("Grid meter", "PEN (Protective earth-Neutral) voltage")
+TANK_CAPACITY = ("Tank", "Tank capacity")
+TANK_FLUID_TYPE = ("Tank", "Tank fluid type")
+TANK_STATUS = ("Tank", "Tank status")
+TANK_LEVEL = ("Tank", "Tank level")  # speculative column name — see vrm_series.py's own note; no numeric level code was found on any real installation to confirm against
+
 
 class VrmCsvError(ValueError):
     """The uploaded file is not a usable VRM export."""
@@ -351,6 +404,26 @@ def alarm_events(raw: pd.DataFrame, site_id: str) -> list[dict]:
     return events
 
 
+def critical_alerts(raw: pd.DataFrame, site_id: str) -> list[dict]:
+    """`vrm.critical_alerts`-shaped rows (PLAN_PHASE18.md §7 item 9) — same
+    WARNING/CLEARED episode shape `alarm_events()` produces, over
+    CRITICAL_ALARM_CATEGORIES instead of ALARM_CATEGORIES. `source` on each
+    event is the 3-value category id (`dc_ripple`/`cell_imbalance`/
+    `temp_fault`); the caller renames it to `category` when inserting into
+    `vrm.critical_alerts`, which is a plain rename, not a reshape — see that
+    table's own migration comment.
+    """
+    events: list[dict] = []
+    for source, (label, specs) in CRITICAL_ALARM_CATEGORIES.items():
+        active = _category_active(raw, specs)
+        if active is None or active.empty:
+            continue
+        events.extend(vrm_daily.alarm_episode_events(
+            active, site_id=site_id, alarm=label, source=source))
+    events.sort(key=lambda e: e["timestamp"])
+    return events
+
+
 def unscored_alarm_summary(raw: pd.DataFrame) -> dict[str, int]:
     """Non-OK sample counts for alarm signals that exist but aren't scored.
 
@@ -384,15 +457,49 @@ def to_energy_daily_rows(raw: pd.DataFrame, tidied: pd.DataFrame, site_id: str,
     The row-building logic itself is format-independent and lives in
     `vrm_daily.to_energy_daily_rows()` (§4.1); this wrapper's only job is the
     CSV-specific part — pulling out each physical charger's "Yield today" /
-    "Charge state" series by column name — and passing this path's own
-    `max_gap_s=MAX_GAP_S` explicitly (`vrm_daily.py` never defaults it).
+    "Charge state" series by column name, plus (PLAN_PHASE18.md §7) each
+    hardware-conditional signal the export happens to contain — and passing
+    this path's own `max_gap_s=MAX_GAP_S` explicitly (`vrm_daily.py` never
+    defaults it).
     """
     yields = _pick_all(raw, *YIELD_TODAY)
     charge_states = _pick_all(raw, *CHARGE_STATE)
+
+    generator_series = _pick_all(raw, *GENERATOR_ACCUMULATED_TIME)
+    generator_time_s = generator_series[0] if generator_series else None
+
+    grid_meter: dict[str, pd.Series] = {}
+    for phase, spec in GRID_METER_VOLTAGE.items():
+        cols = _pick_all(raw, *spec)
+        if cols:
+            grid_meter[f"v_{phase}"] = cols[0]
+    for phase, spec in GRID_METER_CURRENT.items():
+        cols = _pick_all(raw, *spec)
+        if cols:
+            grid_meter[f"c_{phase}"] = cols[0]
+    for phase, spec in GRID_METER_POWER_FACTOR.items():
+        cols = _pick_all(raw, *spec)
+        if cols:
+            grid_meter[f"pf_{phase}"] = cols[0]
+    freq_cols = _pick_all(raw, *GRID_METER_FREQUENCY)
+    if freq_cols:
+        grid_meter["freq"] = freq_cols[0]
+    pen_cols = _pick_all(raw, *GRID_METER_PEN_VOLTAGE)
+    if pen_cols:
+        grid_meter["pen_v"] = pen_cols[0]
+
+    tank: dict[str, pd.Series] = {}
+    for key, spec in (("capacity", TANK_CAPACITY), ("fluid_type", TANK_FLUID_TYPE),
+                      ("status", TANK_STATUS), ("level_pct", TANK_LEVEL)):
+        cols = _pick_all(raw, *spec)
+        if cols:
+            tank[key] = cols[0]
+
     return vrm_daily.to_energy_daily_rows(
         tidied, site_id, max_gap_s=MAX_GAP_S, dump_type=dump_type,
         pv_kwp=pv_kwp, battery_usable_kwh=battery_usable_kwh,
         yields=yields, charge_states=charge_states,
+        generator_time_s=generator_time_s, grid_meter=grid_meter, tank=tank,
     )
 
 
@@ -425,6 +532,7 @@ def parse_export(source, site_id: str, filename: str = "",
         "period_end": raw.index[-1].isoformat(),
         "rows": rows,
         "alarm_events": alarm_events(raw, site_id),
+        "critical_alerts": critical_alerts(raw, site_id),
         "unscored_alarms": unscored,
         "outages": vrm_daily._grid_outages(tidied, MAX_GAP_S).to_dict("records"),
         "missing_signals": missing,

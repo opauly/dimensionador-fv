@@ -17,6 +17,7 @@ import { listTimezones } from '@/lib/timezones';
 import { COUNTRIES, DEFAULT_COUNTRY } from '@/lib/countries';
 import { SUPPORTED_FLAT_CURRENCIES } from '@/lib/currencies';
 import type { SiteRecord } from '@/lib/server/db';
+import { REPORT_MODULE_ICONS } from '@/lib/reportModuleThumbnails';
 import { reverseGeocodeAction, type SiteFormState } from './actions';
 import styles from './sites.module.css';
 
@@ -28,7 +29,21 @@ import styles from './sites.module.css';
 const REPORT_MODULES = [
   'energy_mix', 'battery_health', 'grid_quality', 'events',
   'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+  'critical_alerts', 'grid_meter_detail', 'generator_runtime', 'tank_level',
 ] as const;
+// Same set `victron/weekly_report.py:DEFAULT_MODULES` / `vrm_api/
+// report_modules.py:resolve_report_modules()` treat as "no customization
+// yet" — the original 9 plus critical_alerts (safety-relevant enough to
+// show everyone by default, Oscar's decision 2026-08-29), NOT the 3
+// hardware-conditional Phase 2 modules (most sites have none of that
+// hardware). Pre-checked when a site has never saved a selection, so a
+// customer opening this form for the first time sees what their report
+// ALREADY looks like, not a superset they'd have to notice and uncheck.
+const DEFAULT_REPORT_MODULES = [
+  'energy_mix', 'battery_health', 'grid_quality', 'events',
+  'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+  'critical_alerts',
+];
 const MODULE_LABEL_KEYS: Record<(typeof REPORT_MODULES)[number], StringKey> = {
   energy_mix: 'sites_module_energy_mix',
   battery_health: 'sites_module_battery_health',
@@ -39,6 +54,31 @@ const MODULE_LABEL_KEYS: Record<(typeof REPORT_MODULES)[number], StringKey> = {
   weather: 'sites_module_weather',
   trend: 'sites_module_trend',
   savings: 'sites_module_savings',
+  critical_alerts: 'sites_module_critical_alerts',
+  grid_meter_detail: 'sites_module_grid_meter_detail',
+  generator_runtime: 'sites_module_generator_runtime',
+  tank_level: 'sites_module_tank_level',
+};
+// One-sentence description + a static thumbnail (REPORT_MODULE_ICONS) per
+// checkbox — Oscar's own instruction, 2026-08-29: "show a preview of each
+// one and a brief description... to have more context on what it is
+// tracking". Same icon/description for every site regardless of that
+// site's own data — a static illustrative thumbnail, not a live per-site
+// render (which would mean computing real report data just for this form).
+const MODULE_DESC_KEYS: Record<(typeof REPORT_MODULES)[number], StringKey> = {
+  energy_mix: 'sites_module_desc_energy_mix',
+  battery_health: 'sites_module_desc_battery_health',
+  grid_quality: 'sites_module_desc_grid_quality',
+  events: 'sites_module_desc_events',
+  soc_chart: 'sites_module_desc_soc_chart',
+  solar_performance: 'sites_module_desc_solar_performance',
+  weather: 'sites_module_desc_weather',
+  trend: 'sites_module_desc_trend',
+  savings: 'sites_module_desc_savings',
+  critical_alerts: 'sites_module_desc_critical_alerts',
+  grid_meter_detail: 'sites_module_desc_grid_meter_detail',
+  generator_runtime: 'sites_module_desc_generator_runtime',
+  tank_level: 'sites_module_desc_tank_level',
 };
 // The report's fixed spine (PLAN_PHASE18.md's Decisions section) — never
 // selectable, shown alongside the real checkboxes as always-checked and
@@ -144,7 +184,7 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
   // from an empty set, so an entitled customer opening this form for the
   // first time on an already-existing site sees today's real behavior
   // (everything included), not a blank slate that reads as "nothing sends."
-  const initialModules = new Set<string>(initial?.report_modules && initial.report_modules.length > 0 ? initial.report_modules : REPORT_MODULES);
+  const initialModules = new Set<string>(initial?.report_modules && initial.report_modules.length > 0 ? initial.report_modules : DEFAULT_REPORT_MODULES);
   const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
   function toggleModule(id: string) {
     setSelectedModules((prev) => {
@@ -493,16 +533,20 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
               </label>
             ))}
             {REPORT_MODULES.map((id) => (
-              <label key={id} className={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  name="report_modules"
-                  value={id}
-                  checked={selectedModules.has(id)}
-                  onChange={() => toggleModule(id)}
-                  disabled={pending}
-                />
-                {t(lang, MODULE_LABEL_KEYS[id])}
+              <label key={id} className={styles.moduleCard}>
+                <div className={styles.moduleCardHeader}>
+                  <input
+                    type="checkbox"
+                    name="report_modules"
+                    value={id}
+                    checked={selectedModules.has(id)}
+                    onChange={() => toggleModule(id)}
+                    disabled={pending}
+                  />
+                  <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[id]}</span>
+                  <span>{t(lang, MODULE_LABEL_KEYS[id])}</span>
+                </div>
+                <p className={styles.moduleDesc}>{t(lang, MODULE_DESC_KEYS[id])}</p>
               </label>
             ))}
           </div>
