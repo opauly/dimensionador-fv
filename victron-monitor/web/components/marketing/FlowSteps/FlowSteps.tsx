@@ -15,7 +15,7 @@ const STEPS = [
   {
     num: '03',
     title: 'Deliver',
-    body: "A branded PDF lands in your inbox automatically — or your customer's, if you're managing more than one site. Pick a range past a month and it becomes a monthly Overview instead — same report, right granularity.",
+    body: "A branded PDF lands in your inbox automatically — or your customer's, if you're managing more than one site. Pick a range past a month and it becomes a monthly Overview instead — same report, right granularity. Growth and Fleet installers can also choose which sections show up, per site.",
   },
 ] as const;
 

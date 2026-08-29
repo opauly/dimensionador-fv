@@ -22,11 +22,11 @@ export function ModuleGrid() {
       <div className="wrap">
         <SectionHead
           eyebrow="What's inside"
-          lede="Twelve modules, computed once and shown consistently everywhere. Two of them read differently depending on the range you pick — try the toggle."
+          lede="Twelve modules, computed once. Every plan gets the full set by default — Growth and Fleet installers can choose which ones appear on each site's report. Two of them also read differently depending on the range you pick — try the toggle."
         >
-          Every section the report
+          Every section a report
           <br />
-          actually contains.
+          can contain.
         </SectionHead>
 
         <div className={styles.toggleRow}>
@@ -35,8 +35,8 @@ export function ModuleGrid() {
             value={mode}
             onChange={(next) => setMode(next as Mode)}
             options={[
-              { value: 'detallado', label: 'Detallado · ≤31 days' },
-              { value: 'overview', label: 'Resumen · 32 days–6 months' },
+              { value: 'detallado', label: 'Detailed · ≤31 days' },
+              { value: 'overview', label: 'Overview · 32 days–6 months' },
             ]}
           />
           <span className={styles.hint}>Past 31 days, the report switches itself — no setting to remember.</span>

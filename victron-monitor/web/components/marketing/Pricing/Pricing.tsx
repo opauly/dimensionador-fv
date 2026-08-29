@@ -85,6 +85,10 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
+                  Up to 100 scheduled reports / mo
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
                   Health score + AI narrative
                 </li>
                 <li>
@@ -117,7 +121,15 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 <li className={styles.carry}>Everything in Starter, plus</li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
+                  Up to 300 scheduled reports / mo
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
                   Full white-label branding
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  Per-site report customization
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
@@ -139,6 +151,10 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
               </div>
               <ul className={styles.features}>
                 <li className={styles.carry}>Everything in Growth, plus</li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  Up to 2,000 scheduled reports / mo
+                </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
                   VRM API auto-ingestion
