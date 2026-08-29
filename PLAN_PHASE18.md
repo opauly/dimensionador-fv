@@ -178,3 +178,114 @@ above:
 
 Needing new data ingestion entirely (bigger, separate lift — no schema support today):
 sub-daily/peak-demand load profile (only daily-grain data is stored).
+
+---
+
+## Phase 2 — built (2026-08-29), on `feature/report-modules-phase2`
+
+Scope, per Oscar's own decisions in chat: critical alerts (item 9 above) plus the three
+hardware-conditional modules — grid meter detail, generator runtime, tank level — all four
+**unconditionally selectable** on every site, never hidden behind a per-site hardware-presence
+check. His own words: "my intention is to have all wired in, even if my sites have no data...
+if no data has been received, then we should show the module in 0." This is a real departure
+from this document's own original Phase 2 framing above ("only where a real meter/generator/
+tank exists") — superseded by that instruction once a live probe showed the practical reason
+hardware-gating would have been the wrong default anyway (next paragraph).
+
+**A live 90-day probe (2026-08-29) found generator runtime and tank level are registered but
+silent on every real installation.** `Gt` (generator) is listed in VRM diagnostics on 4 El
+Encino installations; `tc`/`tf`/`ts` (tank) on El Encino Casita — but a 90-day `get_stats()`
+check against all of them returned zero actual data points on every one. Critical alerts and
+grid meter detail, by contrast, are both confirmed LIVE with real current samples (checked
+against Vista Atenas LP M3 and Emtec respectively). Given generator/tank read as "no data" on
+every real site today regardless of gating, hardware-presence gating would only have added a
+detection mechanism with nothing yet to detect — Oscar's "wire it in for a future subscriber"
+instruction turned out to be the simpler AND the correct call, not just the more ambitious one.
+
+**No numeric tank fill-percentage code exists on any real installation.** Only capacity (`tc`,
+m³), fluid type (`tf`), and status (`ts`) are registered anywhere. `tank_level_pct` reads from a
+speculative code (`tl`, following Victron's own naming pattern for the sibling fields) that has
+never been seen on real data — documented as unconfirmed in `victron/vrm_series.py`'s own
+comment. Requesting an unpublished code from `get_stats()` just returns no data, so this costs
+nothing if wrong.
+
+**Schema (migration 029):** a new `vrm.critical_alerts` table — deliberately NOT `vrm.
+alarm_events`, since `vrm.count_alarm_episodes()` counts every row in that table unconditionally
+and a health score must never move because of these three categories (this document's own
+Decisions section on why critical alerts are separate, above). Six new nullable columns on
+`vrm.energy_daily` (`generator_hours`, `grid_meter` jsonb, `tank_capacity_m3`/`tank_fluid_type`/
+`tank_status`/`tank_level_pct`) — NULL on every pre-existing row and every CSV-sourced row with
+no equivalent signal, same pattern migration 012's own `pv_yield_kwh_sc0`/`sc1` already
+established. `report_modules`/`default_report_modules`'s CHECK constraints widened from 9 to 13
+known ids via a dynamic `DO` block that looks up each constraint's real name rather than
+assuming migration 028's Postgres-default naming was exactly right.
+
+**Both ingestion paths, not just the API one** — Oscar's explicit instruction ("fetch the
+correct values... from the API and CSV uploads"). `victron/vrm_series.py` (API path): critical
+alerts follow the exact `ALARM_CATEGORIES`/`alarm_episode_events()` pattern already used for
+scored alarms, just written to a separate output key; generator/grid-meter/tank codes are
+fetched in the same batched `get_stats()` call as everything else, no extra round trip.
+`victron/vrm_csv.py` (CSV path): a parallel `CRITICAL_ALARM_CATEGORIES` re-groups 3 of
+`UNSCORED_ALARM_SIGNALS`' existing entries into discrete WARNING/CLEARED episodes instead of
+only a sample-count summary; generator/grid-meter/tank CSV column names are a best-effort
+inference from Victron's own API `description` strings (device name `"Grid meter"` is already
+confirmed correct from existing code; the specific voltage/current/power-factor descriptions and
+the generator/tank device names are NOT verified against a real CSV export — none of Oscar's
+real sites have this hardware to produce one) — flagged explicitly in that module's own comment,
+and safe to be wrong: `_pick_all()` simply finds nothing and the column reads `None`, same as any
+other absent signal.
+
+**Rendering:** two new report rows — Critical Alerts + Grid Meter Detail (row 4), Generator
+Runtime + Tank Level (row 5) — each independently selectable via the same `want_X` two-block/
+single-block pattern rows 2-3 already use, joining the same `uniform_row_size()` pass so a report
+that includes them doesn't get a visibly different font size. Every one of the four always
+renders something (a real reading, a zero count, or an explicit "not detected" line) rather than
+being hidden — the render-time expression of Oscar's "always wired in" instruction.
+
+**Web UI — preview + description per checkbox**, a brand-new requirement added when this phase
+was authorized ("I want the modules checkboxes to show a preview of each one and a brief
+description"). Resolved as a **static illustrative thumbnail** (one fixed SVG icon per module,
+identical across every site) plus a one-sentence description — chosen over a live per-site
+mini-render specifically to avoid computing real report data just to populate a selection form.
+`lib/reportModuleThumbnails.tsx` is the one shared, presentational-only file both
+`SiteForm.tsx` (customer) and `AdminSiteEditForm.tsx` (admin) import — a deliberate, narrow
+exception to this codebase's usual "duplicate module-id lists across that boundary" rule, since
+icons/descriptions carry no entitlement logic to drift.
+
+**Default rollout — a real, caught-before-shipping regression.** The first pass added all 4 new
+ids to `ALL_MODULES` and left `resolve_report_modules()`'s non-entitled fallbacks and
+`render_html()`'s `selected=None` fallback both returning "the full module set" verbatim, exactly
+as Phase 1 did. Two problems, found during this phase's own verification pass rather than by a
+later live test:
+
+1. **A row-sizing regression independent of the rollout question.** `uniform_row_size()` sizes
+   the whole report's font uniformly by measuring every group of rows passed to it — Phase 2's
+   four new row groups were being added to that measurement UNCONDITIONALLY, before the
+   `want_critical`/`want_grid_meter`/`want_generator`/`want_tank` selection flags were even
+   computed. That means an existing customer's report — one that never selects any Phase 2
+   module — could still get a different (likely smaller) font size than before this phase shipped,
+   purely because unrendered rows were being measured. Fixed by computing the four `want_*` flags
+   BEFORE building `groups`, and only appending each new row group when its module is actually
+   selected — the same discipline `savings_rows`' own conditional append already modeled.
+2. **"Full default set" now meant something different than it used to.** `ALL_MODULES` growing
+   from 9 to 13 meant every non-customizing customer (Starter/owner tier, and any Growth/Fleet
+   installer who's never touched their selection) would gain 4 new report sections the moment this
+   shipped — three of them (grid meter, generator, tank) pure "not detected" boilerplate for the
+   near-totality of real sites, which have none of that hardware. Resolved with Oscar (2026-08-29):
+   a new `DEFAULT_MODULES` constant (the original 9 plus `critical_alerts` only) is what every
+   non-customizing fallback returns now — critical alerts are safety-relevant enough to show
+   everyone by default (the same way the Events section already shows "Total Alarm Episodes: 0"
+   for a clean week), but the 3 hardware-conditional modules stay strictly opt-in. `ALL_MODULES`
+   itself is unchanged (13 — the full set of ids a customer CAN select); only what "nothing
+   customized yet" resolves to changed. The web UI's own "pre-check everything on first open"
+   default (`SiteForm.tsx`/`AdminSiteEditForm.tsx`) was updated to match — a fresh site's
+   checklist opens with the same 10 checked, not all 13.
+
+**Verification:** unit-level exercise of `_phase2_rows()`/`render_html()` against both real and
+synthetic data (empty grid meter, empty tank, populated critical-alert counts); `tools/
+run_migration_029.py` run clean against production after Oscar applied the migration; a real
+`build_report_data()`/`render_pdf()` pass against `vista-atenas-2-floor-pool`'s actual data
+confirming (a) `selected=None` now equals `DEFAULT_MODULES` byte-for-byte, (b) a report selecting
+exactly the original 9 modules renders with no trace of any Phase 2 content, and (c) every
+selection combination (all 13, the new 4 alone, defaults) renders without error; `npx tsc
+--noEmit` clean on the web app after all frontend changes.

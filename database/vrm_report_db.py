@@ -236,6 +236,36 @@ MAX_OVERVIEW_RANGE_DAYS = 183
 # MAX_CUSTOM_RANGE_DAYS check used to raise.
 
 
+def get_critical_alert_counts_by_category(site_id: str, start: str | date, end: str | date,
+                                          schema: str) -> dict[str, int]:
+    """Episode-start count per critical-alert category (PLAN_PHASE18.md §7
+    item 9) within the window — same counting rule as
+    `get_alarm_episode_counts_by_category()` (only `severity = 'WARNING'`
+    rows, one per episode start), against `vrm.critical_alerts` instead of
+    `alarm_events`.
+
+    `vrm.critical_alerts` (migration 029) only exists in the `vrm` schema —
+    `monitoring`-schema sites (Node-RED-written Cerbo GX sites) predate this
+    feature and have their own, unrelated alarm system, so this returns `{}`
+    for `schema == 'monitoring'` without a query rather than erroring against
+    a table that was never meant to exist there.
+    """
+    if schema != "vrm":
+        return {}
+    rows = (_table(schema, "critical_alerts").select("category")
+            .eq("site_id", site_id)
+            .eq("severity", "WARNING")
+            .gte("timestamp", f"{start}T00:00:00")
+            .lte("timestamp", f"{end}T23:59:59")
+            .execute().data or [])
+    counts: dict[str, int] = {}
+    for row in rows:
+        category = row.get("category")
+        if category:
+            counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
 def bucket_days(rows: list[dict], start: date, end: date,
                 bucket_len_days: int) -> list[dict]:
     """Groups `rows` (already-fetched `energy_daily` rows) into consecutive
@@ -444,6 +474,10 @@ def fetch_report_window(site_id: str, start: str | date, end: str | date,
         # section's per-category breakdown is useful for hybrid/grid_zero
         # sites too (report bug fix, 2026-08-19).
         "alarm_episode_counts_by_category": get_alarm_episode_counts_by_category(
+            site_id, start, end, schema),
+        # PLAN_PHASE18.md §7 item 9 — separate from the above on purpose;
+        # see get_critical_alert_counts_by_category()'s own docstring.
+        "critical_alert_counts_by_category": get_critical_alert_counts_by_category(
             site_id, start, end, schema),
         # A window can be short because the CSV didn't cover it or because
         # Node-RED missed days. The report must be able to say so rather than

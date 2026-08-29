@@ -1234,6 +1234,84 @@ which also settled Q9 (the deferred Phase 15 VRM sync) as load-bearing rather th
 2026-08-25, **third-party report recipients allowed, capped at 5 per site**, with an unsubscribe footer
 link (Q5) — the fuller option, not the "customer's own address only" fallback.
 
+## Phase 18 — VRM Monitor: personalized report modules for Growth/Fleet (in progress, started 2026-08-26)
+
+**Goal:** let Growth/Fleet installer accounts choose which content modules appear in a given site's
+report, instead of every site getting the same fixed set — the content-personalization sibling of Phase
+17's tiered white-label branding (appearance only). Phase 1 (module toggling on the existing 12 modules)
+shipped 2026-08-28; Phase 2 (new module types) is in progress.
+
+Full build plan, the module inventory (verified against a live VRM API diagnostics probe, not assumed),
+and per-step validation gates: [`PLAN_PHASE18.md`](PLAN_PHASE18.md). Not duplicated in full here.
+
+### Why this phase exists
+
+The marketing page has always sold "computed once and shown consistently everywhere" as a feature to
+everyone — this phase is a deliberate carve-out from that promise for paying tiers who manage many
+client sites and want more control over the deliverable, not a walk-back of the promise for
+Starter/owner accounts.
+
+### Where this sits relative to other phases
+
+- Depends on Phase 17 (`resolve_branding()`'s exact tier-gating shape; the `report_schedule`/
+  `default_report_schedule` per-site/per-customer column pattern, reused verbatim for module selection).
+- Built on its own branch (`feature/personalized-reports`) rather than directly on `main`, given the
+  size of the risk — a mistake here degrades every existing customer's report, not just Growth/Fleet's —
+  merged back once Phase 1 was fully verified.
+- A live, read-only VRM API diagnostics probe against all 13 real installations (2026-08-26) corrected
+  several assumptions in this codebase's own existing comments (per-tracker PV yield is real, not
+  API-blocked as `vrm_series.py`'s docstring claimed; a real grid meter, generator run-hours, and a tank
+  sensor all exist on real sites today) — grounding Phase 2's module inventory in verified fact.
+- Closed a real, unrelated bug found along the way: the battery-health block's "Avg temperature" row
+  had displayed `max_temp`, not an average, since the block was written — shipped to `main` immediately
+  as its own fix (commit `7d06f3c`), independent of this phase.
+- Also surfaced (2026-08-28/29) that `PIPELINE_API_URL`'s GitHub Actions secret was wrong, silently
+  breaking both `scheduled-reports.yml` and `billing-reconcile.yml` for two days — fixed the same day,
+  unrelated to this phase's own code but found while chasing down why a live test didn't show expected
+  behavior.
+
+### Decisions locked (see PLAN_PHASE18.md's Decisions section, §1–§5)
+
+- **The 12 modules split 3 fixed + 9 selectable.** KPI header, AI narrative, and the daily bar chart are
+  the report's identity and are never optional; the other 9 are independently selectable.
+- **Selection lives per-site, with a per-customer default** — identical shape to
+  `report_schedule`/`default_report_schedule` (migration 026): `NULL` means "every module on," today's
+  exact behavior, unchanged; a customer's default only ever applies to a *new* site, never retroactively.
+- **Entitlement is enforced once, server-side**, in `resolve_report_modules()` — reuses the exact same
+  `white_label` plan_limits flag and tier/account-type population branding already gates on, rather than
+  a second, identically-seeded column. Admin can set a selection for any customer regardless of plan
+  (same "admin write path is separate and untiered" precedent branding uses), but render-time
+  entitlement is re-checked independently of who triggered generation — proven live: a real admin-set
+  selection on a non-entitled test customer correctly rendered every module anyway, and the same
+  selection, simulated against an entitled customer, correctly applied.
+- **What looked like the hard part (a full layout-reflow engine) turned out narrow.** `row2`/`row3`
+  already used generic pairing functions, so 8 of the 9 modules got full independent toggling without a
+  rewrite; the one real gap (a full-width 3-way energy-mix donut for a battery system missing only
+  `battery_health`) was a single new function, not a redesign.
+- **A real gap was found and fixed after Phase 1 "shipped"**: the one function every real report path
+  goes through (`_do_report()`) never actually called `resolve_report_modules()` — a saved selection had
+  zero effect on any real report until this was wired in, caught by Oscar's own live test on a real site,
+  not by any of this phase's earlier verification.
+
+### Explicit non-goals (Phase 1)
+
+New module *types* (deferred to Phase 2 — see `PLAN_PHASE18.md` §7 for the full, verified candidate
+list, with **Critical alerts** — DC ripple, cell imbalance, temperature faults — as the explicit top
+priority), a real full-width 3-way donut becoming a general-purpose N-way layout primitive, module
+selection for CSV-sourced sites being treated any differently than VRM-API sites (deliberately no such
+distinction — module selection isn't gated by live-data freshness the way scheduling is), and an
+operator-notes module (the column exists; nothing writes to it yet).
+
+### Validation
+
+Every step verified against real data, not just typechecked: a byte-for-byte identical regression check
+(a real site's report, before and after, matching exactly) confirming zero effect on any customer who
+never opts in; six real rendered PDF combinations covering every edge case (empty selection, a
+single-block fallback, the documented energy-mix/battery-health gap); the entitlement gate exercised
+with 7 real cases against the live `plan_limits` table; and, after Oscar's own live test surfaced the
+wiring gap, the exact real site and saved selection re-verified end to end, correctly hiding the
+deselected modules once entitlement was actually met.
+
 ---
 
 ## Timeline summary

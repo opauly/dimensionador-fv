@@ -161,13 +161,14 @@ interpreted as `tz`'s calendar days, inclusive.
 
 ── Scope note ────────────────────────────────────────────────────────────────
 `vrm_csv.py`'s `UNSCORED_ALARM_SIGNALS` (DC ripple, temperature, Battery
-Monitor faults — detected but never scored) has no equivalent here yet.
-`get_diagnostics()` does list plausible analogues (`eT*`, `eR*`, and more),
-but mapping them was not attempted in this step — out of scope for
-PLAN_PHASE15.md §8 Step 3, which names only the two *scored* alarm signals
-(`eL`, `eO1`/`eO2`) as confirmed. `unscored_alarms` is always `{}` here; a
-future step can extend `ALARM_CATEGORIES`-style mapping without touching
-this module's public contract.
+Monitor faults — detected but never scored) has no full equivalent here:
+`unscored_alarms` is always `{}` on this path. PLAN_PHASE18.md §7 item 9
+(2026-08-29) closed the safety-relevant subset of that gap —
+`CRITICAL_ALARM_CATEGORIES` below maps DC ripple, cell imbalance, and
+temperature faults into a `critical_alerts` output list, kept deliberately
+separate from `alarm_events`/`ALARM_CATEGORIES` (which are scored) — but the
+broader per-column sample-count summary `unscored_alarm_summary()` gives on
+the CSV path has no equivalent here yet.
 """
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -209,6 +210,59 @@ ALARM_CATEGORIES = {
     "low_battery": ("Low Battery Alarm", ["eL"]),
     "overload": ("Overload Alarm", ["eO1", "eO2"]),
 }
+
+# Critical alerts (PLAN_PHASE18.md §7 item 9) — deliberately NOT added to
+# ALARM_CATEGORIES above: those feed vrm.alarm_events, which
+# vrm.count_alarm_episodes() scores unconditionally. These three categories
+# are safety-relevant (any can precede a shutdown) but must never move a
+# health score — see database/migrations/029_report_modules_phase2.sql's own
+# comment. `fetch_and_map()` returns them under a separate `critical_alerts`
+# key, and the caller inserts them into the separate `vrm.critical_alerts`
+# table instead. Every code below was confirmed present AND actively
+# reporting (non-zero real time-series samples in the last 7 days) on a real
+# installation in a live probe, 2026-08-29 (Vista Atenas LP M3 for the
+# pack-level codes; Emtec/Proyecto gV for the per-module 0/1/2 variants) —
+# unlike the hardware-conditional codes below this dict, these are not
+# speculative.
+CRITICAL_ALARM_CATEGORIES = {
+    "dc_ripple": ("High DC Ripple", ["eR", "eR1", "eR2", "eR3"]),
+    "cell_imbalance": ("Cell Imbalance Alarm",
+                       ["ACI", "ACI0", "ACI1", "ACI2"]),
+    "temp_fault": ("Battery Temperature Alarm", [
+        "AHT", "ALT", "AHCT", "ALCT",
+        "AHT0", "ALT0", "AHCT0", "ALCT0",
+        "AHT1", "ALT1", "AHCT1", "ALCT1",
+        "AHT2", "ALT2", "AHCT2", "ALCT2",
+    ]),
+}
+
+# Hardware-conditional codes (PLAN_PHASE18.md §7 items 4a-c). `GENERATOR_CODE`
+# and the grid-meter codes were confirmed via the same 2026-08-29 live probe
+# (`Gt` registered on 4 real installations though currently reporting zero
+# live samples on all of them; `g1v`/`g1c`/... confirmed live and current on
+# Emtec). `TANK_LEVEL_CODE` is the one genuine guess in this module: no
+# numeric tank-fill-percentage code was found in any of the 13 real
+# installations' diagnostics (only tc/tf/ts/tcn — capacity/fluid
+# type/status/custom name — are registered, on El Encino Casita, also with
+# zero live samples in 90 days). `tl` follows Victron's own naming pattern
+# for the other tank fields but is unconfirmed against any real reading;
+# requesting an unpublished code from `get_stats()` just returns no data,
+# the same safe failure mode as every other absent signal in this module.
+GENERATOR_CODE = "Gt"
+GRID_METER_CODES = {
+    "v_l1": "g1v", "c_l1": "g1c", "p_l1": "g1p", "pf_l1": "g1pf",
+    "v_l2": "g2v", "c_l2": "g2c", "p_l2": "g2p", "pf_l2": "g2pf",
+    "v_l3": "g3v", "c_l3": "g3c", "p_l3": "g3p", "pf_l3": "g3pf",
+    "freq": "g1F", "pen_v": "gpn",
+}
+# Presence gate for "this installation has a real physical meter, not just
+# the inverter's own AC-input approximation" — g1v (grid meter voltage) is
+# only ever published alongside a genuine meter (confirmed: present on
+# Emtec, absent on El Encino Casona, which only has the ordinary g1/g2
+# inverter-side power codes already used elsewhere).
+GRID_METER_PRESENCE_CODE = "g1v"
+TANK_CODES = {"capacity": "tc", "fluid_type": "tf", "status": "ts"}
+TANK_LEVEL_CODE = "tl"  # speculative — see comment above
 
 # `stats?type=custom&interval=days` energy-flow codes, combined per
 # PLAN_PHASE15.md §4.4's formulas below. `Pg`/`Bg` are legitimately absent
@@ -358,10 +412,35 @@ def fetch_and_map(client, id_site, site_id: str, start, end, *,
         if c not in available:
             missing_signals.append(f"energy:{c}")
 
+    # PLAN_PHASE18.md §7 item 9 — same "present" detection shape as
+    # alarm_codes_present above, but kept in its own dict since these never
+    # feed missing_signals/ALARM_CATEGORIES-style scoring warnings (a
+    # missing critical-alert code is not a data-quality problem worth
+    # flagging the way a missing state/energy signal is — most
+    # installations simply don't have per-module battery detail).
+    critical_codes_present: dict[str, list[str]] = {}
+    for category, (_label, codes) in CRITICAL_ALARM_CATEGORIES.items():
+        present = [c for c in codes if c in available]
+        if present:
+            critical_codes_present[category] = present
+
+    # PLAN_PHASE18.md §7 items 4a-c — hardware-conditional codes, fetched in
+    # the same batch as everything else below so no extra API round trip is
+    # needed just because a site happens to have a generator/meter/tank.
+    generator_code = GENERATOR_CODE if GENERATOR_CODE in available else None
+    grid_meter_codes_present = {k: c for k, c in GRID_METER_CODES.items() if c in available}
+    tank_codes_present = {k: c for k, c in TANK_CODES.items() if c in available}
+    if TANK_LEVEL_CODE in available:
+        tank_codes_present["level_pct"] = TANK_LEVEL_CODE
+
     # ── Fine-grained series (state columns + alarm booleans) ───────────────
     requested_codes = sorted(
         set(state_code_of.values())
         | {c for codes in alarm_codes_present.values() for c in codes}
+        | {c for codes in critical_codes_present.values() for c in codes}
+        | ({generator_code} if generator_code else set())
+        | set(grid_meter_codes_present.values())
+        | set(tank_codes_present.values())
     )
     series_by_code: dict[str, pd.Series] = {}
     raw_index = pd.DatetimeIndex([])
@@ -398,9 +477,21 @@ def fetch_and_map(client, id_site, site_id: str, start, end, *,
                    "batt_charge_w", "batt_discharge_w", "grid_w"):
         tidied[column] = np.nan
 
+    # PLAN_PHASE18.md §7 items 4a-c — reindexed to raw_index exactly like
+    # STATE_CODES above, so vrm_daily.to_energy_daily_rows()'s `.loc[idx]`
+    # per-day slicing works the same way it already does for state columns.
+    generator_time_s = (series_by_code[generator_code].reindex(raw_index)
+                        if generator_code else None)
+    grid_meter_series = {k: series_by_code[c].reindex(raw_index)
+                         for k, c in grid_meter_codes_present.items()}
+    tank_series = {k: series_by_code[c].reindex(raw_index)
+                  for k, c in tank_codes_present.items()}
+
     rows = vrm_daily.to_energy_daily_rows(
         tidied, site_id, max_gap_s=max_gap_s, dump_type="vrm_api",
         pv_kwp=pv_kwp, battery_usable_kwh=battery_usable_kwh,
+        generator_time_s=generator_time_s,
+        grid_meter=grid_meter_series, tank=tank_series,
         yields=None, charge_states=None,
     )
 
@@ -484,6 +575,31 @@ def fetch_and_map(client, id_site, site_id: str, start, end, *,
             "— alarm episodes will read as zero"
         )
 
+    # ── Critical alerts (PLAN_PHASE18.md §7 item 9) — same episode shape,
+    # a SEPARATE list the caller inserts into vrm.critical_alerts, never
+    # vrm.alarm_events. No "no signal available" warning here, unlike the
+    # scored alarms above — most installations simply don't have per-module
+    # battery detail, which is normal, not a data-quality problem.
+    critical_alerts: list[dict] = []
+    for category, (label, _codes) in CRITICAL_ALARM_CATEGORIES.items():
+        codes = critical_codes_present.get(category)
+        if not codes:
+            continue
+        parts = []
+        for code in codes:
+            s = series_by_code.get(code)
+            if s is None or s.empty:
+                continue
+            parts.append((s.reindex(raw_index) != 0).fillna(False))
+        if not parts:
+            continue
+        active = parts[0]
+        for p in parts[1:]:
+            active = active | p
+        critical_alerts.extend(vrm_daily.alarm_episode_events(
+            active, site_id=site_id, alarm=label, source=category))
+    critical_alerts.sort(key=lambda e: e["timestamp"])
+
     # ── Remaining warnings ───────────────────────────────────────────────
     step = raw_index.to_series().diff().dt.total_seconds()
     big_gaps = int((step > max_gap_s).sum())
@@ -521,6 +637,7 @@ def fetch_and_map(client, id_site, site_id: str, start, end, *,
         "period_end": raw_index[-1].isoformat(),
         "rows": rows,
         "alarm_events": alarm_events,
+        "critical_alerts": critical_alerts,
         "unscored_alarms": {},
         "outages": outages,
         "missing_signals": missing_signals,

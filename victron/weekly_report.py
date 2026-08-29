@@ -45,6 +45,32 @@ from victron import report_i18n, report_svg as S, savings as savings_mod
 ALL_MODULES = (
     "energy_mix", "battery_health", "grid_quality", "events",
     "soc_chart", "solar_performance", "weather", "trend", "savings",
+    # PLAN_PHASE18.md §7 — "Phase 2" modules (2026-08-29). Unlike the 9
+    # above, these are never gated by has_batt/has_grid — a system with no
+    # generator/tank/real meter/critical-alert data just renders zero/
+    # unavailable (Oscar's own instruction), not hidden by system_type the
+    # way battery_health is hidden for grid_zero.
+    "critical_alerts", "grid_meter_detail", "generator_runtime", "tank_level",
+)
+
+# The set every report renders when nothing more specific is known — "no
+# `selected` was ever passed" (every pre-Phase-18 caller), AND (via
+# `vrm_api/report_modules.py:resolve_report_modules()`) "this customer isn't
+# entitled to customize at all" / "this customer's own selection is empty."
+# Deliberately NOT `ALL_MODULES` since Oscar's decision, 2026-08-29:
+# critical_alerts is safety-relevant enough to show everyone by default
+# (even as "0 events," the same way the Events section already shows
+# "Total Alarm Episodes: 0" for a clean week) — but grid_meter_detail/
+# generator_runtime/tank_level are hardware-conditional, and most real
+# sites have none of that hardware, so making them default-on would add
+# permanent "not detected" boilerplate to every customer's report the
+# moment this shipped, for zero customers who didn't ask for it. Those
+# three are opt-in only, chosen through the module selection UI, same as
+# any other Growth/Fleet personalization.
+DEFAULT_MODULES = (
+    "energy_mix", "battery_health", "grid_quality", "events",
+    "soc_chart", "solar_performance", "weather", "trend", "savings",
+    "critical_alerts",
 )
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -438,6 +464,63 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     min_l2, _ = _minmax(days, "min_grid_v_l2")
     _, max_l2 = _minmax(days, "max_grid_v_l2")
 
+    # ── PLAN_PHASE18.md §7 items 4a-c, 9 — Phase 2 hardware-conditional /
+    # critical-alert data. Every one of these reads `None`/0/empty exactly
+    # the same way whether the underlying signal was never published by this
+    # installation or simply had nothing to report this period — per
+    # Oscar's own instruction (2026-08-29), the module always renders,
+    # showing zero/unavailable rather than being hidden, so a future
+    # subscriber's generator/tank/meter "just works" the day it starts
+    # reporting, with no separate hardware-detection step to wire up first.
+    generator_hours_total = round(sum(_num(r.get("generator_hours")) for r in days), 1)
+
+    def _grid_meter_stat(phase: str, metric: str, agg: str) -> float | None:
+        vals = [r["grid_meter"][phase][f"{metric}_{agg}"] for r in days
+                if r.get("grid_meter") and phase in r["grid_meter"]
+                and f"{metric}_{agg}" in r["grid_meter"][phase]]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    grid_meter_detail: dict[str, dict] = {}
+    for phase in ("l1", "l2", "l3"):
+        v_mins = [r["grid_meter"][phase]["v_min"] for r in days
+                 if r.get("grid_meter") and phase in r["grid_meter"] and "v_min" in r["grid_meter"][phase]]
+        v_maxs = [r["grid_meter"][phase]["v_max"] for r in days
+                 if r.get("grid_meter") and phase in r["grid_meter"] and "v_max" in r["grid_meter"][phase]]
+        if not (v_mins or v_maxs):
+            continue
+        grid_meter_detail[phase] = {
+            "v_min": min(v_mins) if v_mins else None,
+            "v_max": max(v_maxs) if v_maxs else None,
+            "v_avg": _grid_meter_stat(phase, "v", "avg"),
+            "c_avg": _grid_meter_stat(phase, "c", "avg"),
+            "p_avg": _grid_meter_stat(phase, "p", "avg"),
+            "pf_avg": _grid_meter_stat(phase, "pf", "avg"),
+        }
+    has_grid_meter = bool(grid_meter_detail)
+
+    def _tank_last(field: str):
+        for r in reversed(days):
+            gm = r.get(field)
+            if gm is not None:
+                return gm
+        return None
+
+    tank_detail = {
+        "capacity_m3": _tank_last("tank_capacity_m3"),
+        "fluid_type": _tank_last("tank_fluid_type"),
+        "status": _tank_last("tank_status"),
+        "level_pct": _tank_last("tank_level_pct"),
+    }
+    has_tank = any(v is not None for v in tank_detail.values())
+
+    # Same shape/reasoning as alarm_by_category/alarm_total above, over the
+    # separate, never-scored vrm.critical_alerts table (see that table's own
+    # migration comment) — {} for every monitoring-schema report
+    # (get_critical_alert_counts_by_category() returns {} for schema !=
+    # 'vrm' without a query, since that table doesn't exist there).
+    critical_by_category = window.get("critical_alert_counts_by_category") or {}
+    critical_total = sum(critical_by_category.values())
+
     pv_by_day = [(r["date"], _num(r.get("pv_kwh"))) for r in days]
     best = max(pv_by_day, key=lambda x: x[1], default=None)
     worst = min(pv_by_day, key=lambda x: x[1], default=None)
@@ -659,6 +742,14 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         # above (see that variable's own comment, a few lines up in this
         # function, for why it's no longer `sum(daily_health.alarms_count)`).
         "alarmEpisodesByCategory": window["alarm_episode_counts_by_category"],
+        # PLAN_PHASE18.md §7 — Phase 2 hardware-conditional / critical-alert
+        # data. See this function's own "Phase 2" computation block, a few
+        # lines up, for how each is derived.
+        "generatorHoursTotal": generator_hours_total,
+        "gridMeterDetail": grid_meter_detail, "hasGridMeter": has_grid_meter,
+        "tankDetail": tank_detail, "hasTank": has_tank,
+        "criticalAlertsByCategory": critical_by_category,
+        "criticalAlertsTotal": critical_total,
         # PLAN_PHASE17.md §4 — see this function's own docstring. `None`
         # unless a caller explicitly resolved and passed one.
         "branding": branding,
@@ -798,6 +889,70 @@ def _rows(d: dict) -> tuple[list, list, list, list, list]:
     return batt, grid, events, perf, weather
 
 
+# PLAN_PHASE18.md §7 item 9 — same shape/reasoning as _ALARM_CATEGORY_LABEL_KEYS
+# above, over vrm.critical_alerts' `category` values instead of alarm_events'
+# `alarm` labels.
+_CRITICAL_CATEGORY_LABEL_KEYS = {
+    "dc_ripple": "criticalDcRipple",
+    "cell_imbalance": "criticalCellImbalance",
+    "temp_fault": "criticalTempFault",
+}
+
+
+def _phase2_rows(d: dict) -> tuple[list, list, list, list]:
+    """PLAN_PHASE18.md §7 — rows for the four Phase 2 modules, same
+    `[{"label", "value", ...}]` shape `_rows()` above builds for the
+    original nine so `S.single_block_row_svg()`/`S.two_block_row_svg()`
+    render them identically. Every one of these renders SOMETHING even when
+    the underlying signal has never reported for this site (Oscar's own
+    instruction, 2026-08-29) — zero counts, "0.0 hrs", or an explicit
+    "not detected" row, never an empty block.
+    """
+    t = d["t"]
+    by_category = d.get("criticalAlertsByCategory") or {}
+    critical = []
+    for cat_id, key in _CRITICAL_CATEGORY_LABEL_KEYS.items():
+        count = by_category.get(cat_id, 0)
+        critical.append({"label": t[key], "value": str(count),
+                         "valueColor": S.AMBER if count > 0 else "#222"})
+
+    gm = d.get("gridMeterDetail") or {}
+    if gm:
+        phase_key = {"l1": "gridMeterPhaseL1", "l2": "gridMeterPhaseL2", "l3": "gridMeterPhaseL3"}
+        grid_meter_rows = []
+        for phase in ("l1", "l2", "l3"):
+            stats = gm.get(phase)
+            if not stats:
+                continue
+            v = f"{stats['v_avg']:.1f} V" if stats.get("v_avg") is not None else "—"
+            c = f"{stats['c_avg']:.1f} A" if stats.get("c_avg") is not None else "—"
+            pf = f"PF {stats['pf_avg']:.2f}" if stats.get("pf_avg") is not None else ""
+            grid_meter_rows.append({"label": t[phase_key[phase]],
+                                    "value": " · ".join(x for x in (v, c, pf) if x)})
+    else:
+        grid_meter_rows = [{"label": t["gridMeterUnavailable"], "value": ""}]
+
+    generator_hours = [
+        {"label": t["generatorHours"],
+         "value": f"{d.get('generatorHoursTotal', 0.0):.1f} {t['generatorHoursUnit']}"},
+    ]
+
+    tank = d.get("tankDetail") or {}
+    if d.get("hasTank"):
+        tank_rows = [
+            {"label": t["tankCapacity"],
+             "value": f"{tank['capacity_m3']:.2f} m³" if tank.get("capacity_m3") is not None else "—"},
+            {"label": t["tankFluidType"], "value": tank.get("fluid_type") or "—"},
+            {"label": t["tankStatus"], "value": tank.get("status") or "—"},
+            {"label": t["tankLevel"],
+             "value": f"{tank['level_pct']:.0f}%" if tank.get("level_pct") is not None else "—"},
+        ]
+    else:
+        tank_rows = [{"label": t["tankUnavailable"], "value": ""}]
+
+    return critical, grid_meter_rows, generator_hours, tank_rows
+
+
 def render_html(d: dict, selected: set[str] | None = None) -> str:
     """`selected` is the OUTPUT of `vrm_api.report_modules.resolve_report_modules()`
     (PLAN_PHASE18.md §3) — a set of module ids to actually render, already
@@ -806,8 +961,16 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     `report_modules` column — same "receives the ALREADY-RESOLVED output,
     never the raw stored value" shape `branding` (below) already uses.
     `None` (every caller before this feature existed, and any caller that
-    hasn't been updated yet) means "every module on," today's exact,
-    unchanged behavior — not an entitlement decision made here.
+    hasn't been updated yet) means `DEFAULT_MODULES` — the original 9
+    modules (today's exact, unchanged pre-Phase-18 behavior) plus
+    `critical_alerts` (Oscar's own decision, 2026-08-29: safety-relevant
+    enough to show every customer by default) — NOT the full
+    `ALL_MODULES`, which would also silently add grid_meter_detail/
+    generator_runtime/tank_level boilerplate to every report that has
+    never customized its selection. Not an entitlement decision made here
+    either way — see `resolve_report_modules()`, which makes the same
+    `DEFAULT_MODULES` choice for every non-entitled/never-customized
+    customer.
 
     KPI header / narrative / daily bar chart are never gated by `selected`
     at all — they're the report's fixed spine (PLAN_PHASE18.md's Decisions
@@ -821,7 +984,7 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     showing more than was actually selected.
     """
     if selected is None:
-        selected = set(ALL_MODULES)
+        selected = set(DEFAULT_MODULES)
     t = d["t"]
     # PLAN_PHASE17.md §4 — `d["branding"]` is either `None` (every
     # `monitoring` report, every pre-Phase-17 caller, and any `vrm` report
@@ -838,6 +1001,7 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     contact_email = branding.get("contact_email") or "proyectos@paulyco.com"
     logo_b64 = branding.get("logo_b64") or get_logo_b64()
     batt, grid, events, perf, weather = _rows(d)
+    critical, grid_meter_rows, generator_hours_rows, tank_rows = _phase2_rows(d)
     has_grid = d["systemType"] in ("grid_zero", "hybrid")
     has_batt = d["systemType"] in ("off_grid", "hybrid")
 
@@ -856,11 +1020,34 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     # One row font size for the whole report. Sizing each row independently
     # fits tighter but reads as a rendering glitch — a single shrunken line
     # beside full-size neighbours. Solved once here, applied everywhere.
+    # PLAN_PHASE18.md §7 — computed here, ahead of `groups` below, so an
+    # UNSELECTED Phase 2 module's row content never enters the uniform-size
+    # pass at all. Getting this wrong would be a real regression: `batt`/
+    # `events`/`perf`/`weather`/`grid` below are Phase 1's own pre-existing
+    # groups and are (already, since before this feature existed) always
+    # included regardless of `selected` — that was already true when this
+    # function had no `selected` parameter at all, so it changes nothing for
+    # an existing customer. These four are NEW as of Phase 2, so
+    # unconditionally adding them here would size EVERY report — including
+    # one that selects none of them — against text that may never render.
+    want_critical = "critical_alerts" in selected
+    want_grid_meter = "grid_meter_detail" in selected
+    want_generator = "generator_runtime" in selected
+    want_tank = "tank_level" in selected
+
     half, full = S.IW - 2 * S.IPAD, S.PW - 2 * S.IPAD
     groups = [(batt, half), (events, half), (perf, half), (weather, half)]
     groups.append((grid, half if has_grid else full))
     if savings_rows:
         groups.append((savings_rows, full))
+    if want_critical:
+        groups.append((critical, half))
+    if want_grid_meter:
+        groups.append((grid_meter_rows, half))
+    if want_generator:
+        groups.append((generator_hours_rows, half))
+    if want_tank:
+        groups.append((tank_rows, half))
     row_size = S.uniform_row_size(groups)
 
     # Every "want_*" flag below folds selection together with the SAME
@@ -939,6 +1126,40 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
     else:
         row1_svg = ""
 
+    # Row 4 — Critical alerts + Grid meter detail (PLAN_PHASE18.md §7):
+    # never gated by has_batt/has_grid the way rows 1-3 are — a deselected
+    # module is the only reason either half is empty, matching Oscar's own
+    # "always renders, even with nothing to show" instruction for these
+    # four modules. `want_critical`/`want_grid_meter` were already computed
+    # above, ahead of the `groups`/`row_size` pass.
+    if want_critical and want_grid_meter:
+        row4 = S.two_block_row_svg(
+            t["sectionCriticalAlerts"], critical, t["subCriticalAlerts"],
+            t["sectionGridMeter"], grid_meter_rows, t["subGridMeter"],
+            row_size=row_size,
+        )
+    elif want_critical:
+        row4 = S.single_block_row_svg(t["sectionCriticalAlerts"], critical, t["subCriticalAlerts"], row_size=row_size)
+    elif want_grid_meter:
+        row4 = S.single_block_row_svg(t["sectionGridMeter"], grid_meter_rows, t["subGridMeter"], row_size=row_size)
+    else:
+        row4 = ""
+
+    # Row 5 — Generator runtime + Tank level. `want_generator`/`want_tank`
+    # were already computed above, ahead of the `groups`/`row_size` pass.
+    if want_generator and want_tank:
+        row5 = S.two_block_row_svg(
+            t["sectionGenerator"], generator_hours_rows, t["subGenerator"],
+            t["sectionTank"], tank_rows, t["subTank"],
+            row_size=row_size,
+        )
+    elif want_generator:
+        row5 = S.single_block_row_svg(t["sectionGenerator"], generator_hours_rows, t["subGenerator"], row_size=row_size)
+    elif want_tank:
+        row5 = S.single_block_row_svg(t["sectionTank"], tank_rows, t["subTank"], row_size=row_size)
+    else:
+        row5 = ""
+
     env = Environment(loader=FileSystemLoader(_TEMPLATE_DIR),
                       autoescape=select_autoescape(["html"]))
     tpl = env.get_template("weekly_report.html")
@@ -974,6 +1195,8 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
         row3_svg=_safe(row3) if row3 else "",
         trend_svg=(_safe(S.four_week_trend_svg(d["trend"], t)) if "trend" in selected else ""),
         savings_svg=_safe(savings_svg) if savings_svg else "",
+        row4_svg=_safe(row4) if row4 else "",
+        row5_svg=_safe(row5) if row5 else "",
     )
 
 

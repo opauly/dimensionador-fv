@@ -293,12 +293,14 @@ const ADMIN_SITE_WHITELIST = [
   'report_modules',
 ] as const;
 
-// PLAN_PHASE18.md's Decisions section — same 9 ids `sites.ts:REPORT_MODULES`,
-// `victron/weekly_report.py:ALL_MODULES`, and migration 028's CHECK
+// PLAN_PHASE18.md's Decisions section (originally 9 ids) plus §7's Phase 2
+// additions — same 13 ids `sites.ts:REPORT_MODULES`,
+// `victron/weekly_report.py:ALL_MODULES`, and migration 029's widened CHECK
 // constraint use.
 const ADMIN_REPORT_MODULES = new Set([
   'energy_mix', 'battery_health', 'grid_quality', 'events',
   'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+  'critical_alerts', 'grid_meter_detail', 'generator_runtime', 'tank_level',
 ]);
 
 export type AdminSiteUpdateFields = Partial<Pick<SiteRecord, (typeof ADMIN_SITE_WHITELIST)[number]>>;

@@ -13,6 +13,7 @@ import { listTimezones } from '@/lib/timezones';
 import { COUNTRIES } from '@/lib/countries';
 import { SUPPORTED_FLAT_CURRENCIES } from '@/lib/currencies';
 import type { SiteRecord } from '@/lib/server/db';
+import { REPORT_MODULE_ICONS } from '@/lib/reportModuleThumbnails';
 import { updateAnySiteAction, type AdminSiteFormState } from './actions';
 import styles from './sites.module.css';
 
@@ -23,20 +24,49 @@ const COUNTRY_CODES = Object.keys(COUNTRIES);
 // (admin views are English-only, see `lib/i18n/strings.ts`'s own header).
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const MAX_REPORT_RECIPIENTS = 5;
-// Same 9 ids `sites.ts:REPORT_MODULES` / `victron/weekly_report.py:
-// ALL_MODULES` / migration 028's CHECK constraint use, with plain English
-// labels — same "restated, not imported" reasoning this file's other
-// constants already give.
-const REPORT_MODULES: Array<{ id: string; label: string }> = [
-  { id: 'energy_mix', label: 'Where your energy came from' },
-  { id: 'battery_health', label: 'Battery health' },
-  { id: 'grid_quality', label: 'Grid quality' },
-  { id: 'events', label: 'Events' },
-  { id: 'soc_chart', label: 'Battery charge over time' },
-  { id: 'solar_performance', label: 'Solar performance' },
-  { id: 'weather', label: 'Weather' },
-  { id: 'trend', label: '4-week trend' },
-  { id: 'savings', label: 'Tariff savings' },
+// Same 13 ids `sites.ts:REPORT_MODULES` / `victron/weekly_report.py:
+// ALL_MODULES` / migration 029's widened CHECK constraint use, with plain
+// English labels — same "restated, not imported" reasoning this file's
+// other constants already give. `desc` (2026-08-29, Oscar's own
+// instruction) pairs with a static thumbnail icon
+// (lib/reportModuleThumbnails.tsx) for the same "preview + description per
+// checkbox" this file's customer-facing counterpart (SiteForm.tsx) shows.
+const REPORT_MODULES: Array<{ id: string; label: string; desc: string }> = [
+  { id: 'energy_mix', label: 'Where your energy came from',
+    desc: 'A donut chart showing the split between solar, battery, and grid energy.' },
+  { id: 'battery_health', label: 'Battery health',
+    desc: 'Full-charge days, lowest charge level, temperature, and voltage range.' },
+  { id: 'grid_quality', label: 'Grid quality',
+    desc: 'Voltage and frequency stability from the utility grid.' },
+  { id: 'events', label: 'Events',
+    desc: 'Grid outages and alarm episodes recorded during the period.' },
+  { id: 'soc_chart', label: 'Battery charge over time',
+    desc: 'Daily high and low battery charge level over the period.' },
+  { id: 'solar_performance', label: 'Solar performance',
+    desc: 'Actual solar output compared to the theoretical maximum.' },
+  { id: 'weather', label: 'Weather',
+    desc: 'Local sunshine, rain, and cloud cover for the period.' },
+  { id: 'trend', label: '4-week trend',
+    desc: 'Health score and solar production trend across the last 4 weeks.' },
+  { id: 'savings', label: 'Tariff savings',
+    desc: 'Estimated cost avoided by using solar instead of grid power.' },
+  { id: 'critical_alerts', label: 'Critical alerts',
+    desc: 'DC ripple, cell imbalance, and temperature faults on the battery system.' },
+  { id: 'grid_meter_detail', label: 'Grid meter detail',
+    desc: 'Per-phase voltage, current, and power factor from a real physical grid meter, where installed.' },
+  { id: 'generator_runtime', label: 'Generator runtime',
+    desc: 'Hours the backup generator ran during the period.' },
+  { id: 'tank_level', label: 'Tank level',
+    desc: 'Fuel or water tank capacity, fluid type, and last known status.' },
+];
+// Same set `victron/weekly_report.py:DEFAULT_MODULES` treats as "no
+// customization yet" — the original 9 plus critical_alerts, NOT the 3
+// hardware-conditional modules most sites have no hardware for. See
+// SiteForm.tsx's own DEFAULT_REPORT_MODULES for the full reasoning.
+const DEFAULT_REPORT_MODULES = [
+  'energy_mix', 'battery_health', 'grid_quality', 'events',
+  'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+  'critical_alerts',
 ];
 // The report's fixed spine (PLAN_PHASE18.md's Decisions section) — never
 // selectable, shown alongside REPORT_MODULES as always-checked/disabled.
@@ -87,10 +117,11 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
   const [recipients, setRecipients] = useState((site.report_recipients ?? []).join('\n'));
   const recipientCount = recipients.split('\n').map((s) => s.trim()).filter(Boolean).length;
 
-  // PLAN_PHASE18.md §5. `NULL` in the database means "every module on" —
-  // same initial-state rule `SiteForm.tsx` uses.
+  // PLAN_PHASE18.md §5/§7. `NULL` in the database means DEFAULT_REPORT_MODULES
+  // (the original 9 plus critical_alerts, NOT the 3 hardware-conditional
+  // modules) — same initial-state rule `SiteForm.tsx` uses.
   const initialModules = new Set<string>(
-    site.report_modules && site.report_modules.length > 0 ? site.report_modules : REPORT_MODULES.map((m) => m.id),
+    site.report_modules && site.report_modules.length > 0 ? site.report_modules : DEFAULT_REPORT_MODULES,
   );
   const [selectedModules, setSelectedModules] = useState<Set<string>>(initialModules);
   function toggleModule(id: string) {
@@ -354,16 +385,20 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
               </label>
             ))}
             {REPORT_MODULES.map((m) => (
-              <label key={m.id} className={styles.checkboxLabel}>
-                <input
-                  type="checkbox"
-                  name="report_modules"
-                  value={m.id}
-                  checked={selectedModules.has(m.id)}
-                  onChange={() => toggleModule(m.id)}
-                  disabled={pending}
-                />
-                {m.label}
+              <label key={m.id} className={styles.moduleCard}>
+                <div className={styles.moduleCardHeader}>
+                  <input
+                    type="checkbox"
+                    name="report_modules"
+                    value={m.id}
+                    checked={selectedModules.has(m.id)}
+                    onChange={() => toggleModule(m.id)}
+                    disabled={pending}
+                  />
+                  <span className={styles.moduleThumb} aria-hidden="true">{REPORT_MODULE_ICONS[m.id]}</span>
+                  <span>{m.label}</span>
+                </div>
+                <p className={styles.moduleDesc}>{m.desc}</p>
               </label>
             ))}
           </div>

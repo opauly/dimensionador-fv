@@ -162,14 +162,17 @@ function sanitizeRecipients(payload: Record<string, unknown>): void {
     .slice(0, MAX_REPORT_RECIPIENTS);
 }
 
-// PLAN_PHASE18.md's Decisions section — same 9 ids `victron/weekly_report.py:
-// ALL_MODULES` and migration 028's CHECK constraint use. Duplicated here
-// rather than shared across the language boundary, same call every other
-// tenancy-adjacent check in this codebase already makes (this file's own
-// SITE_WHITELIST restatement in lib/server/db/admin.ts, for one).
+// PLAN_PHASE18.md's Decisions section (originally 9 ids, migration 028) plus
+// §7's Phase 2 additions (migration 029) — same 13 ids `victron/weekly_
+// report.py:ALL_MODULES` and migration 029's widened CHECK constraint use.
+// Duplicated here rather than shared across the language boundary, same
+// call every other tenancy-adjacent check in this codebase already makes
+// (this file's own SITE_WHITELIST restatement in lib/server/db/admin.ts,
+// for one).
 export const REPORT_MODULES = [
   'energy_mix', 'battery_health', 'grid_quality', 'events',
   'soc_chart', 'solar_performance', 'weather', 'trend', 'savings',
+  'critical_alerts', 'grid_meter_detail', 'generator_runtime', 'tank_level',
 ] as const;
 const REPORT_MODULES_SET = new Set<string>(REPORT_MODULES);
 

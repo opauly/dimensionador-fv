@@ -220,7 +220,10 @@ def to_energy_daily_rows(tidied: pd.DataFrame, site_id: str, *, max_gap_s: int,
                          pv_kwp: float | None = None,
                          battery_usable_kwh: float | None = None,
                          yields: list[pd.Series] | None = None,
-                         charge_states: list[pd.Series] | None = None) -> list[dict]:
+                         charge_states: list[pd.Series] | None = None,
+                         generator_time_s: pd.Series | None = None,
+                         grid_meter: dict[str, pd.Series] | None = None,
+                         tank: dict[str, pd.Series] | None = None) -> list[dict]:
     """Per-day `energy_daily` rows.
 
     Every day present in `tidied` is emitted, including partial ones — the
@@ -236,9 +239,21 @@ def to_energy_daily_rows(tidied: pd.DataFrame, site_id: str, *, max_gap_s: int,
     nothing and get `None`s in those columns, same as an export missing those
     columns does today. `max_gap_s` is required, not defaulted — see the
     module docstring.
+
+    `generator_time_s` (Victron's `Gt` — a lifetime accumulated-runtime
+    counter, not a daily flow total), `grid_meter` (per-phase v/c/p/pf
+    series keyed `"v_l1"`/`"c_l1"`/`"p_l1"`/`"pf_l1"`/`"v_l2"`/.../`"freq"`/
+    `"pen_v"`, only for a real physical meter — PLAN_PHASE18.md §7's
+    2026-08-26/29 live probe), and `tank` (keyed `"capacity"`/`"fluid_type"`/
+    `"status"`/`"level_pct"`) are all `None` by default — an ingestion path
+    with no equivalent signal (every CSV export today) gets `None` in every
+    one of the new columns below, same as `yields`/`charge_states` already
+    behave when omitted.
     """
     yields = yields or []
     charge_states = charge_states or []
+    grid_meter = grid_meter or {}
+    tank = tank or {}
 
     outages = _grid_outages(tidied, max_gap_s)
     if not outages.empty:
@@ -276,6 +291,73 @@ def to_energy_daily_rows(tidied: pd.DataFrame, site_id: str, *, max_gap_s: int,
 
         day_outages = (outages[outages["day"] == day]
                        if not outages.empty else pd.DataFrame())
+
+        # Generator runtime (PLAN_PHASE18.md §7 item 4b): `Gt` is a lifetime
+        # counter, so the within-day figure is the delta across the day's
+        # samples, not a value read directly off the series. A negative
+        # delta (a counter reset, or a device swap mid-day) is reported as
+        # `None` rather than a nonsensical negative "hours" figure — this
+        # can only be told apart from "no signal at all" by the caller
+        # having the raw series in the first place, which is exactly why
+        # this stays `None` (unknown) instead of silently clamping to 0.
+        generator_hours = None
+        if generator_time_s is not None:
+            day_gt = pd.to_numeric(generator_time_s.loc[idx], errors="coerce").dropna()
+            if len(day_gt) >= 2:
+                delta = float(day_gt.iloc[-1] - day_gt.iloc[0])
+                generator_hours = round(delta / 3600.0, 2) if delta >= 0 else None
+
+        # Real grid-meter detail (PLAN_PHASE18.md §7 item 4a): per-phase
+        # min/max/avg for whatever phases this installation's meter
+        # actually publishes. `None` (not `{}`) when no meter series were
+        # passed at all, so the report can tell "no real meter" apart from
+        # "meter present, this day just has no samples."
+        grid_meter_detail = None
+        if grid_meter:
+            grid_meter_detail = {}
+            for phase in ("l1", "l2", "l3"):
+                phase_stats = {}
+                for metric, unit in (("v", "v"), ("c", "a"), ("p", "w"), ("pf", "pf")):
+                    s = grid_meter.get(f"{metric}_{phase}")
+                    if s is None:
+                        continue
+                    day_s = pd.to_numeric(s.loc[idx], errors="coerce").dropna()
+                    if day_s.empty:
+                        continue
+                    phase_stats[f"{metric}_min"] = round(float(day_s.min()), 2)
+                    phase_stats[f"{metric}_max"] = round(float(day_s.max()), 2)
+                    phase_stats[f"{metric}_avg"] = round(float(day_s.mean()), 2)
+                if phase_stats:
+                    grid_meter_detail[phase] = phase_stats
+            for key in ("freq", "pen_v"):
+                s = grid_meter.get(key)
+                if s is None:
+                    continue
+                day_s = pd.to_numeric(s.loc[idx], errors="coerce").dropna()
+                if not day_s.empty:
+                    grid_meter_detail[key] = round(float(day_s.mean()), 2)
+            if not grid_meter_detail:
+                grid_meter_detail = None
+
+        # Tank sensor fields (PLAN_PHASE18.md §7 item 4c): last known
+        # reading in the day's window — these are slow-changing/metadata
+        # values (capacity is fixed at install time; fluid type and status
+        # change occasionally), so "last sample" is the meaningful figure,
+        # not a min/max/avg the way a fast-moving electrical signal is.
+        def _tank_last(key: str, numeric: bool):
+            s = tank.get(key)
+            if s is None:
+                return None
+            day_s = s.loc[idx].dropna()
+            if day_s.empty:
+                return None
+            v = day_s.iloc[-1]
+            return round(float(v), 2) if numeric else str(v)
+
+        tank_capacity_m3 = _tank_last("capacity", numeric=True)
+        tank_fluid_type = _tank_last("fluid_type", numeric=False)
+        tank_status = _tank_last("status", numeric=False)
+        tank_level_pct = _tank_last("level_pct", numeric=True)
 
         rows.append({
             "site_id": site_id,
@@ -320,6 +402,16 @@ def to_energy_daily_rows(tidied: pd.DataFrame, site_id: str, *, max_gap_s: int,
 
             "pv_kwp_snapshot": pv_kwp,
             "battery_kwh_snapshot": battery_usable_kwh,
+
+            # PLAN_PHASE18.md §7 — hardware-conditional fields, all `None`
+            # unless the caller passed the corresponding series (see this
+            # function's own docstring).
+            "generator_hours": generator_hours,
+            "grid_meter": grid_meter_detail,
+            "tank_capacity_m3": tank_capacity_m3,
+            "tank_fluid_type": tank_fluid_type,
+            "tank_status": tank_status,
+            "tank_level_pct": tank_level_pct,
 
             # Not columns on energy_daily — carried for the caller's UI/filtering.
             "hours_covered": round(hours, 1),
