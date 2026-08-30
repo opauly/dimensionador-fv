@@ -179,7 +179,15 @@ const REPORT_MODULES_SET = new Set<string>(REPORT_MODULES);
 // Same denylist branding.ts / vrm_api/report_modules.py use — a denylist ON
 // PURPOSE, so a legacy hand-created customer with billing_status='none'
 // isn't accidentally excluded by a naive allowlist.
-const NOT_ENTITLED_STATUSES = new Set(['incomplete', 'unpaid', 'canceled']);
+//
+// 'trial_expired' (vrm_api/billing.py, migration 030, 2026-08-29) added
+// alongside the other four restatements of this exact denylist
+// (branding.ts, vrm_api/branding.py, vrm_api/report_modules.py, vrm_api/
+// routers/reports.py) — a real gap found live: a trial that expired with
+// no card on file was correctly demoted (plan/site_limit) but this
+// denylist not knowing the new status meant module selection stayed
+// entitled.
+const NOT_ENTITLED_STATUSES = new Set(['incomplete', 'unpaid', 'canceled', 'trial_expired']);
 
 /** Whether `/app/sites`' per-site edit form should show the module
  * checklist (`true`) or hide it entirely (`false`) for this customer — and

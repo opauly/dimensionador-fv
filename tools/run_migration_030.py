@@ -60,6 +60,7 @@ def main() -> None:
             "customer_id": test_customer_id,
             "onvo_subscription_id": f"migration-030-test-{uuid.uuid4().hex[:8]}",
             "mode": "test", "plan_key": "starter", "status": "trialing",
+            "last_synced_at": "2026-08-30T00:00:00+00:00",
         }).execute().data[0]
         sub_id = row["id"]
         now_iso = "2026-08-29T12:00:00+00:00"

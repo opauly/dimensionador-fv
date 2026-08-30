@@ -136,6 +136,33 @@ _BILLING_STATUS_FOR_ONVO_STATUS: dict[str, str] = {
     "unpaid": "unpaid",
 }
 
+# The single source of truth for "is this customer.billing_status value good
+# enough to use a paid feature" — checked by every READER of billing_status
+# (branding, report module selection, report generation), as opposed to
+# `_STATUS_ENTITLEMENT` above, which is a differently-shaped table consulted
+# only by the WRITER (`apply_entitlements()`, keyed on ONVO's raw `status`,
+# not the stored `billing_status`, and defaulting to "hold" rather than
+# "deny" for anything unrecognized).
+#
+# A DENYLIST on purpose, not an allowlist — PLAN_PHASE17.md §3.6's own
+# reasoning, repeated at every call site this used to be duplicated at: an
+# allowlist would silently exclude `billing_status='none'`/`NULL`, which is
+# every legacy, hand-created, Oscar-invited customer. Everything not
+# explicitly listed here — including a future ONVO status this file hasn't
+# been taught about yet — is entitled by default, matching `_classify_
+# status()`'s own "hold rather than guess" philosophy above.
+#
+# Found duplicated in THREE separate files 2026-08-29 (`branding.py`,
+# `report_modules.py`, `routers/reports.py`), each restating it independently
+# rather than importing it — Python-module-privacy convention taken too far,
+# not a deliberate design: adding `'trial_expired'` here (the very fix this
+# consolidation followed) meant editing three places, and the first pass
+# only found two. Every consumer now imports this constant directly instead
+# of keeping its own copy — a status added here is instantly correct
+# everywhere, with no possibility of one file silently falling behind the
+# others.
+NOT_ENTITLED_BILLING_STATUSES = frozenset({"incomplete", "unpaid", "canceled", "trial_expired"})
+
 
 def _t(name: str):
     return get_client().schema(SCHEMA).table(name)

@@ -175,6 +175,14 @@ export function ReportManager({ sites, lang }: ReportManagerProps) {
           // something true and actionable rather than a bare "try again".
           setError(t(lang, body.retryAfterSeconds && body.retryAfterSeconds >= 86400
             ? 'reports_error_rate_limited_day' : 'reports_error_rate_limited_hour'));
+        } else if (body?.error === 'not_entitled') {
+          // vrm_api/routers/reports.py:post_report()'s new entitlement gate
+          // (real live-test feedback, 2026-08-29: a trial that expired with
+          // no payment method could still generate reports by hand
+          // indefinitely). A specific, actionable message rather than the
+          // generic fallback below — this is the one case where "try
+          // again" is never going to work without renewing first.
+          setError(t(lang, 'reports_error_not_entitled'));
         } else {
           setError(t(lang, 'reports_error_generic'));
         }

@@ -26,16 +26,20 @@ import logging
 import re
 
 from vrm_api import storage
+from vrm_api.billing import NOT_ENTITLED_BILLING_STATUSES
 
 logger = logging.getLogger("vrm_api.branding")
 
-# Same denylist PLAN_PHASE17.md §3.6 uses for the scheduler's entitlement
-# gate (stated there as a denylist ON PURPOSE — the naive allowlist version
-# silently excludes billing_status='none', which is every legacy,
-# hand-created customer). Branding doesn't need §3.6's site-level checks
+# The shared entitlement denylist (`vrm_api.billing.
+# NOT_ENTITLED_BILLING_STATUSES` — that constant's own docstring has the
+# full reasoning, including PLAN_PHASE17.md §3.6's "denylist on purpose so
+# billing_status='none' isn't excluded" point). Previously a private
+# restatement here, along with two others in report_modules.py and
+# routers/reports.py — consolidated 2026-08-29 after adding 'trial_expired'
+# meant editing three separate copies and the first pass only caught two.
+# Branding doesn't need routers/reports.py's additional site-level check
 # (vrm.sites.active) — only the customer-level entitlement question applies
 # here.
-_NOT_ENTITLED_STATUSES = {"incomplete", "unpaid", "canceled"}
 
 # §4.4: strict hex, no shorthand, no alpha — this string is interpolated
 # directly into SVG/CSS.
@@ -172,7 +176,7 @@ def _is_entitled(customer_row: dict) -> bool:
         return False
     if customer_row.get("provisioning_state") != "active":
         return False
-    if customer_row.get("billing_status") in _NOT_ENTITLED_STATUSES:
+    if customer_row.get("billing_status") in NOT_ENTITLED_BILLING_STATUSES:
         return False
     return True
 

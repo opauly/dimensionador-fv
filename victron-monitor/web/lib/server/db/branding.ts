@@ -22,7 +22,11 @@ import type { CustomerRecord } from './types';
 // boundary rather than shared, the same call `vrm_api/tenancy.py`'s own
 // docstring already makes for tenancy checks: two independent
 // implementations of the same one-sentence rule.
-const NOT_ENTITLED_STATUSES = new Set(['incomplete', 'unpaid', 'canceled']);
+//
+// 'trial_expired' (vrm_api/billing.py, migration 030, 2026-08-29) added
+// alongside the other four restatements of this exact denylist — see
+// sites.ts's own comment for the full reasoning.
+const NOT_ENTITLED_STATUSES = new Set(['incomplete', 'unpaid', 'canceled', 'trial_expired']);
 
 /** The shape of `vrm.customers.branding` (PLAN_PHASE17.md §4.1) — the Zod
  * half of the "three places, one shape" documentation `vrm_api/schemas.py:

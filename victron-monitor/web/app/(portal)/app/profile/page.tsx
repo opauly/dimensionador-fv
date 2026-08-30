@@ -4,7 +4,7 @@ import { getBillingStatus, getCustomer, getVrmLinkStatus, siteCount } from '@/li
 import { t, type Lang, type StringKey } from '@/lib/i18n/strings';
 import { planLabel } from '@/lib/plans';
 import { formatDate, type DateLocale } from '@/lib/dates';
-import { Button } from '@/components/ui';
+import { Button, Panel } from '@/components/ui';
 import { ProfileForm } from './ProfileForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import styles from './profile.module.css';
@@ -77,6 +77,18 @@ export default async function ProfilePage() {
     <div>
       <h1>{t(lang, 'profile_title')}</h1>
 
+      {/* Reordered to the top (real live-test feedback, 2026-08-29) — the
+         one section with something to actually DO (edit your info) reads
+         better before the read-only status cards below it, not buried
+         under all of them. Same card treatment (`Panel`) as every other
+         section on this page now — matches `/app/help`'s own
+         `<Panel className={styles.section}>` convention, which this page
+         didn't follow before (its sections were plain, unstyled divs). */}
+      <Panel className={styles.section}>
+        <h2>{t(lang, 'profile_basic_info_title')}</h2>
+        <ProfileForm customer={customer} lang={lang} />
+      </Panel>
+
       <div className={styles.readonly}>
         <div className={styles.readonlyItem}>
           <span className={styles.readonlyLabel}>{t(lang, 'profile_login_email')}</span>
@@ -96,7 +108,7 @@ export default async function ProfilePage() {
         </div>
       </div>
 
-      <div className={styles.section}>
+      <Panel className={styles.section}>
         <h2>{t(lang, 'profile_vrm_title')}</h2>
         {vrmStatus.connected ? (
           <p className={styles.readonlyValue}>
@@ -113,12 +125,12 @@ export default async function ProfilePage() {
         <Button href="/app/sites" variant="ghost">
           {t(lang, 'profile_vrm_manage_cta')}
         </Button>
-      </div>
+      </Panel>
 
       {/* Billing status card (PLAN_PHASE16.md §8 Step 5) — same "compact
          status text + link" shape as the VRM connection card above, not an
          inline billing flow (that lives entirely at /app/billing). */}
-      <div className={styles.section}>
+      <Panel className={styles.section}>
         <h2>{t(lang, 'profile_billing_title')}</h2>
         <p className={styles.readonlyValue}>
           {billingStatus.plan_key
@@ -132,7 +144,7 @@ export default async function ProfilePage() {
         <Button href="/app/billing" variant="ghost">
           {t(lang, 'profile_billing_manage_cta')}
         </Button>
-      </div>
+      </Panel>
 
       {/* Report Branding used to have its own status card here, duplicating
          the "Branding" link already in the main nav (app/(portal)/app/
@@ -142,15 +154,10 @@ export default async function ProfilePage() {
          entitlement-gated `brandingAllowed` read above page.tsx no longer
          has a reader either, so it goes with it. */}
 
-      <div className={styles.section}>
-        <h2>{t(lang, 'profile_basic_info_title')}</h2>
-        <ProfileForm customer={customer} lang={lang} />
-      </div>
-
-      <div className={styles.section}>
+      <Panel className={styles.section}>
         <h2>{t(lang, 'profile_change_password_title')}</h2>
         <ChangePasswordForm lang={lang} />
-      </div>
+      </Panel>
     </div>
   );
 }

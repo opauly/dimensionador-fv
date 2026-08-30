@@ -387,11 +387,28 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
 
   // ── Normal: an already-provisioned account ────────────────────────────
   const perKey = intervalKey(status.billing_interval);
-  const renewsDate = status.cancel_at_period_end
-    ? status.current_period_end
-    : status.status === 'trialing'
-      ? status.trial_end
-      : status.current_period_end;
+  // A subscription ONVO isn't actively going to renew without the customer
+  // doing something first — real live-test feedback, 2026-08-29, confirmed
+  // for 'trial_expired' (a trial that expired with no card:
+  // vrm_api/billing.py:apply_entitlements()'s own 2026-08-29 fix) and
+  // extended by the same reasoning to 'unpaid'/'incomplete' (ONVO gave up
+  // retrying, or the very first charge never went through) — none of the
+  // three has a meaningful "renews on X" date, and all three should offer
+  // "Renew Plan" instead of "Change Plan"/"Cancel Subscription" below.
+  // 'past_due' is deliberately NOT included — Q8's 7-day grace period
+  // treats it as still-entitled and still actively retrying, so Change/
+  // Cancel remain the right actions there, same as `active`/`trialing`.
+  // Only the 'trial_expired' branch of this has been exercised against a
+  // real subscription; 'unpaid'/'incomplete' are extended by symmetry, not
+  // independently live-tested — flag if either looks wrong in practice.
+  const isNotEntitledSubscription = status.status === 'trial_expired' || status.status === 'unpaid' || status.status === 'incomplete';
+  const renewsDate = isNotEntitledSubscription
+    ? null
+    : status.cancel_at_period_end
+      ? status.current_period_end
+      : status.status === 'trialing'
+        ? status.trial_end
+        : status.current_period_end;
 
   return (
     <div>
@@ -455,17 +472,39 @@ export function BillingManager({ status: initialStatus, lang, firstRun, initialP
             {resumeError && <p className={styles.error}>{resumeError}</p>}
 
             <div className={styles.formActions}>
-              <Button type="button" variant="ghost" onClick={() => setPanel(panel === 'plans' ? 'none' : 'plans')}>
-                {t(lang, 'billing_change_plan_button')}
-              </Button>
-              {status.cancel_at_period_end ? (
-                <Button type="button" variant="ghost" onClick={handleResume} disabled={resumeBusy}>
-                  {resumeBusy ? t(lang, 'billing_resuming') : t(lang, 'billing_resume_button')}
+              {isNotEntitledSubscription ? (
+                // trial_expired/unpaid/incomplete (see isNotEntitledSubscription's
+                // own comment above) all still count as `hasLiveSubscription` —
+                // ONVO's dead/stuck subscription object still technically
+                // exists — but "Change Plan" / "Cancel Subscription" both
+                // imply an active, paying arrangement that isn't there. One
+                // button instead: same handler `billing_change_plan_button`
+                // already used (`submitChange()` already correctly detects
+                // `no_payment_method` and routes to the card form, then a
+                // real subscribe — see submitChange()'s own comment; for
+                // unpaid/incomplete WITH a card already on file, it instead
+                // does its normal cancel-and-restart with that same card,
+                // which is a reasonable "start fresh" action for a stuck
+                // subscription too), just labeled for what this customer
+                // actually needs to do.
+                <Button type="button" onClick={() => setPanel(panel === 'plans' ? 'none' : 'plans')}>
+                  {t(lang, 'billing_renew_plan_button')}
                 </Button>
               ) : (
-                <Button type="button" variant="ghost" onClick={() => setCancelOpen(true)}>
-                  {t(lang, 'billing_cancel_button')}
-                </Button>
+                <>
+                  <Button type="button" variant="ghost" onClick={() => setPanel(panel === 'plans' ? 'none' : 'plans')}>
+                    {t(lang, 'billing_change_plan_button')}
+                  </Button>
+                  {status.cancel_at_period_end ? (
+                    <Button type="button" variant="ghost" onClick={handleResume} disabled={resumeBusy}>
+                      {resumeBusy ? t(lang, 'billing_resuming') : t(lang, 'billing_resume_button')}
+                    </Button>
+                  ) : (
+                    <Button type="button" variant="ghost" onClick={() => setCancelOpen(true)}>
+                      {t(lang, 'billing_cancel_button')}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </>

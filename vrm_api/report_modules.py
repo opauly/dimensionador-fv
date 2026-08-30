@@ -20,10 +20,15 @@ identical values forever would be redundant tracking, not clarity — if
 these two entitlement rules are ever meant to diverge, that's a one-line
 change here, not a schema migration.
 
-`_is_entitled()` restates branding.py's own private helper rather than
-importing it — same reasoning `lib/server/db/admin.ts`'s own
-`ADMIN_SITE_WHITELIST` restatement gives for not sharing a tenancy-adjacent
-check across module boundaries via an underscore-prefixed internal.
+`_is_entitled()` used to restate branding.py's own private helper rather
+than importing it (module-privacy convention). That held until adding the
+`'trial_expired'` billing_status (migration 030) meant editing three
+separate copies of the same denylist and the first pass only found two —
+now both this file and branding.py import the single shared
+`vrm_api.billing.NOT_ENTITLED_BILLING_STATUSES` instead (that constant's
+own docstring has the full reasoning), and only the surrounding
+active/provisioning_state checks stay duplicated (they're each a single
+line, not a vocabulary that can drift).
 
 `ALL_MODULES`/`DEFAULT_MODULES` are NOT defined here — they're imported from
 `victron.weekly_report`, which actually implements each block. `victron/`
@@ -36,16 +41,12 @@ import in the project.
 import logging
 
 from victron.weekly_report import ALL_MODULES, DEFAULT_MODULES
+from vrm_api.billing import NOT_ENTITLED_BILLING_STATUSES
 from vrm_api.report_limits import resolve_limits
 
 logger = logging.getLogger("vrm_api.report_modules")
 
 _ALL_MODULES_SET = frozenset(ALL_MODULES)
-
-# Same denylist branding.py and PLAN_PHASE17.md §3.6's scheduler gate use —
-# a denylist ON PURPOSE, so a legacy hand-created customer with
-# billing_status='none' isn't accidentally excluded by a naive allowlist.
-_NOT_ENTITLED_STATUSES = {"incomplete", "unpaid", "canceled"}
 
 
 def _is_entitled(customer_row: dict) -> bool:
@@ -53,7 +54,11 @@ def _is_entitled(customer_row: dict) -> bool:
         return False
     if customer_row.get("provisioning_state") != "active":
         return False
-    if customer_row.get("billing_status") in _NOT_ENTITLED_STATUSES:
+    # The shared entitlement denylist (`vrm_api.billing.
+    # NOT_ENTITLED_BILLING_STATUSES` — that constant's own docstring has the
+    # full reasoning). Previously a private restatement here, along with two
+    # others in branding.py and routers/reports.py — consolidated 2026-08-29.
+    if customer_row.get("billing_status") in NOT_ENTITLED_BILLING_STATUSES:
         return False
     return True
 

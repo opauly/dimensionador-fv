@@ -28,17 +28,22 @@
   color: var(--paper);
 }
 
+/* Card treatment (real live-test feedback, 2026-08-29) — matches
+   `/app/help`'s own `<Panel className={styles.section}>` convention:
+   `Panel` supplies the actual card visuals (background/border/radius),
+   this class only adds sizing/spacing on top, same division of labor
+   help.module.css's own `.section` already uses. */
 .section {
-  margin-top: 36px;
+  max-width: 720px;
+  padding: 22px 26px;
+  margin-top: 20px;
+}
+.section h2 {
+  margin-bottom: 10px;
 }
 
 .form {
   max-width: 560px;
-  /* Same rhythm as .section (margin-top: 36px) — this form has no .section
-     wrapper of its own in page.tsx, so without this it sits flush against
-     the Branding status card right above it, reading as one continuous
-     block instead of two separate sections. */
-  margin-top: 36px;
 }
 
 .fieldRow {

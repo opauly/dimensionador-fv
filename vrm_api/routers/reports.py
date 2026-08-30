@@ -21,6 +21,7 @@ from database.supabase_client import get_client
 from victron import weekly_report
 
 from vrm_api import jobs, report_runs, storage, tenancy
+from vrm_api.billing import NOT_ENTITLED_BILLING_STATUSES
 from vrm_api.branding import resolve_branding
 from vrm_api.deps import require_pipeline_key
 from vrm_api.report_delivery import notify_cap_reached_once, send_report_email
@@ -38,14 +39,16 @@ router = APIRouter(prefix="/v1/reports", tags=["reports"],
 
 _SCHEMA = "vrm"
 
-# §3.6's entitlement gate, restated here as the same DENYLIST branding.py's
-# resolve_branding() uses (and for the identical reason: the naive allowlist
-# version silently excludes billing_status='none'/NULL, which is every
-# legacy, hand-created, Oscar-invited customer — see that module's own
-# comment). Kept as its own copy rather than an import: this endpoint's
-# entitlement question also includes vrm.sites.active, which branding.py's
-# customer-only gate has no reason to know about.
-_NOT_ENTITLED_STATUSES = {"incomplete", "unpaid", "canceled"}
+# §3.6's entitlement gate uses the shared `vrm_api.billing.
+# NOT_ENTITLED_BILLING_STATUSES` denylist (that constant's own docstring has
+# the full reasoning, including why it's a denylist and not an allowlist).
+# Previously its own private copy here, along with two others in
+# branding.py and report_modules.py — consolidated 2026-08-29 after adding
+# 'trial_expired' meant editing three separate copies and the first pass
+# only caught two. This endpoint's own extra check (vrm.sites.active,
+# below) has no equivalent in the shared constant — branding.py's
+# customer-only gate has no reason to know about it, so it stays local to
+# `_is_report_entitled()` instead.
 
 # §3.4: once exceeded, stop STARTING new sites (already-started work is
 # never aborted mid-way) and return with remaining > 0. jobs.py's own
@@ -213,6 +216,27 @@ def post_report(body: ReportRequest, background_tasks: BackgroundTasks) -> JobCr
         # above already forces actor=="admin" whenever schema_=="monitoring",
         # so this branch only ever fires for a real vrm-schema customer.
         customer = tenancy.get_customer(body.customer_id)
+        # Real gap, found live 2026-08-29: this manual path never checked
+        # entitlement at all — only the scheduled path (`run-due` below)
+        # did — so a customer whose trial expired with no payment method
+        # (correctly demoted by billing.apply_entitlements()) could still
+        # generate reports by hand indefinitely. Same check, same
+        # denylist, as the scheduled path now uses (_is_report_entitled(),
+        # renamed from _is_schedule_entitled() for exactly this reason).
+        # Checked BEFORE the rate-limit cap below — a non-entitled customer
+        # shouldn't spend any of that budget just to be told no.
+        if not _is_report_entitled(customer, site_row):
+            raise HTTPException(status_code=403, detail={
+                "code": "not_entitled",
+                "message": "Your subscription isn't active — renew your plan to generate reports.",
+            })
+        # Cap A's vrm_api-side ceiling (PLAN_PHASE17.md §2.2) — a SECOND,
+        # higher rate limit, independent of app/api/pipeline/reports/
+        # route.ts's own lower one. Not redundancy: this is vrm_api's own
+        # trust boundary, and Next.js is only today's caller.
+        # actor=="admin" (/admin/reports) is exempt by design — the guard
+        # above already forces actor=="admin" whenever schema_=="monitoring",
+        # so this branch only ever fires for a real vrm-schema customer.
         check_manual_cap(body.customer_id, customer.get("plan"))
 
     job = jobs.create_job("report", customer_id=body.customer_id, site_id=body.site_id,
@@ -234,21 +258,33 @@ def _site_has_data(site_id: str, start: str, end: str) -> bool:
     return bool(rdb.get_energy_daily(site_id, start, end, "vrm"))
 
 
-def _is_schedule_entitled(customer: dict, site: dict) -> bool:
-    """PLAN_PHASE17.md §3.6 — read `_NOT_ENTITLED_STATUSES` above before this
-    function: it is stated as a DENYLIST on purpose, so `billing_status`
+def _is_report_entitled(customer: dict, site: dict) -> bool:
+    """PLAN_PHASE17.md §3.6 — `NOT_ENTITLED_BILLING_STATUSES` (imported from
+    `vrm_api.billing`) is a DENYLIST on purpose, so `billing_status`
     `'none'`/`NULL` (every legacy, hand-created, Oscar-invited customer)
     keeps generating rather than being silently excluded by a naive
-    allowlist. The scheduler never calls ONVO or `reconcile_customer()` to
-    answer this — it reads the derived cache `apply_entitlements()` already
-    maintains, same as `branding.py`'s own entitlement check."""
+    allowlist — see that constant's own docstring. Never calls ONVO or
+    `reconcile_customer()` to answer this — it reads the derived cache
+    `apply_entitlements()` already maintains, same as `branding.py`'s own
+    entitlement check.
+
+    Originally named `_is_schedule_entitled()` and called only from
+    `run-due` below — a real gap, found live 2026-08-29: the manual
+    "Generate Report" button (`post_report()` above) called NEITHER this
+    NOR any other entitlement check, only `check_manual_cap()`'s rate
+    limit, meaning a customer whose trial expired with no payment method
+    (correctly demoted by `apply_entitlements()`) could still generate
+    reports by hand indefinitely. Renamed and now called from both places —
+    manual and scheduled generation must answer the exact same entitlement
+    question, not two different ones that happened to agree by accident
+    until one changed."""
     if not customer.get("active"):
         return False
     if customer.get("provisioning_state") != "active":
         return False
     if not site.get("active"):
         return False
-    if customer.get("billing_status") in _NOT_ENTITLED_STATUSES:
+    if customer.get("billing_status") in NOT_ENTITLED_BILLING_STATUSES:
         return False
     return True
 
@@ -365,7 +401,7 @@ def post_run_due(body: ReportsRunDueRequest) -> ReportsRunDueOut:
         try:
             customer = tenancy.get_customer(site["customer_id"])
 
-            if not _is_schedule_entitled(customer, site):
+            if not _is_report_entitled(customer, site):
                 report_runs.record_skipped(run_id, "skipped_not_entitled")
                 results.append(ReportRunSiteResult(site_id=site_id, status="skipped_not_entitled"))
                 continue
