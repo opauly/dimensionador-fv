@@ -420,10 +420,6 @@ class FleetSnapshotsRefreshOut(BaseModel):
     skipped: int
     failed: int
 
-    site_id: str
-    start: str
-    end: str
-
 
 # ──────────────────────────────────────────────────────────────────────
 # PLAN_PHASE16.md §5.1–5.3 / §8 Step 3 — routers/billing.py request/response
