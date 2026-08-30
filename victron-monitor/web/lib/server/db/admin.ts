@@ -254,6 +254,180 @@ export async function listAllSites(): Promise<SiteRecord[]> {
   return (data ?? []) as SiteRecord[];
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// Fleet overview (admin ops dashboard, 2026-08-30) — informed by a UCR
+// capstone project's own requirements doc (a separate, standalone project
+// Oscar is sponsoring with the same idea), built independently and now,
+// against data this pipeline already computes. Every field below is read
+// from an EXISTING table — no new migration, no new vrm_api endpoint.
+// Same "no bulk-read endpoint exists for this, and none is needed" call
+// `/admin/activity` (page.tsx's own comment) already makes for a
+// cross-customer admin view: this queries Supabase directly from the
+// Next.js server, the same way listAllSites()/listCustomers() above do,
+// rather than adding a new FastAPI router just to proxy the same read.
+export type FleetConnectionStatus = 'online' | 'stale' | 'never_synced';
+
+export type FleetOverviewRow = {
+  site_id: string;
+  display_name: string;
+  customer_id: string;
+  customer_name: string;
+  system_type: SiteRecord['system_type'];
+  pv_kwp: number | null;
+  battery_usable_kwh: number | null;
+  vrm_last_synced_at: string | null;
+  connection_status: FleetConnectionStatus;
+  health_score: number | null;
+  health_status: string | null;
+  health_date: string | null;
+  active_alarms: number;
+  active_critical_alerts: number;
+};
+
+export type FleetOverview = {
+  sites: FleetOverviewRow[];
+  rollup: {
+    site_count: number;
+    online_count: number;
+    avg_health_score: number | null;
+    total_active_alarms: number;
+    total_active_critical_alerts: number;
+  };
+};
+
+// A site synced within this window reads "online" — 48h, not billing.py's
+// own 5-minute `_STALE_AFTER` (that constant answers a completely different
+// question: "is this ONVO subscription mirror fresh enough to trust
+// without a live re-check"). This fleet's real sync cadence is daily
+// (scheduled reports) or on-demand (a customer's own "Sync now"/an admin
+// fleet sync) — 48h tolerates a normal day-to-day gap and a quiet weekend
+// without flagging every site as "stale" between two ordinary syncs.
+const _ONLINE_WITHIN_MS = 48 * 60 * 60 * 1000;
+
+function _connectionStatus(lastSyncedAt: string | null, now: number): FleetConnectionStatus {
+  if (!lastSyncedAt) return 'never_synced';
+  const age = now - new Date(lastSyncedAt).getTime();
+  return age <= _ONLINE_WITHIN_MS ? 'online' : 'stale';
+}
+
+/** For each (site_id, alarm, source) episode key, the WARNING/CLEARED
+ * severity of its MOST RECENT event within `rows` — a WARNING with no
+ * later CLEARED means that episode is still open right now. `rows` should
+ * already be sorted or unsorted; this scans all of them and keeps the
+ * latest by timestamp per key, the same "fetch raw rows, group in code"
+ * shape `database/vrm_report_db.py:get_alarm_episode_counts_by_category()`
+ * already uses server-side, mirrored here since this is a Next.js-side
+ * read with no Python equivalent to call into. */
+function _countOpenEpisodes(rows: { site_id: string; alarm?: string | null; category?: string | null; severity: string | null; timestamp: string | null }[]): Map<string, number> {
+  const latestByKey = new Map<string, { severity: string | null; ts: number }>();
+  for (const r of rows) {
+    if (!r.timestamp) continue;
+    const label = r.alarm ?? r.category ?? 'unknown';
+    const key = `${r.site_id}::${label}`;
+    const ts = new Date(r.timestamp).getTime();
+    const existing = latestByKey.get(key);
+    if (!existing || ts > existing.ts) latestByKey.set(key, { severity: r.severity, ts });
+  }
+  const openCountBySite = new Map<string, number>();
+  for (const [key, latest] of latestByKey) {
+    if (latest.severity !== 'WARNING') continue;
+    const siteId = key.split('::')[0];
+    openCountBySite.set(siteId, (openCountBySite.get(siteId) ?? 0) + 1);
+  }
+  return openCountBySite;
+}
+
+/** Every `source='vrm_api'` site's current status in one call — connection
+ * freshness, latest health score, and open alarm/critical-alert counts.
+ * `monitoring`-schema (Node-RED) sites are deliberately excluded: they have
+ * no `vrm.daily_health` row shaped the same way, and mixing the two would
+ * make "average fleet health" mean two different things silently. */
+export async function getFleetOverview(): Promise<FleetOverview> {
+  const admin = getSupabaseAdmin();
+  const now = Date.now();
+  // Generous enough to always contain the real most-recent health row (a
+  // site can go a few days without a fresh sync) and any genuinely open
+  // alarm/critical-alert episode (an episode that's been open longer than
+  // this would be a real, separate "stuck" bug worth its own investigation,
+  // not something this dashboard needs to keep scanning further back for).
+  const lookbackIso = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
+  const lookbackDate = lookbackIso.slice(0, 10);
+
+  const { data: sites, error: sitesError } = await admin
+    .schema('vrm')
+    .from('sites')
+    .select('site_id, display_name, customer_id, system_type, pv_kwp, battery_usable_kwh, vrm_last_synced_at')
+    .eq('source', 'vrm_api')
+    .order('display_name');
+  if (sitesError) throw sitesError;
+  const siteRows = sites ?? [];
+  const siteIds = siteRows.map((s) => s.site_id);
+
+  if (siteIds.length === 0) {
+    return { sites: [], rollup: { site_count: 0, online_count: 0, avg_health_score: null, total_active_alarms: 0, total_active_critical_alerts: 0 } };
+  }
+
+  const [{ data: customers, error: customersError }, { data: health, error: healthError }, { data: alarms, error: alarmsError }, { data: criticalAlerts, error: criticalError }] =
+    await Promise.all([
+      admin.schema('vrm').from('customers').select('id, name'),
+      admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status').in('site_id', siteIds).gte('date', lookbackDate),
+      admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
+      admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
+    ]);
+  if (customersError) throw customersError;
+  if (healthError) throw healthError;
+  if (alarmsError) throw alarmsError;
+  if (criticalError) throw criticalError;
+
+  const customerNameById = new Map((customers ?? []).map((c) => [c.id as string, c.name as string]));
+
+  // Latest daily_health row per site — highest `date` wins; a tie (two
+  // dump_types for the same date) keeps the higher health_score, same
+  // dedup rule `database/vrm_report_db.py:bucket_health_days()` already
+  // uses for exactly this "which row represents this date" question.
+  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null }>();
+  for (const row of health ?? []) {
+    const existing = latestHealthBySite.get(row.site_id);
+    if (!existing || row.date > existing.date || (row.date === existing.date && (row.health_score ?? -1) > (existing.health_score ?? -1))) {
+      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status });
+    }
+  }
+
+  const openAlarmsBySite = _countOpenEpisodes((alarms ?? []).map((a) => ({ site_id: a.site_id, alarm: a.alarm, severity: a.severity, timestamp: a.timestamp })));
+  const openCriticalBySite = _countOpenEpisodes((criticalAlerts ?? []).map((c) => ({ site_id: c.site_id, category: c.category, severity: c.severity, timestamp: c.timestamp })));
+
+  const rows: FleetOverviewRow[] = siteRows.map((s) => {
+    const latestHealth = latestHealthBySite.get(s.site_id);
+    return {
+      site_id: s.site_id,
+      display_name: s.display_name,
+      customer_id: s.customer_id,
+      customer_name: customerNameById.get(s.customer_id) ?? '—',
+      system_type: s.system_type,
+      pv_kwp: s.pv_kwp,
+      battery_usable_kwh: s.battery_usable_kwh,
+      vrm_last_synced_at: s.vrm_last_synced_at,
+      connection_status: _connectionStatus(s.vrm_last_synced_at, now),
+      health_score: latestHealth?.health_score ?? null,
+      health_status: latestHealth?.health_status ?? null,
+      health_date: latestHealth?.date ?? null,
+      active_alarms: openAlarmsBySite.get(s.site_id) ?? 0,
+      active_critical_alerts: openCriticalBySite.get(s.site_id) ?? 0,
+    };
+  });
+
+  const scores = rows.map((r) => r.health_score).filter((v): v is number => v !== null);
+  const rollup = {
+    site_count: rows.length,
+    online_count: rows.filter((r) => r.connection_status === 'online').length,
+    avg_health_score: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+    total_active_alarms: rows.reduce((a, r) => a + r.active_alarms, 0),
+    total_active_critical_alerts: rows.reduce((a, r) => a + r.active_critical_alerts, 0),
+  };
+
+  return { sites: rows, rollup };
+}
+
 // Same field whitelist as `sites.ts:SITE_WHITELIST`, restated here rather
 // than imported — that module's constant is a local, unexported `const`
 // (each tenancy file in this directory keeps its own whitelist + its own

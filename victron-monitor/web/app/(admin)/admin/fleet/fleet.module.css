@@ -1,0 +1,92 @@
+/* app/(admin)/admin/fleet — same conventions as sites/activity's own
+   modules (styles/tokens.css only, nothing ported from landing_template.html). */
+
+.rollupRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.rollupCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+}
+.rollupLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+.rollupValue {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--paper);
+}
+
+.sub {
+  font-size: 12px;
+  color: var(--mute);
+  margin-top: 2px;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.dotOnline {
+  background: var(--good);
+}
+.dotStale {
+  background: var(--signal);
+}
+.dotNever {
+  background: var(--mute);
+}
+
+.healthBadge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+/* Same 4-tier thresholds/intent as report_delivery.py's own
+   _health_score_colors() — literal colors here rather than the shared
+   --good/--signal tokens, since that function's own worst tier is a real
+   red this app's token set has no equivalent for (--signal is amber, reused
+   elsewhere for both "warning" and "error" — this view keeps the report's
+   own 4 distinct tiers instead of collapsing the bottom two). */
+.healthExcellent {
+  background: rgba(63, 191, 143, 0.16);
+  color: var(--good);
+}
+.healthGood {
+  background: rgba(7, 137, 212, 0.16);
+  color: var(--victron-glow);
+}
+.healthFair {
+  background: rgba(242, 169, 59, 0.18);
+  color: var(--signal);
+}
+.healthPoor {
+  background: rgba(201, 64, 64, 0.18);
+  color: #e37b7b;
+}
+.healthNone {
+  background: var(--panel-2);
+  color: var(--mute);
+}
+
+.alarmCount {
+  display: inline-block;
+  font-weight: 700;
+  color: var(--signal);
+}
