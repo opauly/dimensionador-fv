@@ -61,6 +61,7 @@ and `tab_upload()`'s CSV path already use) are called directly, matching
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import ValidationError
@@ -438,7 +439,15 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
             skipped += 1
             continue
 
-        _t("site_snapshots").upsert({"site_id": site["site_id"], **snapshot}).execute()
+        # `updated_at DEFAULT now()` only fires on INSERT, not on the UPDATE
+        # half of an upsert — found from `tools/run_migration_031.py`'s own
+        # verification output, where a second upsert with different values
+        # left `updated_at` frozen at its first-ever value. Set explicitly
+        # on every write instead of relying on the column default.
+        _t("site_snapshots").upsert({
+            "site_id": site["site_id"], **snapshot,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
         refreshed += 1
 
     return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
