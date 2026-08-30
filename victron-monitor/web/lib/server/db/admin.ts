@@ -282,6 +282,18 @@ export type FleetOverviewRow = {
   health_date: string | null;
   active_alarms: number;
   active_critical_alerts: number;
+  // Fleet Dashboard Phase 2 (2026-08-30) — from `vrm.site_snapshots`
+  // (migration 031), upserted by the ~15-minute `refresh-snapshots` sweep
+  // (`vrm_api/routers/vrm_fleet.py`). `null` for every field, including
+  // `live_captured_at`, means no snapshot has landed for this site yet —
+  // never a fabricated 0, same "no data is better than fabricated data"
+  // rule the whole pipeline already follows.
+  live_captured_at: string | null;
+  live_pv_power_w: number | null;
+  live_load_power_w: number | null;
+  live_battery_power_w: number | null;
+  live_grid_power_w: number | null;
+  live_soc_pct: number | null;
 };
 
 export type FleetOverview = {
@@ -367,19 +379,30 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     return { sites: [], rollup: { site_count: 0, online_count: 0, avg_health_score: null, total_active_alarms: 0, total_active_critical_alerts: 0 } };
   }
 
-  const [{ data: customers, error: customersError }, { data: health, error: healthError }, { data: alarms, error: alarmsError }, { data: criticalAlerts, error: criticalError }] =
-    await Promise.all([
-      admin.schema('vrm').from('customers').select('id, name'),
-      admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status').in('site_id', siteIds).gte('date', lookbackDate),
-      admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
-      admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
-    ]);
+  const [
+    { data: customers, error: customersError },
+    { data: health, error: healthError },
+    { data: alarms, error: alarmsError },
+    { data: criticalAlerts, error: criticalError },
+    { data: snapshots, error: snapshotsError },
+  ] = await Promise.all([
+    admin.schema('vrm').from('customers').select('id, name'),
+    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status').in('site_id', siteIds).gte('date', lookbackDate),
+    admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
+    admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
+    // Fleet Dashboard Phase 2 — one row per site already (migration 031's
+    // PRIMARY KEY on site_id), so no "latest per site" grouping needed
+    // here the way daily_health above needs one.
+    admin.schema('vrm').from('site_snapshots').select('site_id, captured_at, pv_power_w, load_power_w, battery_power_w, grid_power_w, soc_pct').in('site_id', siteIds),
+  ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
   if (alarmsError) throw alarmsError;
   if (criticalError) throw criticalError;
+  if (snapshotsError) throw snapshotsError;
 
   const customerNameById = new Map((customers ?? []).map((c) => [c.id as string, c.name as string]));
+  const snapshotBySite = new Map((snapshots ?? []).map((s) => [s.site_id as string, s]));
 
   // Latest daily_health row per site — highest `date` wins; a tie (two
   // dump_types for the same date) keeps the higher health_score, same
@@ -398,6 +421,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
 
   const rows: FleetOverviewRow[] = siteRows.map((s) => {
     const latestHealth = latestHealthBySite.get(s.site_id);
+    const snapshot = snapshotBySite.get(s.site_id);
     return {
       site_id: s.site_id,
       display_name: s.display_name,
@@ -413,6 +437,12 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       health_date: latestHealth?.date ?? null,
       active_alarms: openAlarmsBySite.get(s.site_id) ?? 0,
       active_critical_alerts: openCriticalBySite.get(s.site_id) ?? 0,
+      live_captured_at: snapshot?.captured_at ?? null,
+      live_pv_power_w: snapshot?.pv_power_w ?? null,
+      live_load_power_w: snapshot?.load_power_w ?? null,
+      live_battery_power_w: snapshot?.battery_power_w ?? null,
+      live_grid_power_w: snapshot?.grid_power_w ?? null,
+      live_soc_pct: snapshot?.soc_pct ?? null,
     };
   });
 

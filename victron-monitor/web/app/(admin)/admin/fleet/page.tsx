@@ -70,9 +70,30 @@ function row(site: FleetOverviewRow) {
       </td>
       <td>{site.active_alarms > 0 ? <span className={styles.alarmCount}>{site.active_alarms}</span> : '0'}</td>
       <td>{site.active_critical_alerts > 0 ? <span className={styles.alarmCount}>{site.active_critical_alerts}</span> : '0'}</td>
+      <td>
+        {site.live_captured_at ? (
+          <>
+            <div>{formatWatts(site.live_pv_power_w)} PV &middot; {formatWatts(site.live_load_power_w)} load</div>
+            <div className={styles.sub}>
+              {formatWatts(site.live_battery_power_w)} batt &middot; {site.live_soc_pct === null ? '—' : `${site.live_soc_pct}%`} SOC
+            </div>
+            <div className={styles.sub}>as of {formatDateTime(site.live_captured_at, 'en-US')}</div>
+          </>
+        ) : (
+          <span className={styles.sub}>No live reading yet</span>
+        )}
+      </td>
       <td className={styles.sub}>{site.system_type}</td>
     </tr>
   );
+}
+
+// `null` (signal not published by this installation, or no snapshot yet)
+// reads as an em dash, same convention every other "no data" field on this
+// page already uses — never a fabricated "0 W".
+function formatWatts(w: number | null): string {
+  if (w === null) return '—';
+  return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
 }
 
 export default async function AdminFleetPage() {
@@ -83,11 +104,11 @@ export default async function AdminFleetPage() {
     <div>
       <h1>Fleet Health</h1>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status, from data this pipeline already
-        computes for reports — the most recent <code>vrm.daily_health</code> score, and any alarm/critical-alert
-        episode still open. Not live power/SOC readings (that needs a separate near-real-time snapshot layer, not
-        built yet) — this is &quot;how healthy is the fleet as of the last sync,&quot; not &quot;what is happening
-        right now.&quot;
+        Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status — the most recent{' '}
+        <code>vrm.daily_health</code> score, any alarm/critical-alert episode still open, and (Phase 2) a live
+        PV/load/battery/SOC reading refreshed every ~15 minutes by <code>vrm-fleet/refresh-snapshots</code>. Grid
+        power only shows where the installation has a real physical grid meter — most don&apos;t, and that column
+        reads &quot;—&quot; there rather than a guessed number.
       </p>
 
       <div className={styles.rollupRow}>
@@ -126,6 +147,7 @@ export default async function AdminFleetPage() {
               <th>Health</th>
               <th>Alarms</th>
               <th>Critical alerts</th>
+              <th>Live</th>
               <th>Type</th>
             </tr>
           </thead>

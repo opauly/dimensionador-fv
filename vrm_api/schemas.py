@@ -407,6 +407,19 @@ class VrmFleetSyncRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
+class FleetSnapshotsRefreshOut(BaseModel):
+    """`POST /v1/vrm-fleet/refresh-snapshots`'s response — the Fleet
+    Dashboard Phase 2 (2026-08-30) live-snapshot sweep. Counts only, same
+    reasoning `BillingTrialRemindersOut`/`BillingPruneSignupsOut` give for
+    their own shape: a cron log line that says how much it did is the only
+    visibility this job gets."""
+
+    checked: int
+    refreshed: int
+    skipped: int
+    failed: int
+
     site_id: str
     start: str
     end: str

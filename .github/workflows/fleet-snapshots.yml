@@ -1,0 +1,36 @@
+name: Fleet live snapshots
+
+# Fleet Dashboard Phase 2 (2026-08-30). Same shape as billing-reconcile.yml/
+# scheduled-reports.yml — GitHub Actions cron is this project's own
+# scheduling mechanism (no always-on machine, run history visible in the
+# Actions tab), see PHASES.md Phase 12 and PLAN_PHASE15.md §0.1/§6.3.
+#
+# One call: POST /v1/vrm-fleet/refresh-snapshots — for every active
+# source='vrm_api' site, fetches its current PV/load/battery/grid power and
+# SOC from the VRM API and upserts one row into vrm.site_snapshots. Feeds
+# the "live" half of /admin/fleet (Phase 1 already covers the daily-report
+# half: health score, alarm episodes).
+#
+# Every 15 minutes — matches this project's own report-generation
+# granularity (VRM's own 15-minute sample interval) and the UCR capstone
+# doc's own cadence for the same idea; there is no value in polling faster
+# than the underlying data actually changes.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {} # manual trigger from the Actions tab, for a spot check
+
+jobs:
+  refresh-snapshots:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh every site's live snapshot
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/vrm-fleet/refresh-snapshots" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}" \
+            -H "Content-Type: application/json"

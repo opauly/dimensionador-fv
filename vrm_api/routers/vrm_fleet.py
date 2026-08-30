@@ -68,12 +68,15 @@ from pydantic import ValidationError
 from database.supabase_client import get_client
 
 from victron import ingest as victron_ingest
+from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
+from victron.vrm_series import DEFAULT_TZ_NAME
 
-from vrm_api import jobs, tenancy
+from vrm_api import jobs, secrets, tenancy
 from vrm_api.deps import require_pipeline_key
 from vrm_api.routers.vrm_sync import _do_sync
 from vrm_api.schemas import (
+    FleetSnapshotsRefreshOut,
     JobCreated,
     SiteFieldsIn,
     VrmFleetInstallationOut,
@@ -373,3 +376,69 @@ def post_sync(body: VrmFleetSyncRequest, background_tasks: BackgroundTasks) -> J
                          triggered_by="admin", token=token),
     )
     return JobCreated(job_id=job["id"])
+
+
+@router.post("/refresh-snapshots", response_model=FleetSnapshotsRefreshOut)
+def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
+    """Fleet Dashboard Phase 2's live-snapshot sweep (2026-08-30) — meant
+    to run every ~15 minutes via a GitHub Actions `cron:`, same shape as
+    `billing-reconcile.yml`'s daily sweep. Synchronous, not a `vrm.jobs`
+    row: this is a short, bounded, per-site loop (like `vrm_sync.py:
+    post_run_due()`), not a long single-site render worth its own job
+    record.
+
+    Token per site, not one token for everything: a customer-connected
+    site should be read with THAT CUSTOMER's own VRM credential (the same
+    one `vrm_sync.py:post_sync()`'s "Sync now" already reads) — correct
+    scoping, and it works even for an installation `VRM_ADMIN_TOKEN` was
+    never granted to see. `VRM_ADMIN_TOKEN` is the fallback, for a site
+    that only exists because it was linked through THIS router's own admin
+    fleet flow, which never collects a customer token at all (`post_sync()`
+    above always passes `token=VRM_ADMIN_TOKEN` explicitly, for the same
+    reason). A site with neither is skipped, not failed — there is
+    genuinely nothing to fetch it with.
+
+    One site's failure never stops the sweep — same per-site isolation
+    `vrm_sync.py:post_run_due()` already uses for exactly this reason.
+    """
+    sites = (_t("sites").select("site_id, customer_id, vrm_installation_id, timezone")
+            .eq("source", "vrm_api").eq("active", True).execute().data or [])
+    admin_token = os.environ.get("VRM_ADMIN_TOKEN")
+
+    refreshed, skipped, failed = 0, 0, 0
+    for site in sites:
+        id_site = site.get("vrm_installation_id")
+        if id_site is None:
+            skipped += 1
+            continue
+
+        token: str | None = None
+        try:
+            token = secrets.read_customer_vrm_token(site["customer_id"])
+        except Exception:  # noqa: BLE001 — a broken vault read for one
+            # customer must not stop the rest of the sweep; fall through to
+            # the admin token below same as "never connected" would.
+            logger.warning("vrm-fleet refresh-snapshots: could not read customer token for customer_id=%s",
+                          site["customer_id"])
+        token = token or admin_token
+        if not token:
+            skipped += 1
+            continue
+
+        try:
+            client = VrmRemoteClient(token)
+            snapshot = fetch_live_snapshot(client, id_site, site["site_id"],
+                                          tz=site.get("timezone") or DEFAULT_TZ_NAME)
+        except Exception:  # noqa: BLE001 — see this function's own docstring
+            logger.exception("vrm-fleet refresh-snapshots: unexpected error for site %s", site["site_id"])
+            failed += 1
+            continue
+
+        if snapshot is None:
+            skipped += 1
+            continue
+
+        _t("site_snapshots").upsert({"site_id": site["site_id"], **snapshot}).execute()
+        refreshed += 1
+
+    return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
