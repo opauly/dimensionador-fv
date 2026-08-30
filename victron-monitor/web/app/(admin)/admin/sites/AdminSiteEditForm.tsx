@@ -393,17 +393,20 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
             </label>
           </div>
           {moduleMode === 'custom' && (
-            <div className={styles.moduleGrid}>
-              {/* Always included, never selectable — shown alongside the real
-                 checkboxes (checked + greyed out) so it's visually obvious
-                 what's fixed vs. optional. No `name`: display only, never
-                 submitted. */}
-              {FIXED_MODULE_LABELS.map((label) => (
-                <label key={label} className={styles.checkboxLabelDisabled}>
-                  <input type="checkbox" checked disabled />
-                  {label}
-                </label>
-              ))}
+            <>
+              {/* Always included, never selectable — on their own line above
+                 the selectable grid, so the fixed spine reads as a distinct
+                 group (real live-test feedback, 2026-08-29). No `name`:
+                 display only, never submitted. */}
+              <div className={styles.fixedModuleRow}>
+                {FIXED_MODULE_LABELS.map((label) => (
+                  <label key={label} className={styles.checkboxLabelDisabled}>
+                    <input type="checkbox" checked disabled />
+                    {label}
+                  </label>
+                ))}
+              </div>
+              <div className={styles.moduleGrid}>
               {REPORT_MODULES.map((m) => (
                 <label key={m.id} className={styles.moduleCard}>
                   <div className={styles.moduleCardHeader}>
@@ -421,7 +424,8 @@ export function AdminSiteEditForm({ site, onDone }: { site: SiteRecord; onDone: 
                   <p className={styles.moduleDesc}>{m.desc}</p>
                 </label>
               ))}
-            </div>
+              </div>
+            </>
           )}
           {modulesChanged && <p className={styles.caption}>Review before saving — {describeModules(moduleMode, selectedModules)}</p>}
         </>

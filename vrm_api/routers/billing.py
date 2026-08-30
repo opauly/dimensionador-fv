@@ -139,6 +139,7 @@ from vrm_api.schemas import (
     BillingStatusOut,
     BillingSubscribeOut,
     BillingSubscribeRequest,
+    BillingTrialRemindersOut,
     BillingWebhookEventOut,
     BillingWebhookEventRequest,
 )
@@ -294,13 +295,22 @@ def _status_response(state: dict) -> BillingStatusOut:
     active_sites = _active_site_count(customer_id)
     over_limit = site_limit is not None and active_sites > site_limit
     plan_key = state.get("plan")
+    billing_status = state.get("billing_status")
+    # `billing.apply_entitlements()`'s `trial_expired` billing_status
+    # (2026-08-29 fix) is a LOCAL classification — ONVO's own mirrored
+    # `sub["status"]` never changes to reflect it (ONVO still reports
+    # "trialing" forever for a subscription it never got a card to
+    # charge). Reporting the raw ONVO status here regardless would put the
+    # customer-facing "Trial" badge right back to lying about what's
+    # actually true — the exact bug this fix exists to close.
+    reported_status = "trial_expired" if billing_status == "trial_expired" else sub.get("status")
     return BillingStatusOut(
         customer_id=customer_id,
         plan_key=plan_key,
         plan_label_key=_plan_label_key(plan_key),
-        billing_status=state.get("billing_status"),
+        billing_status=billing_status,
         provisioning_state=state.get("provisioning_state") or "active",
-        status=sub.get("status"),
+        status=reported_status,
         billing_interval=sub.get("billing_interval"),
         currency=sub.get("currency"),
         amount_minor=sub.get("amount_minor"),
@@ -915,6 +925,19 @@ def post_reconcile_due() -> BillingReconcileDueOut:
                 }).eq("id", event_id).execute()
 
     return BillingReconcileDueOut(checked=len(due_customer_ids), results=results)
+
+
+@router.post("/trial-reminders", response_model=BillingTrialRemindersOut)
+def post_trial_reminders() -> BillingTrialRemindersOut:
+    """The daily "your trial ends tomorrow" sweep (real live-test feedback,
+    2026-08-29) — same shape as `reconcile-due`/`prune-signups` above:
+    no `customer_id`, pipeline-key only, meant to be called once a day by
+    a GitHub Actions `cron:` (a new workflow, or a new step alongside
+    `billing-reconcile.yml`'s existing one). All the actual logic lives in
+    `vrm_api/billing.py:send_trial_ending_reminders()` — this endpoint is
+    just the HTTP door into it.
+    """
+    return BillingTrialRemindersOut(**billing.send_trial_ending_reminders())
 
 
 @router.post("/prune-signups", response_model=BillingPruneSignupsOut)

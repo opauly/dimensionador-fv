@@ -121,6 +121,19 @@
   margin-bottom: 10px;
 }
 
+/* The fixed spine (KPI cards/narrative/bar chart), on its own line above
+   the selectable module grid — real live-test feedback, 2026-08-29: mixed
+   into one grid with the real checkboxes, it read as part of the same
+   choice instead of the always-on baseline it actually is. */
+.fixedModuleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
 .moduleGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

@@ -696,6 +696,18 @@ class BillingWebhookEventOut(BaseModel):
     ok: bool = True
 
 
+class BillingTrialRemindersOut(BaseModel):
+    """`POST /v1/billing/trial-reminders`'s response — the daily "your
+    trial ends tomorrow" sweep (`vrm_api/billing.py:
+    send_trial_ending_reminders()`, 2026-08-29). Counts only, same
+    reasoning `BillingPruneSignupsOut` gives for its own shape."""
+
+    checked: int
+    sent: int
+    skipped: int
+    failed: int
+
+
 class BillingPruneSignupsOut(BaseModel):
     """`POST /v1/billing/prune-signups`'s response (§3.7/§3.8, §8 Step 7) —
     the retention sweep for `vrm.signup_requests` and `vrm.rate_limits`.

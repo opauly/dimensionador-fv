@@ -10,12 +10,22 @@ name: Billing reconcile + retention sweep
 # (no always-on machine of Oscar's own, run history visible in the Actions
 # tab, no second scheduler to remember).
 #
-# Two calls, both against vrm_api (never victron/, pages/, or app.py):
-#   1. POST /v1/billing/reconcile-due — §4.4's fourth reconcile trigger,
+# Three calls, all against vrm_api (never victron/, pages/, or app.py):
+#   1. POST /v1/billing/trial-reminders — real live-test feedback,
+#      2026-08-29: "your trial ends tomorrow" notice for every subscription
+#      whose trial_end falls in the next ~36h and hasn't been reminded yet
+#      (vrm_api/billing.py:send_trial_ending_reminders()). Runs BEFORE
+#      reconcile-due below on purpose — this is the proactive warning,
+#      reconcile-due below is what actually enforces the demotion once a
+#      trial has genuinely expired with still no payment method.
+#   2. POST /v1/billing/reconcile-due — §4.4's fourth reconcile trigger,
 #      the daily sweep. Reconciles every subscription that's due (past its
 #      current_period_end, in a transitional status, or unsynced for 48h)
-#      and retries any vrm.billing_events row stuck in status='error'.
-#   2. POST /v1/billing/prune-signups — §3.7/§3.8's retention sweep for
+#      and retries any vrm.billing_events row stuck in status='error'. Also
+#      where a trial that expired with no card on file gets demoted
+#      (plan->trial, site_limit->0) — see billing.py:apply_entitlements()'s
+#      own 2026-08-29 comment.
+#   3. POST /v1/billing/prune-signups — §3.7/§3.8's retention sweep for
 #      vrm.signup_requests and vrm.rate_limits. "A retention job that never
 #      runs is a retention policy that doesn't exist" (PLAN_PHASE16.md §8
 #      Step 7) — wired into the same daily run, not left as a TODO.
@@ -31,6 +41,16 @@ jobs:
   reconcile-and-prune:
     runs-on: ubuntu-latest
     steps:
+      - name: Send trial-ending reminders
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/billing/trial-reminders" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}" \
+            -H "Content-Type: application/json"
+
       - name: Reconcile every due subscription
         env:
           PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}

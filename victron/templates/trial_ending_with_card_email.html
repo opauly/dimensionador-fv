@@ -1,0 +1,60 @@
+<!--
+  Trial-ending reminder, "has a card on file" branch — real live-test
+  feedback, 2026-08-29. Sent once per subscription, 1 day (within a 36h
+  lookahead window, to tolerate cron jitter) before trial_end — see
+  vrm_api/billing.py:send_trial_ending_reminders()'s own docstring for the
+  once-per-subscription gate this template's caller enforces before ever
+  rendering it. Same "account-lifecycle mail, this product's own identity,
+  never branded" convention cap_reached_email.html already uses — this is
+  never a per-site report, so there's no customer branding to apply.
+
+  Table layout + inline styles only, no inline base64 image URIs — same
+  Gmail-safety rule invite_email.html/report_email.html already state.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your trial ends tomorrow</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#0b2231; font-family:Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b2231;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0"
+                 style="width:480px; max-width:100%; background-color:#12324a; border-radius:8px; overflow:hidden;">
+            <tr>
+              <td style="padding:28px 32px 0 32px;">
+                <span style="display:inline-block; font-family:Helvetica, Arial, sans-serif; font-weight:800;
+                             text-transform:uppercase; letter-spacing:1px; font-size:13px; color:#e9f2f6;">
+                  Pauly &amp; Co. &middot; VRM Monitor
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 32px 4px 32px;">
+                <h1 style="margin:0 0 12px 0; font-size:18px; color:#ffffff;">Your trial ends tomorrow</h1>
+                <p style="margin:0 0 12px 0; font-size:14px; line-height:1.6; color:#cfe3ee;">
+                  Your free trial ends on {{ trial_end_date }}. Your saved payment method will be charged
+                  {{ amount }} automatically to start your subscription — no action needed on your part.
+                </p>
+                <p style="margin:0 0 20px 0; font-size:14px; line-height:1.6; color:#cfe3ee;">
+                  Want to change your plan or update your card first? You can do that any time from the Billing
+                  page in your account.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 28px 32px;">
+                <p style="margin:0; font-size:12px; color:#7fa0b3;">
+                  You're receiving this because your trial is ending soon. This is a one-time notice.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

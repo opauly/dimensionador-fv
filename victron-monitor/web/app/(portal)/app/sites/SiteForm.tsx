@@ -559,18 +559,21 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
           {moduleMode === 'default' ? (
             <p className={styles.sectionCaption}>{t(lang, 'sites_modules_mode_default_desc')}</p>
           ) : (
-            <div className={styles.moduleGrid}>
-              {/* Always included, never selectable — shown the same way as
-                 the real checkboxes (checked + greyed out) so it's visually
-                 obvious what's fixed vs. optional, rather than the spine
-                 simply not appearing anywhere in this list at all. No
-                 `name` attribute: these never submit, they're display only. */}
-              {FIXED_MODULE_KEYS.map((key) => (
-                <label key={key} className={styles.checkboxLabelDisabled}>
-                  <input type="checkbox" checked disabled />
-                  {t(lang, key)}
-                </label>
-              ))}
+            <>
+              {/* Always included, never selectable — on their own line, above
+                 the real checkboxes, so the fixed spine reads as a distinct
+                 group rather than blending into the selectable grid (real
+                 live-test feedback, 2026-08-29). No `name` attribute: these
+                 never submit, they're display only. */}
+              <div className={styles.fixedModuleRow}>
+                {FIXED_MODULE_KEYS.map((key) => (
+                  <label key={key} className={styles.checkboxLabelDisabled}>
+                    <input type="checkbox" checked disabled />
+                    {t(lang, key)}
+                  </label>
+                ))}
+              </div>
+              <div className={styles.moduleGrid}>
               {REPORT_MODULES.map((id) => (
                 <label key={id} className={styles.moduleCard}>
                   <div className={styles.moduleCardHeader}>
@@ -588,7 +591,8 @@ export function SiteForm({ mode, lang, action, initial, moduleSelectionAllowed =
                   <p className={styles.moduleDesc}>{t(lang, MODULE_DESC_KEYS[id])}</p>
                 </label>
               ))}
-            </div>
+              </div>
+            </>
           )}
 
           {modulesChanged && (

@@ -1,0 +1,57 @@
+<!--
+  Trial-ending reminder, "no card on file" branch — the real warning half
+  of this notice. See trial_ending_with_card_email.html's own header for
+  the shared reasoning (once per subscription, ~1 day before trial_end,
+  never branded). The promise made here ("access will be suspended") is
+  backed by real code, not a bluff: vrm_api/billing.py:apply_entitlements()
+  actively demotes plan/site_limit for exactly this case once trial_end
+  passes with still no payment method — see that function's own comment.
+-->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Your trial ends tomorrow — add a payment method</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#0b2231; font-family:Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b2231;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+          <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0"
+                 style="width:480px; max-width:100%; background-color:#12324a; border-radius:8px; overflow:hidden;">
+            <tr>
+              <td style="padding:28px 32px 0 32px;">
+                <span style="display:inline-block; font-family:Helvetica, Arial, sans-serif; font-weight:800;
+                             text-transform:uppercase; letter-spacing:1px; font-size:13px; color:#e9f2f6;">
+                  Pauly &amp; Co. &middot; VRM Monitor
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px 32px 4px 32px;">
+                <h1 style="margin:0 0 12px 0; font-size:18px; color:#ffffff;">Your trial ends tomorrow</h1>
+                <p style="margin:0 0 12px 0; font-size:14px; line-height:1.6; color:#f2a93b;">
+                  We don't have a payment method on file for your account. Without one, your access will be
+                  suspended when your trial ends on {{ trial_end_date }} — your data stays safe, but reports and
+                  the dashboard won't be available until you add a card and subscribe.
+                </p>
+                <p style="margin:0 0 20px 0; font-size:14px; line-height:1.6; color:#cfe3ee;">
+                  Add a payment method from the Billing page in your account to keep your access without
+                  interruption.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 28px 32px;">
+                <p style="margin:0; font-size:12px; color:#7fa0b3;">
+                  You're receiving this because your trial is ending soon. This is a one-time notice.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

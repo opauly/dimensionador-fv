@@ -40,6 +40,12 @@ const STATUS_LABEL_KEY: Record<string, StringKey> = {
   unpaid: 'billing_status_unpaid',
   incomplete: 'billing_status_incomplete',
   incomplete_expired: 'billing_status_incomplete_expired',
+  // A LOCAL-only value (vrm_api/billing.py:apply_entitlements(), migration
+  // 030, 2026-08-29 fix) — never an ONVO status. Reported here instead of
+  // the raw "trialing" ONVO would otherwise still show for a trial that
+  // genuinely expired with no card on file (vrm_api/routers/billing.py:
+  // _status_response()'s own override).
+  trial_expired: 'billing_status_trial_expired',
 };
 
 function statusLabel(lang: Lang, status: string | null): string {
@@ -50,7 +56,7 @@ function statusLabel(lang: Lang, status: string | null): string {
 
 function statusBadgeClass(status: string | null): string {
   if (status === 'active' || status === 'trialing') return styles.badgeGood;
-  if (status === 'past_due' || status === 'unpaid' || status === 'incomplete') return styles.badgeWarn;
+  if (status === 'past_due' || status === 'unpaid' || status === 'incomplete' || status === 'trial_expired') return styles.badgeWarn;
   return styles.badgeNeutral;
 }
 

@@ -73,7 +73,8 @@ classification takes it from there.
 """
 import logging
 import os
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 
 from database.supabase_client import get_client
 from vrm_api import onvo, tenancy
@@ -528,27 +529,62 @@ def apply_entitlements(customer_id: str) -> None:
         onvo_status = subscription.get("status")
         classification = _classify_status(onvo_status)
 
+        # Set only in the one branch below where a genuinely-expired,
+        # cardless trial gets reclassified from "hold" to "not_entitled" —
+        # read further down to pick `billing_status` from a LOCAL value
+        # instead of `_BILLING_STATUS_FOR_ONVO_STATUS`'s ONVO-status lookup
+        # (which would otherwise still say "trialing", since ONVO's own
+        # `status` field is untouched by this).
+        trial_expired_no_card = False
+
         if classification == "entitled" and not (_billing_customer_row(customer_id) or {}).get(
             "default_payment_method_id"
         ):
             # Status alone is necessary but not sufficient — see module
             # docstring's "Entitled status is necessary but NOT sufficient"
-            # section. Folded into the same 'hold' branch _classify_status()
-            # already uses for an unrecognized status: do not grant, do not
-            # promote, this IS the visible record (§4.5 rule 2's reasoning,
-            # extended).
-            logger.error(
-                "billing.entitled_status_no_payment_method customer_id=%s "
-                "subscription %s has status=%r (entitled-shaped per "
-                "_STATUS_ENTITLEMENT) but vrm.billing_customers."
-                "default_payment_method_id is not set for this customer — "
-                "holding current entitlement, granting nothing, promoting "
-                "nothing. Either a signup that has not completed the ONVO "
-                "SDK card step yet, or a payment method detached after "
-                "entitlement was already granted.",
-                customer_id, subscription.get("onvo_subscription_id"), onvo_status,
-            )
-            classification = "hold"
+            # section. Two sub-cases, found to need different treatment
+            # from a real live test (2026-08-29): a `trialing` subscription
+            # whose `trial_end` has already passed is not "ambiguous, might
+            # still complete signup any moment" the way a brand-new,
+            # still-within-trial signup is — ONVO has nothing to charge
+            # (no card was ever attached, PLAN_PHASE16.md's "card required
+            # upfront" being an SDK-widget-during-signup intent, not
+            # something ONVO's own subscription object enforces) and will
+            # never move this off `trialing` on its own. Oscar's own
+            # decision, 2026-08-29: this case must actively revoke access
+            # ("suspended until valid payment is processed"), not sit in
+            # `hold` forever alongside a genuinely-still-deciding signup.
+            trial_end = _parse_ts(subscription.get("trial_end"))
+            if onvo_status == "trialing" and trial_end is not None and datetime.now(timezone.utc) > trial_end:
+                classification = "not_entitled"
+                trial_expired_no_card = True
+                logger.warning(
+                    "billing.trial_expired_no_payment_method customer_id=%s "
+                    "subscription %s — trial_end %s has passed with no "
+                    "payment method on file; revoking entitlement (plan-> "
+                    "trial, site_limit->0 if plan-sourced).",
+                    customer_id, subscription.get("onvo_subscription_id"), trial_end,
+                )
+            else:
+                # Folded into the same 'hold' branch _classify_status()
+                # already uses for an unrecognized status: do not grant, do
+                # not promote, this IS the visible record (§4.5 rule 2's
+                # reasoning, extended). Covers both a signup still mid-flow
+                # (waiting for the SDK card step, well within its trial
+                # window) and a payment method detached after the fact from
+                # a NON-trialing entitled status (e.g. `active`/`past_due`).
+                logger.error(
+                    "billing.entitled_status_no_payment_method customer_id=%s "
+                    "subscription %s has status=%r (entitled-shaped per "
+                    "_STATUS_ENTITLEMENT) but vrm.billing_customers."
+                    "default_payment_method_id is not set for this customer — "
+                    "holding current entitlement, granting nothing, promoting "
+                    "nothing. Either a signup that has not completed the ONVO "
+                    "SDK card step yet, or a payment method detached after "
+                    "entitlement was already granted.",
+                    customer_id, subscription.get("onvo_subscription_id"), onvo_status,
+                )
+                classification = "hold"
 
         if classification == "hold":
             # §4.5 rule 2 — touch NOTHING, not even billing_status. The
@@ -556,7 +592,14 @@ def apply_entitlements(customer_id: str) -> None:
             # the entitled-but-no-payment-method check above is the record.
             pass
         else:
-            new_billing_status = _BILLING_STATUS_FOR_ONVO_STATUS.get(onvo_status, customer.get("billing_status"))
+            new_billing_status = (
+                # LOCAL-only value (migration 030) — never one of ONVO's own
+                # status strings, and never derived from `onvo_status`
+                # (still literally "trialing" here), since the whole point
+                # is telling this state apart from a real, live trial.
+                "trial_expired" if trial_expired_no_card
+                else _BILLING_STATUS_FOR_ONVO_STATUS.get(onvo_status, customer.get("billing_status"))
+            )
             _set("billing_status", new_billing_status)
 
             site_limit_source = customer.get("site_limit_source")
@@ -619,6 +662,135 @@ def apply_entitlements(customer_id: str) -> None:
                 customer_id, updates.get("plan", customer.get("plan")),
                 updates.get("site_limit", customer.get("site_limit")),
             )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# send_trial_ending_reminders — the "trial ends tomorrow" notice
+# ═══════════════════════════════════════════════════════════════════════
+# 2026-08-29: real live-test feedback, plus the finding above that a
+# cardless trial never moves off `trialing` on its own — this is the
+# customer-facing half of the same fix. One email per subscription, sent
+# once (the `trial_reminder_sent_at` gate, migration 030), branched on
+# whether a payment method is on file:
+#   - has a card: purely informational — "you'll be charged automatically."
+#   - no card: a real warning — "add a card or access will be suspended
+#     when the trial ends" (matching what apply_entitlements() above will
+#     actually do once trial_end passes, so this promise is never a bluff).
+_TRIAL_REMINDER_LOOKAHEAD = timedelta(hours=36)
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _trial_reminder_template_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "victron", "templates")
+
+
+def send_trial_ending_reminders() -> dict:
+    """Scans every live `trialing` subscription whose `trial_end` falls
+    within the next `_TRIAL_REMINDER_LOOKAHEAD` and hasn't been reminded
+    yet, and sends the appropriate notice. Meant to run once a day (a
+    GitHub Actions cron, same shape as `billing-reconcile.yml`) — the
+    lookahead window is wider than 24h specifically so a daily sweep with
+    some scheduling jitter still catches every subscription exactly once,
+    never zero times and never twice (the `trial_reminder_sent_at IS NULL`
+    read-then-conditional-update below is what prevents "twice").
+
+    Never raises per-subscription — one bad row (a malformed email, a
+    template error, Resend down) must not stop the rest of the sweep, same
+    posture `report_delivery.notify_cap_reached_once()` already takes for
+    exactly this reason. Returns a summary dict for the caller to log/return,
+    never partial exception state.
+    """
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    from victron.mailer import MailerError
+    from victron.mailer import send as mailer_send
+
+    now = datetime.now(timezone.utc)
+    horizon = now + _TRIAL_REMINDER_LOOKAHEAD
+
+    candidates = (
+        _t("subscriptions").select("*")
+        .eq("status", "trialing")
+        .is_("trial_reminder_sent_at", "null")
+        .not_.is_("trial_end", "null")
+        .lte("trial_end", horizon.isoformat())
+        .execute().data or []
+    )
+
+    env = Environment(loader=FileSystemLoader(_trial_reminder_template_dir()),
+                      autoescape=select_autoescape(["html"]))
+    sent, skipped, failed = 0, 0, 0
+
+    for sub in candidates:
+        trial_end = _parse_ts(sub.get("trial_end"))
+        # The `.lte()` filter above is a DB-side coarse pass (ONVO's raw
+        # string comparison sorts correctly for ISO timestamps, but a
+        # second, real datetime comparison here guards against a
+        # subscription whose trial_end already passed entirely — that one
+        # is apply_entitlements()'s job above, not a "reminder," and
+        # sending a "your trial ends tomorrow" notice for a trial that
+        # ended three days ago would be a real, visible bug.
+        if trial_end is None or trial_end <= now:
+            skipped += 1
+            continue
+
+        customer_id = sub.get("customer_id")
+        try:
+            customer = tenancy.get_customer(customer_id)
+        except Exception:  # noqa: BLE001 — a missing/broken customer row
+            # must not stop the rest of the sweep.
+            logger.exception("billing.trial_reminder: could not load customer %s", customer_id)
+            failed += 1
+            continue
+
+        to = customer.get("contact_email") or customer.get("auth_email")
+        if not to or not _EMAIL_RE.match(to):
+            skipped += 1
+            continue
+
+        has_card = bool((_billing_customer_row(customer_id) or {}).get("default_payment_method_id"))
+        template_name = "trial_ending_with_card_email.html" if has_card else "trial_ending_no_card_email.html"
+        amount = sub.get("amount_minor")
+        amount_label = f"{(amount or 0) / 100:.2f} {sub.get('currency') or 'USD'}"
+
+        try:
+            html = env.get_template(template_name).render(
+                trial_end_date=trial_end.date().isoformat(),
+                amount=amount_label,
+                billing_interval=sub.get("billing_interval") or "month",
+            )
+            subject = ("Your trial ends tomorrow" if has_card
+                      else "Your trial ends tomorrow — add a payment method to keep access")
+            mailer_send(to, subject, html)
+        except MailerError as exc:
+            logger.warning("billing.trial_reminder: could not email customer %s: %s", customer_id, exc)
+            failed += 1
+            continue
+        except Exception:  # noqa: BLE001 — see function docstring
+            logger.exception("billing.trial_reminder: unexpected error emailing customer %s", customer_id)
+            failed += 1
+            continue
+
+        # Conditional on IS NULL, same CAS-style guard
+        # notify_cap_reached_once() uses — only the sweep run whose UPDATE
+        # actually lands counts this as sent; a lost race (two overlapping
+        # sweeps) sends the email at most... well, the email itself already
+        # went out above per run that reaches here, but this column update
+        # is what a second concurrent run's SELECT would see to skip a
+        # subscription entirely on its next invocation. Overlapping sweep
+        # runs are not expected (one daily cron, no concurrent trigger) —
+        # this guard is defense in depth, not the primary safeguard.
+        updated = (
+            _t("subscriptions").update({"trial_reminder_sent_at": now.isoformat()})
+            .eq("id", sub["id"]).is_("trial_reminder_sent_at", "null").execute().data
+        )
+        if updated:
+            sent += 1
+            logger.info("billing.trial_reminder_sent customer_id=%s has_card=%s trial_end=%s",
+                       customer_id, has_card, trial_end.isoformat())
+        else:
+            skipped += 1
+
+    return {"checked": len(candidates), "sent": sent, "skipped": skipped, "failed": failed}
 
 
 def _billing_state(customer_id: str) -> dict:

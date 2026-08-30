@@ -57,13 +57,32 @@ const DATE_LOCALE: Record<Lang, DateLocale> = { en: 'en-US', es: 'es-CR' };
  * there is no per-site date picker in this panel (unlike `/admin/vrm-fleet`'s
  * manual window) — a click on "Sync now" always asks for everything since
  * the last successful sync, or the last 31 days on a site's first-ever
- * sync, through yesterday. */
-function defaultSyncWindow(lastSyncedAt: string | null): { start: string; end: string } {
+ * sync, through yesterday.
+ *
+ * Returns `null` when there is genuinely nothing new to fetch yet — a real,
+ * reproducible case, not an edge case: `vrm_last_synced_at` is a real
+ * timestamp (e.g. a late-evening sync in a UTC-6 timezone), and
+ * `.toISOString()` always reports its UTC calendar date. A sync recorded at
+ * 23:45 local time in Costa Rica already reads as the *next* UTC day, which
+ * can equal or exceed `end` ("yesterday" in UTC) — sending that window to
+ * `vrm_series.fetch_and_map()` used to raise `VrmSeriesError("end (...) is
+ * before start (...)")`, a raw exception string that then got persisted to
+ * `vrm.sites.vrm_last_sync_error` and shown to the customer verbatim (found
+ * via a real "Sync All" click, 2026-08-29 — reproducible on ANY site synced
+ * more than once on what UTC considers the same day). This is not a
+ * failure to report — it means the data through `end` is already current. */
+function defaultSyncWindow(lastSyncedAt: string | null): { start: string; end: string } | null {
   const end = new Date();
   end.setUTCDate(end.getUTCDate() - 1);
-  const start = lastSyncedAt ? new Date(lastSyncedAt) : new Date(end);
-  if (!lastSyncedAt) start.setUTCDate(start.getUTCDate() - 31);
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) };
+  const endStr = end.toISOString().slice(0, 10);
+  if (!lastSyncedAt) {
+    const start = new Date(end);
+    start.setUTCDate(start.getUTCDate() - 31);
+    return { start: start.toISOString().slice(0, 10), end: endStr };
+  }
+  const startStr = new Date(lastSyncedAt).toISOString().slice(0, 10);
+  if (startStr > endStr) return null;
+  return { start: startStr, end: endStr };
 }
 
 function buildInitialMappingRows(installations: VrmLinkValidateOut['installations'], sites: SiteRecord[]): Record<number, MappingRow> {
@@ -108,6 +127,9 @@ export function VrmLinkPanel({ status, sites, lang, canAdd, siteLimit }: VrmLink
   const [syncBusy, setSyncBusy] = useState<Record<string, boolean>>({});
   const [syncError, setSyncError] = useState<Record<string, string>>({});
   const [syncResult, setSyncResult] = useState<Record<string, SyncResult>>({});
+  // Set when defaultSyncWindow() finds nothing new since the last sync —
+  // see that function's own comment for why this is a real, normal outcome.
+  const [syncUpToDate, setSyncUpToDate] = useState<Record<string, boolean>>({});
 
   function updateMappingRow(idSite: number, patch: Partial<MappingRow>) {
     setMappingRows((rows) => ({ ...rows, [idSite]: { ...rows[idSite], ...patch } }));
@@ -250,13 +272,21 @@ export function VrmLinkPanel({ status, sites, lang, canAdd, siteLimit }: VrmLink
 
   async function handleSync(siteId: string, lastSyncedAt: string | null) {
     const win = defaultSyncWindow(lastSyncedAt);
-    setSyncBusy((b) => ({ ...b, [siteId]: true }));
     setSyncError((e) => ({ ...e, [siteId]: '' }));
     setSyncResult((r) => {
       const next = { ...r };
       delete next[siteId];
       return next;
     });
+    // Nothing new since the last sync (see defaultSyncWindow()'s own
+    // comment) — a real, normal outcome, not an error, so no API call and
+    // no busy spinner; just say so.
+    if (!win) {
+      setSyncUpToDate((u) => ({ ...u, [siteId]: true }));
+      return;
+    }
+    setSyncUpToDate((u) => ({ ...u, [siteId]: false }));
+    setSyncBusy((b) => ({ ...b, [siteId]: true }));
     try {
       const res = await fetch('/api/vrm/sync', {
         method: 'POST',
@@ -353,6 +383,7 @@ export function VrmLinkPanel({ status, sites, lang, canAdd, siteLimit }: VrmLink
                   </div>
                   {site.vrm_last_sync_error && <div className={styles.syncErrorText}>{site.vrm_last_sync_error}</div>}
                   {syncError[site.site_id] && <div className={styles.syncErrorText}>{syncError[site.site_id]}</div>}
+                  {syncUpToDate[site.site_id] && <div className={styles.linkedSiteMeta}>{t(lang, 'vrm_link_connected_sync_up_to_date')}</div>}
                   {syncResult[site.site_id] && (
                     <div className={styles.success}>
                       {t(lang, 'vrm_link_connected_sync_success')
