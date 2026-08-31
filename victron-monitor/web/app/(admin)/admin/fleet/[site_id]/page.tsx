@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireAdmin } from '@/lib/server/auth';
-import { getFleetSiteDetail } from '@/lib/server/db/admin';
+import { getFleetSiteDetail, type BatteryStress } from '@/lib/server/db/admin';
 import { formatDateTimeInZone } from '@/lib/dates';
 import { FlowDiagram } from '../FlowDiagram';
 import { Gauge } from '../Gauge';
@@ -32,6 +32,15 @@ function formatWatts(w: number | null): string {
 function tzLabel(tz: string | null): string {
   if (!tz) return 'CR';
   return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+}
+
+// Same 3-tier-plus-"no data" wording `weekly_report.py` uses on the PDF
+// (English side — admin is English-only by product decision).
+function stressLabel(stress: BatteryStress): string {
+  if (stress === 'high_stress') return 'High stress';
+  if (stress === 'working_hard') return 'Working hard';
+  if (stress === 'no_data') return 'No data';
+  return 'Normal';
 }
 
 export default async function AdminFleetSitePage({ params }: { params: Promise<{ site_id: string }> }) {
@@ -147,6 +156,57 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
         </div>
       </div>
 
+      <div className={styles.weekCard}>
+        <h2>This week</h2>
+        <div className={styles.cardSub}>
+          From the last 7 days of <code>vrm.energy_daily</code> — the same figures and formulas the PDF report
+          already computes, not a second definition.
+        </div>
+        <div className={styles.weekStats}>
+          <div className={styles.weekStat}>
+            <span className={styles.weekStatLabel}>Battery cycles</span>
+            <span className={styles.weekStatValue}>{site.seven_day.batteryCycles ?? '—'}</span>
+            <span className={`${styles.stressBadge} ${styles[`stress_${site.seven_day.batteryStress}`]}`}>
+              {stressLabel(site.seven_day.batteryStress)}
+            </span>
+          </div>
+          <div className={styles.weekStat}>
+            <span className={styles.weekStatLabel}>Grid outages</span>
+            <span className={styles.weekStatValue}>
+              {site.seven_day.outageCount > 0 ? `${site.seven_day.outageCount} (${site.seven_day.outageMinutes} min)` : '0'}
+            </span>
+          </div>
+          <div className={styles.weekStat}>
+            <span className={styles.weekStatLabel}>SOC range</span>
+            <span className={styles.weekStatValue}>
+              {site.seven_day.minSoc !== null && site.seven_day.maxSoc !== null
+                ? `${site.seven_day.minSoc}–${site.seven_day.maxSoc}%`
+                : '—'}
+            </span>
+            {site.seven_day.avgSoc !== null && <span className={styles.weekStatSub}>avg {site.seven_day.avgSoc}%</span>}
+          </div>
+          <div className={styles.weekStat}>
+            <span className={styles.weekStatLabel}>Days self-sufficient</span>
+            <span className={styles.weekStatValue}>
+              {site.seven_day.daysWithData > 0 ? `${site.seven_day.daysSelfSufficient} / ${site.seven_day.daysWithData}` : '—'}
+            </span>
+          </div>
+          {site.grid_dependency_pct !== null && (
+            <div className={styles.weekStat}>
+              <span className={styles.weekStatLabel}>Grid dependency</span>
+              <span className={styles.weekStatValue}>{site.grid_dependency_pct}%</span>
+            </div>
+          )}
+          {site.specific_yield_kwh_per_kwp !== null && (
+            <div className={styles.weekStat}>
+              <span className={styles.weekStatLabel}>Specific yield</span>
+              <span className={styles.weekStatValue}>{site.specific_yield_kwh_per_kwp}</span>
+              <span className={styles.weekStatSub}>kWh/kWp</span>
+            </div>
+          )}
+        </div>
+      </div>
+
       <ShapeChart
         siteIds={[site.site_id]}
         title="Site shape"
@@ -154,9 +214,6 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
       />
 
       <div className={styles.metaRow}>
-        {site.specific_yield_kwh_per_kwp !== null && <span>Specific yield: {site.specific_yield_kwh_per_kwp} kWh/kWp</span>}
-        {site.battery_cycles_7d !== null && <span>Battery cycles (7d): {site.battery_cycles_7d}</span>}
-        {site.grid_dependency_pct !== null && <span>Grid dependency: {site.grid_dependency_pct}%</span>}
         {site.pv_kwp !== null && <span>Installed: {site.pv_kwp} kWp</span>}
         {site.battery_usable_kwh !== null && <span>Usable battery: {site.battery_usable_kwh} kWh</span>}
       </div>

@@ -364,6 +364,23 @@ export async function getSiteShape(siteId: string, range: SiteShapeRange): Promi
   return pipelineJson(`/v1/vrm-fleet/site-shape?${qs.toString()}`, { method: 'GET' });
 }
 
+/** Mirrors `vrm_api/schemas.py:SiteSavingsOut` — relays
+ * `victron/savings.py:compute_weekly_savings()`'s own result verbatim (the
+ * exact function the PDF report already calls) for the requested window.
+ * `amount`/`currency`/`basisCount` are all `null` together when that
+ * function has no basis to compute one — never a fabricated number. */
+export type SiteSavingsOut = {
+  amount: number | null;
+  currency: string | null;
+  basis_count: number | null;
+  days_with_data: number;
+};
+
+export async function getSiteSavings(siteId: string, range: SiteShapeRange): Promise<SiteSavingsOut> {
+  const qs = new URLSearchParams({ site_id: siteId, range });
+  return pipelineJson(`/v1/vrm-fleet/site-savings?${qs.toString()}`, { method: 'GET' });
+}
+
 // ── VRM link (PLAN_PHASE15.md §3.1 / §8 Step 5) ─────────────────────────
 // A CUSTOMER'S OWN VRM personal access token — never `VRM_ADMIN_TOKEN`
 // (that's the `VrmFleet*` functions above). Mirrors `vrm_api/schemas.py`'s

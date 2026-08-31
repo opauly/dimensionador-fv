@@ -73,6 +73,7 @@ from victron import ingest as victron_ingest
 from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
 from victron.vrm_series import DEFAULT_TZ_NAME
+from victron.vrm_savings import fetch_site_savings
 from victron.vrm_shape import RANGE_DAYS, fetch_site_shape
 
 from vrm_api import jobs, secrets, tenancy
@@ -82,6 +83,7 @@ from vrm_api.schemas import (
     FleetSnapshotsRefreshOut,
     JobCreated,
     SiteFieldsIn,
+    SiteSavingsOut,
     SiteShapeOut,
     VrmFleetInstallationOut,
     VrmFleetInstallationsOut,
@@ -495,3 +497,30 @@ def get_site_shape(
     shape = fetch_site_shape(client, site["vrm_installation_id"], range_key=range,
                             tz=site.get("timezone") or DEFAULT_TZ_NAME)
     return SiteShapeOut(**shape)
+
+
+@router.get("/site-savings", response_model=SiteSavingsOut)
+def get_site_savings(
+    site_id: str = Query(...),
+    range: Literal["today", "week", "month"] = Query(...),
+) -> SiteSavingsOut:
+    """Fleet Dashboard Phase 2.5 (2026-08-31) — estimated savings for one
+    site over today/the last 7 days/the last 30 days. A thin wrapper around
+    `victron/vrm_savings.py:fetch_site_savings()`, which itself only calls
+    `victron/savings.py:compute_weekly_savings()` — the exact function the
+    PDF report already uses (real ARESEP-blended CR tariff, or a site's own
+    configured flat `savings_rate`/`savings_currency` elsewhere). No new
+    tariff math lives here or in that wrapper.
+
+    404 for the same reason `get_site_shape()` above does — a CSV-only site
+    or an unknown `site_id` isn't something this endpoint can ever answer
+    for, regardless of what savings math it might otherwise support.
+    """
+    row = _t("sites").select("site_id, source").eq("site_id", site_id).limit(1).execute().data
+    if not row or row[0].get("source") != "vrm_api":
+        raise HTTPException(status_code=404, detail={"code": "site_not_found"})
+
+    result = fetch_site_savings(site_id, range_key=range)
+    if result is None:
+        return SiteSavingsOut(amount=None, currency=None, basis_count=None, days_with_data=0)
+    return SiteSavingsOut(**result)

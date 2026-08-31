@@ -436,6 +436,20 @@ class SiteShapeOut(BaseModel):
     grid: list[float | None]
 
 
+class SiteSavingsOut(BaseModel):
+    """`GET /v1/vrm-fleet/site-savings`'s response — Fleet Dashboard Phase
+    2.5 (2026-08-31). Relays `victron/savings.py:compute_weekly_savings()`'s
+    own result verbatim (the exact function the PDF report already calls,
+    not a second implementation) for the requested today/week/month window.
+    `amount`/`currency`/`basis_count` are all `None` together when that
+    function has no basis to compute one — never a fabricated $0."""
+
+    amount: float | None
+    currency: str | None
+    basis_count: int | None
+    days_with_data: int
+
+
 # ──────────────────────────────────────────────────────────────────────
 # PLAN_PHASE16.md §5.1–5.3 / §8 Step 3 — routers/billing.py request/response
 # models. `extra="forbid"` on every request body, same reasoning as

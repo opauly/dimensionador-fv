@@ -319,14 +319,14 @@ export type FleetOverviewRow = {
   self_sufficiency_pct: number | null;
   self_consumption_pct: number | null;
   dod_pct: number | null;
-  // Equivalent full cycles over the last 7 days — computed here the same
-  // way `weekly_report.py` computes it for the PDF report (see
-  // `_batteryCyclesOverWindow()`), NOT read from
-  // `vrm.daily_health.battery_cycles`, which still fabricates a 0.0 for
-  // every VRM-API site. `null` only when the whole week's data is missing,
-  // never a false zero.
-  battery_cycles_7d: number | null;
   grid_dependency_pct: number | null;
+  // Everything computed the same way `victron/weekly_report.py` computes
+  // it for the PDF report (see `_sevenDayIndicators()`) — battery cycles,
+  // stress label, outage minutes/count, min/max/avg SOC, days
+  // self-sufficient, all over the last 7 days of `vrm.energy_daily` rows.
+  // NOT read from `vrm.daily_health.battery_cycles`, which still
+  // fabricates a 0.0 for every VRM-API site (migration 012, unfixed).
+  seven_day: SevenDayIndicators;
 };
 
 export type FleetOverview = {
@@ -398,29 +398,82 @@ function _dailyIndicators(
   return { specificYield, selfSufficiency, selfConsumption, dod };
 }
 
-/** Equivalent full cycles over the last 7 days, computed exactly the way
- * `victron/weekly_report.py:build_report_data()` already does for the PDF
- * report — sum real discharge over the window, divide by usable capacity —
- * instead of trusting `vrm.daily_health.battery_cycles`
- * (`vrm.compute_daily_health()`, migration 012), which still does
- * `COALESCE(battery_discharge_kwh, 0) / capacity` and so fabricates a
- * confident 0.0 for every VRM-API site (that column is NULL there by
- * design). Mirrors that function's own guard precisely: `null` only when
- * EVERY day in the window has both charge and discharge NULL — a
- * CSV-sourced site can have a real zero-discharge day, which must stay a
- * real 0, not get swept into "unavailable" alongside the VRM-API case. */
-function _batteryCyclesOverWindow(
-  rows: { battery_charge_kwh: number | null; battery_discharge_kwh: number | null }[],
+export type BatteryStress = 'normal' | 'working_hard' | 'high_stress' | 'no_data';
+
+export type SevenDayIndicators = {
+  // Equivalent full cycles over the last 7 days, computed exactly the way
+  // `victron/weekly_report.py:build_report_data()` already does for the PDF
+  // report — sum real discharge over the window, divide by usable
+  // capacity — instead of trusting `vrm.daily_health.battery_cycles`
+  // (`vrm.compute_daily_health()`, migration 012), which still does
+  // `COALESCE(battery_discharge_kwh, 0) / capacity` and so fabricates a
+  // confident 0.0 for every VRM-API site (that column is NULL there by
+  // design). `null` only when EVERY day in the window has both charge and
+  // discharge NULL — a CSV-sourced site can have a real zero-discharge
+  // day, which must stay a real 0, not get swept into "unavailable"
+  // alongside the VRM-API case.
+  batteryCycles: number | null;
+  // Same 3-tier-plus-"no data" label `weekly_report.py` shows on the PDF
+  // (thresholds 10.0/7.0 cycles — that module's own comment: "assuming a
+  // week," which this window always is, so no scaling needed here the way
+  // a variable-length report window requires). `'no_data'` is a genuine
+  // fourth state, not lumped in with `'normal'` — the report's own comment
+  // on why: "'Normal' would actively assert everything's fine for data
+  // that is actually just absent."
+  batteryStress: BatteryStress;
+  outageMinutes: number;
+  outageCount: number;
+  minSoc: number | null;
+  maxSoc: number | null;
+  avgSoc: number | null;
+  daysSelfSufficient: number;
+  daysWithData: number;
+};
+
+const _BATTERY_CYCLES_HIGH = 10.0;
+const _BATTERY_CYCLES_MID = 7.0;
+
+function _sevenDayIndicators(
+  rows: {
+    grid_kwh: number | null;
+    min_soc: number | null;
+    max_soc: number | null;
+    avg_soc: number | null;
+    outage_count: number | null;
+    outage_minutes: number | null;
+    battery_charge_kwh: number | null;
+    battery_discharge_kwh: number | null;
+  }[],
   batteryUsableKwh: number | null
-): number | null {
-  if (rows.length === 0) return null;
-  const available = !(
+): SevenDayIndicators {
+  const batteryKwhAvailable = !(
     rows.every((r) => r.battery_charge_kwh === null) && rows.every((r) => r.battery_discharge_kwh === null)
   );
-  if (!available) return null;
-  const totalDischarge = rows.reduce((sum, r) => sum + (r.battery_discharge_kwh ?? 0), 0);
-  const capacity = batteryUsableKwh || 1;
-  return Math.round((totalDischarge / capacity) * 100) / 100;
+  const batteryCycles = rows.length > 0 && batteryKwhAvailable
+    ? Math.round((rows.reduce((sum, r) => sum + (r.battery_discharge_kwh ?? 0), 0) / (batteryUsableKwh || 1)) * 100) / 100
+    : null;
+
+  const batteryStress: BatteryStress =
+    batteryCycles === null ? 'no_data'
+    : batteryCycles > _BATTERY_CYCLES_HIGH ? 'high_stress'
+    : batteryCycles > _BATTERY_CYCLES_MID ? 'working_hard'
+    : 'normal';
+
+  const minSocValues = rows.map((r) => r.min_soc).filter((v): v is number => v !== null);
+  const maxSocValues = rows.map((r) => r.max_soc).filter((v): v is number => v !== null);
+  const avgSocValues = rows.map((r) => r.avg_soc).filter((v): v is number => v !== null);
+
+  return {
+    batteryCycles,
+    batteryStress,
+    outageMinutes: Math.round(rows.reduce((sum, r) => sum + (r.outage_minutes ?? 0), 0) * 10) / 10,
+    outageCount: rows.reduce((sum, r) => sum + (r.outage_count ?? 0), 0),
+    minSoc: minSocValues.length > 0 ? Math.min(...minSocValues) : null,
+    maxSoc: maxSocValues.length > 0 ? Math.max(...maxSocValues) : null,
+    avgSoc: avgSocValues.length > 0 ? Math.round((avgSocValues.reduce((a, b) => a + b, 0) / avgSocValues.length) * 10) / 10 : null,
+    daysSelfSufficient: rows.filter((r) => (r.grid_kwh ?? 0) <= 0).length,
+    daysWithData: rows.length,
+  };
 }
 
 /** For each (site_id, alarm, source) episode key, the WARNING/CLEARED
@@ -514,7 +567,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     // rather than trusting `vrm.daily_health.battery_cycles`, which still
     // fabricates a 0.0 for exactly this case (migration 012, unfixed).
     admin.schema('vrm').from('energy_daily')
-      .select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc, battery_charge_kwh, battery_discharge_kwh')
+      .select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc, max_soc, avg_soc, outage_count, outage_minutes, battery_charge_kwh, battery_discharge_kwh')
       .in('site_id', siteIds).gte('date', lookbackDate),
   ]);
   if (customersError) throw customersError;
@@ -549,17 +602,36 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   }
 
   // Every row from the last 7 days per site (not just the latest) — what
-  // `_batteryCyclesOverWindow()` below sums over, mirroring
+  // `_sevenDayIndicators()` below sums/aggregates over, mirroring
   // `weekly_report.py`'s own weekly framing exactly (that module's own
-  // comment: thresholds "were set assuming a week"). A single day's
-  // discharge is too noisy/small a number to mean much on its own; a
-  // week's total is the same quantity the PDF report already shows.
+  // comment: battery-cycle thresholds "were set assuming a week"). A single
+  // day's discharge/outage figure is too noisy to mean much alone; a
+  // week's total/spread is the same grain the PDF report already shows.
+  type EnergyRow7d = {
+    grid_kwh: number | null;
+    min_soc: number | null;
+    max_soc: number | null;
+    avg_soc: number | null;
+    outage_count: number | null;
+    outage_minutes: number | null;
+    battery_charge_kwh: number | null;
+    battery_discharge_kwh: number | null;
+  };
   const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const last7dEnergyBySite = new Map<string, { battery_charge_kwh: number | null; battery_discharge_kwh: number | null }[]>();
+  const last7dEnergyBySite = new Map<string, EnergyRow7d[]>();
   for (const row of energyDaily ?? []) {
     if (row.date < sevenDaysAgo) continue;
     const list = last7dEnergyBySite.get(row.site_id) ?? [];
-    list.push({ battery_charge_kwh: row.battery_charge_kwh, battery_discharge_kwh: row.battery_discharge_kwh });
+    list.push({
+      grid_kwh: row.grid_kwh,
+      min_soc: row.min_soc,
+      max_soc: row.max_soc,
+      avg_soc: row.avg_soc,
+      outage_count: row.outage_count,
+      outage_minutes: row.outage_minutes,
+      battery_charge_kwh: row.battery_charge_kwh,
+      battery_discharge_kwh: row.battery_discharge_kwh,
+    });
     last7dEnergyBySite.set(row.site_id, list);
   }
 
@@ -599,8 +671,8 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       self_sufficiency_pct: indicators.selfSufficiency,
       self_consumption_pct: indicators.selfConsumption,
       dod_pct: indicators.dod,
-      battery_cycles_7d: _batteryCyclesOverWindow(last7dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
       grid_dependency_pct: latestHealth?.grid_dependency_pct ?? null,
+      seven_day: _sevenDayIndicators(last7dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
     };
   });
 

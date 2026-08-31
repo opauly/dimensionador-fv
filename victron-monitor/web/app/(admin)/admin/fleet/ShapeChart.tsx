@@ -134,6 +134,25 @@ function buildPaths(arr: (number | null)[], scale: { pxPerWPos: number; pxPerWNe
   return { linePath: linePath.trim(), fillPath: fillPath.trim() };
 }
 
+type SiteSavingsOut = {
+  amount: number | null;
+  currency: string | null;
+  basis_count: number | null;
+  days_with_data: number;
+};
+
+// Mirrors `victron/savings.py:CURRENCY_SYMBOLS`/`format_money()` exactly —
+// display formatting only, not a second computation of the amount itself
+// (that stays entirely server-side, in the one function that already does
+// it for the PDF report).
+const CURRENCY_SYMBOLS: Record<string, string> = { CRC: '₡', USD: '$', EUR: '€' };
+function formatMoney(amount: number, currency: string): string {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? `${currency} `;
+  return currency === 'CRC'
+    ? `${symbol}${Math.round(amount).toLocaleString()}`
+    : `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 function sumSeries(all: (number | null)[][]): (number | null)[] {
   const out: (number | null)[] = [];
   for (let h = 0; h < 24; h++) {
@@ -202,6 +221,52 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       .catch(() => {
         if (cancelled) return;
         setStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- siteIds is a prop that doesn't change identity per-render in practice (caller passes a stable array)
+  }, [range]);
+
+  // Estimated savings for the SAME range the chart above is showing —
+  // fetched separately (own loading/error state) since it's a different
+  // vrm_api endpoint, but keyed on the same `range` so switching
+  // Today/7-day/30-day moves both together. Grouped by currency rather
+  // than summed into one number: a fleet mixing real CR sites (ARESEP
+  // tariff, always CRC) with a manually-configured non-CR site (whatever
+  // currency the operator typed in) must never add those two together.
+  const [savings, setSavings] = useState<{ groups: { currency: string; amount: number }[]; sitesWithSavings: number } | null>(null);
+  const [savingsStatus, setSavingsStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.resolve().then(() => {
+      if (!cancelled) setSavingsStatus('loading');
+    });
+
+    Promise.all(
+      siteIds.map((siteId) =>
+        fetch(`/api/admin/pipeline/vrm-fleet/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
+          .then((r) => (r.ok ? (r.json() as Promise<SiteSavingsOut>) : Promise.reject(new Error('fetch failed'))))
+      )
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const byCurrency = new Map<string, number>();
+        let sitesWithSavings = 0;
+        for (const r of results) {
+          if (r.amount === null || r.currency === null) continue;
+          sitesWithSavings += 1;
+          byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.amount);
+        }
+        setSavings({ groups: [...byCurrency.entries()].map(([currency, amount]) => ({ currency, amount })), sitesWithSavings });
+        setSavingsStatus('idle');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSavingsStatus('error');
       });
 
     return () => {
@@ -324,6 +389,31 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
         <span>12:00</span>
         <span>18:00</span>
         <span>23:00</span>
+      </div>
+
+      <div className={styles.savings}>
+        <div className={styles.savingsLabel}>
+          Estimated savings — {RANGES.find((r) => r.key === range)?.label}
+        </div>
+        {savingsStatus === 'loading' && !savings && <div className={styles.status}>Loading…</div>}
+        {savingsStatus === 'error' && !savings && <div className={styles.status}>Could not load savings right now.</div>}
+        {savings && savings.groups.length === 0 && (
+          <div className={styles.savingsNote}>Not enough data yet to estimate savings for this window.</div>
+        )}
+        {savings && savings.groups.length > 0 && (
+          <div className={styles.savingsAmounts}>
+            {savings.groups.map((g) => (
+              <span key={g.currency} className={styles.savingsAmount}>
+                {formatMoney(g.amount, g.currency)}
+              </span>
+            ))}
+          </div>
+        )}
+        {savings && siteIds.length > 1 && savings.sitesWithSavings > 0 && savings.sitesWithSavings < siteIds.length && (
+          <div className={styles.savingsCaveat}>
+            {savings.sitesWithSavings} of {siteIds.length} sites included — the rest have no tariff basis to estimate from yet
+          </div>
+        )}
       </div>
     </div>
   );
