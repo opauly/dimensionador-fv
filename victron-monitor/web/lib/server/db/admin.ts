@@ -321,12 +321,16 @@ export type FleetOverviewRow = {
   dod_pct: number | null;
   grid_dependency_pct: number | null;
   // Everything computed the same way `victron/weekly_report.py` computes
-  // it for the PDF report (see `_sevenDayIndicators()`) — battery cycles,
+  // it for the PDF report (see `_periodIndicators()`) — battery cycles,
   // stress label, outage minutes/count, min/max/avg SOC, days
-  // self-sufficient, all over the last 7 days of `vrm.energy_daily` rows.
-  // NOT read from `vrm.daily_health.battery_cycles`, which still
-  // fabricates a 0.0 for every VRM-API site (migration 012, unfixed).
-  seven_day: SevenDayIndicators;
+  // self-sufficient — over the last 7 and last 30 days of
+  // `vrm.energy_daily` rows respectively, so the per-site page's
+  // week/month toggle needs no extra fetch, just a client-side switch
+  // between two already-computed objects. NOT read from
+  // `vrm.daily_health.battery_cycles`, which still fabricates a 0.0 for
+  // every VRM-API site (migration 012, unfixed).
+  week: PeriodIndicators;
+  month: PeriodIndicators;
 };
 
 export type FleetOverview = {
@@ -400,8 +404,8 @@ function _dailyIndicators(
 
 export type BatteryStress = 'normal' | 'working_hard' | 'high_stress' | 'no_data';
 
-export type SevenDayIndicators = {
-  // Equivalent full cycles over the last 7 days, computed exactly the way
+export type PeriodIndicators = {
+  // Equivalent full cycles over the window, computed exactly the way
   // `victron/weekly_report.py:build_report_data()` already does for the PDF
   // report — sum real discharge over the window, divide by usable
   // capacity — instead of trusting `vrm.daily_health.battery_cycles`
@@ -413,13 +417,16 @@ export type SevenDayIndicators = {
   // day, which must stay a real 0, not get swept into "unavailable"
   // alongside the VRM-API case.
   batteryCycles: number | null;
-  // Same 3-tier-plus-"no data" label `weekly_report.py` shows on the PDF
-  // (thresholds 10.0/7.0 cycles — that module's own comment: "assuming a
-  // week," which this window always is, so no scaling needed here the way
-  // a variable-length report window requires). `'no_data'` is a genuine
-  // fourth state, not lumped in with `'normal'` — the report's own comment
-  // on why: "'Normal' would actively assert everything's fine for data
-  // that is actually just absent."
+  // Same 3-tier-plus-"no data" label `weekly_report.py` shows on the PDF,
+  // thresholds scaled by the window's own length the same way that
+  // module's own comment describes ("a 30-day custom range naturally
+  // accumulates ~4x the cycles a 7-day one does for the exact same daily
+  // usage pattern... these thresholds... scale with the window's length")
+  // — a month window must not read as "High stress" purely for being
+  // longer than a week. `'no_data'` is a genuine fourth state, not lumped
+  // in with `'normal'` — the report's own comment on why: "'Normal' would
+  // actively assert everything's fine for data that is actually just
+  // absent."
   batteryStress: BatteryStress;
   outageMinutes: number;
   outageCount: number;
@@ -433,7 +440,7 @@ export type SevenDayIndicators = {
 const _BATTERY_CYCLES_HIGH = 10.0;
 const _BATTERY_CYCLES_MID = 7.0;
 
-function _sevenDayIndicators(
+function _periodIndicators(
   rows: {
     grid_kwh: number | null;
     min_soc: number | null;
@@ -445,7 +452,7 @@ function _sevenDayIndicators(
     battery_discharge_kwh: number | null;
   }[],
   batteryUsableKwh: number | null
-): SevenDayIndicators {
+): PeriodIndicators {
   const batteryKwhAvailable = !(
     rows.every((r) => r.battery_charge_kwh === null) && rows.every((r) => r.battery_discharge_kwh === null)
   );
@@ -453,10 +460,15 @@ function _sevenDayIndicators(
     ? Math.round((rows.reduce((sum, r) => sum + (r.battery_discharge_kwh ?? 0), 0) / (batteryUsableKwh || 1)) * 100) / 100
     : null;
 
+  // `weekScale` from the actual row COUNT, same as `weekly_report.py`'s own
+  // `len(days) / 7` — a site with gaps in its history gets thresholds
+  // scaled to how much real data it actually has, not the window's nominal
+  // length.
+  const weekScale = rows.length > 0 ? rows.length / 7 : 1;
   const batteryStress: BatteryStress =
     batteryCycles === null ? 'no_data'
-    : batteryCycles > _BATTERY_CYCLES_HIGH ? 'high_stress'
-    : batteryCycles > _BATTERY_CYCLES_MID ? 'working_hard'
+    : batteryCycles > _BATTERY_CYCLES_HIGH * weekScale ? 'high_stress'
+    : batteryCycles > _BATTERY_CYCLES_MID * weekScale ? 'working_hard'
     : 'normal';
 
   const minSocValues = rows.map((r) => r.min_soc).filter((v): v is number => v !== null);
@@ -518,6 +530,10 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   // not something this dashboard needs to keep scanning further back for).
   const lookbackIso = new Date(now - 14 * 24 * 60 * 60 * 1000).toISOString();
   const lookbackDate = lookbackIso.slice(0, 10);
+  // `energy_daily` alone needs a deeper window than the other tables above —
+  // the "This month" toggle on the per-site page needs 30 real days to sum
+  // over, not just 14.
+  const lookback30Date = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const { data: sites, error: sitesError } = await admin
     .schema('vrm')
@@ -568,7 +584,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     // fabricates a 0.0 for exactly this case (migration 012, unfixed).
     admin.schema('vrm').from('energy_daily')
       .select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc, max_soc, avg_soc, outage_count, outage_minutes, battery_charge_kwh, battery_discharge_kwh')
-      .in('site_id', siteIds).gte('date', lookbackDate),
+      .in('site_id', siteIds).gte('date', lookback30Date),
   ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
@@ -601,13 +617,13 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     }
   }
 
-  // Every row from the last 7 days per site (not just the latest) — what
-  // `_sevenDayIndicators()` below sums/aggregates over, mirroring
-  // `weekly_report.py`'s own weekly framing exactly (that module's own
-  // comment: battery-cycle thresholds "were set assuming a week"). A single
-  // day's discharge/outage figure is too noisy to mean much alone; a
-  // week's total/spread is the same grain the PDF report already shows.
-  type EnergyRow7d = {
+  // Every row from the last 7/30 days per site (not just the latest) — what
+  // `_periodIndicators()` below sums/aggregates over, mirroring
+  // `weekly_report.py`'s own framing exactly for whichever window a caller
+  // asks for. A single day's discharge/outage figure is too noisy to mean
+  // much alone; a week's or month's total/spread is the same grain the PDF
+  // report already shows.
+  type EnergyRowPeriod = {
     grid_kwh: number | null;
     min_soc: number | null;
     max_soc: number | null;
@@ -618,11 +634,10 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     battery_discharge_kwh: number | null;
   };
   const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const last7dEnergyBySite = new Map<string, EnergyRow7d[]>();
+  const last7dEnergyBySite = new Map<string, EnergyRowPeriod[]>();
+  const last30dEnergyBySite = new Map<string, EnergyRowPeriod[]>();
   for (const row of energyDaily ?? []) {
-    if (row.date < sevenDaysAgo) continue;
-    const list = last7dEnergyBySite.get(row.site_id) ?? [];
-    list.push({
+    const entry: EnergyRowPeriod = {
       grid_kwh: row.grid_kwh,
       min_soc: row.min_soc,
       max_soc: row.max_soc,
@@ -631,8 +646,18 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       outage_minutes: row.outage_minutes,
       battery_charge_kwh: row.battery_charge_kwh,
       battery_discharge_kwh: row.battery_discharge_kwh,
-    });
-    last7dEnergyBySite.set(row.site_id, list);
+    };
+    // `lookback30Date` already bounds `energyDaily` to 30 days, so every
+    // row here belongs in the month map; only the more recent ones also
+    // belong in the week map.
+    const monthList = last30dEnergyBySite.get(row.site_id) ?? [];
+    monthList.push(entry);
+    last30dEnergyBySite.set(row.site_id, monthList);
+    if (row.date >= sevenDaysAgo) {
+      const weekList = last7dEnergyBySite.get(row.site_id) ?? [];
+      weekList.push(entry);
+      last7dEnergyBySite.set(row.site_id, weekList);
+    }
   }
 
   const openAlarmsBySite = _countOpenEpisodes((alarms ?? []).map((a) => ({ site_id: a.site_id, alarm: a.alarm, severity: a.severity, timestamp: a.timestamp })));
@@ -672,7 +697,8 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       self_consumption_pct: indicators.selfConsumption,
       dod_pct: indicators.dod,
       grid_dependency_pct: latestHealth?.grid_dependency_pct ?? null,
-      seven_day: _sevenDayIndicators(last7dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
+      week: _periodIndicators(last7dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
+      month: _periodIndicators(last30dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
     };
   });
 
