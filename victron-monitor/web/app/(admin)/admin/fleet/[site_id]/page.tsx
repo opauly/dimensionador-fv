@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireAdmin } from '@/lib/server/auth';
 import { getFleetSiteDetail } from '@/lib/server/db/admin';
-import { formatDateTime } from '@/lib/dates';
+import { formatDateTimeInZone } from '@/lib/dates';
 import { FlowDiagram } from '../FlowDiagram';
 import { Gauge } from '../Gauge';
 import { ShapeChart } from '../ShapeChart';
@@ -24,6 +24,14 @@ export async function generateMetadata({ params }: { params: Promise<{ site_id: 
 function formatWatts(w: number | null): string {
   if (w === null) return '—';
   return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
+}
+
+// "America/Costa_Rica" -> "Costa Rica" — the site's own configured
+// timezone (its Cerbo's local time), shown so it's clear this timestamp is
+// NOT the viewer's own clock, unlike the fleet-wide badge on `/admin/fleet`.
+function tzLabel(tz: string | null): string {
+  if (!tz) return 'CR';
+  return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
 }
 
 export default async function AdminFleetSitePage({ params }: { params: Promise<{ site_id: string }> }) {
@@ -47,7 +55,7 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
         {site.live_captured_at && (
           <div className={styles.live}>
             <span className={styles.pulse} />
-            LIVE — as of {formatDateTime(site.live_captured_at, 'en-US')}
+            LIVE — as of {formatDateTimeInZone(site.live_captured_at, site.timezone, 'en-US')} ({tzLabel(site.timezone)})
           </div>
         )}
       </div>
@@ -147,7 +155,7 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
 
       <div className={styles.metaRow}>
         {site.specific_yield_kwh_per_kwp !== null && <span>Specific yield: {site.specific_yield_kwh_per_kwp} kWh/kWp</span>}
-        {site.battery_cycles !== null && <span>Battery cycles: {site.battery_cycles}</span>}
+        {site.battery_cycles_7d !== null && <span>Battery cycles (7d): {site.battery_cycles_7d}</span>}
         {site.grid_dependency_pct !== null && <span>Grid dependency: {site.grid_dependency_pct}%</span>}
         {site.pv_kwp !== null && <span>Installed: {site.pv_kwp} kWp</span>}
         {site.battery_usable_kwh !== null && <span>Usable battery: {site.battery_usable_kwh} kWh</span>}

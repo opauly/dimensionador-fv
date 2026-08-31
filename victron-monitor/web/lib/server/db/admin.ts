@@ -275,6 +275,13 @@ export type FleetOverviewRow = {
   system_type: SiteRecord['system_type'];
   pv_kwp: number | null;
   battery_usable_kwh: number | null;
+  // The site's own configured timezone (its Cerbo's local time), same
+  // field `victron/vrm_live.py`/`vrm_shape.py` already pass to VRM — a
+  // live reading is timestamped in THIS, not the app-wide
+  // America/Costa_Rica default `lib/dates.ts:formatDateTime()` otherwise
+  // assumes. `null` falls back to that default (a site with no configured
+  // timezone, effectively "unknown" rather than "definitely UTC").
+  timezone: string | null;
   vrm_last_synced_at: string | null;
   connection_status: FleetConnectionStatus;
   health_score: number | null;
@@ -312,7 +319,13 @@ export type FleetOverviewRow = {
   self_sufficiency_pct: number | null;
   self_consumption_pct: number | null;
   dod_pct: number | null;
-  battery_cycles: number | null;
+  // Equivalent full cycles over the last 7 days — computed here the same
+  // way `weekly_report.py` computes it for the PDF report (see
+  // `_batteryCyclesOverWindow()`), NOT read from
+  // `vrm.daily_health.battery_cycles`, which still fabricates a 0.0 for
+  // every VRM-API site. `null` only when the whole week's data is missing,
+  // never a false zero.
+  battery_cycles_7d: number | null;
   grid_dependency_pct: number | null;
 };
 
@@ -385,6 +398,31 @@ function _dailyIndicators(
   return { specificYield, selfSufficiency, selfConsumption, dod };
 }
 
+/** Equivalent full cycles over the last 7 days, computed exactly the way
+ * `victron/weekly_report.py:build_report_data()` already does for the PDF
+ * report — sum real discharge over the window, divide by usable capacity —
+ * instead of trusting `vrm.daily_health.battery_cycles`
+ * (`vrm.compute_daily_health()`, migration 012), which still does
+ * `COALESCE(battery_discharge_kwh, 0) / capacity` and so fabricates a
+ * confident 0.0 for every VRM-API site (that column is NULL there by
+ * design). Mirrors that function's own guard precisely: `null` only when
+ * EVERY day in the window has both charge and discharge NULL — a
+ * CSV-sourced site can have a real zero-discharge day, which must stay a
+ * real 0, not get swept into "unavailable" alongside the VRM-API case. */
+function _batteryCyclesOverWindow(
+  rows: { battery_charge_kwh: number | null; battery_discharge_kwh: number | null }[],
+  batteryUsableKwh: number | null
+): number | null {
+  if (rows.length === 0) return null;
+  const available = !(
+    rows.every((r) => r.battery_charge_kwh === null) && rows.every((r) => r.battery_discharge_kwh === null)
+  );
+  if (!available) return null;
+  const totalDischarge = rows.reduce((sum, r) => sum + (r.battery_discharge_kwh ?? 0), 0);
+  const capacity = batteryUsableKwh || 1;
+  return Math.round((totalDischarge / capacity) * 100) / 100;
+}
+
 /** For each (site_id, alarm, source) episode key, the WARNING/CLEARED
  * severity of its MOST RECENT event within `rows` — a WARNING with no
  * later CLEARED means that episode is still open right now. `rows` should
@@ -431,7 +469,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   const { data: sites, error: sitesError } = await admin
     .schema('vrm')
     .from('sites')
-    .select('site_id, display_name, customer_id, system_type, pv_kwp, battery_usable_kwh, vrm_last_synced_at')
+    .select('site_id, display_name, customer_id, system_type, pv_kwp, battery_usable_kwh, timezone, vrm_last_synced_at')
     .eq('source', 'vrm_api')
     .order('display_name');
   if (sitesError) throw sitesError;
@@ -451,7 +489,14 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     { data: energyDaily, error: energyDailyError },
   ] = await Promise.all([
     admin.schema('vrm').from('customers').select('id, name'),
-    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, battery_cycles, grid_dependency_pct').in('site_id', siteIds).gte('date', lookbackDate),
+    // `battery_cycles` deliberately NOT selected here — `vrm.compute_daily_health()`
+    // (migration 012) still does `COALESCE(battery_discharge_kwh, 0) / capacity`,
+    // fabricating a confident 0.0 for every VRM-API site (that field is
+    // NULL there by design — see `energyDaily`'s own comment below). Cycles
+    // are computed independently a few lines down, mirroring
+    // `weekly_report.py`'s own already-correct guard instead of trusting
+    // that column.
+    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, grid_dependency_pct').in('site_id', siteIds).gte('date', lookbackDate),
     admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
     admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
     // Fleet Dashboard Phase 2 — one row per site already (migration 031's
@@ -460,8 +505,17 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     admin.schema('vrm').from('site_snapshots').select('site_id, captured_at, pv_power_w, load_power_w, battery_power_w, grid_power_w, soc_pct').in('site_id', siteIds),
     // Fleet Dashboard Phase 2.5 — the raw kWh/SOC/yield fields IE-0499 §4's
     // formulas are built from (self-sufficiency, self-consumption, DoD,
-    // specific yield). Same lookback window as daily_health above.
-    admin.schema('vrm').from('energy_daily').select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc').in('site_id', siteIds).gte('date', lookbackDate),
+    // specific yield, battery cycles). Same lookback window as daily_health
+    // above. `battery_charge_kwh`/`battery_discharge_kwh` are NULL on every
+    // row for a VRM-API site by design (`victron/vrm_series.py`'s own
+    // docstring point 2b — VRM's derived flow-diagram totals disagreed with
+    // a real battery monitor by up to 97%/58%) — fetched anyway so cycles
+    // can apply the same all-null guard `weekly_report.py` already does,
+    // rather than trusting `vrm.daily_health.battery_cycles`, which still
+    // fabricates a 0.0 for exactly this case (migration 012, unfixed).
+    admin.schema('vrm').from('energy_daily')
+      .select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc, battery_charge_kwh, battery_discharge_kwh')
+      .in('site_id', siteIds).gte('date', lookbackDate),
   ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
@@ -477,11 +531,11 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   // dump_types for the same date) keeps the higher health_score, same
   // dedup rule `database/vrm_report_db.py:bucket_health_days()` already
   // uses for exactly this "which row represents this date" question.
-  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; battery_cycles: number | null; grid_dependency_pct: number | null }>();
+  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null }>();
   for (const row of health ?? []) {
     const existing = latestHealthBySite.get(row.site_id);
     if (!existing || row.date > existing.date || (row.date === existing.date && (row.health_score ?? -1) > (existing.health_score ?? -1))) {
-      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, battery_cycles: row.battery_cycles, grid_dependency_pct: row.grid_dependency_pct });
+      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, grid_dependency_pct: row.grid_dependency_pct });
     }
   }
 
@@ -492,6 +546,21 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     if (!existing || row.date > existing.date) {
       latestEnergyBySite.set(row.site_id, row);
     }
+  }
+
+  // Every row from the last 7 days per site (not just the latest) — what
+  // `_batteryCyclesOverWindow()` below sums over, mirroring
+  // `weekly_report.py`'s own weekly framing exactly (that module's own
+  // comment: thresholds "were set assuming a week"). A single day's
+  // discharge is too noisy/small a number to mean much on its own; a
+  // week's total is the same quantity the PDF report already shows.
+  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const last7dEnergyBySite = new Map<string, { battery_charge_kwh: number | null; battery_discharge_kwh: number | null }[]>();
+  for (const row of energyDaily ?? []) {
+    if (row.date < sevenDaysAgo) continue;
+    const list = last7dEnergyBySite.get(row.site_id) ?? [];
+    list.push({ battery_charge_kwh: row.battery_charge_kwh, battery_discharge_kwh: row.battery_discharge_kwh });
+    last7dEnergyBySite.set(row.site_id, list);
   }
 
   const openAlarmsBySite = _countOpenEpisodes((alarms ?? []).map((a) => ({ site_id: a.site_id, alarm: a.alarm, severity: a.severity, timestamp: a.timestamp })));
@@ -510,6 +579,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       system_type: s.system_type,
       pv_kwp: s.pv_kwp,
       battery_usable_kwh: s.battery_usable_kwh,
+      timezone: s.timezone,
       vrm_last_synced_at: s.vrm_last_synced_at,
       connection_status: _connectionStatus(s.vrm_last_synced_at, now),
       health_score: latestHealth?.health_score ?? null,
@@ -529,7 +599,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       self_sufficiency_pct: indicators.selfSufficiency,
       self_consumption_pct: indicators.selfConsumption,
       dod_pct: indicators.dod,
-      battery_cycles: latestHealth?.battery_cycles ?? null,
+      battery_cycles_7d: _batteryCyclesOverWindow(last7dEnergyBySite.get(s.site_id) ?? [], s.battery_usable_kwh),
       grid_dependency_pct: latestHealth?.grid_dependency_pct ?? null,
     };
   });

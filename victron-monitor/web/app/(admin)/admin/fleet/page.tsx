@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { requireAdmin } from '@/lib/server/auth';
 import { getFleetOverview, type FleetConnectionStatus, type FleetOverviewRow } from '@/lib/server/db/admin';
 import { Table } from '@/components/ui';
-import { formatDateTime } from '@/lib/dates';
+import { formatDateTime, formatDateTimeInZone } from '@/lib/dates';
+import { FleetFreshness } from './FleetFreshness';
 import { FlowDiagram } from './FlowDiagram';
 import { ShapeChart } from './ShapeChart';
 import styles from './fleet.module.css';
@@ -84,7 +85,7 @@ function row(site: FleetOverviewRow) {
             <div className={styles.sub}>
               {formatWatts(site.live_battery_power_w)} batt &middot; {site.live_soc_pct === null ? '—' : `${site.live_soc_pct}%`} SOC
             </div>
-            <div className={styles.sub}>as of {formatDateTime(site.live_captured_at, 'en-US')}</div>
+            <div className={styles.sub}>as of {formatDateTimeInZone(site.live_captured_at, site.timezone, 'en-US')}</div>
           </>
         ) : (
           <span className={styles.sub}>No live reading yet</span>
@@ -125,9 +126,27 @@ export default async function AdminFleetPage() {
   const avgSoc = socSites.length > 0 ? Math.round((socSites.reduce((a, s) => a + (s.live_soc_pct ?? 0), 0) / socSites.length) * 10) / 10 : null;
   const lowestSoc = socSites.length > 0 ? socSites.reduce((min, s) => ((s.live_soc_pct ?? 0) < (min.live_soc_pct ?? 0) ? s : min)) : null;
 
+  // The fleet-wide "how fresh is this" badge is about the VIEWER's own
+  // clock, not any one site's — computed here (server-side, cheap: just a
+  // max over already-fetched rows) and handed to `FleetFreshness`, the one
+  // Client Component on this page, to actually render in the browser's
+  // own timezone.
+  const capturedTimestamps = sites.map((s) => s.live_captured_at).filter((v): v is string => v !== null);
+  const mostRecentCapturedAt = capturedTimestamps.length > 0
+    ? capturedTimestamps.reduce((latest, ts) => (ts > latest ? ts : latest))
+    : null;
+
   return (
     <div>
-      <h1>Fleet Health</h1>
+      <div className={styles.pageHead}>
+        <h1>Fleet Health</h1>
+        {mostRecentCapturedAt && (
+          <div className={styles.liveBadge}>
+            <span className={styles.pulse} />
+            <FleetFreshness mostRecentCapturedAt={mostRecentCapturedAt} />
+          </div>
+        )}
+      </div>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
         Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status — the most recent{' '}
         <code>vrm.daily_health</code>/<code>vrm.energy_daily</code> figures, any alarm/critical-alert episode still

@@ -1,6 +1,52 @@
 /* app/(admin)/admin/fleet — same conventions as sites/activity's own
    modules (styles/tokens.css only, nothing ported from landing_template.html). */
 
+.pageHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.liveBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper-dim);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 7px 14px 7px 10px;
+  white-space: nowrap;
+}
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+  animation: fleetPulse 2.2s infinite;
+  flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
+@keyframes fleetPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--good-rgb), 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(var(--good-rgb), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--good-rgb), 0);
+  }
+}
+
 .rollupHint {
   font-size: 12px;
   color: var(--mute);
