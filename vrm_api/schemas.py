@@ -421,6 +421,21 @@ class FleetSnapshotsRefreshOut(BaseModel):
     failed: int
 
 
+class SiteShapeOut(BaseModel):
+    """`GET /v1/vrm-fleet/site-shape`'s response — Fleet Dashboard Phase 2.5
+    (2026-08-30). 24 hour-of-day buckets (index 0 = midnight local time),
+    fetched fresh from VRM on every call (`victron/vrm_shape.py`), never
+    stored. `None` per-hour where that site published nothing usable for
+    that bucket — `grid` is `None` for every hour on a site with no
+    physical grid meter, same convention `FleetOverviewRow.live_grid_power_w`
+    already uses for a single instantaneous reading."""
+
+    solar: list[float | None]
+    load: list[float | None]
+    battery: list[float | None]
+    grid: list[float | None]
+
+
 # ──────────────────────────────────────────────────────────────────────
 # PLAN_PHASE16.md §5.1–5.3 / §8 Step 3 — routers/billing.py request/response
 # models. `extra="forbid"` on every request body, same reasoning as

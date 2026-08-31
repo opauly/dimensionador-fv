@@ -1,0 +1,46 @@
+/* app/(admin)/admin/help — same conventions as fleet's own modules
+   (styles/tokens.css only); mirrors app/(portal)/app/help's layout without
+   the topic-switcher (admin has three static sections, not a multi-topic
+   FAQ needing a client component to switch between them). */
+
+.intro {
+  color: var(--paper-dim);
+  max-width: 68ch;
+  margin-bottom: 24px;
+}
+
+.section {
+  max-width: 720px;
+  padding: 22px 26px;
+  margin-bottom: 20px;
+}
+.section h2 {
+  margin-bottom: 10px;
+}
+.section p {
+  color: var(--paper-dim);
+  max-width: 68ch;
+}
+.section p + p {
+  margin-top: 10px;
+}
+
+.stepList,
+.bulletList {
+  color: var(--paper-dim);
+  max-width: 68ch;
+  margin-top: 12px;
+  padding-left: 22px;
+}
+.stepList li,
+.bulletList li {
+  margin-bottom: 10px;
+}
+.stepList li:last-child,
+.bulletList li:last-child {
+  margin-bottom: 0;
+}
+.stepList strong,
+.bulletList strong {
+  color: var(--paper);
+}

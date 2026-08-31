@@ -1,0 +1,123 @@
+/* ShapeChart.tsx — same conventions as fleet.module.css (styles/tokens.css
+   only), split into its own module since this component is shared between
+   /admin/fleet and /admin/fleet/[site_id]. */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 22px;
+}
+.card h2 {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.cardSub {
+  font-size: 12.5px;
+  color: var(--mute);
+  margin-bottom: 18px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.rangeToggle {
+  display: inline-flex;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 3px;
+  gap: 2px;
+}
+.rangeBtn,
+.rangeBtnActive {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: none;
+  border: none;
+  border-radius: 16px;
+  padding: 6px 13px;
+  cursor: pointer;
+  color: var(--mute);
+}
+.rangeBtnActive {
+  background: var(--victron);
+  color: #fff;
+}
+.rangeBtn:hover {
+  color: var(--paper-dim);
+}
+
+.seriesChecks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.seriesChecks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--paper-dim);
+  cursor: pointer;
+}
+.checkDisabled {
+  color: var(--mute) !important;
+  cursor: default !important;
+}
+.seriesChecks input {
+  accent-color: var(--victron);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+.checkDisabled input {
+  cursor: default;
+}
+.seriesChecks i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  flex: none;
+}
+
+.chartWrap {
+  position: relative;
+  min-height: 140px;
+}
+.chartWrap svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.status {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--mute);
+  padding: 40px 0;
+  text-align: center;
+}
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--mute);
+  margin-top: 4px;
+}

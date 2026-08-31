@@ -32,6 +32,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     { href: '/admin/activity', label: 'Activity' },
     { href: '/admin/fleet', label: 'Fleet Health' },
     { href: '/admin/vrm-fleet', label: 'VRM Fleet', personal: true },
+    { href: '/admin/help', label: 'Help' },
   ];
 
   return (

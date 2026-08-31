@@ -62,8 +62,9 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import ValidationError
 
 from database.supabase_client import get_client
@@ -72,6 +73,7 @@ from victron import ingest as victron_ingest
 from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
 from victron.vrm_series import DEFAULT_TZ_NAME
+from victron.vrm_shape import RANGE_DAYS, fetch_site_shape
 
 from vrm_api import jobs, secrets, tenancy
 from vrm_api.deps import require_pipeline_key
@@ -80,6 +82,7 @@ from vrm_api.schemas import (
     FleetSnapshotsRefreshOut,
     JobCreated,
     SiteFieldsIn,
+    SiteShapeOut,
     VrmFleetInstallationOut,
     VrmFleetInstallationsOut,
     VrmFleetLinkedSiteOut,
@@ -451,3 +454,44 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
         refreshed += 1
 
     return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
+
+
+@router.get("/site-shape", response_model=SiteShapeOut)
+def get_site_shape(
+    site_id: str = Query(...),
+    range: Literal["today", "week", "month"] = Query(...),
+) -> SiteShapeOut:
+    """Fleet Dashboard Phase 2.5 (2026-08-30) — one site's hour-of-day
+    PV/load/battery/grid shape, computed fresh from VRM on every call
+    (`victron/vrm_shape.py`; see that module's own docstring for the
+    "confirmed 180+ days of real 15-min history" finding this is built on).
+    Never stored — this is the on-demand alternative to a new accumulating
+    snapshot-history table, cheaper for a fleet this size.
+
+    Same site lookup / token resolution as `post_refresh_snapshots()`
+    above: a customer-connected site reads with that customer's own VRM
+    credential, `VRM_ADMIN_TOKEN` is the fallback for an admin-fleet-linked
+    site. 404 for a site this API doesn't know as `source='vrm_api'` — a
+    CSV-only site or an unknown `site_id` has nothing this endpoint could
+    ever answer.
+    """
+    row = (_t("sites").select("site_id, customer_id, vrm_installation_id, timezone, source")
+          .eq("site_id", site_id).limit(1).execute().data)
+    if not row or row[0].get("source") != "vrm_api" or row[0].get("vrm_installation_id") is None:
+        raise HTTPException(status_code=404, detail={"code": "site_not_found"})
+    site = row[0]
+
+    token: str | None = None
+    try:
+        token = secrets.read_customer_vrm_token(site["customer_id"])
+    except Exception:  # noqa: BLE001 — see post_refresh_snapshots()'s own try/except
+        logger.warning("vrm-fleet site-shape: could not read customer token for customer_id=%s",
+                      site["customer_id"])
+    token = token or os.environ.get("VRM_ADMIN_TOKEN")
+    if not token:
+        raise HTTPException(status_code=409, detail={"code": "no_vrm_token_available"})
+
+    client = VrmRemoteClient(token)
+    shape = fetch_site_shape(client, site["vrm_installation_id"], range_key=range,
+                            tz=site.get("timezone") or DEFAULT_TZ_NAME)
+    return SiteShapeOut(**shape)

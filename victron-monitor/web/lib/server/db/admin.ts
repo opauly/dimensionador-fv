@@ -294,6 +294,26 @@ export type FleetOverviewRow = {
   live_battery_power_w: number | null;
   live_grid_power_w: number | null;
   live_soc_pct: number | null;
+  // A live snapshot value that has ever landed non-null is the one signal
+  // this app has that a physical grid meter actually exists — checked live
+  // against real production data 2026-08-30 (found Proyecto gV DOES have
+  // one; the other 3 don't), not assumed. There is no separate "has grid
+  // meter" column on `vrm.sites` to read instead.
+  has_grid_meter: boolean;
+  // Fleet Dashboard Phase 2.5 (2026-08-30) — every one of these is derived
+  // from the most recent `vrm.energy_daily`/`vrm.daily_health` row using
+  // exactly the formulas IE-0499's own requirements doc §4 specifies
+  // (`self_sufficiency = 1 - grid_kwh/load_kwh`, etc.) — no new ingestion,
+  // this data has been sitting on those two tables all along. `null` when
+  // that day's denominator is zero/missing rather than a divide-by-zero or
+  // a fabricated 0%.
+  health_metrics_date: string | null;
+  specific_yield_kwh_per_kwp: number | null;
+  self_sufficiency_pct: number | null;
+  self_consumption_pct: number | null;
+  dod_pct: number | null;
+  battery_cycles: number | null;
+  grid_dependency_pct: number | null;
 };
 
 export type FleetOverview = {
@@ -320,6 +340,49 @@ function _connectionStatus(lastSyncedAt: string | null, now: number): FleetConne
   if (!lastSyncedAt) return 'never_synced';
   const age = now - new Date(lastSyncedAt).getTime();
   return age <= _ONLINE_WITHIN_MS ? 'online' : 'stale';
+}
+
+/** IE-0499's own §4 formulas, applied to the most recent `energy_daily`
+ * row: specific yield = pv_kwh / pv_kwp; self-sufficiency = 1 -
+ * grid_kwh/load_kwh (approximated here as `pv_kwh - grid_export_kwh` for
+ * "load" — this table has no direct `load_kwh` column read into this
+ * query, and PV-minus-exports is the same quantity the doc's own
+ * self-consumption formula already uses); DoD = 100% - min_soc. `null`
+ * whenever the row itself is missing or a denominator is zero, never a
+ * fabricated 0%/divide-by-zero.
+ *
+ * `pv_kwp_snapshot` (meant to freeze the capacity a given day's yield was
+ * computed against, surviving a later capacity change) is `null` on every
+ * real row as of 2026-08-30 — checked live, not assumed, and it's a real
+ * gap in the ingestion pipeline this function doesn't own. `fallbackKwp`
+ * (the site's CURRENT `pv_kwp`) is what actually makes yield computable
+ * today; swap back to `pv_kwp_snapshot`-only once that column is actually
+ * populated at ingestion time. */
+function _dailyIndicators(
+  energy: { pv_kwh: number | null; grid_kwh: number | null; grid_export_kwh: number | null; pv_kwp_snapshot: number | null; min_soc: number | null } | undefined,
+  fallbackKwp: number | null
+): {
+  specificYield: number | null; selfSufficiency: number | null; selfConsumption: number | null; dod: number | null;
+} {
+  if (!energy) return { specificYield: null, selfSufficiency: null, selfConsumption: null, dod: null };
+  const pv = energy.pv_kwh ?? null;
+  const grid = energy.grid_kwh ?? null;
+  const exported = energy.grid_export_kwh ?? 0;
+  const kwp = energy.pv_kwp_snapshot ?? fallbackKwp ?? null;
+  const minSoc = energy.min_soc ?? null;
+
+  const specificYield = pv !== null && kwp !== null && kwp > 0 ? Math.round((pv / kwp) * 100) / 100 : null;
+  const selfConsumption = pv !== null && pv > 0 ? Math.round(((pv - exported) / pv) * 1000) / 10 : null;
+
+  const consumedLocally = pv !== null ? Math.max(pv - exported, 0) : null;
+  const totalLoad = consumedLocally !== null && grid !== null ? consumedLocally + grid : null;
+  const selfSufficiency = totalLoad !== null && totalLoad > 0 && grid !== null
+    ? Math.round((1 - grid / totalLoad) * 1000) / 10
+    : null;
+
+  const dod = minSoc !== null ? Math.round((100 - minSoc) * 10) / 10 : null;
+
+  return { specificYield, selfSufficiency, selfConsumption, dod };
 }
 
 /** For each (site_id, alarm, source) episode key, the WARNING/CLEARED
@@ -385,21 +448,27 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     { data: alarms, error: alarmsError },
     { data: criticalAlerts, error: criticalError },
     { data: snapshots, error: snapshotsError },
+    { data: energyDaily, error: energyDailyError },
   ] = await Promise.all([
     admin.schema('vrm').from('customers').select('id, name'),
-    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status').in('site_id', siteIds).gte('date', lookbackDate),
+    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, battery_cycles, grid_dependency_pct').in('site_id', siteIds).gte('date', lookbackDate),
     admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
     admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
     // Fleet Dashboard Phase 2 — one row per site already (migration 031's
     // PRIMARY KEY on site_id), so no "latest per site" grouping needed
     // here the way daily_health above needs one.
     admin.schema('vrm').from('site_snapshots').select('site_id, captured_at, pv_power_w, load_power_w, battery_power_w, grid_power_w, soc_pct').in('site_id', siteIds),
+    // Fleet Dashboard Phase 2.5 — the raw kWh/SOC/yield fields IE-0499 §4's
+    // formulas are built from (self-sufficiency, self-consumption, DoD,
+    // specific yield). Same lookback window as daily_health above.
+    admin.schema('vrm').from('energy_daily').select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc').in('site_id', siteIds).gte('date', lookbackDate),
   ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
   if (alarmsError) throw alarmsError;
   if (criticalError) throw criticalError;
   if (snapshotsError) throw snapshotsError;
+  if (energyDailyError) throw energyDailyError;
 
   const customerNameById = new Map((customers ?? []).map((c) => [c.id as string, c.name as string]));
   const snapshotBySite = new Map((snapshots ?? []).map((s) => [s.site_id as string, s]));
@@ -408,11 +477,20 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   // dump_types for the same date) keeps the higher health_score, same
   // dedup rule `database/vrm_report_db.py:bucket_health_days()` already
   // uses for exactly this "which row represents this date" question.
-  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null }>();
+  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; battery_cycles: number | null; grid_dependency_pct: number | null }>();
   for (const row of health ?? []) {
     const existing = latestHealthBySite.get(row.site_id);
     if (!existing || row.date > existing.date || (row.date === existing.date && (row.health_score ?? -1) > (existing.health_score ?? -1))) {
-      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status });
+      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, battery_cycles: row.battery_cycles, grid_dependency_pct: row.grid_dependency_pct });
+    }
+  }
+
+  // Latest energy_daily row per site — same "highest date wins" rule.
+  const latestEnergyBySite = new Map<string, { date: string; pv_kwh: number | null; grid_kwh: number | null; grid_export_kwh: number | null; pv_kwp_snapshot: number | null; min_soc: number | null }>();
+  for (const row of energyDaily ?? []) {
+    const existing = latestEnergyBySite.get(row.site_id);
+    if (!existing || row.date > existing.date) {
+      latestEnergyBySite.set(row.site_id, row);
     }
   }
 
@@ -422,6 +500,8 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   const rows: FleetOverviewRow[] = siteRows.map((s) => {
     const latestHealth = latestHealthBySite.get(s.site_id);
     const snapshot = snapshotBySite.get(s.site_id);
+    const energy = latestEnergyBySite.get(s.site_id);
+    const indicators = _dailyIndicators(energy, s.pv_kwp);
     return {
       site_id: s.site_id,
       display_name: s.display_name,
@@ -443,6 +523,14 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       live_battery_power_w: snapshot?.battery_power_w ?? null,
       live_grid_power_w: snapshot?.grid_power_w ?? null,
       live_soc_pct: snapshot?.soc_pct ?? null,
+      has_grid_meter: (snapshot?.grid_power_w ?? null) !== null,
+      health_metrics_date: energy?.date ?? null,
+      specific_yield_kwh_per_kwp: indicators.specificYield,
+      self_sufficiency_pct: indicators.selfSufficiency,
+      self_consumption_pct: indicators.selfConsumption,
+      dod_pct: indicators.dod,
+      battery_cycles: latestHealth?.battery_cycles ?? null,
+      grid_dependency_pct: latestHealth?.grid_dependency_pct ?? null,
     };
   });
 
@@ -456,6 +544,21 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   };
 
   return { sites: rows, rollup };
+}
+
+/** The single-site version of `getFleetOverview()`'s own row shape, for
+ * `/admin/fleet/[site_id]`. Reuses that function outright rather than
+ * restating its five-way parallel query and indicator math for one row —
+ * at fleet sizes this dashboard is built for (single digits today), fetching
+ * every site to serve one page is negligible cost for guaranteeing the
+ * drill-down and the table can never compute the same indicator two
+ * different ways. Worth splitting into a real single-site query if the
+ * fleet grows enough for that assumption to stop holding. `null` (not a
+ * throw) when `siteId` doesn't match any `source='vrm_api'` site — the
+ * caller's own job to decide that's a 404. */
+export async function getFleetSiteDetail(siteId: string): Promise<FleetOverviewRow | null> {
+  const overview = await getFleetOverview();
+  return overview.sites.find((s) => s.site_id === siteId) ?? null;
 }
 
 // Same field whitelist as `sites.ts:SITE_WHITELIST`, restated here rather

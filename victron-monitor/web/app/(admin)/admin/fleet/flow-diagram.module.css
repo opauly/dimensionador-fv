@@ -1,0 +1,122 @@
+/* FlowDiagram.tsx — validated against Oscar's own mockup review (Fleet
+   Dashboard Phase 2.5): Home/Battery pushed apart enough that the ring +
+   the "37 W" line label never collide with the node's own text stack,
+   and the battery connector is the same visual length as solar/grid's. */
+
+.flow {
+  position: relative;
+  height: 420px;
+}
+.node {
+  position: absolute;
+  width: 108px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.ring {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  border: 2px solid var(--line);
+}
+.ring svg {
+  width: 28px;
+  height: 28px;
+}
+.name {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+}
+.amt {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+.footnote {
+  font-size: 10px;
+  color: var(--mute);
+  text-align: center;
+}
+
+.solar {
+  top: 4px;
+  left: 0;
+}
+.grid {
+  top: 4px;
+  right: 0;
+}
+.home {
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.home .ring {
+  width: 82px;
+  height: 82px;
+  border-color: var(--paper-dim);
+}
+.battery {
+  top: 276px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.solar .ring {
+  border-color: var(--signal);
+  box-shadow: 0 0 18px rgba(var(--signal-rgb), 0.25);
+}
+.battery .ring {
+  border-color: var(--good);
+  box-shadow: 0 0 18px rgba(var(--good-rgb), 0.25);
+}
+.grid .ring {
+  border-color: var(--mute);
+}
+
+.lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.path {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 6 8;
+  animation: dash 1.1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .path {
+    animation: none;
+  }
+}
+@keyframes dash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+.solarHome {
+  stroke: var(--signal);
+}
+.batteryHome {
+  stroke: var(--good);
+}
+.gridHome {
+  stroke: var(--line);
+  stroke-dasharray: 3 6;
+  animation: none;
+}

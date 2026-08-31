@@ -346,6 +346,24 @@ export async function syncVrmFleetSite(body: { site_id: string; start: string; e
   return pipelineJson('/v1/vrm-fleet/sync', jsonInit(body));
 }
 
+export type SiteShapeRange = 'today' | 'week' | 'month';
+
+/** Mirrors `vrm_api/schemas.py:SiteShapeOut` — 24 hour-of-day buckets,
+ * `null` where that site published nothing usable, `grid` all-`null` on a
+ * site with no physical meter. Fetched fresh from VRM on every call
+ * (Fleet Dashboard Phase 2.5) — never cached/stored on this side either. */
+export type SiteShapeOut = {
+  solar: (number | null)[];
+  load: (number | null)[];
+  battery: (number | null)[];
+  grid: (number | null)[];
+};
+
+export async function getSiteShape(siteId: string, range: SiteShapeRange): Promise<SiteShapeOut> {
+  const qs = new URLSearchParams({ site_id: siteId, range });
+  return pipelineJson(`/v1/vrm-fleet/site-shape?${qs.toString()}`, { method: 'GET' });
+}
+
 // ── VRM link (PLAN_PHASE15.md §3.1 / §8 Step 5) ─────────────────────────
 // A CUSTOMER'S OWN VRM personal access token — never `VRM_ADMIN_TOKEN`
 // (that's the `VrmFleet*` functions above). Mirrors `vrm_api/schemas.py`'s
