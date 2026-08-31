@@ -3,9 +3,19 @@
    the "37 W" line label never collide with the node's own text stack,
    and the battery connector is the same visual length as solar/grid's. */
 
+/* Bounded to a fixed max-width and centered — without this, the absolutely
+   positioned nodes (solar/grid pinned to the card's own left:0/right:0
+   edges) stretch to whatever width the surrounding card happens to be.
+   On a wide desktop card that pulls solar/grid far apart while the
+   diagram's height stays fixed, and skews every connector's SVG curve
+   (drawn in a 400-wide viewBox, `preserveAspectRatio="none"`) into a flat,
+   disproportionate line — found live on a real wide viewport, not
+   something the ~800px dev preview this was built against ever showed. */
 .flow {
   position: relative;
   height: 420px;
+  max-width: 480px;
+  margin: 0 auto;
 }
 .node {
   position: absolute;

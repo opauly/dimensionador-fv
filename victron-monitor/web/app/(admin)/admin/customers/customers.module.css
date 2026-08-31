@@ -126,3 +126,12 @@
   font-size: 14px;
   margin: 10px 0;
 }
+
+.deactivatedHeading {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--mute);
+  margin: 28px 0 10px;
+}

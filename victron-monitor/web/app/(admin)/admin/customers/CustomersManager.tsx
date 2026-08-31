@@ -100,6 +100,14 @@ export function CustomersManager({ customers }: { customers: AdminCustomerRow[] 
     [customers, originFilter, provisioningFilter],
   );
 
+  // Active customers are what you're managing day to day; a deactivated one
+  // is closed-out business — split into its own table below so it doesn't
+  // compete for attention in the main list (Oscar's own request,
+  // 2026-08-30), same "top table is where you look first" idea the fleet
+  // page's own layout follows.
+  const activeCustomers = useMemo(() => filteredCustomers.filter((c) => c.active), [filteredCustomers]);
+  const deactivatedCustomers = useMemo(() => filteredCustomers.filter((c) => !c.active), [filteredCustomers]);
+
   function runRowAction(id: string, fn: () => Promise<{ ok?: boolean; error?: string } | void>) {
     setRowBusy((b) => ({ ...b, [id]: true }));
     setRowError((e) => ({ ...e, [id]: '' }));
@@ -111,6 +119,136 @@ export function CustomersManager({ customers }: { customers: AdminCustomerRow[] 
       }
     });
   }
+
+  function renderCustomerRow(c: AdminCustomerRow) {
+    const vrmLink = vrmLinkStatusLabel(c);
+    return (
+      <Fragment key={c.id}>
+        <tr>
+          <td>
+            {c.name}
+            <div className={styles.subtle}>
+              {c.slug} · {countryLabel(c.country)}
+            </div>
+          </td>
+          <td>{c.account_type === 'installer' ? 'Installer' : 'Owner'}</td>
+          <td>{planLabel(c.plan)}</td>
+          <td>
+            {c.siteCount}
+            {c.site_limit !== null ? ` / ${c.site_limit}` : ''}
+          </td>
+          <td>{c.lastUploadAt ? formatDate(c.lastUploadAt) : '—'}</td>
+          <td>
+            <span className={authStatusLabel(c).className}>{authStatusLabel(c).text}</span>
+            {rowError[c.id] && <div className={styles.rowError}>{rowError[c.id]}</div>}
+          </td>
+          <td>
+            <span className={vrmLink.className}>{vrmLink.text}</span>
+          </td>
+          <td>
+            <span className={c.active ? styles.statusActive : styles.statusNone}>{c.active ? 'Yes' : 'No'}</span>
+          </td>
+          <td>
+            <span className={billingStatusBadgeClass(c.billing_status)}>{c.billing_status ?? 'none'}</span>
+            <div className={styles.subtle}>
+              {c.nextRenewalAt ? `Renews ${formatDate(c.nextRenewalAt)}` : 'No renewal scheduled'}
+              {c.cancelPending ? ' · Cancel pending' : ''}
+            </div>
+          </td>
+          <td>
+            <span className={styles.subtle}>{c.origin === 'self_serve' ? 'Self-serve' : 'Admin'}</span>
+            {c.provisioning_state === 'pending_subscription' && (
+              <div className={styles.statusInvited}>Pending signup</div>
+            )}
+          </td>
+          <td className={styles.actionsCell}>
+            <Button type="button" variant="ghost" onClick={() => setEditingId(editingId === c.id ? null : c.id)}>
+              Edit
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setBillingOpenId(billingOpenId === c.id ? null : c.id)}
+            >
+              Billing
+            </Button>
+            {c.auth_user_id ? (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={rowBusy[c.id]}
+                onClick={() => runRowAction(c.id, () => resendInviteAction(c.id))}
+              >
+                Resend invite
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={rowBusy[c.id]}
+                onClick={() => runRowAction(c.id, () => sendInviteAction(c.id))}
+              >
+                Send invite
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={rowBusy[c.id]}
+              onClick={() => runRowAction(c.id, () => setActiveAction(c.id, !c.active))}
+            >
+              {c.active ? 'Deactivate' : 'Activate'}
+            </Button>
+            {vrmLink.connected && (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={rowBusy[c.id]}
+                onClick={() => {
+                  if (!window.confirm(`Disconnect ${c.name}'s VRM account? Data already imported will not be deleted.`)) return;
+                  runRowAction(c.id, () => disconnectVrmLinkAction(c.id));
+                }}
+              >
+                Disconnect VRM
+              </Button>
+            )}
+          </td>
+        </tr>
+        {editingId === c.id && (
+          <tr>
+            <td colSpan={TABLE_COLUMN_COUNT} className={styles.editRow}>
+              <EditCustomerForm customer={c} onDone={() => setEditingId(null)} />
+            </td>
+          </tr>
+        )}
+        {billingOpenId === c.id && (
+          <tr>
+            <td colSpan={TABLE_COLUMN_COUNT} className={styles.editRow}>
+              <CustomerBillingPanel customer={c} />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  }
+
+  const tableHead = (
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Type</th>
+        <th>Plan</th>
+        <th>Sites</th>
+        <th>Last upload</th>
+        <th>Access</th>
+        <th>VRM</th>
+        <th>Active</th>
+        <th>Billing</th>
+        <th>Origin</th>
+        <th />
+      </tr>
+    </thead>
+  );
 
   return (
     <div>
@@ -137,135 +275,19 @@ export function CustomersManager({ customers }: { customers: AdminCustomerRow[] 
       </div>
 
       <Table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Plan</th>
-            <th>Sites</th>
-            <th>Last upload</th>
-            <th>Access</th>
-            <th>VRM</th>
-            <th>Active</th>
-            <th>Billing</th>
-            <th>Origin</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {filteredCustomers.map((c) => {
-            const vrmLink = vrmLinkStatusLabel(c);
-            return (
-            <Fragment key={c.id}>
-              <tr>
-                <td>
-                  {c.name}
-                  <div className={styles.subtle}>
-                    {c.slug} · {countryLabel(c.country)}
-                  </div>
-                </td>
-                <td>{c.account_type === 'installer' ? 'Installer' : 'Owner'}</td>
-                <td>{planLabel(c.plan)}</td>
-                <td>
-                  {c.siteCount}
-                  {c.site_limit !== null ? ` / ${c.site_limit}` : ''}
-                </td>
-                <td>{c.lastUploadAt ? formatDate(c.lastUploadAt) : '—'}</td>
-                <td>
-                  <span className={authStatusLabel(c).className}>{authStatusLabel(c).text}</span>
-                  {rowError[c.id] && <div className={styles.rowError}>{rowError[c.id]}</div>}
-                </td>
-                <td>
-                  <span className={vrmLink.className}>{vrmLink.text}</span>
-                </td>
-                <td>
-                  <span className={c.active ? styles.statusActive : styles.statusNone}>{c.active ? 'Yes' : 'No'}</span>
-                </td>
-                <td>
-                  <span className={billingStatusBadgeClass(c.billing_status)}>{c.billing_status ?? 'none'}</span>
-                  <div className={styles.subtle}>
-                    {c.nextRenewalAt ? `Renews ${formatDate(c.nextRenewalAt)}` : 'No renewal scheduled'}
-                    {c.cancelPending ? ' · Cancel pending' : ''}
-                  </div>
-                </td>
-                <td>
-                  <span className={styles.subtle}>{c.origin === 'self_serve' ? 'Self-serve' : 'Admin'}</span>
-                  {c.provisioning_state === 'pending_subscription' && (
-                    <div className={styles.statusInvited}>Pending signup</div>
-                  )}
-                </td>
-                <td className={styles.actionsCell}>
-                  <Button type="button" variant="ghost" onClick={() => setEditingId(editingId === c.id ? null : c.id)}>
-                    Edit
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setBillingOpenId(billingOpenId === c.id ? null : c.id)}
-                  >
-                    Billing
-                  </Button>
-                  {c.auth_user_id ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={rowBusy[c.id]}
-                      onClick={() => runRowAction(c.id, () => resendInviteAction(c.id))}
-                    >
-                      Resend invite
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={rowBusy[c.id]}
-                      onClick={() => runRowAction(c.id, () => sendInviteAction(c.id))}
-                    >
-                      Send invite
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={rowBusy[c.id]}
-                    onClick={() => runRowAction(c.id, () => setActiveAction(c.id, !c.active))}
-                  >
-                    {c.active ? 'Deactivate' : 'Activate'}
-                  </Button>
-                  {vrmLink.connected && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      disabled={rowBusy[c.id]}
-                      onClick={() => {
-                        if (!window.confirm(`Disconnect ${c.name}'s VRM account? Data already imported will not be deleted.`)) return;
-                        runRowAction(c.id, () => disconnectVrmLinkAction(c.id));
-                      }}
-                    >
-                      Disconnect VRM
-                    </Button>
-                  )}
-                </td>
-              </tr>
-              {editingId === c.id && (
-                <tr>
-                  <td colSpan={TABLE_COLUMN_COUNT} className={styles.editRow}>
-                    <EditCustomerForm customer={c} onDone={() => setEditingId(null)} />
-                  </td>
-                </tr>
-              )}
-              {billingOpenId === c.id && (
-                <tr>
-                  <td colSpan={TABLE_COLUMN_COUNT} className={styles.editRow}>
-                    <CustomerBillingPanel customer={c} />
-                  </td>
-                </tr>
-              )}
-            </Fragment>
-            );
-          })}
-        </tbody>
+        {tableHead}
+        <tbody>{activeCustomers.map(renderCustomerRow)}</tbody>
       </Table>
+
+      {deactivatedCustomers.length > 0 && (
+        <>
+          <h2 className={styles.deactivatedHeading}>Deactivated ({deactivatedCustomers.length})</h2>
+          <Table>
+            {tableHead}
+            <tbody>{deactivatedCustomers.map(renderCustomerRow)}</tbody>
+          </Table>
+        </>
+      )}
 
       <div className={styles.actionsRow}>
         {!creating && (

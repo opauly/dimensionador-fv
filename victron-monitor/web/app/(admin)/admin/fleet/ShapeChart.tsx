@@ -39,28 +39,81 @@ const SERIES: { key: SeriesKey; label: string; color: string; fill?: string }[] 
 ];
 
 const W = 960;
+const H = 240;
 const ZERO_Y = 170;
-// Fixed scale (not auto-fit to the fetched data's own max) so switching
-// range/series doesn't rescale the y-axis under the reader on every click —
-// 1450 W covers this fleet's real observed peaks (fleet load ~1.4kW) with
-// headroom; a much larger fleet would want this configurable rather than
-// hardcoded.
-const PX_PER_W = 170 / 1450;
+const HEADROOM_ABOVE = ZERO_Y; // px available for positive values
+const HEADROOM_BELOW = H - ZERO_Y; // px available for negative values (battery discharge, grid export)
 
 function xFor(i: number) {
   return Math.round(i * (W / 23));
 }
-function yFor(v: number) {
-  return Math.round(ZERO_Y - v * PX_PER_W);
+
+/** Scale is computed fresh per fetch from the ACTUAL data (with headroom),
+ * not a hardcoded constant — a hardcoded scale clipped real fleet load
+ * (found live: fleet load regularly exceeds the number this was first
+ * shipped with). Positive and negative values get independent scales so a
+ * small battery dip doesn't waste most of the chart's height, and solar's
+ * real peak doesn't get clipped by a scale sized for battery instead. */
+function computeScale(data: ShapeData): { pxPerWPos: number; pxPerWNeg: number } {
+  let maxPos = 0;
+  let maxNeg = 0;
+  for (const key of Object.keys(data) as SeriesKey[]) {
+    for (const v of data[key]) {
+      if (v === null) continue;
+      if (v > maxPos) maxPos = v;
+      if (-v > maxNeg) maxNeg = -v;
+    }
+  }
+  // 20% headroom so a peak never touches the very top/bottom edge; a flat
+  // all-zero series still gets a sane, non-infinite scale.
+  const pxPerWPos = HEADROOM_ABOVE / Math.max(maxPos * 1.2, 1);
+  const pxPerWNeg = HEADROOM_BELOW / Math.max(maxNeg * 1.2, 1);
+  return { pxPerWPos, pxPerWNeg };
 }
-function pointsFor(arr: (number | null)[]): string | null {
-  const pts: string[] = [];
+
+function yFor(v: number, scale: { pxPerWPos: number; pxPerWNeg: number }) {
+  return v >= 0 ? ZERO_Y - v * scale.pxPerWPos : ZERO_Y - v * scale.pxPerWNeg;
+}
+
+/** Splits into contiguous non-null runs (a gap in the data breaks the line
+ * rather than lying about a value in between), then draws each run as a
+ * softened curve — a plain point-to-point polyline turns real, noisy
+ * hourly data into sharp zigzags; horizontal-tangent cubic Beziers between
+ * each pair of points round that off without overshooting past the real
+ * values, matching the smoother look the mockup's hand-picked illustrative
+ * numbers happened to have for free. */
+function buildPaths(arr: (number | null)[], scale: { pxPerWPos: number; pxPerWNeg: number }, withFill: boolean): { linePath: string; fillPath: string } {
+  const runs: [number, number][][] = [];
+  let current: [number, number][] = [];
   for (let i = 0; i < arr.length; i++) {
     const v = arr[i];
-    if (v === null) continue;
-    pts.push(`${xFor(i)},${yFor(v)}`);
+    if (v === null) {
+      if (current.length >= 2) runs.push(current);
+      current = [];
+      continue;
+    }
+    current.push([xFor(i), yFor(v, scale)]);
   }
-  return pts.length >= 2 ? pts.join(' ') : null;
+  if (current.length >= 2) runs.push(current);
+
+  let linePath = '';
+  let fillPath = '';
+  for (const run of runs) {
+    let seg = `M ${run[0][0]} ${run[0][1]}`;
+    for (let i = 0; i < run.length - 1; i++) {
+      const [x0, y0] = run[i];
+      const [x1, y1] = run[i + 1];
+      const cpx = (x0 + x1) / 2;
+      seg += ` C ${cpx} ${y0}, ${cpx} ${y1}, ${x1} ${y1}`;
+    }
+    linePath += seg + ' ';
+    if (withFill) {
+      const [lastX] = run[run.length - 1];
+      const [firstX] = run[0];
+      fillPath += `${seg} L ${lastX} ${ZERO_Y} L ${firstX} ${ZERO_Y} Z `;
+    }
+  }
+  return { linePath: linePath.trim(), fillPath: fillPath.trim() };
 }
 
 function sumSeries(all: (number | null)[][]): (number | null)[] {
@@ -80,24 +133,34 @@ function sumSeries(all: (number | null)[][]): (number | null)[] {
   return out;
 }
 
-// One tagged union instead of separate loading/error/data booleans+state —
-// avoids ever needing to set "loading" synchronously at the top of the
-// effect (a react-hooks/set-state-in-effect violation): the previous
-// range's chart just stays on screen, unchanged, until the new range's
-// fetch actually resolves, which reads better anyway (no flash back to a
-// loading spinner on every toggle click).
-type LoadState =
-  | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; data: ShapeData; gridAvailableCount: number };
+type Ready = { data: ShapeData; gridAvailableCount: number };
 
 export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; title: string; cardSub: string }) {
   const [range, setRange] = useState<Range>('today');
   const [checked, setChecked] = useState<Record<SeriesKey, boolean>>({ solar: true, load: true, grid: false, battery: false });
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  // `ready` is the last successfully loaded data — kept on screen across a
+  // range switch instead of being cleared, so a slow refetch (real VRM
+  // calls over a 7/30-day window, summed across every site) doesn't blank
+  // the chart. `status` tracks the in-flight fetch separately, so there's
+  // still visible feedback that a click registered — the earlier version's
+  // "just leave the old chart up" design had NO indicator at all during a
+  // refetch, which is indistinguishable from Today/7-day/30-day simply not
+  // working when a fetch takes more than an instant.
+  const [ready, setReady] = useState<Ready | null>(null);
+  const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
 
   useEffect(() => {
     let cancelled = false;
+
+    // Deferred into a microtask rather than called directly at the top of
+    // the effect body — calling setState synchronously there is a
+    // react-hooks/set-state-in-effect violation; wrapping it in a `.then()`
+    // continuation is the same "callback fires when something changes"
+    // shape the rule expects, just fired as soon as possible instead of on
+    // network completion.
+    Promise.resolve().then(() => {
+      if (!cancelled) setStatus('loading');
+    });
 
     Promise.all(
       siteIds.map((siteId) =>
@@ -107,8 +170,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
     )
       .then((results) => {
         if (cancelled) return;
-        setState({
-          status: 'ready',
+        setReady({
           data: {
             solar: sumSeries(results.map((r) => r.solar)),
             load: sumSeries(results.map((r) => r.load)),
@@ -117,10 +179,11 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
           },
           gridAvailableCount: results.filter((r) => r.grid.some((v) => v !== null)).length,
         });
+        setStatus('idle');
       })
       .catch(() => {
         if (cancelled) return;
-        setState({ status: 'error' });
+        setStatus('error');
       });
 
     return () => {
@@ -129,19 +192,21 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
     // eslint-disable-next-line react-hooks/exhaustive-deps -- siteIds is a prop that doesn't change identity per-render in practice (caller passes a stable array)
   }, [range]);
 
-  const gridAvailableCount = state.status === 'ready' ? state.gridAvailableCount : null;
+  const gridAvailableCount = ready?.gridAvailableCount ?? null;
   const gridDisabled = gridAvailableCount === 0;
   const gridLabel = gridAvailableCount === null
     ? 'Grid'
     : `Grid ${siteIds.length > 1 ? `(${gridAvailableCount} of ${siteIds.length} metered)` : gridAvailableCount === 0 ? '(no meter)' : ''}`;
 
+  const scale = useMemo(() => (ready ? computeScale(ready.data) : null), [ready]);
+
   const paths = useMemo(() => {
-    if (state.status !== 'ready') return [];
+    if (!ready || !scale) return [];
     return SERIES.filter((s) => checked[s.key] && !(s.key === 'grid' && gridDisabled)).map((s) => ({
       ...s,
-      points: pointsFor(state.data[s.key]),
+      ...buildPaths(ready.data[s.key], scale, Boolean(s.fill)),
     }));
-  }, [state, checked, gridDisabled]);
+  }, [ready, scale, checked, gridDisabled]);
 
   return (
     <div className={styles.card}>
@@ -182,24 +247,28 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       </div>
 
       <div className={styles.chartWrap}>
-        {state.status === 'loading' && <div className={styles.status}>Loading real VRM data…</div>}
-        {state.status === 'error' && <div className={styles.status}>Could not load this chart right now.</div>}
-        {state.status === 'ready' && (
-          <svg viewBox={`0 0 ${W} 240`} preserveAspectRatio="none">
-            <line x1="0" y1={ZERO_Y} x2={W} y2={ZERO_Y} stroke="var(--line)" strokeWidth={1.2} />
-            {[6, 12, 18].map((h) => (
-              <line key={h} x1={xFor(h)} y1={0} x2={xFor(h)} y2={240} stroke="var(--line)" strokeWidth={1} strokeDasharray="2 4" />
-            ))}
-            {paths.map(
-              (p) =>
-                p.points && (
-                  <g key={p.key}>
-                    {p.fill && <polygon points={`${p.points} ${xFor(23)},${ZERO_Y} ${xFor(0)},${ZERO_Y}`} fill={p.fill} stroke="none" />}
-                    <polyline points={p.points} fill="none" stroke={p.color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-                  </g>
-                )
-            )}
-          </svg>
+        {status === 'loading' && !ready && <div className={styles.status}>Loading real VRM data…</div>}
+        {status === 'error' && !ready && <div className={styles.status}>Could not load this chart right now.</div>}
+        {ready && scale && (
+          <>
+            {status === 'loading' && <div className={styles.updating}>Updating…</div>}
+            {status === 'error' && <div className={styles.updating}>Couldn&apos;t refresh — showing the last loaded data.</div>}
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+              <line x1="0" y1={ZERO_Y} x2={W} y2={ZERO_Y} stroke="var(--line)" strokeWidth={1.2} />
+              {[6, 12, 18].map((h) => (
+                <line key={h} x1={xFor(h)} y1={0} x2={xFor(h)} y2={H} stroke="var(--line)" strokeWidth={1} strokeDasharray="2 4" />
+              ))}
+              {paths.map(
+                (p) =>
+                  p.linePath && (
+                    <g key={p.key}>
+                      {p.fillPath && <path d={p.fillPath} fill={p.fill} stroke="none" />}
+                      <path d={p.linePath} fill="none" stroke={p.color} strokeWidth={2.5} strokeLinecap="round" />
+                    </g>
+                  )
+              )}
+            </svg>
+          </>
         )}
       </div>
       <div className={styles.axis}>

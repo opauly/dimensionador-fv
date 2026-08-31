@@ -100,6 +100,19 @@
   position: relative;
   min-height: 140px;
 }
+.updating {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mute);
+  background: rgba(var(--victron-rgb), 0.12);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 3px 10px;
+  z-index: 1;
+}
 .chartWrap svg {
   width: 100%;
   height: auto;

@@ -8,9 +8,19 @@
 }
 .rollupRow {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 24px;
+}
+@media (max-width: 900px) {
+  .rollupRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .rollupRow {
+    grid-template-columns: 1fr;
+  }
 }
 /* Each rollup card is a native <details> — click to expand the per-site
    breakdown behind the aggregate, no JS needed. Panel's own "card" variant
