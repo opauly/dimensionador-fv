@@ -53,22 +53,40 @@ function xFor(i: number) {
  * (found live: fleet load regularly exceeds the number this was first
  * shipped with). Positive and negative values get independent scales so a
  * small battery dip doesn't waste most of the chart's height, and solar's
- * real peak doesn't get clipped by a scale sized for battery instead. */
-function computeScale(data: ShapeData): { pxPerWPos: number; pxPerWNeg: number } {
+ * real peak doesn't get clipped by a scale sized for battery instead.
+ *
+ * Takes only the CURRENTLY VISIBLE series' arrays, not every fetched
+ * series — computing it from the full fetch regardless of which
+ * checkboxes are on left the axis (and half the chart's height) reserved
+ * for Battery/Grid's negative range even with both unchecked, the actual
+ * default state. Toggling a series does reflow the scale as a result; kept
+ * that way on purpose, matching "show me what's actually on screen" over
+ * a perfectly stable axis nothing is using. */
+function computeScale(visible: (number | null)[][]): { pxPerWPos: number; pxPerWNeg: number; topW: number; bottomW: number; hasNegative: boolean } {
   let maxPos = 0;
   let maxNeg = 0;
-  for (const key of Object.keys(data) as SeriesKey[]) {
-    for (const v of data[key]) {
+  for (const arr of visible) {
+    for (const v of arr) {
       if (v === null) continue;
       if (v > maxPos) maxPos = v;
       if (-v > maxNeg) maxNeg = -v;
     }
   }
   // 20% headroom so a peak never touches the very top/bottom edge; a flat
-  // all-zero series still gets a sane, non-infinite scale.
-  const pxPerWPos = HEADROOM_ABOVE / Math.max(maxPos * 1.2, 1);
-  const pxPerWNeg = HEADROOM_BELOW / Math.max(maxNeg * 1.2, 1);
-  return { pxPerWPos, pxPerWNeg };
+  // all-zero series still gets a sane, non-infinite scale. `topW`/`bottomW`
+  // are the actual W value sitting at the chart's top/bottom edge under
+  // that headroom — what the y-axis labels below are built from, so the
+  // axis always matches the scale exactly instead of being a second,
+  // separately-guessed set of numbers.
+  const topW = Math.max(maxPos * 1.2, 1);
+  const bottomW = Math.max(maxNeg * 1.2, 1);
+  const pxPerWPos = HEADROOM_ABOVE / topW;
+  const pxPerWNeg = HEADROOM_BELOW / bottomW;
+  return { pxPerWPos, pxPerWNeg, topW, bottomW, hasNegative: maxNeg > 0 };
+}
+
+function formatW(w: number): string {
+  return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
 }
 
 function yFor(v: number, scale: { pxPerWPos: number; pxPerWNeg: number }) {
@@ -198,15 +216,23 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
     ? 'Grid'
     : `Grid ${siteIds.length > 1 ? `(${gridAvailableCount} of ${siteIds.length} metered)` : gridAvailableCount === 0 ? '(no meter)' : ''}`;
 
-  const scale = useMemo(() => (ready ? computeScale(ready.data) : null), [ready]);
+  const visibleSeries = useMemo(
+    () => (ready ? SERIES.filter((s) => checked[s.key] && !(s.key === 'grid' && gridDisabled)) : []),
+    [ready, checked, gridDisabled]
+  );
+
+  const scale = useMemo(
+    () => (ready ? computeScale(visibleSeries.map((s) => ready.data[s.key])) : null),
+    [ready, visibleSeries]
+  );
 
   const paths = useMemo(() => {
     if (!ready || !scale) return [];
-    return SERIES.filter((s) => checked[s.key] && !(s.key === 'grid' && gridDisabled)).map((s) => ({
+    return visibleSeries.map((s) => ({
       ...s,
       ...buildPaths(ready.data[s.key], scale, Boolean(s.fill)),
     }));
-  }, [ready, scale, checked, gridDisabled]);
+  }, [ready, scale, visibleSeries]);
 
   return (
     <div className={styles.card}>
@@ -258,6 +284,14 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
               {[6, 12, 18].map((h) => (
                 <line key={h} x1={xFor(h)} y1={0} x2={xFor(h)} y2={H} stroke="var(--line)" strokeWidth={1} strokeDasharray="2 4" />
               ))}
+              {/* Y-axis gridlines behind the data, matching the scale
+                  exactly since both come from the same computeScale() call
+                  — never a separately-guessed set of numbers that could
+                  drift out of sync with where the lines actually are. */}
+              <line x1="0" y1={4} x2={W} y2={4} stroke="var(--line)" strokeWidth={1} strokeDasharray="2 4" opacity={0.5} />
+              {scale.hasNegative && (
+                <line x1="0" y1={H - 4} x2={W} y2={H - 4} stroke="var(--line)" strokeWidth={1} strokeDasharray="2 4" opacity={0.5} />
+              )}
               {paths.map(
                 (p) =>
                   p.linePath && (
@@ -266,6 +300,19 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
                       <path d={p.linePath} fill="none" stroke={p.color} strokeWidth={2.5} strokeLinecap="round" />
                     </g>
                   )
+              )}
+              {/* Labels drawn last (on top of the data) so a line passing
+                  near the left edge never covers the axis text. */}
+              <text x={6} y={13} fontSize={11} fill="var(--paper-dim)" fontFamily="var(--font-mono)" style={{ paintOrder: 'stroke' }} stroke="var(--panel)" strokeWidth={3}>
+                {formatW(scale.topW)}
+              </text>
+              <text x={6} y={ZERO_Y - 5} fontSize={11} fill="var(--paper-dim)" fontFamily="var(--font-mono)" style={{ paintOrder: 'stroke' }} stroke="var(--panel)" strokeWidth={3}>
+                0
+              </text>
+              {scale.hasNegative && (
+                <text x={6} y={H - 8} fontSize={11} fill="var(--paper-dim)" fontFamily="var(--font-mono)" style={{ paintOrder: 'stroke' }} stroke="var(--panel)" strokeWidth={3}>
+                  -{formatW(scale.bottomW)}
+                </text>
               )}
             </svg>
           </>
