@@ -19,7 +19,7 @@ import styles from './site.module.css';
 export async function generateMetadata({ params }: { params: Promise<{ site_id: string }> }): Promise<Metadata> {
   const { site_id } = await params;
   const site = await getFleetSiteDetail(site_id);
-  return { title: site ? `${site.display_name} — Fleet Health` : 'Site not found — Fleet Health' };
+  return { title: site ? `${site.display_name} — VRM Fleet` : 'Site not found — VRM Fleet' };
 }
 
 function formatWatts(w: number | null): string {
@@ -44,7 +44,7 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
   return (
     <div>
       <div className={styles.crumb}>
-        <Link href="/admin/fleet">Fleet Health</Link> / <span>{site.display_name}</span>
+        <Link href="/admin/fleet">VRM Fleet</Link> / <span>{site.display_name}</span>
       </div>
       <div className={styles.pagehead}>
         <div>

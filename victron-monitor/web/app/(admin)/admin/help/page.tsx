@@ -18,14 +18,14 @@ export default async function AdminHelpPage() {
   return (
     <div>
       <h1>Help</h1>
-      <p className={styles.intro}>Reference for admin-only workflows — Fleet Health, VRM linking, and site upkeep.</p>
+      <p className={styles.intro}>Reference for admin-only workflows — VRM Fleet, linking installations, and site upkeep.</p>
 
       <Panel className={styles.section}>
         <h2>Monitor a site live</h2>
         <p>
-          <strong>Fleet Health</strong> (the <code>/admin/fleet</code> tab) only shows sites connected through the{' '}
+          <strong>VRM Fleet</strong> (the <code>/admin/fleet</code> tab) only shows sites connected through the{' '}
           <strong>VRM API</strong> — a site that only ever receives CSV uploads has no live connection to poll, so it
-          never appears there, no matter how many reports it has. To get a site onto Fleet Health, connect it to VRM
+          never appears there, no matter how many reports it has. To get a site onto VRM Fleet, connect it to VRM
           first, one of two ways:
         </p>
         <ol className={styles.stepList}>
@@ -33,25 +33,28 @@ export default async function AdminHelpPage() {
             <strong>Customer connects their own installation.</strong> The customer goes to their <em>Sites</em> page
             and uses the VRM Link panel to enter their own VRM installation and personal access token. Once
             connected, the site&apos;s <code>source</code> flips to <code>vrm_api</code> automatically — no separate
-            step needed to make it show up on Fleet Health.
+            step needed to make it show up on VRM Fleet.
           </li>
           <li>
-            <strong>You link it directly, as admin.</strong> Go to <em>VRM Fleet</em> in the nav (the personal,
-            highlighted tab — this is your own VRM account, not a customer&apos;s). Pick the installation from the
-            list, and either attach it to an existing customer or create a new one, then give it a site name. This
-            is the right path for your own field installations, or any site where walking a customer through
-            self-service linking doesn&apos;t make sense.
+            <strong>You link it directly, as admin.</strong> From the VRM Fleet dashboard, click{' '}
+            <em>+ Link a new installation</em> (this is your own VRM account, not a customer&apos;s — the dashboard
+            itself is highlighted in the nav for the same reason). Pick the installation from the list,
+            and either attach it to an existing customer or create a new one, then give it a site name. This is the
+            right path for your own field installations, or any site where walking a customer through self-service
+            linking doesn&apos;t make sense.
           </li>
         </ol>
-        <p>Once linked, two things start happening automatically — nothing else to configure:</p>
+        <p>Once linked and active, two things start happening automatically — nothing else to configure or enable:</p>
         <ul className={styles.bulletList}>
           <li>
             A GitHub Actions cron (<code>fleet-snapshots.yml</code>) refreshes every connected site&apos;s live
-            PV/load/battery/grid/SOC reading roughly every 15 minutes.
+            PV/load/battery/grid/SOC reading every ~15 minutes — this is the ONLY requirement (
+            <code>source = &apos;vrm_api&apos;</code> and <code>active = true</code>), there is no separate
+            enrollment step or allowlist to add a site to.
           </li>
           <li>
             The site&apos;s existing daily report pipeline keeps computing health score, self-sufficiency,
-            self-consumption, depth of discharge, and yield the same way it always has — Fleet Health just surfaces
+            self-consumption, depth of discharge, and yield the same way it always has — VRM Fleet just surfaces
             those same numbers instead of only mailing them in a weekly PDF.
           </li>
         </ul>
@@ -61,10 +64,12 @@ export default async function AdminHelpPage() {
         <h2>Reading the fleet table</h2>
         <ul className={styles.bulletList}>
           <li>
-            <strong>Connection</strong> is based on <code>vrm_last_synced_at</code> — <em>Online</em> within 48
-            hours, <em>Stale</em> beyond that, <em>Never synced</em> if it hasn&apos;t completed a report sync yet.
-            A brand-new VRM link can show live power immediately while still saying &quot;Never synced&quot; here —
-            the live snapshot and the daily report sync are two independent things.
+            <strong>Connection</strong> is based on <code>site_snapshots.captured_at</code> — the same ~15-minute
+            live sweep above — so <em>Online</em> means &quot;this site answered VRM within the last 45 minutes,&quot;
+            not anything about the daily report sync. The &quot;Report data: …&quot; line underneath is that separate
+            daily sync&apos;s own last-completed date; the two can genuinely disagree for days (a site can be{' '}
+            <em>Online</em> with live power showing while its report data is a week old, or vice versa) — that&apos;s
+            expected, not a bug, since they&apos;re two independent pipelines.
           </li>
           <li>
             <strong>Grid</strong> only shows a number for a site that actually has a physical grid meter — checked
@@ -85,7 +90,7 @@ export default async function AdminHelpPage() {
       <Panel className={styles.section}>
         <h2>Removing a site from monitoring</h2>
         <p>
-          There&apos;s no one-click &quot;unmonitor&quot; today. Fleet Health shows every site with{' '}
+          There&apos;s no one-click &quot;unmonitor&quot; today. VRM Fleet shows every site with{' '}
           <code>source = &apos;vrm_api&apos;</code>, regardless of whether that customer&apos;s subscription is
           active — deliberately, since this page is about hardware you&apos;re responsible for, not billing status.
           Genuinely disconnecting a site from VRM isn&apos;t a supported self-service action yet; ask engineering if

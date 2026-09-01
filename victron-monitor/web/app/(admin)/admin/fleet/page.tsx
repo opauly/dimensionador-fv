@@ -10,7 +10,7 @@ import { ShapeChart } from './ShapeChart';
 import styles from './fleet.module.css';
 
 export const metadata: Metadata = {
-  title: 'Fleet Health — Admin',
+  title: 'VRM Fleet — Admin',
 };
 
 // `/admin/fleet` — the ops overview a UCR capstone project's own
@@ -68,7 +68,9 @@ function row(site: FleetOverviewRow) {
       <td>
         <span className={`${styles.dot} ${connectionClass(site.connection_status)}`} aria-hidden="true" />
         {connectionLabel(site.connection_status)}
-        <div className={styles.sub}>{site.vrm_last_synced_at ? formatDateTime(site.vrm_last_synced_at, 'en-US') : '—'}</div>
+        <div className={styles.sub}>
+          Report data: {site.vrm_last_synced_at ? formatDateTime(site.vrm_last_synced_at, 'en-US') : 'never'}
+        </div>
       </td>
       <td>
         <span className={`${styles.healthBadge} ${healthClass(site.health_score)}`}>
@@ -139,7 +141,7 @@ export default async function AdminFleetPage() {
   return (
     <div>
       <div className={styles.pageHead}>
-        <h1>Fleet Health</h1>
+        <h1>VRM Fleet</h1>
         {mostRecentCapturedAt && (
           <div className={styles.liveBadge}>
             <span className={styles.pulse} />
@@ -147,6 +149,9 @@ export default async function AdminFleetPage() {
           </div>
         )}
       </div>
+      <Link href="/admin/vrm-fleet" className={styles.manageLink}>
+        + Link a new installation →
+      </Link>
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
         Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status — the most recent{' '}
         <code>vrm.daily_health</code>/<code>vrm.energy_daily</code> figures, any alarm/critical-alert episode still

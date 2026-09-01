@@ -24,14 +24,21 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // explicitly links an installation to one. `AppShell` renders it in a
   // separated, highlighted group so that distinction is visible, not just
   // documented here.
+  //
+  // Merged 2026-08-31 (Oscar's own request — two tabs over the same site
+  // set was confusing): "Fleet Health" and "VRM Fleet" used to be separate
+  // top-level tabs, one for monitoring already-linked sites and one for
+  // linking new ones. Now there is one nav entry, landing on the live
+  // dashboard (`/admin/fleet`) — linking a new installation is still
+  // `/admin/vrm-fleet`, reached via a "Manage installations" link on that
+  // dashboard rather than its own top-level tab.
   const navItems: AppNavItem[] = [
     { href: '/admin/customers', label: 'Customers' },
     { href: '/admin/sites', label: 'Sites' },
     { href: '/admin/upload', label: 'Upload' },
     { href: '/admin/reports', label: 'Reports' },
     { href: '/admin/activity', label: 'Activity' },
-    { href: '/admin/fleet', label: 'Fleet Health' },
-    { href: '/admin/vrm-fleet', label: 'VRM Fleet', personal: true },
+    { href: '/admin/fleet', label: 'VRM Fleet', personal: true },
     { href: '/admin/help', label: 'Help' },
   ];
 

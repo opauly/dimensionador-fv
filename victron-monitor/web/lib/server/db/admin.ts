@@ -344,18 +344,21 @@ export type FleetOverview = {
   };
 };
 
-// A site synced within this window reads "online" — 48h, not billing.py's
-// own 5-minute `_STALE_AFTER` (that constant answers a completely different
-// question: "is this ONVO subscription mirror fresh enough to trust
-// without a live re-check"). This fleet's real sync cadence is daily
-// (scheduled reports) or on-demand (a customer's own "Sync now"/an admin
-// fleet sync) — 48h tolerates a normal day-to-day gap and a quiet weekend
-// without flagging every site as "stale" between two ordinary syncs.
-const _ONLINE_WITHIN_MS = 48 * 60 * 60 * 1000;
+// Based on `site_snapshots.captured_at` (the ~15-minute `refresh-snapshots`
+// sweep), NOT `vrm_last_synced_at` (the daily energy_daily/report sync) —
+// found live 2026-08-31 that those two can disagree for days at a time
+// (the daily sync can stall on a bad date range or a standing VRM error
+// while the live snapshot sweep keeps succeeding every 15 minutes
+// regardless, since it's a completely separate code path). An admin reading
+// "online" reasonably means "is this site talking to VRM right now," which
+// is exactly what the snapshot sweep answers and the daily sync does not.
+// 45 minutes = 3x the sweep's own interval, tolerating one missed run
+// without flagging a genuinely live site as stale.
+const _ONLINE_WITHIN_MS = 45 * 60 * 1000;
 
-function _connectionStatus(lastSyncedAt: string | null, now: number): FleetConnectionStatus {
-  if (!lastSyncedAt) return 'never_synced';
-  const age = now - new Date(lastSyncedAt).getTime();
+function _connectionStatus(liveCapturedAt: string | null, now: number): FleetConnectionStatus {
+  if (!liveCapturedAt) return 'never_synced';
+  const age = now - new Date(liveCapturedAt).getTime();
   return age <= _ONLINE_WITHIN_MS ? 'online' : 'stale';
 }
 
@@ -678,7 +681,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       battery_usable_kwh: s.battery_usable_kwh,
       timezone: s.timezone,
       vrm_last_synced_at: s.vrm_last_synced_at,
-      connection_status: _connectionStatus(s.vrm_last_synced_at, now),
+      connection_status: _connectionStatus(snapshot?.captured_at ?? null, now),
       health_score: latestHealth?.health_score ?? null,
       health_status: latestHealth?.health_status ?? null,
       health_date: latestHealth?.date ?? null,
