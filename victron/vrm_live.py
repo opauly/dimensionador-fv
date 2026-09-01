@@ -83,15 +83,6 @@ class VrmLiveError(ValueError):
     """The API returned nothing usable for a live snapshot."""
 
 
-def _pv_power_instance_count(diagnostics: dict) -> int:
-    records = diagnostics.get("records", diagnostics) if isinstance(diagnostics, dict) else diagnostics
-    if not isinstance(records, list):
-        return 0
-    instances = {r.get("instance") for r in records
-                if isinstance(r, dict) and r.get("code") == PV_POWER_CODE}
-    return len(instances)
-
-
 def _pv_power_from_diagnostics(diagnostics: dict) -> tuple[float | None, datetime | None]:
     """Sum every `PVP` instance's own `rawValue` straight from diagnostics —
     see the module docstring for why this, not `get_stats`, is the one
@@ -111,6 +102,53 @@ def _pv_power_from_diagnostics(diagnostics: dict) -> tuple[float | None, datetim
     latest = (datetime.fromtimestamp(max(timestamps), tz=timezone.utc)
              if timestamps else None)
     return float(total), latest
+
+
+def fetch_pv_power_series(client, id_site, *, interval: str, start: int, end: int,
+                          zone: ZoneInfo) -> pd.Series:
+    """A site's total PV power over `[start, end)`, correctly summed across
+    every solar-charger instance — the historical counterpart to
+    `_pv_power_from_diagnostics()`'s live total. Diagnostics only gives an
+    instant reading, so it can't power an hour-by-hour chart; this instead
+    uses `get_stats(show_instance=True)` (confirmed live 2026-09-01 against
+    Victron's own OpenAPI spec — see `VrmRemoteClient.get_stats()`'s own
+    docstring) to get each instance's own real series, timestamp-aligned,
+    then sums them the same way `LOAD_CODES`/`GRID_POWER_CODES` already are
+    elsewhere in this pipeline. Works identically for a single-instance
+    site (one series, "summed" with nothing to add) — callers don't need to
+    branch on instance count any more than they do for load/grid.
+
+    Returns an empty `pd.Series` (never raises) on any failure or when the
+    installation publishes no `PVP` at all — same "no data over fabricated
+    data" posture as every other optional signal here."""
+    try:
+        body = client.get_stats(id_site, type="custom", interval=interval,
+                                start=start, end=end,
+                                attribute_codes=[PV_POWER_CODE], show_instance=True)
+    except Exception:  # noqa: BLE001 — one site's failure must not raise
+        # past this function; callers already isolate per-site failures.
+        logger.warning("vrm_live: get_stats(show_instance) failed for installation %s", id_site)
+        return pd.Series(dtype=float)
+
+    records = body.get("records") if isinstance(body, dict) else None
+    if isinstance(records, dict):
+        records = list(records.values())
+    if not isinstance(records, list):
+        return pd.Series(dtype=float)
+
+    parts = []
+    for entry in records:
+        if not isinstance(entry, dict):
+            continue
+        stats = entry.get("stats", entry)
+        raw = stats.get(PV_POWER_CODE, False) if isinstance(stats, dict) else False
+        series = _series_to_pandas(raw, zone)
+        if not series.empty:
+            parts.append(series)
+
+    if not parts:
+        return pd.Series(dtype=float)
+    return pd.concat(parts, axis=1).sum(axis=1, min_count=1)
 
 
 def _latest(series: pd.Series) -> float | None:

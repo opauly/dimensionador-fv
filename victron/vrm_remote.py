@@ -295,7 +295,8 @@ class VrmRemoteClient:
         return self._request("GET", f"/installations/{id_site}/diagnostics")
 
     def get_stats(self, id_site, *, type, interval, start, end,
-                  attribute_codes: list[str] | None = None) -> dict:
+                  attribute_codes: list[str] | None = None,
+                  show_instance: bool = False) -> dict:
         """`GET /installations/{id_site}/stats`.
 
         `start`/`end` are epoch seconds. `type` is one of Victron's stats
@@ -306,6 +307,17 @@ class VrmRemoteClient:
         return real, gapless data for a 24h window; longer-horizon retention
         at 15-min resolution was not tested by Step 0).
 
+        `show_instance` — documented parameter (confirmed live 2026-09-01
+        against Victron's own OpenAPI spec at vrm-api-docs.victronenergy.com,
+        Commands/Installation/docs/StatsCommand.yaml), NOT the same as
+        passing `instance` as a plain query param (silently ignored — tested
+        live, returns the same ambiguous merged series every time). When
+        `True`, `records`/`totals` become a LIST of `{instance, stats}`/
+        `{instance, totals}` objects instead of one flat dict — this is the
+        only way to separate a code like `PVP` that exists on more than one
+        physical device (see `victron/vrm_live.py`'s module docstring for
+        why that ambiguity exists and what it's used for).
+
         Returns `{records: {...}, totals: {...}}` exactly as Victron sent
         it — see the module docstring for the two response-shape quirks
         every caller must handle itself (a no-data code returning the
@@ -314,4 +326,6 @@ class VrmRemoteClient:
         params = {"type": type, "interval": interval, "start": start, "end": end}
         if attribute_codes:
             params["attributeCodes[]"] = attribute_codes
+        if show_instance:
+            params["show_instance"] = "true"
         return self._request("GET", f"/installations/{id_site}/stats", params=params)
