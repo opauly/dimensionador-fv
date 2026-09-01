@@ -87,6 +87,18 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
             Load
           </div>
           <div className={styles.kpiValue}>{formatWatts(site.live_load_power_w)}</div>
+          {site.live_load_phases && site.live_load_phases.length > 1 && (
+            <details className={styles.chargerBreakdown}>
+              <summary>{site.live_load_phases.length} phases</summary>
+              <ul>
+                {site.live_load_phases.map((p) => (
+                  <li key={p.phase}>
+                    {p.phase}: {formatWatts(p.power_w)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>
@@ -108,7 +120,10 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
             Grid
           </div>
           <div className={styles.kpiValue}>{site.has_grid_meter ? formatWatts(site.live_grid_power_w) : '—'}</div>
-          {!site.has_grid_meter && <div className={styles.kpiDelta}>No physical grid meter</div>}
+          {site.live_grid_source === 'inverter' && (
+            <div className={styles.kpiDelta}>Via inverter (no dedicated meter)</div>
+          )}
+          {site.live_grid_source === null && <div className={styles.kpiDelta}>No grid reading available</div>}
         </div>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>

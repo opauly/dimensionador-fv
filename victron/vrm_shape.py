@@ -30,6 +30,7 @@ import pandas as pd
 from victron.vrm_live import (
     BATTERY_POWER_CODE,
     GRID_POWER_CODES,
+    INVERTER_INPUT_CODES,
     LOAD_CODES,
     PV_POWER_CODE,
     fetch_pv_power_series,
@@ -78,13 +79,23 @@ def fetch_site_shape(client, id_site, *, range_key: str, tz: str = DEFAULT_TZ_NA
         return dict(_EMPTY_SHAPE)
 
     has_pv = PV_POWER_CODE in available
+    # Same meter-first, inverter-fallback preference as vrm_live.py's live
+    # snapshot — see that module's GRID_POWER_CODES/INVERTER_INPUT_CODES
+    # comment for why the two aren't interchangeable.
+    if any(c in available for c in GRID_POWER_CODES):
+        grid_codes: tuple[str, ...] = GRID_POWER_CODES
+    elif any(c in available for c in INVERTER_INPUT_CODES):
+        grid_codes = INVERTER_INPUT_CODES
+    else:
+        grid_codes = ()
+
     requested: set[str] = set()
     for code in LOAD_CODES:
         if code in available:
             requested.add(code)
     if BATTERY_POWER_CODE in available:
         requested.add(BATTERY_POWER_CODE)
-    for code in GRID_POWER_CODES:
+    for code in grid_codes:
         if code in available:
             requested.add(code)
 
@@ -120,7 +131,7 @@ def fetch_site_shape(client, id_site, *, range_key: str, tz: str = DEFAULT_TZ_NA
     load_parts = [series_by_code[c] for c in LOAD_CODES if c in series_by_code and not series_by_code[c].empty]
     load_series = pd.concat(load_parts, axis=1).sum(axis=1, min_count=1) if load_parts else pd.Series(dtype=float)
 
-    grid_parts = [series_by_code[c] for c in GRID_POWER_CODES if c in series_by_code and not series_by_code[c].empty]
+    grid_parts = [series_by_code[c] for c in grid_codes if c in series_by_code and not series_by_code[c].empty]
     grid_series = pd.concat(grid_parts, axis=1).sum(axis=1, min_count=1) if grid_parts else pd.Series(dtype=float)
 
     # Correctly summed across every solar-charger instance — see

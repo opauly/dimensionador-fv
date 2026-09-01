@@ -306,12 +306,20 @@ export type FleetOverviewRow = {
   // one with no PV at all; on a multi-charger site, entries sum to exactly
   // `live_pv_power_w`.
   live_pv_chargers: { instance: number; power_w: number }[] | null;
-  // A live snapshot value that has ever landed non-null is the one signal
-  // this app has that a physical grid meter actually exists — checked live
-  // against real production data 2026-08-30 (found Proyecto gV DOES have
-  // one; the other 3 don't), not assumed. There is no separate "has grid
-  // meter" column on `vrm.sites` to read instead.
+  // A live snapshot value that has ever landed non-null means there's SOME
+  // grid reading to show — originally assumed that always meant a physical
+  // grid meter, corrected 2026-09-01: most sites have no dedicated meter
+  // and this is instead the inverter/charger's own AC input measurement
+  // (`live_grid_source: 'inverter'`) — see victron/vrm_live.py's
+  // GRID_POWER_CODES/INVERTER_INPUT_CODES comment for why the two read
+  // meaningfully different values on the one site checked with both, and
+  // are never conflated. `live_grid_source` is `null` only when this site
+  // publishes no grid signal of either kind.
   has_grid_meter: boolean;
+  live_grid_source: 'meter' | 'inverter' | null;
+  // Per-phase live load breakdown (a1/a2, i.e. L1/L2) — same shape/intent
+  // as live_pv_chargers, entries sum to exactly live_load_power_w.
+  live_load_phases: { phase: string; power_w: number }[] | null;
   // Fleet Dashboard Phase 2.5 (2026-08-30) — every one of these is derived
   // from the most recent `vrm.energy_daily`/`vrm.daily_health` row using
   // exactly the formulas IE-0499's own requirements doc §4 specifies
@@ -380,6 +388,23 @@ function _pvChargersFromRaw(raw: unknown): { instance: number; power_w: number }
     .map((e) => ({ instance: Number(e.instance), power_w: Number(e.power_w) }))
     .filter((e) => Number.isFinite(e.instance) && Number.isFinite(e.power_w));
   return parsed.length > 0 ? parsed : null;
+}
+
+function _loadPhasesFromRaw(raw: unknown): { phase: string; power_w: number }[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const list = (raw as Record<string, unknown>).load_phases;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const parsed = list
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({ phase: String(e.phase), power_w: Number(e.power_w) }))
+    .filter((e) => e.phase.length > 0 && Number.isFinite(e.power_w));
+  return parsed.length > 0 ? parsed : null;
+}
+
+function _gridSourceFromRaw(raw: unknown): 'meter' | 'inverter' | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const source = (raw as Record<string, unknown>).grid_source;
+  return source === 'meter' || source === 'inverter' ? source : null;
 }
 
 /** IE-0499's own §4 formulas, applied to the most recent `energy_daily`
@@ -716,6 +741,8 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       live_soc_pct: snapshot?.soc_pct ?? null,
       live_pv_chargers: _pvChargersFromRaw(snapshot?.raw),
       has_grid_meter: (snapshot?.grid_power_w ?? null) !== null,
+      live_grid_source: _gridSourceFromRaw(snapshot?.raw),
+      live_load_phases: _loadPhasesFromRaw(snapshot?.raw),
       health_metrics_date: energy?.date ?? null,
       specific_yield_kwh_per_kwp: indicators.specificYield,
       self_sufficiency_pct: indicators.selfSufficiency,

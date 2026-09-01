@@ -72,9 +72,13 @@ export default async function AdminHelpPage() {
             expected, not a bug, since they&apos;re two independent pipelines.
           </li>
           <li>
-            <strong>Grid</strong> only shows a number for a site that actually has a physical grid meter — checked
-            per site from real data, not assumed from the system type. Most installations don&apos;t have one, and
-            that column reads &quot;no meter&quot; there instead of a guessed value.
+            <strong>Grid</strong> prefers a dedicated grid meter when one exists, and falls back to the
+            inverter/charger&apos;s own AC input reading when it doesn&apos;t — most installations have no separate
+            meter, but the inverter itself still measures what it draws from grid. The two are NOT the same number
+            (cross-checked live on the one site with both: they read meaningfully differently, since a separate
+            meter and the inverter&apos;s own sensor sit at different points in the electrical system) — the fleet
+            table&apos;s per-site breakdown says which source a given reading came from. Only a site with neither
+            signal at all shows &quot;no reading.&quot;
           </li>
           <li>
             Click any of the summary cards at the top (Sites monitored, Online, Avg health score, etc.) to expand

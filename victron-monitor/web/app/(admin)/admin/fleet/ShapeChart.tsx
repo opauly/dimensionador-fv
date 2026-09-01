@@ -279,7 +279,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
   const gridDisabled = gridAvailableCount === 0;
   const gridLabel = gridAvailableCount === null
     ? 'Grid'
-    : `Grid ${siteIds.length > 1 ? `(${gridAvailableCount} of ${siteIds.length} metered)` : gridAvailableCount === 0 ? '(no meter)' : ''}`;
+    : `Grid ${siteIds.length > 1 ? `(${gridAvailableCount} of ${siteIds.length} reporting)` : gridAvailableCount === 0 ? '(no reading)' : ''}`;
 
   const visibleSeries = useMemo(
     () => (ready ? SERIES.filter((s) => checked[s.key] && !(s.key === 'grid' && gridDisabled)) : []),

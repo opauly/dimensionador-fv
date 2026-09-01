@@ -68,7 +68,22 @@ PV_POWER_CODE = "PVP"
 LOAD_CODES = ("a1", "a2")
 BATTERY_POWER_CODE = "bp"
 SOC_CODE = "SOC"
+# `g1`/`g2`/`g3` — a DEDICATED grid meter (e.g. an ET340), "Grid L1/L2/L3."
+# Confirmed present on only some real installations (El Encino Casona,
+# Emtec CR, Proyecto gV, live-checked 2026-09-01). `IP1`/`IP2`/`IP3` — the
+# inverter/charger's OWN "Input power 1/2/3" measurement at its own AC
+# input terminals, present on every real installation checked (single
+# instance each, no multi-charger-style ambiguity). These are NOT
+# interchangeable: cross-checked live on Emtec CR (the one site with both)
+# and they read meaningfully different values at the same instant (-92W vs
+# -22W) — they measure at different points in the electrical system, not
+# the same thing with a different name. `grid_power_w` prefers the
+# dedicated meter when one exists and only falls back to the inverter's own
+# reading when it doesn't; `raw["grid_source"]` records which was used so
+# the UI can be honest about it instead of implying a meter that isn't
+# there.
 GRID_POWER_CODES = ("g1", "g2", "g3")
+INVERTER_INPUT_CODES = ("IP1", "IP2", "IP3")
 INVERTER_STATE_CODE = "S"
 ACTIVE_INPUT_CODE = "AI"
 
@@ -208,6 +223,16 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     # series `stats` returns for a multi-charger site.
     pv_power_w, pv_captured_at, pv_chargers = _pv_power_from_diagnostics(diagnostics)
 
+    # Prefer a dedicated grid meter; fall back to the inverter's own AC
+    # input measurement only when no meter exists — see the module-level
+    # constants' own comment for why these aren't just synonyms.
+    if any(c in available for c in GRID_POWER_CODES):
+        grid_codes, grid_source = GRID_POWER_CODES, "meter"
+    elif any(c in available for c in INVERTER_INPUT_CODES):
+        grid_codes, grid_source = INVERTER_INPUT_CODES, "inverter"
+    else:
+        grid_codes, grid_source = (), None
+
     requested = set()
     for code in LOAD_CODES:
         if code in available:
@@ -216,7 +241,7 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
         requested.add(BATTERY_POWER_CODE)
     if SOC_CODE in available:
         requested.add(SOC_CODE)
-    for code in GRID_POWER_CODES:
+    for code in grid_codes:
         if code in available:
             requested.add(code)
     if INVERTER_STATE_CODE in available:
@@ -250,7 +275,16 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
         combined = pd.concat(load_parts, axis=1).sum(axis=1, min_count=1)
         load_power_w = _latest(combined)
 
-    grid_parts = [series_by_code[c] for c in GRID_POWER_CODES if c in series_by_code and not series_by_code[c].empty]
+    # Per-phase breakdown, same idea as pv_chargers above — kept alongside
+    # the summed load_power_w rather than replacing it.
+    _PHASE_LABELS = {"a1": "L1", "a2": "L2"}
+    load_phases = [
+        {"phase": _PHASE_LABELS.get(c, c), "power_w": round(v, 1)}
+        for c in LOAD_CODES
+        if c in series_by_code and (v := _latest(series_by_code[c])) is not None
+    ] or None
+
+    grid_parts = [series_by_code[c] for c in grid_codes if c in series_by_code and not series_by_code[c].empty]
     grid_power_w = None
     if grid_parts:
         combined = pd.concat(grid_parts, axis=1).sum(axis=1, min_count=1)
@@ -297,5 +331,16 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
             # docstring. `None` when the site has no PVP at all, same as
             # every other missing signal here.
             "pv_chargers": pv_chargers,
+            # Per-phase load breakdown — same idea as pv_chargers, always
+            # present when load_power_w is (both come from the same a1/a2
+            # series), `None` only when this site publishes no AC
+            # consumption signal at all.
+            "load_phases": load_phases,
+            # Which signal grid_power_w came from — "meter" (a dedicated
+            # grid meter), "inverter" (the inverter/charger's own AC input
+            # measurement, used only when no meter exists), or `None` (no
+            # grid signal published at all). See the module-level constants'
+            # own comment for why these two sources are not interchangeable.
+            "grid_source": grid_source,
         },
     }

@@ -63,7 +63,7 @@ export function FlowDiagram({
         </div>
         <div className={styles.name}>Grid</div>
         <div className={styles.amt} style={!hasGridMeter ? { color: 'var(--mute)' } : undefined}>
-          {hasGridMeter ? formatW(gridW) : 'no meter'}
+          {hasGridMeter ? formatW(gridW) : 'no reading'}
         </div>
         {gridNote && <div className={styles.footnote}>{gridNote}</div>}
       </div>

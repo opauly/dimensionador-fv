@@ -156,8 +156,8 @@ export default async function AdminFleetPage() {
         Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status — the most recent{' '}
         <code>vrm.daily_health</code>/<code>vrm.energy_daily</code> figures, any alarm/critical-alert episode still
         open, and a live PV/load/battery/SOC reading refreshed every ~15 minutes by{' '}
-        <code>vrm-fleet/refresh-snapshots</code>. Grid power only shows for the site(s) that actually have a
-        physical grid meter — checked per site from real data, not assumed.
+        <code>vrm-fleet/refresh-snapshots</code>. Grid power comes from a dedicated meter where one exists, and
+        falls back to the inverter&apos;s own reading otherwise — checked per site from real data, not assumed.
       </p>
 
       <p className={styles.rollupHint}>Click any card to see the per-site numbers behind it.</p>
@@ -256,7 +256,7 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
-            <span className={styles.rollupLabel}>Grid-metered</span>
+            <span className={styles.rollupLabel}>Grid reading</span>
             <span className={styles.rollupValue}>
               {meteredSites.length}/{sites.length}
             </span>
@@ -265,7 +265,11 @@ export default async function AdminFleetPage() {
             {sites.map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
                 <span>{s.display_name}</span>
-                <span>{s.has_grid_meter ? 'metered' : 'no meter'}</span>
+                <span>
+                  {s.live_grid_source === 'meter' ? 'dedicated meter'
+                    : s.live_grid_source === 'inverter' ? 'via inverter'
+                    : 'none'}
+                </span>
               </div>
             ))}
           </div>
