@@ -53,6 +53,28 @@ fabricated-meaning this pipeline's own conventions exist to avoid (see
 `vrm_series.py`'s own tank fluid_type/status precedent, PLAN_PHASE18.md
 §7). Decoding these into a human label is real follow-up work, once
 Victron's actual enum values are confirmed against known site states.
+
+── Live alarm/critical-alert detection (added 2026-09-01) ─────────────────
+`vrm_series.py`'s own historical path only ever sees data through
+yesterday (by design — `vrm_api/routers/vrm_sync.py:_do_sync()`'s date
+range never includes today), so a transient alarm that starts and clears
+within the same day would NEVER show as "active" on the dashboard at any
+point — by the time it's synced, it's already resolved history. Found live
+2026-09-01 while auditing whether "Active Alarms: 0" fleet-wide could be
+trusted. `check_live_alarms()` closes that gap using the exact same
+interpretation `vrm_series.py` already uses for its own historical episode
+detection (`ALARM_CATEGORIES`/`CRITICAL_ALARM_CATEGORIES`, "any code's raw
+value != 0 means this category is active," codes OR'd within a category)
+— confirmed live that diagnostics' own `rawValue` is `0` exactly when
+`formattedValue` reads "Ok"/"No alarm", the same convention. Reuses the
+SAME `get_diagnostics()` call `fetch_live_snapshot()` already makes (pass
+it in via that function's own `diagnostics` parameter) rather than costing
+a second VRM API call per site per ~15-minute sweep. This function only
+READS and reports current state — inserting the resulting WARNING/CLEARED
+episode-boundary rows into `vrm.alarm_events`/`vrm.critical_alerts` is the
+caller's job (`vrm_api/routers/vrm_fleet.py:post_refresh_snapshots()`),
+which also owns comparing against the last known state so a still-ongoing
+alarm doesn't get a fresh WARNING row inserted every single sweep.
 """
 import logging
 from datetime import datetime, timezone
@@ -60,7 +82,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
-from victron.vrm_series import DEFAULT_TZ_NAME, _available_codes, _series_to_pandas
+from victron.vrm_series import (
+    ALARM_CATEGORIES,
+    CRITICAL_ALARM_CATEGORIES,
+    DEFAULT_TZ_NAME,
+    _available_codes,
+    _series_to_pandas,
+)
 
 logger = logging.getLogger("victron.vrm_live")
 
@@ -132,6 +160,40 @@ def _pv_power_from_diagnostics(
     return float(total), latest, by_instance
 
 
+def check_live_alarms(diagnostics: dict) -> dict[str, dict]:
+    """Current instantaneous state of every scored alarm/critical-alert
+    category, straight from diagnostics' own `rawValue` — see the module
+    docstring's "Live alarm/critical-alert detection" section for why this
+    exists and the interpretation it reuses from `vrm_series.py`.
+
+    Returns `{category_key: {"label": str, "table": "alarm_events" |
+    "critical_alerts", "active": bool}}` — only for categories this
+    installation actually publishes at least one relevant code for; a
+    category with no codes present on this hardware is simply absent from
+    the result, never a fabricated `False` (same "no data over fabricated
+    data" rule as everywhere else in this module)."""
+    records = diagnostics.get("records", diagnostics) if isinstance(diagnostics, dict) else diagnostics
+    if not isinstance(records, list):
+        return {}
+    raw_by_code = {r["code"]: r.get("rawValue") for r in records
+                  if isinstance(r, dict) and r.get("code")}
+
+    result: dict[str, dict] = {}
+    for source, (label, codes) in ALARM_CATEGORIES.items():
+        present = [c for c in codes if c in raw_by_code]
+        if not present:
+            continue
+        active = any((raw_by_code[c] or 0) != 0 for c in present)
+        result[source] = {"label": label, "table": "alarm_events", "active": active}
+    for category, (label, codes) in CRITICAL_ALARM_CATEGORIES.items():
+        present = [c for c in codes if c in raw_by_code]
+        if not present:
+            continue
+        active = any((raw_by_code[c] or 0) != 0 for c in present)
+        result[category] = {"label": label, "table": "critical_alerts", "active": active}
+    return result
+
+
 def fetch_pv_power_series(client, id_site, *, interval: str, start: int, end: int,
                           zone: ZoneInfo) -> pd.Series:
     """A site's total PV power over `[start, end)`, correctly summed across
@@ -189,12 +251,19 @@ def _latest_ts(series: pd.Series):
     return clean.index[-1] if not clean.empty else None
 
 
-def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_NAME) -> dict | None:
+def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_NAME,
+                        diagnostics: dict | None = None) -> dict | None:
     """One site's most recent reading, or `None` if this installation has
     published nothing usable at all (never raises for that case — a single
     unresponsive site must not stop a fleet-wide refresh; the caller logs
     and moves on, same posture `vrm_sync.py:post_run_due()`'s per-site
     isolation already takes).
+
+    `diagnostics` — pass an already-fetched `get_diagnostics()` response to
+    reuse it (e.g. also feeding `check_live_alarms()` from the same call)
+    instead of this function fetching its own; `None` (the default) fetches
+    it here exactly as before, so every existing caller/test keeps working
+    unchanged.
 
     Returns a dict shaped exactly like a `vrm.site_snapshots` row (minus
     `site_id`, which the caller already has) — `captured_at` is the actual
@@ -207,12 +276,13 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     except ZoneInfoNotFoundError:
         zone = ZoneInfo(DEFAULT_TZ_NAME)
 
-    try:
-        diagnostics = client.get_diagnostics(id_site)
-    except Exception:  # noqa: BLE001 — one site's failure must not raise
-        # past this function; the caller's per-site loop is what isolates it.
-        logger.warning("vrm_live: get_diagnostics failed for installation %s (site %s)", id_site, site_id)
-        return None
+    if diagnostics is None:
+        try:
+            diagnostics = client.get_diagnostics(id_site)
+        except Exception:  # noqa: BLE001 — one site's failure must not raise
+            # past this function; the caller's per-site loop is what isolates it.
+            logger.warning("vrm_live: get_diagnostics failed for installation %s (site %s)", id_site, site_id)
+            return None
     available = _available_codes(diagnostics)
     if not available:
         return None
