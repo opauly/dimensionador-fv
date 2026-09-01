@@ -79,6 +79,7 @@ function touches `vrm.customers`' token-STATE columns is gated on
 own connection, and must never be stamped from an admin-token call.
 """
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends
@@ -315,10 +316,27 @@ def post_run_due() -> VrmSyncRunDueOut:
     Reachable only behind the pipeline key, same as every route in this
     router (this router's own `dependencies=[Depends(require_pipeline_key)]`
     — nothing here is unauthenticated).
+
+    Admin-token fallback added 2026-09-01, a real bug found live: every
+    site linked through `/admin/vrm-fleet` (Oscar's own VRM_ADMIN_TOKEN,
+    never a customer-connected token) was silently failing this call with
+    "No live VRM connection for this customer" the moment its
+    vrm_last_synced_at stamp aged past "yesterday" — which is every
+    admin-linked site in the fleet, confirmed live (4 of 12 real
+    installations failing this exact way in one real run-due call; the
+    other 8 only *looked* fine because a manual sync earlier the same day
+    had left their stamp fresh enough to be skipped as "up to date" before
+    ever reaching this check — they were about to hit the identical
+    failure). This meant NO admin-linked site's alarm/health data was ever
+    refreshing on its own — only a manual "Sync" click ever moved it
+    forward. Same fallback `vrm_fleet.py:post_refresh_snapshots()` already
+    uses: the customer's own token first, `VRM_ADMIN_TOKEN` only when they
+    have none.
     """
     due_sites = (_t("sites").select("*")
                 .eq("source", "vrm_api").eq("active", True).eq("vrm_sync_enabled", True)
                 .execute().data or [])
+    admin_token = os.environ.get("VRM_ADMIN_TOKEN")
 
     results: list[VrmSyncSiteResult] = []
     yesterday = date.today() - timedelta(days=1)
@@ -330,9 +348,34 @@ def post_run_due() -> VrmSyncRunDueOut:
         if start > yesterday:
             results.append(VrmSyncSiteResult(site_id=site_id, status="skipped_up_to_date"))
             continue
+
+        # Only check WHETHER a customer token exists, to route correctly —
+        # if one does, `_do_sync` below is still called with token=None so
+        # it does its own (identical) read and keeps stamping that
+        # customer's vrm_token_last_checked_at/last_ok_at correctly
+        # (is_customer_token must stay True for a real customer-token sync;
+        # passing the token explicitly here would wrongly turn that off).
+        # The extra read is a local Vault lookup, not a VRM API call — cheap
+        # enough that correctness wins over avoiding it twice.
+        has_customer_token = False
+        try:
+            has_customer_token = secrets.read_customer_vrm_token(site["customer_id"]) is not None
+        except Exception:  # noqa: BLE001 — a broken vault read for one
+            # customer must not stop the rest of the run; fall through to
+            # the admin-token path below same as "never connected" would.
+            logger.warning("vrm_sync/run-due: could not read customer token for customer_id=%s",
+                          site["customer_id"])
+
+        if not has_customer_token and not admin_token:
+            results.append(VrmSyncSiteResult(
+                site_id=site_id, status="failed",
+                error="No live VRM connection for this customer, and no admin fallback configured."))
+            continue
+
         try:
             _do_sync(site["customer_id"], site, start.isoformat(), yesterday.isoformat(),
-                    triggered_by="schedule")
+                    triggered_by="schedule",
+                    token=None if has_customer_token else admin_token)
             results.append(VrmSyncSiteResult(site_id=site_id, status="done"))
         except Exception as exc:  # noqa: BLE001 — per-site isolation (§6.3): one
             # site's failure must not block the rest of the run.
