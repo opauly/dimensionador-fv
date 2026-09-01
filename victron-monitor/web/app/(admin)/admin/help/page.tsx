@@ -90,11 +90,14 @@ export default async function AdminHelpPage() {
       <Panel className={styles.section}>
         <h2>Removing a site from monitoring</h2>
         <p>
-          There&apos;s no one-click &quot;unmonitor&quot; today. VRM Fleet shows every site with{' '}
-          <code>source = &apos;vrm_api&apos;</code>, regardless of whether that customer&apos;s subscription is
-          active — deliberately, since this page is about hardware you&apos;re responsible for, not billing status.
-          Genuinely disconnecting a site from VRM isn&apos;t a supported self-service action yet; ask engineering if
-          you need one removed.
+          VRM Fleet shows every site with <code>source = &apos;vrm_api&apos;</code> AND{' '}
+          <code>active = true</code>, regardless of whether that customer&apos;s subscription is active —
+          deliberately, since this page is about hardware you&apos;re responsible for, not billing status. There&apos;s
+          no one-click &quot;unmonitor&quot; button in the UI yet, but setting a site&apos;s own <code>active</code>{' '}
+          column to <code>false</code> (in Supabase directly today) removes it from VRM Fleet immediately, without
+          deleting its history — the same flag the live snapshot sweep and the daily sync already respect, so a
+          deactivated site also stops being polled going forward. Genuinely deleting a site is still not a
+          supported self-service action; ask engineering if you need one truly gone.
         </p>
       </Panel>
     </div>

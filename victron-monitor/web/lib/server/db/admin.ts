@@ -543,6 +543,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     .from('sites')
     .select('site_id, display_name, customer_id, system_type, pv_kwp, battery_usable_kwh, timezone, vrm_last_synced_at')
     .eq('source', 'vrm_api')
+    .eq('active', true)
     .order('display_name');
   if (sitesError) throw sitesError;
   const siteRows = sites ?? [];
