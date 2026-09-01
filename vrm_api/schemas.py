@@ -407,6 +407,10 @@ class VrmFleetSyncRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    site_id: str
+    start: str
+    end: str
+
 
 class FleetSnapshotsRefreshOut(BaseModel):
     """`POST /v1/vrm-fleet/refresh-snapshots`'s response — the Fleet
