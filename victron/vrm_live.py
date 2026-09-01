@@ -83,25 +83,38 @@ class VrmLiveError(ValueError):
     """The API returned nothing usable for a live snapshot."""
 
 
-def _pv_power_from_diagnostics(diagnostics: dict) -> tuple[float | None, datetime | None]:
+def _pv_power_from_diagnostics(
+    diagnostics: dict,
+) -> tuple[float | None, datetime | None, list[dict] | None]:
     """Sum every `PVP` instance's own `rawValue` straight from diagnostics —
     see the module docstring for why this, not `get_stats`, is the one
     place in this pipeline that can safely total a multi-charger site.
-    `None`/`None` when the installation publishes no `PVP` at all (an
+    `None`/`None`/`None` when the installation publishes no `PVP` at all (an
     off-grid-battery-only or grid-only site), same "no data" convention as
-    every other missing signal here."""
+    every other missing signal here.
+
+    The third element is the per-instance breakdown (each charger's own
+    `instance` id and current watts) — stored in `vrm.site_snapshots.raw`
+    under `pv_chargers` (that column's own migration comment already
+    anticipated "PVP per solar-charger instance"), so a multi-charger site
+    can show what each device is contributing, not just the total."""
     records = diagnostics.get("records", diagnostics) if isinstance(diagnostics, dict) else diagnostics
     if not isinstance(records, list):
-        return None, None
+        return None, None, None
     pv_records = [r for r in records if isinstance(r, dict) and r.get("code") == PV_POWER_CODE
                  and isinstance(r.get("rawValue"), (int, float))]
     if not pv_records:
-        return None, None
+        return None, None, None
     total = sum(r["rawValue"] for r in pv_records)
     timestamps = [r["timestamp"] for r in pv_records if isinstance(r.get("timestamp"), (int, float))]
     latest = (datetime.fromtimestamp(max(timestamps), tz=timezone.utc)
              if timestamps else None)
-    return float(total), latest
+    by_instance = sorted(
+        ({"instance": r.get("instance"), "power_w": round(float(r["rawValue"]), 1)}
+         for r in pv_records),
+        key=lambda d: (d["instance"] is None, d["instance"]),
+    )
+    return float(total), latest, by_instance
 
 
 def fetch_pv_power_series(client, id_site, *, interval: str, start: int, end: int,
@@ -193,7 +206,7 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     # docstring for why diagnostics' own per-instance rawValue is the
     # trustworthy source for a live snapshot, unlike the ambiguous single
     # series `stats` returns for a multi-charger site.
-    pv_power_w, pv_captured_at = _pv_power_from_diagnostics(diagnostics)
+    pv_power_w, pv_captured_at, pv_chargers = _pv_power_from_diagnostics(diagnostics)
 
     requested = set()
     for code in LOAD_CODES:
@@ -279,5 +292,10 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
             **{code: (round(v, 3) if (v := _latest(s)) is not None else None)
               for code, s in series_by_code.items()},
             PV_POWER_CODE: round(pv_power_w, 3) if pv_power_w is not None else None,
+            # Per-charger breakdown (only meaningful/present on a
+            # multi-instance site) — see _pv_power_from_diagnostics()'s own
+            # docstring. `None` when the site has no PVP at all, same as
+            # every other missing signal here.
+            "pv_chargers": pv_chargers,
         },
     }

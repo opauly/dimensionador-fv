@@ -108,6 +108,36 @@
   color: var(--mute);
 }
 
+.chargerBreakdown {
+  font-size: 12px;
+}
+.chargerBreakdown summary {
+  color: var(--mute);
+  cursor: pointer;
+  list-style: none;
+}
+.chargerBreakdown summary::-webkit-details-marker {
+  display: none;
+}
+.chargerBreakdown summary::before {
+  content: '▸ ';
+}
+.chargerBreakdown[open] summary::before {
+  content: '▾ ';
+}
+.chargerBreakdown ul {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chargerBreakdown li {
+  color: var(--paper-dim);
+  font-family: var(--font-mono);
+}
+
 .split {
   display: grid;
   grid-template-columns: 1.35fr 1fr;

@@ -68,6 +68,18 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
             Solar (PV)
           </div>
           <div className={styles.kpiValue}>{formatWatts(site.live_pv_power_w)}</div>
+          {site.live_pv_chargers && site.live_pv_chargers.length > 1 && (
+            <details className={styles.chargerBreakdown}>
+              <summary>{site.live_pv_chargers.length} chargers</summary>
+              <ul>
+                {site.live_pv_chargers.map((c) => (
+                  <li key={c.instance}>
+                    Charger {c.instance + 1}: {formatWatts(c.power_w)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
         <div className={styles.kpi}>
           <div className={styles.kpiLabel}>

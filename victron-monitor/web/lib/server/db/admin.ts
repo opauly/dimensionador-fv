@@ -301,6 +301,11 @@ export type FleetOverviewRow = {
   live_battery_power_w: number | null;
   live_grid_power_w: number | null;
   live_soc_pct: number | null;
+  // Per-solar-charger breakdown (victron/vrm_live.py:_pv_power_from_diagnostics(),
+  // 2026-09-01) — `null` on a single-charger site (nothing to break down) or
+  // one with no PV at all; on a multi-charger site, entries sum to exactly
+  // `live_pv_power_w`.
+  live_pv_chargers: { instance: number; power_w: number }[] | null;
   // A live snapshot value that has ever landed non-null is the one signal
   // this app has that a physical grid meter actually exists — checked live
   // against real production data 2026-08-30 (found Proyecto gV DOES have
@@ -360,6 +365,21 @@ function _connectionStatus(liveCapturedAt: string | null, now: number): FleetCon
   if (!liveCapturedAt) return 'never_synced';
   const age = now - new Date(liveCapturedAt).getTime();
   return age <= _ONLINE_WITHIN_MS ? 'online' : 'stale';
+}
+
+// `site_snapshots.raw` is a loosely-typed jsonb blob (see migration 031's
+// own comment on that column) — pulled apart here rather than trusted
+// as-is, same defensive parsing every other jsonb-sourced field in this
+// file already does.
+function _pvChargersFromRaw(raw: unknown): { instance: number; power_w: number }[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const list = (raw as Record<string, unknown>).pv_chargers;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const parsed = list
+    .filter((e): e is Record<string, unknown> => !!e && typeof e === 'object')
+    .map((e) => ({ instance: Number(e.instance), power_w: Number(e.power_w) }))
+    .filter((e) => Number.isFinite(e.instance) && Number.isFinite(e.power_w));
+  return parsed.length > 0 ? parsed : null;
 }
 
 /** IE-0499's own §4 formulas, applied to the most recent `energy_daily`
@@ -575,7 +595,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     // Fleet Dashboard Phase 2 — one row per site already (migration 031's
     // PRIMARY KEY on site_id), so no "latest per site" grouping needed
     // here the way daily_health above needs one.
-    admin.schema('vrm').from('site_snapshots').select('site_id, captured_at, pv_power_w, load_power_w, battery_power_w, grid_power_w, soc_pct').in('site_id', siteIds),
+    admin.schema('vrm').from('site_snapshots').select('site_id, captured_at, pv_power_w, load_power_w, battery_power_w, grid_power_w, soc_pct, raw').in('site_id', siteIds),
     // Fleet Dashboard Phase 2.5 — the raw kWh/SOC/yield fields IE-0499 §4's
     // formulas are built from (self-sufficiency, self-consumption, DoD,
     // specific yield, battery cycles). Same lookback window as daily_health
@@ -694,6 +714,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       live_battery_power_w: snapshot?.battery_power_w ?? null,
       live_grid_power_w: snapshot?.grid_power_w ?? null,
       live_soc_pct: snapshot?.soc_pct ?? null,
+      live_pv_chargers: _pvChargersFromRaw(snapshot?.raw),
       has_grid_meter: (snapshot?.grid_power_w ?? null) !== null,
       health_metrics_date: energy?.date ?? null,
       specific_yield_kwh_per_kwp: indicators.specificYield,
