@@ -20,23 +20,28 @@ real installations (confirmed on El Encino Casona during Phase 18) but not
 this one — best-effort only, `None` when absent, same as every other
 optional signal in this pipeline.
 
-── The `PVP` multi-charger trap (found live, 2026-08-30 — NOT the same
-   number `vrm_series.py`'s own per-charger yield gap describes, but the
-   same underlying cause) ────────────────────────────────────────────────
+── The `PVP` multi-charger trap, and how the LIVE path (this module) gets
+   around it (found live, 2026-08-30, fixed 2026-09-01) ───────────────────
 `get_diagnostics()` can list `PVP` at MORE THAN ONE instance (two separate
-physical solar-charger devices, confirmed on 844478). Victron's `stats`
-endpoint has no documented way to request a specific instance for an
-ambiguous code like this — `vrm_series.py`'s own module docstring already
-established this exact limitation for `YT` ("Yield today") and chose NULL
-over a guessed sum. A live probe here (5 real days of data) found `PVP`
-returning real, plausible-looking non-zero values even with two `PVP`
-instances present — but with no independent number to cross-check it
-against, there is no way to confirm from this endpoint alone whether that
-is the true site total or just one charger's share wearing the total's
-name. Rather than ship a number that might silently understate real PV
-production, `pv_power_w` is populated ONLY when exactly one `PVP` instance
-exists; a site with more than one is left `None`, same discipline as
-`pv_yield_kwh_sc0`/`sc1`/`mppt` on the daily-report path.
+physical solar-charger devices, confirmed on 844478 and, live-checked
+2026-09-01, also on 855465/793865/844477). Victron's `stats` endpoint has
+no documented way to request a specific instance for an ambiguous code
+like this — `vrm_series.py`'s own module docstring already established
+this exact limitation for `YT` ("Yield today") and chose NULL over a
+guessed sum; `get_stats(attribute_codes=["PVP"])` on a multi-instance site
+was confirmed live to return one single, unlabeled series whose values
+don't line up with either instance's own reading, so summing or trusting
+that series is not possible — that limitation is real and still applies
+to `vrm_shape.py`'s hourly history, which has no other source.
+`fetch_live_snapshot()` doesn't need history, though — only "right now" —
+and `get_diagnostics()`'s own per-instance records already carry a real,
+trustworthy `rawValue` (each solar charger's own current output) AND a
+`timestamp`, both confirmed live against real production data. Summing
+`rawValue` across every `PVP` instance directly from diagnostics, instead
+of going through the ambiguous `stats` series at all, gives an honest live
+total for a multi-charger site with no guessing involved — this is the one
+place in this pipeline where beating `stats`'s own limitation is possible,
+because a snapshot only ever needs one instant, not a series.
 
 ── `inverter_state_raw`/`active_ac_source_raw` (codes `S`, `AI`) ──────────
 Both returned real, live, current values in the same probe (`AI` = a bare
@@ -87,6 +92,27 @@ def _pv_power_instance_count(diagnostics: dict) -> int:
     return len(instances)
 
 
+def _pv_power_from_diagnostics(diagnostics: dict) -> tuple[float | None, datetime | None]:
+    """Sum every `PVP` instance's own `rawValue` straight from diagnostics —
+    see the module docstring for why this, not `get_stats`, is the one
+    place in this pipeline that can safely total a multi-charger site.
+    `None`/`None` when the installation publishes no `PVP` at all (an
+    off-grid-battery-only or grid-only site), same "no data" convention as
+    every other missing signal here."""
+    records = diagnostics.get("records", diagnostics) if isinstance(diagnostics, dict) else diagnostics
+    if not isinstance(records, list):
+        return None, None
+    pv_records = [r for r in records if isinstance(r, dict) and r.get("code") == PV_POWER_CODE
+                 and isinstance(r.get("rawValue"), (int, float))]
+    if not pv_records:
+        return None, None
+    total = sum(r["rawValue"] for r in pv_records)
+    timestamps = [r["timestamp"] for r in pv_records if isinstance(r.get("timestamp"), (int, float))]
+    latest = (datetime.fromtimestamp(max(timestamps), tz=timezone.utc)
+             if timestamps else None)
+    return float(total), latest
+
+
 def _latest(series: pd.Series) -> float | None:
     clean = series.dropna()
     return float(clean.iloc[-1]) if not clean.empty else None
@@ -125,10 +151,13 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     if not available:
         return None
 
-    pv_instances = _pv_power_instance_count(diagnostics)
+    # PV is deliberately NOT requested via get_stats below — see the module
+    # docstring for why diagnostics' own per-instance rawValue is the
+    # trustworthy source for a live snapshot, unlike the ambiguous single
+    # series `stats` returns for a multi-charger site.
+    pv_power_w, pv_captured_at = _pv_power_from_diagnostics(diagnostics)
+
     requested = set()
-    if pv_instances == 1:
-        requested.add(PV_POWER_CODE)
     for code in LOAD_CODES:
         if code in available:
             requested.add(code)
@@ -144,25 +173,25 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     if ACTIVE_INPUT_CODE in available:
         requested.add(ACTIVE_INPUT_CODE)
 
-    if not requested:
+    if not requested and pv_power_w is None:
         return None
-
-    now = datetime.now(timezone.utc)
-    end_s = int(now.timestamp())
-    start_s = end_s - _LOOKBACK_HOURS * 3600
-    try:
-        body = client.get_stats(id_site, type="custom", interval="15mins",
-                                start=start_s, end=end_s, attribute_codes=sorted(requested))
-    except Exception:  # noqa: BLE001 — see the get_diagnostics() try/except above
-        logger.warning("vrm_live: get_stats failed for installation %s (site %s)", id_site, site_id)
-        return None
-    records = body.get("records", body) if isinstance(body, dict) else {}
 
     series_by_code: dict[str, pd.Series] = {}
-    for code in requested:
-        series_by_code[code] = _series_to_pandas(
-            records.get(code, False) if isinstance(records, dict) else False, zone
-        )
+    if requested:
+        now = datetime.now(timezone.utc)
+        end_s = int(now.timestamp())
+        start_s = end_s - _LOOKBACK_HOURS * 3600
+        try:
+            body = client.get_stats(id_site, type="custom", interval="15mins",
+                                    start=start_s, end=end_s, attribute_codes=sorted(requested))
+        except Exception:  # noqa: BLE001 — see the get_diagnostics() try/except above
+            logger.warning("vrm_live: get_stats failed for installation %s (site %s)", id_site, site_id)
+            return None
+        records = body.get("records", body) if isinstance(body, dict) else {}
+        for code in requested:
+            series_by_code[code] = _series_to_pandas(
+                records.get(code, False) if isinstance(records, dict) else False, zone
+            )
 
     load_parts = [series_by_code[c] for c in LOAD_CODES if c in series_by_code and not series_by_code[c].empty]
     load_power_w = None
@@ -176,19 +205,20 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
         combined = pd.concat(grid_parts, axis=1).sum(axis=1, min_count=1)
         grid_power_w = _latest(combined)
 
-    pv_power_w = (_latest(series_by_code[PV_POWER_CODE])
-                 if PV_POWER_CODE in series_by_code else None)
-
-    # `captured_at` — the most recent timestamp among whatever series
-    # actually had data, so a site with a slow SOC feed but fresh power
-    # data (or vice versa) still gets an honest "as of" time rather than
-    # `None` because one particular series happened to be sparse.
-    latest_timestamps = [ts for s in series_by_code.values() if (ts := _latest_ts(s)) is not None]
+    # `captured_at` — the most recent timestamp among whatever source
+    # actually had data (the get_stats series above, or PV's own
+    # diagnostics-sourced timestamp), so a site with a slow SOC feed but
+    # fresh power data (or vice versa) still gets an honest "as of" time
+    # rather than `None` because one particular series happened to be
+    # sparse. `_series_to_pandas()` always returns tz-NAIVE local
+    # timestamps (its own docstring) — localize before comparing/storing.
+    latest_timestamps = [ts.tz_localize(zone).astimezone(timezone.utc)
+                         for s in series_by_code.values() if (ts := _latest_ts(s)) is not None]
+    if pv_captured_at is not None:
+        latest_timestamps.append(pv_captured_at)
     if not latest_timestamps:
         return None
-    # `_series_to_pandas()` always returns tz-NAIVE local timestamps (its
-    # own docstring) — localize before converting to UTC for storage.
-    captured_at = max(latest_timestamps).tz_localize(zone)
+    captured_at = max(latest_timestamps)
 
     def _raw_str(code: str) -> str | None:
         v = _latest(series_by_code[code]) if code in series_by_code else None
@@ -207,6 +237,9 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
                    else None),
         "inverter_state_raw": _raw_str(INVERTER_STATE_CODE),
         "active_ac_source_raw": _raw_str(ACTIVE_INPUT_CODE),
-        "raw": {code: (round(v, 3) if (v := _latest(s)) is not None else None)
-               for code, s in series_by_code.items()},
+        "raw": {
+            **{code: (round(v, 3) if (v := _latest(s)) is not None else None)
+              for code, s in series_by_code.items()},
+            PV_POWER_CODE: round(pv_power_w, 3) if pv_power_w is not None else None,
+        },
     }
