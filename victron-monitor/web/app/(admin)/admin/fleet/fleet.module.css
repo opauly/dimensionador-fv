@@ -59,6 +59,18 @@
   color: var(--mute);
   margin: -14px 0 10px;
 }
+/* One per group of 4 cards below it — plain section headings, not cards
+   themselves, so the grouping reads at a glance without adding a 13th
+   "group" card to the grid. */
+.rollupGroupLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--victron-glow);
+  margin: 0 0 10px;
+}
 .rollupRow {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -99,17 +111,20 @@
 .rollupCard summary::after {
   content: '';
   position: absolute;
-  top: 20px;
+  /* Centered on the card's height, not a fixed offset — the 3rd line
+     (.rollupDesc) makes summary taller than the 2-line cards this was
+     originally tuned for. */
+  top: 50%;
   right: 16px;
   width: 7px;
   height: 7px;
   border-right: 1.5px solid var(--mute);
   border-bottom: 1.5px solid var(--mute);
-  transform: rotate(45deg);
+  transform: translateY(-50%) rotate(45deg);
   transition: transform 0.15s ease;
 }
 .rollupCard[open] summary::after {
-  transform: rotate(-135deg);
+  transform: translateY(-50%) rotate(-135deg);
 }
 .rollupLabel {
   font-family: var(--font-mono);
@@ -123,6 +138,14 @@
   font-size: 22px;
   font-weight: 600;
   color: var(--paper);
+}
+/* The "what does this track" one-liner every card gets, per Oscar's own
+   request — visible in the collapsed summary, not hidden behind a click
+   the way the per-site breakdown is. */
+.rollupDesc {
+  font-size: 11.5px;
+  color: var(--mute);
+  line-height: 1.4;
 }
 .rollupBreakdown {
   border-top: 1px solid var(--line);

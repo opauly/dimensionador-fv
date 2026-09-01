@@ -128,6 +128,35 @@ export default async function AdminFleetPage() {
   const avgSoc = socSites.length > 0 ? Math.round((socSites.reduce((a, s) => a + (s.live_soc_pct ?? 0), 0) / socSites.length) * 10) / 10 : null;
   const lowestSoc = socSites.length > 0 ? socSites.reduce((min, s) => ((s.live_soc_pct ?? 0) < (min.live_soc_pct ?? 0) ? s : min)) : null;
 
+  // "History Sync" — the DAILY report-data pipeline's own freshness
+  // (vrm_last_synced_at), deliberately separate from "Online" above (the
+  // LIVE ~15-min snapshot's own freshness) — see the Help tab for why the
+  // two are independent pipelines that can genuinely disagree. 24h, not
+  // the per-site "Online" badge's 45-minute window: this is a daily-grade
+  // signal, checking "did today's sync actually run," not "is it live."
+  const now = Date.now();
+  const historySyncedSites = sites.filter((s) => {
+    if (!s.vrm_last_synced_at) return false;
+    return now - new Date(s.vrm_last_synced_at).getTime() <= 24 * 60 * 60 * 1000;
+  });
+
+  // Outages this week — from the same real energy_daily-derived figures
+  // the per-site "This week" panel already shows, not a live signal (an
+  // outage is inherently a past event by the time it's counted).
+  const outageSites = sites.filter((s) => s.week.outageCount > 0);
+
+  // Fleet averages for the three IE-0499 §4 daily-indicator formulas —
+  // same per-site numbers `_dailyIndicators()` already computes, averaged
+  // only over sites that actually have a value today (never treating a
+  // missing denominator as a 0%).
+  const avgOf = (values: (number | null)[]) => {
+    const real = values.filter((v): v is number => v !== null);
+    return real.length > 0 ? Math.round((real.reduce((a, b) => a + b, 0) / real.length) * 10) / 10 : null;
+  };
+  const avgSelfSufficiency = avgOf(sites.map((s) => s.self_sufficiency_pct));
+  const avgSelfConsumption = avgOf(sites.map((s) => s.self_consumption_pct));
+  const avgGridDependency = avgOf(sites.map((s) => s.grid_dependency_pct));
+
   // The fleet-wide "how fresh is this" badge is about the VIEWER's own
   // clock, not any one site's — computed here (server-side, cheap: just a
   // max over already-fetched rows) and handed to `FleetFreshness`, the one
@@ -161,11 +190,14 @@ export default async function AdminFleetPage() {
       </p>
 
       <p className={styles.rollupHint}>Click any card to see the per-site numbers behind it.</p>
+
+      <h2 className={styles.rollupGroupLabel}>Fleet &amp; connectivity</h2>
       <div className={styles.rollupRow}>
         <details className={styles.rollupCard}>
           <summary>
             <span className={styles.rollupLabel}>Sites monitored</span>
             <span className={styles.rollupValue}>{overview.rollup.site_count}</span>
+            <span className={styles.rollupDesc}>Total sites currently linked via the VRM API</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -183,6 +215,7 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupValue}>
               {overview.rollup.online_count} / {overview.rollup.site_count}
             </span>
+            <span className={styles.rollupDesc}>Live snapshot received in the last 45 minutes</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -196,8 +229,52 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
+            <span className={styles.rollupLabel}>Grid reading</span>
+            <span className={styles.rollupValue}>
+              {meteredSites.length}/{sites.length}
+            </span>
+            <span className={styles.rollupDesc}>Sites reporting grid power, via meter or inverter</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>
+                  {s.live_grid_source === 'meter' ? 'dedicated meter'
+                    : s.live_grid_source === 'inverter' ? 'via inverter'
+                    : 'none'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>History sync</span>
+            <span className={styles.rollupValue}>
+              {historySyncedSites.length}/{sites.length}
+            </span>
+            <span className={styles.rollupDesc}>Daily report data synced in the last 24 hours</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.vrm_last_synced_at ? formatDateTime(s.vrm_last_synced_at, 'en-US') : 'never'}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <h2 className={styles.rollupGroupLabel}>Health &amp; alerts</h2>
+      <div className={styles.rollupRow}>
+        <details className={styles.rollupCard}>
+          <summary>
             <span className={styles.rollupLabel}>Avg health score</span>
             <span className={styles.rollupValue}>{overview.rollup.avg_health_score === null ? '—' : `${overview.rollup.avg_health_score}/100`}</span>
+            <span className={styles.rollupDesc}>Average of each site&apos;s latest daily health score</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -213,6 +290,7 @@ export default async function AdminFleetPage() {
           <summary>
             <span className={styles.rollupLabel}>Active alarms</span>
             <span className={styles.rollupValue}>{overview.rollup.total_active_alarms}</span>
+            <span className={styles.rollupDesc}>Low battery / overload, present in the latest live fetch</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -228,6 +306,7 @@ export default async function AdminFleetPage() {
           <summary>
             <span className={styles.rollupLabel}>Active critical alerts</span>
             <span className={styles.rollupValue}>{overview.rollup.total_active_critical_alerts}</span>
+            <span className={styles.rollupDesc}>DC ripple, cell imbalance, temp fault — live, right now</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -241,8 +320,30 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
+            <span className={styles.rollupLabel}>Outages (7d)</span>
+            <span className={styles.rollupValue}>
+              {outageSites.length}/{sites.length}
+            </span>
+            <span className={styles.rollupDesc}>Sites with a grid outage in the last 7 days</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.week.daysWithData === 0 ? '—' : s.week.outageCount > 0 ? `${s.week.outageCount} (${s.week.outageMinutes} min)` : '0'}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <h2 className={styles.rollupGroupLabel}>Energy performance (today)</h2>
+      <div className={styles.rollupRow}>
+        <details className={styles.rollupCard}>
+          <summary>
             <span className={styles.rollupLabel}>Avg SOC</span>
             <span className={styles.rollupValue}>{avgSoc === null ? '—' : `${avgSoc}%`}</span>
+            <span className={styles.rollupDesc}>Average state of charge across the fleet, right now</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
@@ -256,20 +357,47 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
-            <span className={styles.rollupLabel}>Grid reading</span>
-            <span className={styles.rollupValue}>
-              {meteredSites.length}/{sites.length}
-            </span>
+            <span className={styles.rollupLabel}>Self-sufficiency</span>
+            <span className={styles.rollupValue}>{avgSelfSufficiency === null ? '—' : `${avgSelfSufficiency}%`}</span>
+            <span className={styles.rollupDesc}>Share of today&apos;s load covered by solar + battery</span>
           </summary>
           <div className={styles.rollupBreakdown}>
             {sites.map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
                 <span>{s.display_name}</span>
-                <span>
-                  {s.live_grid_source === 'meter' ? 'dedicated meter'
-                    : s.live_grid_source === 'inverter' ? 'via inverter'
-                    : 'none'}
-                </span>
+                <span>{s.self_sufficiency_pct === null ? '—' : `${s.self_sufficiency_pct}%`}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Self-consumption</span>
+            <span className={styles.rollupValue}>{avgSelfConsumption === null ? '—' : `${avgSelfConsumption}%`}</span>
+            <span className={styles.rollupDesc}>Share of solar generated that was used on-site</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.self_consumption_pct === null ? '—' : `${s.self_consumption_pct}%`}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Grid dependency</span>
+            <span className={styles.rollupValue}>{avgGridDependency === null ? '—' : `${avgGridDependency}%`}</span>
+            <span className={styles.rollupDesc}>Share of today&apos;s load pulled from the grid</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.grid_dependency_pct === null ? '—' : `${s.grid_dependency_pct}%`}</span>
               </div>
             ))}
           </div>
