@@ -423,11 +423,6 @@ class FleetSnapshotsRefreshOut(BaseModel):
     refreshed: int
     skipped: int
     failed: int
-    # Live alarm/critical-alert transitions recorded this sweep (2026-09-01)
-    # — see vrm_fleet.py:_apply_live_alarm_state()'s own docstring. Usually
-    # 0 on any given sweep; a nonzero count means something actually
-    # started or cleared in the last ~15 minutes.
-    alarm_transitions: int = 0
 
 
 class SiteShapeOut(BaseModel):

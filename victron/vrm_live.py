@@ -293,6 +293,18 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
     # series `stats` returns for a multi-charger site.
     pv_power_w, pv_captured_at, pv_chargers = _pv_power_from_diagnostics(diagnostics)
 
+    # Live alarm/critical-alert state — see check_live_alarms()'s own
+    # docstring and this module's "Live alarm/critical-alert detection"
+    # section. Deliberately just a snapshot of RIGHT NOW, not an
+    # episode/history record — this pipeline's historical sync already
+    # owns that (through yesterday, for report/health-score purposes); the
+    # live dashboard's own "Active Alarms" is meant to answer nothing more
+    # than "is this present in the latest live fetch," full stop.
+    live_alarm_states = check_live_alarms(diagnostics)
+    live_alarms = {k: v["active"] for k, v in live_alarm_states.items() if v["table"] == "alarm_events"} or None
+    live_critical_alerts = {k: v["active"] for k, v in live_alarm_states.items()
+                           if v["table"] == "critical_alerts"} or None
+
     # Prefer a dedicated grid meter; fall back to the inverter's own AC
     # input measurement only when no meter exists — see the module-level
     # constants' own comment for why these aren't just synonyms.
@@ -406,6 +418,12 @@ def fetch_live_snapshot(client, id_site, site_id: str, *, tz: str = DEFAULT_TZ_N
             # series), `None` only when this site publishes no AC
             # consumption signal at all.
             "load_phases": load_phases,
+            # Live alarm/critical-alert state, RIGHT NOW — {category_key:
+            # bool}, `None` when this installation publishes no relevant
+            # codes at all. Not an episode/history record; see this
+            # function's own comment above for why.
+            "alarms": live_alarms,
+            "critical_alerts": live_critical_alerts,
             # Which signal grid_power_w came from — "meter" (a dedicated
             # grid meter), "inverter" (the inverter/charger's own AC input
             # measurement, used only when no meter exists), or `None` (no

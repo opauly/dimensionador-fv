@@ -287,6 +287,12 @@ export type FleetOverviewRow = {
   health_score: number | null;
   health_status: string | null;
   health_date: string | null;
+  // Live-only (2026-09-01): counts categories present in the MOST RECENT
+  // live snapshot's raw.alarms/raw.critical_alerts, nothing else — not an
+  // episode/history count. A category active yesterday but cleared by the
+  // latest ~15-minute fetch does not count; one that just started does,
+  // even if it started five minutes ago. 0 whenever there's no live
+  // snapshot yet, same as every other live-only field here.
   active_alarms: number;
   active_critical_alerts: number;
   // Fleet Dashboard Phase 2 (2026-08-30) — from `vrm.site_snapshots`
@@ -536,31 +542,17 @@ function _periodIndicators(
   };
 }
 
-/** For each (site_id, alarm, source) episode key, the WARNING/CLEARED
- * severity of its MOST RECENT event within `rows` — a WARNING with no
- * later CLEARED means that episode is still open right now. `rows` should
- * already be sorted or unsorted; this scans all of them and keeps the
- * latest by timestamp per key, the same "fetch raw rows, group in code"
- * shape `database/vrm_report_db.py:get_alarm_episode_counts_by_category()`
- * already uses server-side, mirrored here since this is a Next.js-side
- * read with no Python equivalent to call into. */
-function _countOpenEpisodes(rows: { site_id: string; alarm?: string | null; category?: string | null; severity: string | null; timestamp: string | null }[]): Map<string, number> {
-  const latestByKey = new Map<string, { severity: string | null; ts: number }>();
-  for (const r of rows) {
-    if (!r.timestamp) continue;
-    const label = r.alarm ?? r.category ?? 'unknown';
-    const key = `${r.site_id}::${label}`;
-    const ts = new Date(r.timestamp).getTime();
-    const existing = latestByKey.get(key);
-    if (!existing || ts > existing.ts) latestByKey.set(key, { severity: r.severity, ts });
-  }
-  const openCountBySite = new Map<string, number>();
-  for (const [key, latest] of latestByKey) {
-    if (latest.severity !== 'WARNING') continue;
-    const siteId = key.split('::')[0];
-    openCountBySite.set(siteId, (openCountBySite.get(siteId) ?? 0) + 1);
-  }
-  return openCountBySite;
+/** Live-only "Active Alarms"/"Active Critical Alerts" count (2026-09-01) —
+ * counts `true` entries in a `site_snapshots.raw.alarms`/`raw.critical_alerts`
+ * blob (see `victron/vrm_live.py:check_live_alarms()`). Deliberately NOT
+ * episode/history-based any more: a category present in the latest live
+ * fetch counts, one absent from it (including "no live snapshot at all")
+ * does not — this is a live dashboard, not a historical alarm log. */
+function _activeCountFromRaw(raw: unknown, key: 'alarms' | 'critical_alerts'): number {
+  if (!raw || typeof raw !== 'object') return 0;
+  const states = (raw as Record<string, unknown>)[key];
+  if (!states || typeof states !== 'object') return 0;
+  return Object.values(states as Record<string, unknown>).filter((v) => v === true).length;
 }
 
 /** Every `source='vrm_api'` site's current status in one call — connection
@@ -601,8 +593,6 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   const [
     { data: customers, error: customersError },
     { data: health, error: healthError },
-    { data: alarms, error: alarmsError },
-    { data: criticalAlerts, error: criticalError },
     { data: snapshots, error: snapshotsError },
     { data: energyDaily, error: energyDailyError },
   ] = await Promise.all([
@@ -615,8 +605,15 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     // `weekly_report.py`'s own already-correct guard instead of trusting
     // that column.
     admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, grid_dependency_pct').in('site_id', siteIds).gte('date', lookbackDate),
-    admin.schema('vrm').from('alarm_events').select('site_id, alarm, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
-    admin.schema('vrm').from('critical_alerts').select('site_id, category, severity, timestamp').in('site_id', siteIds).gte('timestamp', lookbackIso),
+    // `alarm_events`/`critical_alerts` deliberately NOT fetched here any
+    // more (2026-09-01) — this is a live monitoring dashboard, and those
+    // tables are the HISTORICAL sync's own record (through yesterday only,
+    // for report/health-score purposes). "Active Alarms"/"Active Critical
+    // Alerts" below now read straight from the live snapshot's own
+    // raw.alarms/raw.critical_alerts instead — present in the latest live
+    // fetch means shown, not present means not shown, no episode/history
+    // reasoning involved. For real alarm HISTORY, the official VRM portal
+    // is the source of truth, not this dashboard.
     // Fleet Dashboard Phase 2 — one row per site already (migration 031's
     // PRIMARY KEY on site_id), so no "latest per site" grouping needed
     // here the way daily_health above needs one.
@@ -637,8 +634,6 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
-  if (alarmsError) throw alarmsError;
-  if (criticalError) throw criticalError;
   if (snapshotsError) throw snapshotsError;
   if (energyDailyError) throw energyDailyError;
 
@@ -709,9 +704,6 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     }
   }
 
-  const openAlarmsBySite = _countOpenEpisodes((alarms ?? []).map((a) => ({ site_id: a.site_id, alarm: a.alarm, severity: a.severity, timestamp: a.timestamp })));
-  const openCriticalBySite = _countOpenEpisodes((criticalAlerts ?? []).map((c) => ({ site_id: c.site_id, category: c.category, severity: c.severity, timestamp: c.timestamp })));
-
   const rows: FleetOverviewRow[] = siteRows.map((s) => {
     const latestHealth = latestHealthBySite.get(s.site_id);
     const snapshot = snapshotBySite.get(s.site_id);
@@ -731,8 +723,8 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       health_score: latestHealth?.health_score ?? null,
       health_status: latestHealth?.health_status ?? null,
       health_date: latestHealth?.date ?? null,
-      active_alarms: openAlarmsBySite.get(s.site_id) ?? 0,
-      active_critical_alerts: openCriticalBySite.get(s.site_id) ?? 0,
+      active_alarms: _activeCountFromRaw(snapshot?.raw, 'alarms'),
+      active_critical_alerts: _activeCountFromRaw(snapshot?.raw, 'critical_alerts'),
       live_captured_at: snapshot?.captured_at ?? null,
       live_pv_power_w: snapshot?.pv_power_w ?? null,
       live_load_power_w: snapshot?.load_power_w ?? null,

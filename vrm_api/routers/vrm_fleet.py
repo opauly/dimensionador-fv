@@ -70,7 +70,7 @@ from pydantic import ValidationError
 from database.supabase_client import get_client
 
 from victron import ingest as victron_ingest
-from victron.vrm_live import check_live_alarms, fetch_live_snapshot
+from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
 from victron.vrm_series import DEFAULT_TZ_NAME
 from victron.vrm_savings import fetch_site_savings
@@ -384,47 +384,6 @@ def post_sync(body: VrmFleetSyncRequest, background_tasks: BackgroundTasks) -> J
     return JobCreated(job_id=job["id"])
 
 
-def _apply_live_alarm_state(site_id: str, category_key: str, info: dict) -> bool:
-    """Insert a new WARNING/CLEARED episode-boundary row only when the
-    live-detected state (`info`, from `check_live_alarms()`) differs from
-    the last known one for this category — same transition-only posture
-    `victron/vrm_daily.py:alarm_episode_events()` already uses for the
-    historical path, just detected by polling every ~15 minutes instead of
-    scanning a full day's series at once. This is what lets a transient
-    alarm that starts AND clears within the same day still show up as
-    briefly active — the historical sync, bounded to "through yesterday,"
-    can never do that (see victron/vrm_live.py's module docstring).
-
-    Returns True if a transition was actually recorded (for the sweep's own
-    counters) — False for "already in this state, nothing to do," which is
-    the common case on almost every sweep for almost every category.
-    """
-    table = info["table"]
-    label = info["label"]
-    filter_col = "alarm" if table == "alarm_events" else "category"
-    filter_val = label if table == "alarm_events" else category_key
-
-    latest = (_t(table).select("severity")
-             .eq("site_id", site_id).eq(filter_col, filter_val)
-             .order("timestamp", desc=True).limit(1).execute().data)
-    last_severity = latest[0]["severity"] if latest else None
-    new_severity = "WARNING" if info["active"] else "CLEARED"
-
-    # No episode ever open for this category, and it's still not active —
-    # never treat that as a "transition to CLEARED" (there is nothing to
-    # clear from a state that was never open).
-    if last_severity == new_severity or (last_severity is None and not info["active"]):
-        return False
-
-    row = {
-        "site_id": site_id, "alarm": label, "severity": new_severity,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    row["source" if table == "alarm_events" else "category"] = category_key
-    _t(table).insert(row).execute()
-    return True
-
-
 @router.post("/refresh-snapshots", response_model=FleetSnapshotsRefreshOut)
 def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
     """Fleet Dashboard Phase 2's live-snapshot sweep (2026-08-30) — meant
@@ -448,20 +407,19 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
     One site's failure never stops the sweep — same per-site isolation
     `vrm_sync.py:post_run_due()` already uses for exactly this reason.
 
-    Live alarm/critical-alert detection added 2026-09-01 (see
-    `victron/vrm_live.py`'s module docstring for why): reuses this same
-    sweep's own `get_diagnostics()` call — already fetched below to build
-    the snapshot — to also check every alarm/critical category's CURRENT
-    state and record a transition immediately, rather than waiting for
-    tomorrow's historical sync. `_apply_live_alarm_state()` only writes when
-    the state actually changed, so a still-ongoing alarm doesn't get a new
-    row every single sweep.
+    Live alarm/critical-alert state added 2026-09-01 (see
+    `victron/vrm_live.py`'s module docstring for why): `fetch_live_snapshot()`
+    below now folds each category's current state directly into this same
+    snapshot row (`raw.alarms`/`raw.critical_alerts`) — a plain "is this
+    present right now" read, not an episode/history record. The historical
+    sync still owns `vrm.alarm_events`/`vrm.critical_alerts` for report/
+    health-score purposes, untouched by this.
     """
     sites = (_t("sites").select("site_id, customer_id, vrm_installation_id, timezone")
             .eq("source", "vrm_api").eq("active", True).execute().data or [])
     admin_token = os.environ.get("VRM_ADMIN_TOKEN")
 
-    refreshed, skipped, failed, alarm_transitions = 0, 0, 0, 0
+    refreshed, skipped, failed = 0, 0, 0
     for site in sites:
         id_site = site.get("vrm_installation_id")
         if id_site is None:
@@ -496,15 +454,6 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
             skipped += 1
             continue
 
-        for category_key, info in check_live_alarms(diagnostics).items():
-            try:
-                if _apply_live_alarm_state(site["site_id"], category_key, info):
-                    alarm_transitions += 1
-            except Exception:  # noqa: BLE001 — a write failure for one
-                # category must not lose the rest of this sweep's work.
-                logger.exception("vrm-fleet refresh-snapshots: alarm state write failed for site %s category %s",
-                                 site["site_id"], category_key)
-
         # `updated_at DEFAULT now()` only fires on INSERT, not on the UPDATE
         # half of an upsert — found from `tools/run_migration_031.py`'s own
         # verification output, where a second upsert with different values
@@ -516,8 +465,7 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
         }).execute()
         refreshed += 1
 
-    return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed,
-                                    alarm_transitions=alarm_transitions)
+    return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
 
 
 @router.get("/site-shape", response_model=SiteShapeOut)
