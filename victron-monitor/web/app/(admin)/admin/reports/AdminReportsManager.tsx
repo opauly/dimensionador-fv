@@ -76,6 +76,21 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
   // case-insensitive/trimmed — the data checked is consistently formatted,
   // so a looser substring match would only risk a false-positive match
   // between two differently-named people, not save anyone from a typo.
+
+  // The Customer dropdown itself used to stay the same full `vrm.customers`
+  // list regardless of Source, which read as "switching to monitoring does
+  // nothing" — confusing, since for `monitoring` a customer is only useful
+  // here if they actually own a monitoring site. Narrow it to customers with
+  // an owner-name match once `monitoringSites` has loaded; fall back to the
+  // full list while loading or if nothing matches at all, so the picker is
+  // never left empty.
+  const monitoringCustomers = monitoringSites ? customers.filter((c) => monitoringSites.some((s) => (s.owner ?? '').trim().toLowerCase() === c.name.trim().toLowerCase())) : null;
+  const visibleCustomers = schema === 'vrm' ? customers : monitoringCustomers && monitoringCustomers.length > 0 ? monitoringCustomers : customers;
+
+  if (customerId && visibleCustomers.length > 0 && !visibleCustomers.some((c) => c.id === customerId)) {
+    setCustomerId(visibleCustomers[0].id);
+  }
+
   const selectedCustomerName = customers.find((c) => c.id === customerId)?.name ?? null;
   const normalizedCustomerName = selectedCustomerName?.trim().toLowerCase() ?? null;
 
@@ -223,7 +238,7 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
         <label className={styles.controlField}>
           <span className={styles.controlLabel}>Customer {schema === 'monitoring' ? '(job reference only)' : ''}</span>
           <Select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-            {customers.map((c) => (
+            {visibleCustomers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>

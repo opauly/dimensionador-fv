@@ -13,7 +13,11 @@ export const metadata: Metadata = {
 // only from `requireAdmin()`.
 export default async function AdminUploadPage() {
   await requireAdmin();
-  const customers = await listCustomers();
+  // Inactive/test customers (e.g. QA accounts, cancelled trials) clutter a
+  // picker whose only job is "upload on behalf of a real customer" — the
+  // `/admin/customers` management page is where Oscar still needs to see
+  // and reactivate them.
+  const customers = (await listCustomers()).filter((c) => c.active);
 
   return (
     <div>

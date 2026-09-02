@@ -17,7 +17,10 @@ export const metadata: Metadata = {
 // `lib/server/pipeline.ts:listSitesForSchema()`'s own comment).
 export default async function AdminReportsPage() {
   await requireAdmin();
-  const [vrmSites, customers] = await Promise.all([listAllSites(), listCustomers()]);
+  const [vrmSites, allCustomers] = await Promise.all([listAllSites(), listCustomers()]);
+  // Same active-only filter as `/admin/upload` — no reason to offer QA/test
+  // accounts in a report-generation picker either.
+  const customers = allCustomers.filter((c) => c.active);
 
   return (
     <div>
