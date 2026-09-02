@@ -47,6 +47,7 @@ All already present in the repo-root `.env` (never committed; see
 | `SUPABASE_SERVICE_ROLE_KEY` | Same client. This is the secret credential — see "Trust boundary rules." |
 | `ANTHROPIC_API_KEY` | `victron/weekly_report.py:generate_narrative()`. Missing key fails soft (a placeholder paragraph), never an error. |
 | `PIPELINE_API_KEY` | `vrm_api/deps.py` — the bearer token every route but `/health` requires. Long random secret, held only by this service and the Next.js server's env, never in a browser. |
+| `PUBLIC_TARIFF_API_KEY` | `vrm_api/deps.py` — the bearer token `GET /public/tariffs/*` requires. A **separate** secret from `PIPELINE_API_KEY`, held only by this service and whatever external tool reads tariffs (Claude Design) — see "The public tariff route" below. |
 | `ONVO_MODE` | `routers/billing.py:_onvo_mode()` — `test` or `live`. Scopes every `vrm.plans`/`vrm.subscriptions` read/write to the matching row (`§3.1`'s `mode` column on both tables, so a dev row can never point at a live price). Defaults to `test` if unset. |
 | `ONVO_SECRET_KEY` | `vrm_api/onvo.py` **only** — the server-side ONVO API key (`Authorization: Bearer <key>` on every outbound call to `api.onvopay.com`). Never logged, never returned to a browser, never read by any other module in this repo. Test-mode keys (`onvo_test_secret_key_...`) for everything except a real production deploy — see `.env.example` and `PLAN_PHASE16.md` §0.6 Q9. |
 | `ONVO_PUBLISHABLE_KEY` | `routers/billing.py:_publishable_key()` — handed to the **browser** (as part of `BillingSubscribeOut`/`BillingPaymentMethodSessionOut`) so the ONVO web SDK (`sdk.onvopay.com/sdk.js`) can render its own card form client-side. Safe to expose — it's the public half of the key pair, the same way a Stripe publishable key is. |
@@ -56,7 +57,7 @@ All already present in the repo-root `.env` (never committed; see
 | `PORTAL_FROM_EMAIL` | `victron/mailer.py:send()`'s default `from` address when no `from_` is passed explicitly — every scheduled report email and the Cap B "limit reached" notice use this. |
 | `VRM_ADMIN_TOKEN` | `routers/vrm_fleet.py` — Oscar's own Victron VRM personal access token, used only by the admin fleet flow (`/admin/vrm-fleet`) to read/link installations under his own VRM account. Never a customer's own token (that's `secrets.read_customer_vrm_token()`, Vault-backed, unrelated to this var). |
 
-In production (Render), all twelve vars above are set directly in the
+In production (Render), all thirteen vars above are set directly in the
 service's environment — no `.env` file is deployed.
 
 **`ONVO_WEBHOOK_SECRET` is deliberately NOT in this list — this service never
@@ -317,6 +318,27 @@ $ curl -X POST -H "Authorization: Bearer $PIPELINE_API_KEY" \
 {"signup_requests_deleted":0,"rate_limits_deleted":0}
 ```
 
+### `GET /public/tariffs/*` — read-only tariff lookup for Claude Design
+
+The one route in this service that isn't gated by `PIPELINE_API_KEY` — see
+"The public tariff route" below for why it's safe to expose. Auth is
+`Authorization: Bearer $PUBLIC_TARIFF_API_KEY` (a different secret; the
+pipeline key does **not** work here).
+
+| Route | What it does |
+|---|---|
+| `GET /public/tariffs/distributors` | Every seeded CR distributor: `abbreviation`, `name`, `coverage_area`. |
+| `GET /public/tariffs/{abbreviation}?code=T-RE` | Current tariff block for that distributor (defaults to `T-RE`, residential). `404` if the abbreviation or code doesn't match anything seeded. |
+
+```
+$ curl -H "Authorization: Bearer $PUBLIC_TARIFF_API_KEY" \
+    "http://localhost:8000/public/tariffs/CNFL"
+{"distributor_abbreviation":"CNFL","distributor_name":"Compañía Nacional de Fuerza y Luz",
+ "code":"T-RE","name":"Tarifa Residencial","access_charge_crc":1744.8,"bomberos_pct":0.0175,
+ "iva_threshold_kwh":280,"last_updated":"2026-07-03T00:00:00+00:00",
+ "tiers":[{"from_kwh":31,"to_kwh":200,"rate_crc":58.16,"is_fixed":false,"sort_order":1}, ...]}
+```
+
 ## Trust boundary rules (PLAN_PHASE14.md §1.3)
 
 This service holds the same Supabase service-role privilege the Next.js
@@ -388,6 +410,36 @@ with our own secret key — the same read `POST /v1/billing/refresh` and the
 daily sweep already perform. It can never write state directly, because
 nothing in this codebase ever applies a webhook payload's own fields to a
 mirror row.
+
+### The public tariff route (`routers/public_tariffs.py`)
+
+Rule 2 above ("one caller, one key") has exactly one deliberate exception:
+`GET /public/tariffs/*`. An external tool (Claude Design, building
+maintenance-report savings tables) needs a distributor's current ARESEP
+tariff, and the alternative — a human retyping tier numbers into a text box
+each time — doesn't scale and has no way to notice when ARESEP revises a
+rate.
+
+This doesn't reopen the boundary the rest of this file protects, for three
+reasons that all have to hold together:
+
+1. **Different key.** `PUBLIC_TARIFF_API_KEY` is checked by a separate
+   dependency (`require_public_tariff_key`) that never consults
+   `PIPELINE_API_KEY`, and vice versa — see the smoke test in
+   `vrm_api/deps.py`'s docstring. Whoever holds the tariff key gains nothing
+   toward the pipeline key.
+2. **Different data.** `database/tariffs_db.py`'s tables hold public ARESEP
+   utility filings — distributor names and rate structures anyone could
+   request from ARESEP directly — never a customer, a site, or this
+   project's own metering/billing data. There's nothing behind this route
+   the trust boundary above is meant to protect.
+3. **Read-only, one router.** `public_tariffs.py` has no write path, and the
+   carve-out is scoped to that one file — not a global "second key also
+   works everywhere" change.
+
+Still worth re-auditing if this route ever grows beyond tariff lookups: the
+reasoning above is about *this specific, narrow* exception, not a precedent
+for adding more public routes without the same three checks.
 
 ## Jobs (PLAN_PHASE14.md §1.6)
 

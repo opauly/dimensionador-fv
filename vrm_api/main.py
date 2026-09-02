@@ -8,15 +8,18 @@ weekly/overview reports, without rewriting `victron/vrm_csv.py`,
 
 ── No CORS middleware — anywhere, ever (PLAN_PHASE14.md §1.3) ─────────────
 This is not "CORS configured to deny everything"; it is CORS not configured
-at all. `victron-monitor/web`'s server is the only legitimate caller, and a
-server never runs in a browser's CORS sandbox to begin with — it doesn't
-need permission. Installing `CORSMiddleware` with an empty/strict allow-list
-would still add an `Access-Control-*` response path that a future edit could
-loosen by one line without anyone noticing it changed the trust boundary.
-With no middleware installed, Starlette has nothing to answer a browser's
-`OPTIONS` preflight with (no route here declares `OPTIONS`, so it 405s, and
-no response anywhere carries `Access-Control-Allow-Origin`) — a browser
-fails the preflight by construction, not by policy.
+at all. `victron-monitor/web`'s server is the only legitimate *browser-facing*
+caller, and a server never runs in a browser's CORS sandbox to begin with —
+it doesn't need permission. Installing `CORSMiddleware` with an empty/strict
+allow-list would still add an `Access-Control-*` response path that a future
+edit could loosen by one line without anyone noticing it changed the trust
+boundary. With no middleware installed, Starlette has nothing to answer a
+browser's `OPTIONS` preflight with (no route here declares `OPTIONS`, so it
+405s, and no response anywhere carries `Access-Control-Allow-Origin`) — a
+browser fails the preflight by construction, not by policy. `routers/
+public_tariffs.py` (below) is called server-side by an external tool, not
+from a browser tab, so this still holds for it — if that ever changes, this
+paragraph is the thing to revisit before adding CORS.
 
 ── Every route but /health requires a bearer token (vrm_api/deps.py) ──────
 Wired as a `dependencies=[Depends(require_pipeline_key)]` on each router
@@ -24,6 +27,18 @@ in `routers/`, not globally on `app` — `GET /health` is registered directly
 here with no dependency, because it is the one endpoint PLAN_PHASE14.md §1.3
 carves out as unauthenticated (so an uptime monitor / Render's own health
 check can hit it without holding the pipeline key).
+
+── `routers/public_tariffs.py` — the one deliberate second caller ─────────
+Everything above describes a service built for exactly one caller
+(`victron-monitor/web`'s server). `public_tariffs` is a scoped, read-only
+exception: an external tool (Claude Design) needs live ARESEP tariff rates
+for maintenance-report savings tables, and hand-copying tier numbers into a
+text box each time both doesn't scale and silently goes stale whenever
+ARESEP revises a rate. It is gated by its own key
+(`require_public_tariff_key`, a separate secret from `PIPELINE_API_KEY`) and
+touches only public utility-rate data — never a customer, a site, or this
+project's own metering data — so it doesn't reopen the trust boundary the
+rest of this file protects.
 
 Run locally, from the repo root (not from inside `vrm_api/`):
     uvicorn vrm_api.main:app --reload
@@ -36,7 +51,7 @@ from fastapi.responses import JSONResponse
 from vrm_api import jobs, storage
 from vrm_api.deps import require_pipeline_key
 from vrm_api.report_limits import ReportRateLimited
-from vrm_api.routers import billing, ingest, meta, reports, vrm_fleet, vrm_link, vrm_sync
+from vrm_api.routers import billing, ingest, meta, public_tariffs, reports, vrm_fleet, vrm_link, vrm_sync
 from vrm_api.schemas import JobOut
 from vrm_api.tenancy import NotAuthorized, VrmAccountAlreadyLinked
 
@@ -162,3 +177,4 @@ app.include_router(vrm_link.router)
 app.include_router(vrm_sync.router)
 app.include_router(vrm_fleet.router)
 app.include_router(billing.router)
+app.include_router(public_tariffs.router)

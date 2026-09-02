@@ -759,3 +759,45 @@ class BillingPruneSignupsOut(BaseModel):
 
     signup_requests_deleted: int
     rate_limits_deleted: int
+
+
+class DistributorOut(BaseModel):
+    """One row of `GET /public/tariffs/distributors` — just enough for an
+    external caller to pick a distributor abbreviation to then look up a
+    tariff for. No `id` (internal Supabase primary key, meaningless outside
+    this project)."""
+
+    abbreviation: str
+    name: str
+    coverage_area: str | None = None
+
+
+class TariffTierOut(BaseModel):
+    from_kwh: int
+    to_kwh: int | None
+    rate_crc: float
+    is_fixed: bool
+    sort_order: int
+
+
+class TariffInfoOut(BaseModel):
+    """`GET /public/tariffs/{abbreviation}`'s response — the tariff fields
+    `estimate_bill_crc` (tools/solar_tariff_savings.py and this project's own
+    calculations/tariff_calculator.py) needs to price a bill, plus enough
+    attribution (`distributor_name`, `last_updated`) that whatever consumes
+    this can label the number instead of showing a bare figure. No internal
+    `id`s — same reasoning as `DistributorOut`."""
+
+    distributor_abbreviation: str
+    distributor_name: str
+    code: str
+    name: str
+    access_charge_crc: float
+    bomberos_pct: float
+    iva_threshold_kwh: int
+    alumbrado_publico_rate_crc: float = 0.0
+    ios_monthly_crc: float = 0.0
+    coa_monthly_crc: float = 0.0
+    cvg_monthly_crc: float = 0.0
+    last_updated: str | None = None
+    tiers: list[TariffTierOut]

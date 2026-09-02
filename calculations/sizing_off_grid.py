@@ -810,7 +810,7 @@ def estimate_hybrid_savings_pct(
     grid_kwh_month = max(0.0, whole_home_avg_kwh_month - self_consumed_kwh_month)
 
     old_bill = estimate_bill_crc(whole_home_avg_kwh_month, tariff_info)
-    new_bill = estimate_bill_crc(grid_kwh_month, tariff_info)
+    new_bill = estimate_bill_crc(grid_kwh_month, tariff_info, include_gd_charges=True)
     savings_crc = max(0.0, old_bill - new_bill)
     savings_pct = round(savings_crc / old_bill * 100, 1) if old_bill > 0 else 0.0
 
