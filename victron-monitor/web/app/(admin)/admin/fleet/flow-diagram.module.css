@@ -125,8 +125,10 @@
 .batteryHome {
   stroke: var(--good);
 }
+/* Grid keeps its own neutral identity color (the same --mute used for the
+   Grid KPI card's swatch elsewhere), but otherwise animates exactly like
+   solarHome/batteryHome — a real, moving grid reading with a static line
+   read as "this number isn't actually live," which it is. */
 .gridHome {
-  stroke: var(--line);
-  stroke-dasharray: 3 6;
-  animation: none;
+  stroke: var(--mute);
 }
