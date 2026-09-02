@@ -606,14 +606,13 @@ def _scenario_projection(
       grid_kwh      = avg_kwh − self_consumed        (still drawn from grid)
       coverage      = self_consumed / avg_kwh         (always < 100 % due to nights)
 
-    `new_bill` is computed with `include_gd_charges=True`: this is the
-    projected bill AFTER installing a grid-tied system, and any grid-tied
-    solar install requires Generación Distribuida interconnection with CNFL
-    — so unlike `avg_bill_crc` (the customer's real current bill, pre-solar,
-    never GD-enrolled), the projection should reflect COA/CVG showing up on
-    their real invoices once the system is live. See
-    `calculations/tariff_calculator.py`'s docstring for the full reasoning
-    and what's still excluded (DER, always).
+    `new_bill` is the energy-charge + access-charge estimate only —
+    bomberos, alumbrado público, IVA, and Generación Distribuida charges
+    (COA/CVG/DER/IOS) are deliberately excluded from both `new_bill` and
+    `avg_bill_crc`'s own estimate. See `calculations/tariff_calculator.py`'s
+    docstring for the full reasoning; any client-facing use of `new_bill`
+    (proposal PDFs, this wizard's own review step) must carry that
+    disclaimer through rather than presenting it as a complete bill.
     """
     from calculations.tariff_calculator import estimate_bill_crc as _est
     gen = round(system_kw * avg_irradiance)
@@ -627,7 +626,7 @@ def _scenario_projection(
     self_consumption_pct = round(self_consumed / gen * 100) if gen > 0 else 0
 
     if tariff_info:
-        new_bill = _est(grid_kwh, tariff_info, include_gd_charges=True)
+        new_bill = _est(grid_kwh, tariff_info)
         savings  = max(0, round(avg_bill_crc - new_bill))
     else:
         new_bill = None

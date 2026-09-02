@@ -72,7 +72,7 @@ def monthly_savings_table(
     for i, (kwh, gen) in enumerate(zip(monthly_kwh, monthly_generation)):
         net_kwh = max(0.0, kwh - gen)
         old_bill = calculate_bill(kwh, tariff_type, tiers)["total_crc"]
-        new_bill = calculate_bill(net_kwh, tariff_type, tiers, include_gd_charges=True)["total_crc"]
+        new_bill = calculate_bill(net_kwh, tariff_type, tiers)["total_crc"]
         savings_crc = old_bill - new_bill
         savings_usd = round(savings_crc / exchange_rate, 2) if exchange_rate else 0.0
 
