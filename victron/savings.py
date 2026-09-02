@@ -24,6 +24,11 @@ export compensation (net metering vs net billing vs none at all) is a policy
 variable that differs by country and even by Costa Rican distributor;
 modeling it without knowing the specific policy risks a confidently wrong
 number, which is worse than the honest gap this leaves for exporting sites.
+
+`rate` itself is energy charge ÷ kWh only — see
+`calculations/tariff_calculator.py`'s own docstring for why bomberos,
+alumbrado público, IVA, and Generación Distribuida charges are excluded
+from that formula entirely, not just from this weekly-report path.
 """
 import time
 

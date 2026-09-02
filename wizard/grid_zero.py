@@ -66,9 +66,10 @@ def step4_utility() -> dict | None:
         selected_tariff = tariff_options[tariff_label]
 
         st.caption(
-            f"Cargo fijo: ₡{selected_tariff['access_charge_crc']:,.0f}/mes · "
-            f"Bomberos: {selected_tariff['bomberos_pct']*100:.2f}% · "
-            f"Umbral IVA: {selected_tariff['iva_threshold_kwh']} kWh"
+            f"Cargo fijo: ₡{selected_tariff['access_charge_crc']:,.0f}/mes "
+            "(la factura estimada solo incluye cargo por energía + cargo fijo; "
+            "no incluye bomberos, alumbrado público, IVA ni cargos de "
+            "Generación Distribuida)"
         )
     else:
         st.warning("No hay tarifas registradas para esta distribuidora.")

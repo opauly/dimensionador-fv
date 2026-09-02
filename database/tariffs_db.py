@@ -91,12 +91,24 @@ def upsert_tariff_type_row(
     demand_threshold_kw: int = 0,
     bomberos_pct: float = 0.0175,
     iva_threshold_kwh: int = 280,
-    alumbrado_publico_rate_crc: float = 0.0,
-    ios_monthly_crc: float = 0.0,
-    coa_monthly_crc: float = 0.0,
-    cvg_monthly_crc: float = 0.0,
+    alumbrado_publico_rate_crc: float | None = None,
+    ios_monthly_crc: float | None = None,
+    coa_monthly_crc: float | None = None,
+    cvg_monthly_crc: float | None = None,
 ) -> str:
-    """Insert or update a tariff_type row. Returns the tariff_type_id."""
+    """Insert or update a tariff_type row. Returns the tariff_type_id.
+
+    `alumbrado_publico_rate_crc`/`ios_monthly_crc`/`coa_monthly_crc`/
+    `cvg_monthly_crc` default to `None`, not `0.0`, and are only written
+    when explicitly passed -- an UPDATE call that omits them (e.g. the
+    admin Tariff Manager's "Aplicar actualización", which only knows about
+    `access_charge_crc`/`demand_rate_crc`/`demand_threshold_kw`) leaves
+    whatever real-invoice-confirmed value is already on the row alone,
+    rather than silently resetting it to 0 ("unverified") on every routine
+    edit. A brand new row (INSERT branch) still needs an explicit starting
+    value, so `None` there becomes 0.0 -- correct, since a row that's never
+    had these set genuinely has nothing to preserve.
+    """
     from datetime import date
     db = get_client()
     dist = (
@@ -121,16 +133,20 @@ def upsert_tariff_type_row(
         "access_charge_crc": access_charge_crc,
         "demand_rate_crc": demand_rate_crc,
         "demand_threshold_kw": demand_threshold_kw,
+        "last_updated": date.today().isoformat(),
+    }
+    optional_fields = {
         "alumbrado_publico_rate_crc": alumbrado_publico_rate_crc,
         "ios_monthly_crc": ios_monthly_crc,
         "coa_monthly_crc": coa_monthly_crc,
         "cvg_monthly_crc": cvg_monthly_crc,
-        "last_updated": date.today().isoformat(),
     }
     if existing.data:
         tt_id = existing.data[0]["id"]
+        payload.update({k: v for k, v in optional_fields.items() if v is not None})
         db.table("tariff_types").update(payload).eq("id", tt_id).execute()
     else:
+        payload.update({k: (v if v is not None else 0.0) for k, v in optional_fields.items()})
         payload.update({
             "distributor_id": dist_id,
             "code": code,

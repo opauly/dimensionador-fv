@@ -789,8 +789,10 @@ def estimate_hybrid_savings_pct(
         daytime_fraction: same AI-estimated fraction Grid Zero uses — share
             of whole-home consumption that happens during solar hours.
         tariff_info: dict shape calculations/tariff_calculator.py:
-            estimate_bill_crc() expects (access_charge_crc, bomberos_pct,
-            iva_threshold_kwh, tiers).
+            estimate_bill_crc() expects (access_charge_crc, tiers). Note
+            that function's own docstring for what's deliberately excluded
+            (bomberos, alumbrado público, IVA, Generación Distribuida
+            charges) and why.
 
     Returns:
         {
