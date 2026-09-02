@@ -13,10 +13,12 @@ export const metadata: Metadata = {
 // only from `requireAdmin()`.
 export default async function AdminUploadPage() {
   await requireAdmin();
-  // Inactive/test customers (e.g. QA accounts, cancelled trials) clutter a
-  // picker whose only job is "upload on behalf of a real customer" — the
-  // `/admin/customers` management page is where Oscar still needs to see
-  // and reactivate them.
+  // Deactivated customers (QA fixtures, cancelled trials) never belong in a
+  // live picker regardless of origin — `/admin/customers` is where Oscar
+  // still manages/reactivates them. The admin-vs-self-serve distinction
+  // itself is a filter inside AdminUploadManager, not a hard exclusion here,
+  // since Oscar's own admin-linked installations are still real customer
+  // records he may need to pick.
   const customers = (await listCustomers()).filter((c) => c.active);
 
   return (

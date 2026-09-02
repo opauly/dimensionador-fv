@@ -1,10 +1,7 @@
 import type { Metadata } from 'next';
 import { requireAdmin } from '@/lib/server/auth';
 import { listAllIngestions, listAllReportRuns, listAllSites, listBillingEvents, listCustomers, listRecentSignups } from '@/lib/server/db/admin';
-import { ActivityTable } from './ActivityTable';
-import { BillingEventsTable } from './BillingEventsTable';
-import { RecentSignupsPanel } from './RecentSignupsPanel';
-import { ReportRunsTable } from './ReportRunsTable';
+import { ActivityManager } from './ActivityManager';
 
 export const metadata: Metadata = {
   title: 'Activity — Admin',
@@ -32,9 +29,11 @@ export default async function AdminActivityPage() {
   ]);
 
   const customerNameBySite = new Map<string, string>();
+  const customerIdBySite = new Map<string, string>();
   const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
   for (const s of sites) {
     customerNameBySite.set(s.site_id, customerNameById.get(s.customer_id) ?? '—');
+    customerIdBySite.set(s.site_id, s.customer_id);
   }
   const displayNameBySite = new Map(sites.map((s) => [s.site_id, s.display_name]));
 
@@ -44,31 +43,14 @@ export default async function AdminActivityPage() {
       <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
         Upload log (<code>vrm.ingestion_log</code>) across all customers, most recent first.
       </p>
-      <ActivityTable ingestions={ingestions} customerNameBySite={Object.fromEntries(customerNameBySite)} displayNameBySite={Object.fromEntries(displayNameBySite)} />
-
-      <h2 style={{ marginTop: 36 }}>Billing events</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        ONVO webhook deliveries (<code>vrm.billing_events</code>), most recent first — including rejected-secret
-        deliveries, the only visible evidence an attempted forgery happened.
-      </p>
-      <BillingEventsTable events={billingEvents} customerNameById={Object.fromEntries(customerNameById)} />
-
-      <h2 style={{ marginTop: 36 }}>Recent signups</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        Public <code>/signup</code> requests (<code>vrm.signup_requests</code>), most recent first — the only place a
-        spam wave is visible before it shows up in the Resend bill.
-      </p>
-      <RecentSignupsPanel signups={signups} customerNameById={Object.fromEntries(customerNameById)} />
-
-      <h2 style={{ marginTop: 36 }}>Scheduled reports</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
-        <code>vrm.report_runs</code>, most recent first — the detection surface for &quot;the scheduled-reports
-        cron silently stopped&quot; (a GitHub Actions workflow with no commits for 60 days gets disabled
-        automatically). &quot;Run due reports now&quot; is the same manual spot-check a <code>workflow_dispatch</code>{' '}
-        trigger gives the GitHub Actions side.
-      </p>
-      <ReportRunsTable
-        runs={reportRuns}
+      <ActivityManager
+        customers={customers}
+        customerIdBySite={Object.fromEntries(customerIdBySite)}
+        ingestions={ingestions}
+        billingEvents={billingEvents}
+        signups={signups}
+        reportRuns={reportRuns}
+        customerNameBySite={Object.fromEntries(customerNameBySite)}
         customerNameById={Object.fromEntries(customerNameById)}
         displayNameBySite={Object.fromEntries(displayNameBySite)}
       />

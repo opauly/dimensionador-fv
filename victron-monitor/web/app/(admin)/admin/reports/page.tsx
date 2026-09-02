@@ -18,8 +18,10 @@ export const metadata: Metadata = {
 export default async function AdminReportsPage() {
   await requireAdmin();
   const [vrmSites, allCustomers] = await Promise.all([listAllSites(), listCustomers()]);
-  // Same active-only filter as `/admin/upload` — no reason to offer QA/test
-  // accounts in a report-generation picker either.
+  // Same active-only filter as `/admin/upload` — see that page's own
+  // comment. The admin-vs-self-serve split is a togglable filter inside
+  // AdminReportsManager, not a hard exclusion, so a report can still be
+  // generated for one of Oscar's own admin-linked installations.
   const customers = allCustomers.filter((c) => c.active);
 
   return (

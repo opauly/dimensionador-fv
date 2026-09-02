@@ -56,6 +56,10 @@ type ReportSummary = {
   isOverview: boolean;
 };
 
+// Same admin/self-serve distinction `/admin/customers` filters by (its own
+// `origin` column).
+type OriginFilter = 'all' | 'admin' | 'self_serve';
+
 function daysBetween(start: string, end: string): number {
   const a = new Date(`${start}T00:00:00Z`).getTime();
   const b = new Date(`${end}T00:00:00Z`).getTime();
@@ -66,6 +70,14 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
   const [schema, setSchema] = useState<Schema>('vrm');
   const [customerId, setCustomerId] = useState<string>(customers[0]?.id ?? '');
   const [monitoringSites, setMonitoringSites] = useState<SiteSummary[] | null>(null);
+
+  // Same admin/self-serve distinction `/admin/customers` filters by — Oscar's
+  // own admin-linked installations vs. real signed-up subscribers. Narrows
+  // the pool the monitoring-owner match below runs against, so it stays a
+  // togglable filter rather than the earlier hard exclusion (which made it
+  // impossible to generate a report for one of Oscar's own real sites).
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const originFilteredCustomers = originFilter === 'all' ? customers : customers.filter((c) => c.origin === originFilter);
 
   // Bug-fix pass 2026-08-18 (Bug 3): `monitoring.sites` has no `customer_id`
   // FK (this schema predates `vrm.customers` — it's Oscar's own
@@ -84,8 +96,10 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
   // an owner-name match once `monitoringSites` has loaded; fall back to the
   // full list while loading or if nothing matches at all, so the picker is
   // never left empty.
-  const monitoringCustomers = monitoringSites ? customers.filter((c) => monitoringSites.some((s) => (s.owner ?? '').trim().toLowerCase() === c.name.trim().toLowerCase())) : null;
-  const visibleCustomers = schema === 'vrm' ? customers : monitoringCustomers && monitoringCustomers.length > 0 ? monitoringCustomers : customers;
+  const monitoringCustomers = monitoringSites
+    ? originFilteredCustomers.filter((c) => monitoringSites.some((s) => (s.owner ?? '').trim().toLowerCase() === c.name.trim().toLowerCase()))
+    : null;
+  const visibleCustomers = schema === 'vrm' ? originFilteredCustomers : monitoringCustomers && monitoringCustomers.length > 0 ? monitoringCustomers : originFilteredCustomers;
 
   if (customerId && visibleCustomers.length > 0 && !visibleCustomers.some((c) => c.id === customerId)) {
     setCustomerId(visibleCustomers[0].id);
@@ -228,6 +242,14 @@ export function AdminReportsManager({ vrmSites, customers }: { vrmSites: SiteRec
   return (
     <div>
       <div className={styles.controls}>
+        <label className={styles.controlField}>
+          <span className={styles.controlLabel}>Origin</span>
+          <Select value={originFilter} onChange={(e) => setOriginFilter(e.target.value as OriginFilter)}>
+            <option value="all">All</option>
+            <option value="admin">Admin (Oscar&apos;s own sites)</option>
+            <option value="self_serve">Self-serve (subscribers)</option>
+          </Select>
+        </label>
         <label className={styles.controlField}>
           <span className={styles.controlLabel}>Source</span>
           <Select value={schema} onChange={(e) => setSchema(e.target.value as Schema)}>

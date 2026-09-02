@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, startTransition, useState } from 'react';
+import { Fragment, startTransition, useMemo, useState } from 'react';
 import { Button, Select, Table } from '@/components/ui';
 import { formatDateTime as formatDateTimeShared } from '@/lib/dates';
 import type { SiteRecord } from '@/lib/server/db';
@@ -20,6 +20,11 @@ const SOURCE_LABEL: Record<string, string> = {
   csv_upload: 'CSV',
 };
 
+// Same admin/self-serve distinction `/admin/customers` filters by (its own
+// `origin` column) — Oscar's own admin-linked installations vs. real
+// signed-up subscribers.
+type OriginFilter = 'all' | 'admin' | 'self_serve';
+
 function formatDateTime(iso: string | null): string {
   // Delegates to lib/dates.ts's deterministic formatter (2026-08-19 — a
   // real Next.js hydration error surfaced this exact pattern elsewhere in
@@ -36,6 +41,14 @@ export function AdminSitesManager({ sites, customers }: { sites: SiteRecord[]; c
   const [reassignError, setReassignError] = useState<Record<string, string>>({});
 
   const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
+  const customerOriginById = new Map(customers.map((c) => [c.id, c.origin]));
+
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const filteredSites = useMemo(
+    () => sites.filter((s) => originFilter === 'all' || customerOriginById.get(s.customer_id) === originFilter),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- customerOriginById is rebuilt fresh every render from `customers`, not stable across renders
+    [sites, originFilter, customers],
+  );
 
   function handleReassign(siteId: string) {
     const target = reassignTarget[siteId];
@@ -51,6 +64,20 @@ export function AdminSitesManager({ sites, customers }: { sites: SiteRecord[]; c
 
   return (
     <div>
+      <div className={styles.filtersRow}>
+        <label className={styles.filterLabel}>
+          Origin
+          <Select value={originFilter} onChange={(e) => setOriginFilter(e.target.value as OriginFilter)}>
+            <option value="all">All</option>
+            <option value="admin">Admin</option>
+            <option value="self_serve">Self-serve</option>
+          </Select>
+        </label>
+        <span className={styles.filterCount}>
+          {filteredSites.length} of {sites.length} site(s)
+        </span>
+      </div>
+
       <Table>
         <thead>
           <tr>
@@ -67,7 +94,7 @@ export function AdminSitesManager({ sites, customers }: { sites: SiteRecord[]; c
           </tr>
         </thead>
         <tbody>
-          {sites.map((s) => (
+          {filteredSites.map((s) => (
             <Fragment key={s.site_id}>
               <tr>
                 <td>{s.display_name}</td>

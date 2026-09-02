@@ -41,6 +41,12 @@ type SiteFieldsState = {
 
 const NEW_SITE_VALUE = '__new__';
 
+// Same admin/self-serve distinction `/admin/customers` filters by (its own
+// `origin` column) — Oscar's own admin-linked installations vs. real signed-up
+// subscribers. A togglable filter here, not a hard exclusion, so either
+// population stays reachable.
+type OriginFilter = 'all' | 'admin' | 'self_serve';
+
 function emptyFields(): SiteFieldsState {
   return {
     displayName: '',
@@ -127,7 +133,10 @@ export function AdminUploadManager({ customers }: { customers: AdminCustomerRow[
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [customerId, setCustomerId] = useState<string>(customers[0]?.id ?? '');
+  const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const visibleCustomers = originFilter === 'all' ? customers : customers.filter((c) => c.origin === originFilter);
+
+  const [customerId, setCustomerId] = useState<string>(visibleCustomers[0]?.id ?? '');
   const [context, setContext] = useState<AdminUploadContext | null>(null);
   const [loadingContext, setLoadingContext] = useState(false);
 
@@ -150,6 +159,14 @@ export function AdminUploadManager({ customers }: { customers: AdminCustomerRow[
     setPreview(null);
     setCommitResult(null);
     setErrorMessage(null);
+  }
+
+  // Flipping the Origin filter can leave `customerId` pointing at a
+  // customer the new filter hides — same render-time correction
+  // `AdminReportsManager.tsx`'s own Origin/Source narrowing uses, so the
+  // Select never shows a value that isn't one of its own options.
+  if (customerId && visibleCustomers.length > 0 && !visibleCustomers.some((c) => c.id === customerId)) {
+    setCustomerId(visibleCustomers[0].id);
   }
 
   // "Adjusting state when a prop/state change happens" during render, not
@@ -341,15 +358,24 @@ export function AdminUploadManager({ customers }: { customers: AdminCustomerRow[
   return (
     <div>
       <div className={styles.panel}>
-        <Field label="Customer" htmlFor="admin-upload-customer">
-          <Select id="admin-upload-customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={formDisabled}>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <div className={styles.fieldRow}>
+          <Field label="Origin" htmlFor="admin-upload-origin">
+            <Select id="admin-upload-origin" value={originFilter} onChange={(e) => setOriginFilter(e.target.value as OriginFilter)} disabled={formDisabled}>
+              <option value="all">All</option>
+              <option value="admin">Admin (Oscar&apos;s own sites)</option>
+              <option value="self_serve">Self-serve (subscribers)</option>
+            </Select>
+          </Field>
+          <Field label="Customer" htmlFor="admin-upload-customer">
+            <Select id="admin-upload-customer" value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={formDisabled}>
+              {visibleCustomers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
       </div>
 
       {loadingContext && <p className={styles.status}>Loading…</p>}
