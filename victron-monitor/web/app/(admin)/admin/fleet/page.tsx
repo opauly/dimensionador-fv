@@ -115,11 +115,18 @@ export default async function AdminFleetPage() {
   const overview = await getFleetOverview();
 
   const sites = overview.sites;
-  const solarSites = sites.filter((s) => s.live_pv_power_w !== null);
-  const loadSites = sites.filter((s) => s.live_load_power_w !== null);
-  const batterySites = sites.filter((s) => s.live_battery_power_w !== null);
-  const meteredSites = sites.filter((s) => s.has_grid_meter);
-  const socSites = sites.filter((s) => s.live_soc_pct !== null);
+  // A stale site's last snapshot still has real (once-live) readings sitting
+  // in its row — e.g. a site last seen at 10:42am with sun out still shows
+  // "370W PV" 44 days later at 11pm with none. Gating on `connection_status
+  // === 'online'` (the same ~45-minute freshness `_connectionStatus()`
+  // already computes) keeps these fleet-wide "live" totals actually live,
+  // instead of quietly summing months-old readings as if they were current.
+  const onlineSites = sites.filter((s) => s.connection_status === 'online');
+  const solarSites = onlineSites.filter((s) => s.live_pv_power_w !== null);
+  const loadSites = onlineSites.filter((s) => s.live_load_power_w !== null);
+  const batterySites = onlineSites.filter((s) => s.live_battery_power_w !== null);
+  const meteredSites = onlineSites.filter((s) => s.has_grid_meter);
+  const socSites = onlineSites.filter((s) => s.live_soc_pct !== null);
 
   const totalSolar = solarSites.reduce((a, s) => a + (s.live_pv_power_w ?? 0), 0);
   const totalLoad = loadSites.reduce((a, s) => a + (s.live_load_power_w ?? 0), 0);
