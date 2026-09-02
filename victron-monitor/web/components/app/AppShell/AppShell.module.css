@@ -65,6 +65,16 @@
 .navLink:hover {
   color: var(--paper);
 }
+/* Light highlighting for whichever tab matches the current route (2026-09-02,
+   Oscar's own request) — a soft pill, not the bolder `.navLinkPersonal`
+   treatment, since this is "where you are," not "a different kind of link." */
+.navLinkActive {
+  color: var(--paper);
+  background: var(--panel);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  margin: -4px -8px;
+}
 
 /* The "personal" nav group (2026-08-19) — `.nav` above already has
  * `flex: 1`, so it consumes all the row's slack space and this sits
@@ -92,6 +102,11 @@
 .navLinkPersonal:hover {
   background: color-mix(in srgb, var(--victron) 22%, transparent);
   border-color: var(--victron);
+}
+.navLinkPersonalActive {
+  background: color-mix(in srgb, var(--victron) 26%, transparent);
+  border-color: var(--victron);
+  color: var(--paper);
 }
 
 .account {

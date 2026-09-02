@@ -39,7 +39,10 @@ export function FlowDiagram({
     <div className={styles.flow}>
       <svg className={styles.lines} viewBox="0 0 400 420" preserveAspectRatio="none">
         <path className={`${styles.path} ${styles.solarHome}`} d="M 75 40 Q 180 55 195 120" />
-        <path className={`${styles.path} ${styles.batteryHome}`} d="M 200 276 Q 200 256 200 236" />
+        {/* Ends at 248, not the home node's exact text-bottom (110 + 82 ring +
+           name + amt = 236) — that left zero clearance, so the dashed line's
+           own start dot sat right on top of the amount text. */}
+        <path className={`${styles.path} ${styles.batteryHome}`} d="M 200 276 Q 200 262 200 248" />
         {hasGridMeter && <path className={`${styles.path} ${styles.gridHome}`} d="M 325 40 Q 220 55 205 120" />}
       </svg>
 

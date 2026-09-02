@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { signOutAction } from '@/lib/server/auth-actions';
 import { t, type Lang } from '@/lib/i18n/strings';
+import { NavLink } from './NavLink';
 import styles from './AppShell.module.css';
 
 export type AppNavItem = {
@@ -66,18 +67,18 @@ export function AppShell({ role, email, navItems, lang, children }: AppShellProp
         </div>
         <nav className={styles.nav}>
           {mainItems.map((item) => (
-            <Link key={item.href} href={item.href} className={styles.navLink}>
+            <NavLink key={item.href} href={item.href} className={styles.navLink} activeClassName={styles.navLinkActive}>
               {item.label}
-            </Link>
+            </NavLink>
           ))}
         </nav>
         {personalItems.length > 0 && (
           <nav className={styles.navPersonal}>
             <span className={styles.divider} aria-hidden="true" />
             {personalItems.map((item) => (
-              <Link key={item.href} href={item.href} className={styles.navLinkPersonal}>
+              <NavLink key={item.href} href={item.href} className={styles.navLinkPersonal} activeClassName={styles.navLinkPersonalActive}>
                 {item.label}
-              </Link>
+              </NavLink>
             ))}
           </nav>
         )}
