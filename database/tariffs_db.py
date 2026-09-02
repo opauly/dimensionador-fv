@@ -31,7 +31,7 @@ def list_tariff_types(distributor_id: str) -> list[dict]:
     result = (
         get_client()
         .table("tariff_types")
-        .select("id, code, name, sector, access_charge_crc, bomberos_pct, iva_threshold_kwh, demand_rate_crc, demand_threshold_kw, last_updated")
+        .select("id, code, name, sector, access_charge_crc, bomberos_pct, iva_threshold_kwh, alumbrado_publico_rate_crc, ios_monthly_crc, coa_monthly_crc, cvg_monthly_crc, demand_rate_crc, demand_threshold_kw, last_updated")
         .eq("distributor_id", distributor_id)
         .order("code")
         .execute()
@@ -65,7 +65,7 @@ def get_tariff_info(distributor_abbrev: str, code: str) -> dict | None:
         return None
     tt = (
         db.table("tariff_types")
-        .select("id, code, name, sector, access_charge_crc, bomberos_pct, iva_threshold_kwh, demand_rate_crc, demand_threshold_kw, last_updated")
+        .select("id, code, name, sector, access_charge_crc, bomberos_pct, iva_threshold_kwh, alumbrado_publico_rate_crc, ios_monthly_crc, coa_monthly_crc, cvg_monthly_crc, demand_rate_crc, demand_threshold_kw, last_updated")
         .eq("distributor_id", dist.data["id"])
         .eq("code", code)
         .single()
@@ -91,6 +91,10 @@ def upsert_tariff_type_row(
     demand_threshold_kw: int = 0,
     bomberos_pct: float = 0.0175,
     iva_threshold_kwh: int = 280,
+    alumbrado_publico_rate_crc: float = 0.0,
+    ios_monthly_crc: float = 0.0,
+    coa_monthly_crc: float = 0.0,
+    cvg_monthly_crc: float = 0.0,
 ) -> str:
     """Insert or update a tariff_type row. Returns the tariff_type_id."""
     from datetime import date
@@ -117,6 +121,10 @@ def upsert_tariff_type_row(
         "access_charge_crc": access_charge_crc,
         "demand_rate_crc": demand_rate_crc,
         "demand_threshold_kw": demand_threshold_kw,
+        "alumbrado_publico_rate_crc": alumbrado_publico_rate_crc,
+        "ios_monthly_crc": ios_monthly_crc,
+        "coa_monthly_crc": coa_monthly_crc,
+        "cvg_monthly_crc": cvg_monthly_crc,
         "last_updated": date.today().isoformat(),
     }
     if existing.data:

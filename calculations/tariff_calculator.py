@@ -1,43 +1,70 @@
 """
 Monthly electricity bill estimator using ARESEP tariff structure.
 
-Formula (Costa Rica residential T-RE):
-  energy_charge  = sum of tiered kWh × rate_crc per tier
-  fixed_charge   = access_charge_crc
-  bomberos       = (energy_charge + fixed_charge) × bomberos_pct
-  subtotal       = fixed_charge + energy_charge + bomberos
-  iva            = subtotal × 0.13  if kwh >= iva_threshold_kwh, else 0
-  total          = subtotal + iva
+Formula:
+  energy_charge = sum of tiered kWh × rate_crc per tier (T-RE: consumption
+                  blocks; T-CO: a single flat rate — see below)
+  fixed_charge  = access_charge_crc
+  total         = fixed_charge + energy_charge
+
+── Deliberately excludes bomberos, alumbrado público, IVA, and Generación
+Distribuida charges (DER/COA/CVG/IOS) -- Oscar's explicit direction
+(2026-09-02) ─────────────────────────────────────────────────────────────
+Real CNFL invoices (validated against 6 bills across two customers, one with
+a full itemized breakdown for three separate months) confirmed every one of
+these is messier than a static tariff table can responsibly hold:
+
+  Bomberos is bracket-dependent, not a flat percentage -- two real customers
+    at different consumption levels implied 0.68% and 2.1-2.4% respectively,
+    and even the SAME customer's rate moved between months.
+  Alumbrado público (confirmed ¢3.02/kWh, apparently CNFL-wide) and IOS
+    (Impuesto Otros Servicios, flat monthly) are real charges, but only
+    verified for CNFL -- no data for any other distributor.
+  COA/CVG (Generación Distribuida access charges) don't scale with kWh and
+    are revised by periodic ARESEP resolution: two real bills for the exact
+    same 410 kWh had COA of ¢9,085 and ¢14,020, a 54% swing with zero change
+    in consumption. DER (Recursos Energéticos Distribuidos) was never
+    modeled at all, even before this simplification.
+  IVA (13%) itself isn't hard to compute, but it taxes a subtotal built from
+    all of the above -- keeping it while stripping everything it was taxing
+    would just misprice it differently, not more simply.
+
+Rather than keep chasing partial, CNFL-only, sometimes-contradicted values
+for all of this, the formula now estimates only the two components with
+real month-to-month stability and (for CNFL, at least) real-invoice
+confirmation: the tiered/flat energy rate and the fixed access charge. Every
+caller showing this estimate to a client (Grid Zero/Hybrid proposals, the
+solar-savings-table skill) must say so -- see their own docstrings/SKILL.md
+for the exact disclaimer text to carry through to the client-facing
+document. `database/tariffs_db.py`'s `alumbrado_publico_rate_crc`/
+`ios_monthly_crc`/`coa_monthly_crc`/`cvg_monthly_crc`/`bomberos_pct`/
+`iva_threshold_kwh` columns are left in place as reference data (some of it
+real-invoice-confirmed for CNFL) for whenever this gets revisited, but
+nothing in this module reads them anymore.
 """
 from __future__ import annotations
-
-_IVA_RATE = 0.13
 
 
 def estimate_bill_crc(kwh: float, tariff_info: dict) -> float:
     """
-    Estimate monthly electricity bill (₡) from consumption and tariff.
+    Estimate monthly electricity bill (₡) from consumption and tariff --
+    energy charge (tiered or flat) plus the fixed access charge only. See
+    this module's docstring for what's deliberately excluded and why.
 
     Args:
         kwh: Monthly consumption in kWh.
         tariff_info: Dict with keys:
-            access_charge_crc, bomberos_pct, iva_threshold_kwh,
+            access_charge_crc,
             tiers: list of {from_kwh, to_kwh, rate_crc, is_fixed, sort_order}
 
     Returns:
         Estimated total bill in CRC, rounded to nearest colón.
     """
+    fixed_charge = float(tariff_info.get("access_charge_crc") or 0)
     if kwh <= 0:
-        # Access charge + bomberos still apply even at 0 kWh
-        fixed = float(tariff_info.get("access_charge_crc") or 0)
-        bomberos = fixed * float(tariff_info.get("bomberos_pct") or 0)
-        return round(fixed + bomberos)
+        return round(fixed_charge)
 
     tiers = sorted(tariff_info.get("tiers") or [], key=lambda t: t.get("sort_order", 0))
-    fixed_charge = float(tariff_info.get("access_charge_crc") or 0)
-    bomberos_pct = float(tariff_info.get("bomberos_pct") or 0)
-    iva_threshold = int(tariff_info.get("iva_threshold_kwh") or 9999)
-
     energy_charge = 0.0
     for tier in tiers:
         if tier.get("is_fixed"):
@@ -50,10 +77,7 @@ def estimate_bill_crc(kwh: float, tariff_info: dict) -> float:
         tier_kwh = (min(kwh, to_k) - from_k) if to_k is not None else (kwh - from_k)
         energy_charge += tier_kwh * float(tier["rate_crc"])
 
-    bomberos = (fixed_charge + energy_charge) * bomberos_pct
-    subtotal = fixed_charge + energy_charge + bomberos
-    iva = subtotal * _IVA_RATE if kwh >= iva_threshold else 0.0
-    return round(subtotal + iva)
+    return round(fixed_charge + energy_charge)
 
 
 def estimate_blended_effective_rate_crc(monthly_kwh: float,

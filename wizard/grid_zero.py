@@ -605,6 +605,14 @@ def _scenario_projection(
       curtailed     = max(0, gen − daytime_kwh)      (solar that can't be absorbed)
       grid_kwh      = avg_kwh − self_consumed        (still drawn from grid)
       coverage      = self_consumed / avg_kwh         (always < 100 % due to nights)
+
+    `new_bill` is the energy-charge + access-charge estimate only —
+    bomberos, alumbrado público, IVA, and Generación Distribuida charges
+    (COA/CVG/DER/IOS) are deliberately excluded from both `new_bill` and
+    `avg_bill_crc`'s own estimate. See `calculations/tariff_calculator.py`'s
+    docstring for the full reasoning; any client-facing use of `new_bill`
+    (proposal PDFs, this wizard's own review step) must carry that
+    disclaimer through rather than presenting it as a complete bill.
     """
     from calculations.tariff_calculator import estimate_bill_crc as _est
     gen = round(system_kw * avg_irradiance)

@@ -16,14 +16,23 @@ Usage (CLI):
       "daytime_fraction": 0.45,
       "tariff_info": {
         "access_charge_crc": 1500,
-        "bomberos_pct": 0.0175,
-        "iva_threshold_kwh": 280,
         "tiers": [
           {"from_kwh": 0, "to_kwh": 200, "rate_crc": 85.5, "is_fixed": false, "sort_order": 1},
           {"from_kwh": 200, "to_kwh": null, "rate_crc": 105.2, "is_fixed": false, "sort_order": 2}
         ]
       }
     }
+
+Both old_bill_crc and new_bill_crc are energy charge (tiered) + the fixed
+access charge only. Deliberately excludes bomberos, alumbrado público, IVA,
+and Generación Distribuida charges (COA/CVG/DER/IOS) — real CNFL invoices
+confirmed every one of these is either bracket-dependent (bomberos), revised
+by periodic ARESEP resolution and not a function of kWh (COA/CVG), or only
+verified for a single distributor (alumbrado, IOS) — see
+calculations/tariff_calculator.py in the main project (which this file
+mirrors) for the full reasoning. Any report built from this output must
+carry that disclaimer forward rather than presenting these figures as a
+complete bill.
 
 Usage (as a module):
     from solar_tariff_savings import calculate_solar_savings
@@ -40,33 +49,29 @@ import json
 import sys
 
 DAYS_PER_MONTH = 30
-_IVA_RATE = 0.13
 _DEFAULT_DAYTIME_FRACTION = 0.45
 
 
 def estimate_bill_crc(kwh: float, tariff_info: dict) -> float:
     """
-    Estimate a monthly electricity bill (CRC) from consumption and tariff structure.
+    Estimate a monthly electricity bill (CRC) from consumption and tariff
+    structure -- energy charge (tiered) plus the fixed access charge only.
+    See this module's docstring for what's deliberately excluded and why.
 
     Args:
         kwh: Monthly consumption in kWh.
         tariff_info: Dict with keys:
-            access_charge_crc, bomberos_pct, iva_threshold_kwh,
+            access_charge_crc,
             tiers: list of {from_kwh, to_kwh, rate_crc, is_fixed, sort_order}
 
     Returns:
         Estimated total bill in CRC, rounded to the nearest colón.
     """
+    fixed_charge = float(tariff_info.get("access_charge_crc") or 0)
     if kwh <= 0:
-        fixed = float(tariff_info.get("access_charge_crc") or 0)
-        bomberos = fixed * float(tariff_info.get("bomberos_pct") or 0)
-        return round(fixed + bomberos)
+        return round(fixed_charge)
 
     tiers = sorted(tariff_info.get("tiers") or [], key=lambda t: t.get("sort_order", 0))
-    fixed_charge = float(tariff_info.get("access_charge_crc") or 0)
-    bomberos_pct = float(tariff_info.get("bomberos_pct") or 0)
-    iva_threshold = int(tariff_info.get("iva_threshold_kwh") or 9999)
-
     energy_charge = 0.0
     for tier in tiers:
         if tier.get("is_fixed"):
@@ -79,10 +84,7 @@ def estimate_bill_crc(kwh: float, tariff_info: dict) -> float:
         tier_kwh = (min(kwh, to_k) - from_k) if to_k is not None else (kwh - from_k)
         energy_charge += tier_kwh * float(tier["rate_crc"])
 
-    bomberos = (fixed_charge + energy_charge) * bomberos_pct
-    subtotal = fixed_charge + energy_charge + bomberos
-    iva = subtotal * _IVA_RATE if kwh >= iva_threshold else 0.0
-    return round(subtotal + iva)
+    return round(fixed_charge + energy_charge)
 
 
 def calculate_solar_savings(

@@ -1,13 +1,26 @@
 """
-Tiered electricity bill calculator for Costa Rican ARESEP tariffs.
-Handles: block tiers, IVA threshold (280 kWh), bomberos levy (1.75%). Phase 2.
+Tiered electricity bill calculator for Costa Rican ARESEP tariffs. Phase 2.
 
 Formula:
   energy_charge = sum of (kwh_in_tier × rate_crc) per tier block
-  subtotal = energy_charge + access_charge
-  bomberos = subtotal × bomberos_pct
-  iva = subtotal × 0.13  (only if kwh > iva_threshold_kwh; applies to full subtotal)
-  total = subtotal + bomberos + iva
+  total = energy_charge + access_charge
+
+Deliberately excludes bomberos, alumbrado público, IVA, and Generación
+Distribuida charges (COA/CVG/DER/IOS) — same reasoning as
+`calculations/tariff_calculator.py`'s docstring: real CNFL invoices showed
+every one of these is either bracket-dependent, revised by periodic ARESEP
+resolution, or only verified for a single distributor, so this estimates
+only the two components with real month-to-month stability. Any caller
+showing this to a client must carry that disclaimer through — see
+`calculations/tariff_calculator.py`'s docstring for the exact reasoning.
+
+This is a second, independent implementation of the same formula (used by
+the Grid Zero proposal wizard/sizing, where `calculations/tariff_calculator.py`
+is used by the VRM weekly report and other tools) -- kept in sync by hand for
+now. Its tier-boundary convention (`_apply_tiers`'s `to_kwh - from_kwh + 1`,
+inclusive of both ends) differs from `tariff_calculator.py`'s (`from_kwh`
+exclusive), a pre-existing discrepancy between the two that predates this
+change and is out of scope here.
 """
 
 
@@ -40,43 +53,32 @@ def _apply_tiers(kwh: float, tiers: list[dict]) -> float:
 
 def calculate_bill(kwh: float, tariff_type: dict, tiers: list[dict]) -> dict:
     """
-    Calculate monthly electricity bill.
+    Calculate monthly electricity bill -- energy charge (tiered) plus the
+    fixed access charge only. See this module's docstring for what's
+    deliberately excluded and why.
 
     Args:
         kwh: Monthly consumption in kWh.
-        tariff_type: Row from tariff_types table (access_charge_crc, bomberos_pct, iva_threshold_kwh).
+        tariff_type: Row from tariff_types table (access_charge_crc).
         tiers: Rows from tariff_tiers table sorted by sort_order.
 
     Returns dict with:
         energy_charge_crc: Sum of tier charges.
         access_charge_crc: Fixed monthly charge.
-        subtotal_crc: energy + access.
-        bomberos_crc: 1.75% of subtotal.
-        iva_crc: 13% on subtotal if kwh > threshold (0 otherwise).
-        total_crc: Final bill amount.
+        total_crc: Final bill amount (energy + access).
     """
     energy = _apply_tiers(kwh, tiers)
     access = float(tariff_type.get("access_charge_crc", 0))
-    subtotal = energy + access
-
-    bomberos_pct = float(tariff_type.get("bomberos_pct", 0.0175))
-    bomberos = subtotal * bomberos_pct
-
-    iva_threshold = int(tariff_type.get("iva_threshold_kwh", 280))
-    iva = subtotal * 0.13 if kwh > iva_threshold else 0.0
-
-    total = subtotal + bomberos + iva
+    total = energy + access
 
     return {
         "energy_charge_crc": round(energy),
         "access_charge_crc": round(access),
-        "subtotal_crc": round(subtotal),
-        "bomberos_crc": round(bomberos),
-        "iva_crc": round(iva),
         "total_crc": round(total),
     }
 
 
 def calculate_new_bill(new_kwh: float, tariff_type: dict, tiers: list[dict]) -> dict:
-    """Same as calculate_bill but for post-solar net consumption."""
+    """Same as calculate_bill -- kept as a separate name for call sites that
+    read more clearly labeling a post-solar net-consumption bill as such."""
     return calculate_bill(new_kwh, tariff_type, tiers)
