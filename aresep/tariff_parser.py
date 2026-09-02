@@ -13,6 +13,29 @@ T-CO has two sub-formats:
   5-row (most distributors): a=energy rate ≤3000 kWh, b=min charge, c=energy rate >3000 kWh,
                               d=demand min charge, e=demand rate per kW
   3-row (ICE):               a=energy rate ≤3000 kWh, b=energy rate per kWh, c=demand rate per kW
+
+T-CO is ARESEP's single official "Comercios y Servicios" tariff and applies
+to both Baja Tensión (B1-B7) and Media Tensión (M1-M8) alike -- confirmed
+against CNFL's own current Tarifas Vigentes (effective 2026-01-01, La Gaceta
+Alcance N°161): there is no separate "T-CO2" or Media-Tensión-only code, and
+the demand charge (rows d/e) is part of the one published T-CO structure for
+both voltage levels, not something exclusive to Media Tensión. This parser
+extracts that real structure correctly.
+
+What DOES differ from this file is `calculations/tariffs.py` and
+`calculations/tariff_calculator.py`'s bill estimate: per real CNFL invoices
+for <100kW single-phase commercial clients (Pauly & Co's typical solar
+customer), no demand charge ever appears -- their meters have no demand
+register, so ARESEP's demand block is never triggered for them in practice,
+even though it's genuinely part of the official tariff schedule. Those two
+calculators deliberately read only `access_charge_crc` and `tiers`, and for
+T-CO the DB's values there were hand-corrected to match those real
+small-client invoices (a single flat energy tier, no minimum/access charge)
+rather than left as this file's raw binomial structure. `demand_rate_crc`/
+`demand_threshold_kw` are unused by any bill estimate and safe to keep in
+sync with this file; `access_charge_crc`/tiers for T-CO are NOT -- see the
+admin tariff-sync tool (pages/05_admin.py), which requires explicit
+per-distributor confirmation before overwriting them.
 """
 from __future__ import annotations
 import re

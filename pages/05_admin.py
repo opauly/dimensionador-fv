@@ -45,6 +45,38 @@ def _tiers_changed(cur: list[dict], new: list[dict]) -> bool:
         for ct, nt in zip(cur, new)
     )
 
+def _energy_changed(cur: dict, new_data: dict) -> bool:
+    """True if the file's access charge or energy tiers differ from the DB.
+
+    For T-CO these are NOT safe to auto-apply: they were hand-corrected from
+    real <100kW CNFL invoices to a flat, no-access-charge structure, which
+    genuinely differs from ARESEP's raw published T-CO (see
+    aresep/tariff_parser.py's docstring) -- a routine sync must not silently
+    revert that.
+    """
+    new_access = new_data["access_charge_crc"]
+    cur_access = cur.get("access_charge_crc") or 0.0
+    return (
+        abs(new_access - cur_access) > 0.01
+        or _tiers_changed(cur.get("tiers", []), new_data.get("tiers", []))
+    )
+
+
+def _demand_changed(cur: dict, new_data: dict) -> bool:
+    """True if the file's demand rate/threshold differ from the DB.
+
+    Safe to auto-apply: calculations/tariffs.py and
+    calculations/tariff_calculator.py never read these fields, so keeping
+    them in sync with ARESEP's real published structure can't affect any
+    bill estimate.
+    """
+    new_demand = new_data.get("demand_rate_crc", 0.0)
+    cur_demand = cur.get("demand_rate_crc") or 0.0
+    new_thresh = new_data.get("demand_threshold_kw", 0)
+    cur_thresh = cur.get("demand_threshold_kw") or 0
+    return abs(new_demand - cur_demand) > 0.01 or new_thresh != cur_thresh
+
+
 def _build_changes(parsed: dict, current_db: dict) -> list[dict]:
     """Build a flat list of change records (one per distributor × tariff code)."""
     changes = []
@@ -52,37 +84,37 @@ def _build_changes(parsed: dict, current_db: dict) -> list[dict]:
         for code, new_data in tariffs.items():
             cur = current_db.get(abbrev, {}).get(code)
             if cur is None:
-                # New tariff type — mark as change so it gets created
+                # New tariff type — mark as change so it gets created. Nothing
+                # exists yet to protect, so the file's raw values are fine.
                 changes.append({
                     "abbrev": abbrev,
                     "code": code,
                     "tariff_type_id": None,
                     "has_change": True,
                     "is_new": True,
+                    "energy_changed": True,
+                    "demand_changed": True,
+                    "energy_confirmed": True,
                     "new": new_data,
                     "cur": {},
                 })
                 continue
 
-            new_access = new_data["access_charge_crc"]
-            cur_access = cur.get("access_charge_crc") or 0.0
-            new_demand = new_data.get("demand_rate_crc", 0.0)
-            cur_demand = cur.get("demand_rate_crc") or 0.0
-            new_thresh = new_data.get("demand_threshold_kw", 0)
-            cur_thresh = cur.get("demand_threshold_kw") or 0
-
-            has_change = (
-                abs(new_access - cur_access) > 0.01
-                or abs(new_demand - cur_demand) > 0.01
-                or new_thresh != cur_thresh
-                or _tiers_changed(cur.get("tiers", []), new_data.get("tiers", []))
-            )
+            energy_changed = _energy_changed(cur, new_data)
+            demand_changed = _demand_changed(cur, new_data)
+            # Only T-CO's energy fields carry the hand-corrected-vs-ARESEP-raw
+            # conflict, so only T-CO needs the UI's explicit checkbox gate.
+            # T-RE (and anything else) syncs its energy fields as before.
+            needs_confirmation = code == "T-CO" and energy_changed
             changes.append({
                 "abbrev": abbrev,
                 "code": code,
                 "tariff_type_id": cur["id"],
-                "has_change": has_change,
+                "has_change": energy_changed or demand_changed,
                 "is_new": False,
+                "energy_changed": energy_changed,
+                "demand_changed": demand_changed,
+                "energy_confirmed": not needs_confirmation,
                 "new": new_data,
                 "cur": cur,
             })
@@ -135,16 +167,12 @@ def _tariff_updater() -> None:
                     pass
 
     changes = _build_changes(parsed, current_db)
-    to_update = [c for c in changes if c["has_change"]]
 
-    if not to_update:
+    if not any(c["has_change"] for c in changes):
         st.success("Los valores del archivo coinciden con la base de datos. No hay cambios que aplicar.")
         return
 
     st.markdown("#### Comparación: valores actuales vs. archivo ARESEP")
-
-    # Group by distributor for display
-    abbrevs_with_changes = sorted({c["abbrev"] for c in to_update})
 
     for abbrev in sorted(parsed.keys()):
         dist_changes = [c for c in changes if c["abbrev"] == abbrev]
@@ -186,10 +214,40 @@ def _tariff_updater() -> None:
                     for t in new_data.get("tiers", []):
                         st.markdown(f"- {_tier_label(t)}: {_fmt_rate(t['rate_crc'])}")
 
+                if code == "T-CO" and ch["energy_changed"] and not ch["is_new"]:
+                    st.warning(
+                        "⚠️ El archivo ARESEP trae la estructura binomial oficial de T-CO "
+                        "(bloques de energía + cargo por demanda). El valor actual en la "
+                        "base de datos fue corregido a mano a partir de facturas reales de "
+                        "clientes <100kW monofásicos sin medidor de demanda, donde nunca se "
+                        "cobra ese cargo — sobrescribirlo cambiará las estimaciones de "
+                        "factura de todos los proyectos que usan esta tarifa."
+                    )
+                    ch["energy_confirmed"] = st.checkbox(
+                        f"Sí, sobrescribir el cargo fijo y los bloques de energía de "
+                        f"T-CO para {abbrev} con los valores del archivo",
+                        key=f"admin_confirm_energy_{abbrev}_{code}",
+                    )
+                elif code == "T-CO" and ch["demand_changed"] and not ch["is_new"]:
+                    st.caption(
+                        "El cargo por demanda es solo informativo (no se usa en ninguna "
+                        "estimación de factura) — se actualizará automáticamente."
+                    )
+
                 st.divider()
+
+    to_update = [
+        c for c in changes
+        if c["has_change"] and (c["is_new"] or c["demand_changed"] or c["energy_confirmed"])
+    ]
+
+    if not to_update:
+        st.info("No hay cambios confirmados para aplicar.")
+        return
 
     # Apply button
     n = len(to_update)
+    abbrevs_with_changes = sorted({c["abbrev"] for c in to_update})
     st.warning(
         f"Se actualizarán **{n} tarifa(s)** en {len(abbrevs_with_changes)} distribuidora(s). "
         "Esta acción reemplaza los bloques tarifarios en la base de datos."
@@ -204,17 +262,27 @@ def _tariff_updater() -> None:
             try:
                 meta = TARIFF_META[ch["code"]]
                 new_data = ch["new"]
+                cur_data = ch["cur"]
+                use_new_energy = ch["is_new"] or ch["energy_confirmed"]
+                access_charge = (
+                    new_data["access_charge_crc"] if use_new_energy
+                    else (cur_data.get("access_charge_crc") or 0.0)
+                )
+                tiers = (
+                    new_data.get("tiers", []) if use_new_energy
+                    else cur_data.get("tiers", [])
+                )
                 tt_id = upsert_tariff_type_row(
                     distributor_abbrev=ch["abbrev"],
                     code=ch["code"],
                     name=meta["name"],
                     sector=meta["sector"],
-                    access_charge_crc=new_data["access_charge_crc"],
+                    access_charge_crc=access_charge,
                     demand_rate_crc=new_data.get("demand_rate_crc", 0.0),
                     demand_threshold_kw=new_data.get("demand_threshold_kw", 0),
                     iva_threshold_kwh=meta["iva_threshold_kwh"],
                 )
-                replace_tariff_tiers(tt_id, new_data.get("tiers", []))
+                replace_tariff_tiers(tt_id, tiers)
                 updated += 1
             except Exception as e:
                 errors.append(f"{ch['abbrev']} {ch['code']}: {e}")
@@ -283,6 +351,11 @@ def _current_tariffs() -> None:
         if tt.get("demand_rate_crc"):
             col3.metric("Demanda", f"₡{tt['demand_rate_crc']:,.0f}/kW")
             col4.metric("Última actualización", last_upd)
+            st.caption(
+                "El cargo por demanda es la estructura oficial ARESEP, pero es solo "
+                "informativo: ninguna estimación de factura lo usa (los clientes "
+                "monofásicos <100kW nunca lo pagan)."
+            )
         else:
             col3.metric("Umbral IVA", f"{tt['iva_threshold_kwh']} kWh")
             col4.metric("Última actualización", last_upd)

@@ -41,6 +41,16 @@ document. `database/tariffs_db.py`'s `alumbrado_publico_rate_crc`/
 `iva_threshold_kwh` columns are left in place as reference data (some of it
 real-invoice-confirmed for CNFL) for whenever this gets revisited, but
 nothing in this module reads them anymore.
+
+`demand_rate_crc`/`demand_threshold_kw` are the same story for a different
+reason: they're ARESEP's real, official T-CO demand-charge structure (see
+`aresep/tariff_parser.py`'s docstring), but real invoices show it's never
+actually billed to Pauly & Co's typical <100kW single-phase commercial
+client, so this module ignores them too. `access_charge_crc`/`tiers` for
+T-CO, by contrast, ARE read here, and were deliberately hand-corrected away
+from ARESEP's raw published values to match those same invoices -- don't
+let a routine ARESEP sync silently overwrite them back (see
+pages/05_admin.py's tariff-sync tool).
 """
 from __future__ import annotations
 
