@@ -540,31 +540,66 @@ def _client_form(existing: dict | None = None) -> None:
 
 
 def _client_sites_linker(client: dict) -> None:
-    """Checkbox list linking monitoring.sites to this client."""
+    """Checkbox list linking a client to their monitored sites — merged
+    across both `monitoring.sites` (Oscar's own Node-RED/Cerbo-GX fleet,
+    any brand) and `vrm.sites` (the VRM Monitor product's VRM-Portal-synced
+    sites, always Victron Energy by construction — VRM Portal has no other
+    brand). Each row is tagged with its brand and routed back to the right
+    table's own link column (`monitoring.sites.client_id` vs
+    `vrm.sites.public_client_id`) on check/uncheck.
+    """
     from database.monitoring_sites_db import list_monitoring_sites, set_site_client
+    from database.vrm_sites_db import list_vrm_sites_for_linking, set_site_public_client
 
     try:
-        sites = list_monitoring_sites()
+        monitoring_sites = list_monitoring_sites()
     except Exception as e:
         st.caption(f"No se pudieron cargar los sitios de monitoreo: {e}")
-        return
+        monitoring_sites = []
 
-    if not sites:
+    try:
+        vrm_sites = list_vrm_sites_for_linking()
+    except Exception as e:
+        st.caption(f"No se pudieron cargar los sitios de VRM Monitor: {e}")
+        vrm_sites = []
+
+    combined = [
+        {
+            "site_id": s["site_id"],
+            "display_name": s.get("display_name") or s["site_id"],
+            "brand": s.get("brand") or "Victron Energy",
+            "linked_client_id": s.get("client_id"),
+            "set_client": set_site_client,
+        }
+        for s in monitoring_sites
+    ] + [
+        {
+            "site_id": s["site_id"],
+            "display_name": s.get("display_name") or s["site_id"],
+            "brand": "Victron Energy",
+            "linked_client_id": s.get("public_client_id"),
+            "set_client": set_site_public_client,
+        }
+        for s in vrm_sites
+    ]
+    combined.sort(key=lambda s: s["display_name"])
+
+    if not combined:
         st.caption("No hay sitios registrados en Victron Monitor.")
         return
 
     st.markdown("###### Proyectos vinculados:")
-    for s in sites:
-        linked = s.get("client_id") == client["id"]
+    for s in combined:
+        linked = s["linked_client_id"] == client["id"]
         checked = st.checkbox(
-            s.get("display_name") or s["site_id"],
+            f'{s["display_name"]} — {s["brand"]}',
             value=linked,
             key=f"site_link_{client['id']}_{s['site_id']}",
         )
         if checked != linked:
             new_client_id = client["id"] if checked else None
             try:
-                set_site_client(s["site_id"], new_client_id)
+                s["set_client"](s["site_id"], new_client_id)
                 st.rerun()
             except Exception as e:
                 st.error(f"Error al vincular {s['site_id']}: {e}")

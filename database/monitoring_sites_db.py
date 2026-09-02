@@ -13,7 +13,7 @@ def list_monitoring_sites() -> list[dict]:
         get_client()
         .schema("monitoring")
         .table("sites")
-        .select("id, site_id, display_name, client_id, active")
+        .select("id, site_id, display_name, client_id, active, brand")
         .order("display_name")
         .execute()
     )
