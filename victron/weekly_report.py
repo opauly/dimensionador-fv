@@ -568,6 +568,23 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     # possible label for data that is actually just absent.
     battery_cycles = (round(totals["discharge"] / batt_usable, 2)
                       if battery_kwh_available else None)
+    # Estimated fallback (2026-09-03, matching vrm.compute_daily_health()'s
+    # own migration 039 and admin.ts:_periodIndicators()) — min_soc/max_soc
+    # ARE trustworthy for VRM-API sites even when discharge_kwh isn't; a
+    # day's SOC swing gives a real, approximate cycle count. Sum of each
+    # day's own swing across the window, same "per-day rate accumulated
+    # over the period" shape the exact metric already has. A day missing
+    # either end of its swing contributes 0, same convention `_num()`
+    # already applies to discharge_kwh above.
+    battery_cycles_estimated = False
+    if battery_cycles is None:
+        est_cycles = sum(
+            (_num(r.get("max_soc")) - _num(r.get("min_soc"))) / 100
+            for r in days if r.get("min_soc") is not None and r.get("max_soc") is not None
+        )
+        if any(r.get("min_soc") is not None and r.get("max_soc") is not None for r in days):
+            battery_cycles = round(est_cycles, 2)
+            battery_cycles_estimated = True
     longest_outage = window["longest_outage_minutes"]
 
     # Overview mode (plan doc §22): health/grid-independence/battery-cycling
@@ -638,6 +655,13 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     thr = {"batteryCyclesHigh": 10.0, "batteryCyclesMid": 7.0}
     thr.update(site.get("health_thresholds") or {})
     thr = {k: v * week_scale for k, v in thr.items()}
+    # Estimated basis thresholds (SOC swing, migration 039) are PER-DAY
+    # (0.85/0.65), unlike the exact metric's per-WEEK 10.0/7.0 -- scale by
+    # the real day count directly, never by week_scale (which would give a
+    # 30-day window ~4.3x too little headroom instead of ~4.3x too much).
+    est_thr = {"estCyclesHigh": 0.85, "estCyclesMid": 0.65}
+    est_thr.update(site.get("health_thresholds") or {})
+    est_thr = {k: v * len(days) for k, v in est_thr.items()}
     # A genuine third state, not "Normal" and not the existing high-stress
     # tier — "Normal" would actively assert everything's fine for data that
     # is actually just absent (battery_kwh_available is False; see above).
@@ -646,6 +670,15 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
     if battery_cycles is None:
         stress = t["battStressNoData"]
         stress_color = "#999"
+    elif battery_cycles_estimated and battery_cycles > est_thr["estCyclesHigh"]:
+        stress = "Alto estrés" if lang == "es" else "High stress"
+        stress_color = S.AMBER
+    elif battery_cycles_estimated and battery_cycles > est_thr["estCyclesMid"]:
+        stress = "Uso activo" if lang == "es" else "Working hard"
+        stress_color = S.AMBER
+    elif battery_cycles_estimated:
+        stress = "Normal"
+        stress_color = S.GREEN
     elif battery_cycles > thr["batteryCyclesHigh"]:
         stress = "Alto estrés" if lang == "es" else "High stress"
         stress_color = S.AMBER
@@ -671,9 +704,13 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
             # "not available" text, not a bare None, so the model sees why
             # the number is missing rather than rendering "None" verbatim —
             # see battery_kwh_available above.
-            "batteryCycles": (battery_cycles if battery_cycles is not None
-                              else "not available (no per-day battery "
-                                   "charge/discharge data for this site)"),
+            "batteryCycles": (
+                "not available (no per-day battery charge/discharge or SOC data for this site)"
+                if battery_cycles is None else
+                f"{battery_cycles} (estimated from SOC swing, not exact discharge data)"
+                if battery_cycles_estimated else
+                battery_cycles
+            ),
             "daysFullCharge": totals["daysFullCharge"], "totalDays": len(days),
             "outageCount": totals["outageCount"],
             "outageMinutes": totals["outageMinutes"],
@@ -705,6 +742,7 @@ def build_report_data(site_id: str, start: str | date, end: str | date, schema: 
         "avgHealth": avg_health, "healthStatus": health_status,
         "alarmEpisodesTotal": alarm_total,
         "gridIndependencePct": grid_independence, "batteryCycles": battery_cycles,
+        "batteryCyclesEstimated": battery_cycles_estimated,
         "minSoc": min_soc, "maxSoc": max_soc,
         "minVoltage": min_v, "maxVoltage": max_v, "maxTemp": max_temp, "avgTemp": avg_temp,
         "minFreq": min_f, "maxFreq": max_f,

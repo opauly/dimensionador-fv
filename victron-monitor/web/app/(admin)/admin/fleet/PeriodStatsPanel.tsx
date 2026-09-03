@@ -57,6 +57,9 @@ export function PeriodStatsPanel({ week, month }: { week: PeriodIndicators; mont
           <span className={`${styles.stressBadge} ${styles[`stress_${d.batteryStress}`]}`}>
             {stressLabel(d.batteryStress)}
           </span>
+          {d.batteryCyclesEstimated && (
+            <span className={styles.weekStatSub}>Estimated from SOC swing — no exact discharge data for this site</span>
+          )}
         </div>
         <div className={styles.weekStat}>
           <span className={styles.weekStatLabel}>Grid outages</span>
