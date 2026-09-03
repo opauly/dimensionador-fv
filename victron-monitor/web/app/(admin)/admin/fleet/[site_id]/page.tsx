@@ -54,11 +54,11 @@ function tzLabel(tz: string | null): string {
   return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
 }
 
-// Fleet Dashboard Phase 3b (2026-09-03) — `vrm.site_anomalies.anomaly_type`'s
-// full vocabulary (migration 038), even though only 'unexpected_silence' is
-// ever written today (3a quiet_drift / 3c underperformance are future
-// phases, PLAN_PHASE19_FLEET_P3.md §1) — labeling every known value now
-// means this page needs no change when those ship.
+// Fleet Dashboard Phase 3 (2026-09-03) — `vrm.site_anomalies.anomaly_type`'s
+// full vocabulary (migration 038). All three now write real rows: 3b
+// (unexpected_silence, ~15-min live sweep), 3a (quiet_drift) and 3c
+// (underperformance) (both daily, `victron/anomaly_drift.py`, wired into
+// `POST /v1/vrm-fleet/detect-anomalies-daily`).
 function anomalyTypeLabel(type: string): string {
   if (type === 'unexpected_silence') return 'Unexpected silence';
   if (type === 'quiet_drift') return 'Quiet drift';
@@ -67,18 +67,72 @@ function anomalyTypeLabel(type: string): string {
 }
 
 // `detail`'s shape is anomaly_type-specific (the migration's own COMMENT ON
-// COLUMN) — only 'unexpected_silence''s own keys
-// (victron/anomaly_silence.py:_build_detail()) are understood here; any
-// other/unknown shape falls back to raw JSON rather than showing nothing.
+// COLUMN) — each known anomaly_type has its own keys
+// (victron/anomaly_silence.py:_build_detail() for unexpected_silence;
+// victron/anomaly_drift.py's own detail dicts for quiet_drift/
+// underperformance); any other/unknown shape falls back to raw JSON rather
+// than showing nothing.
+// Plain calendar dates in `detail` (e.g. "2026-08-30") come from Python's
+// `date.isoformat()` — no time-of-day, no timezone component. Running them
+// through `formatDateTimeInZone` (built for real timestamps) would parse
+// the bare date as UTC midnight and could shift the displayed day by one
+// depending on the site's own timezone, so this is a separate, deliberately
+// UTC-pinned formatter for date-only values.
+function formatPlainDate(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+}
+
+// Natural-language summary for a non-technical reader, with the real
+// numbers a support conversation would actually need attached — not just a
+// derived ratio. Every field read here is optional (typeof-guarded): a
+// `detail` shape from an older row, or a partial update, must not crash
+// this page, same "one bad field can't break the render" posture the rest
+// of this pipeline's live-data code already takes.
 function anomalyDetailSummary(a: SiteAnomalyRow): string {
   const detail = a.detail ?? {};
   if (a.anomaly_type === 'unexpected_silence') {
     const minutes = typeof detail.minutes_silent === 'number' ? Math.round(detail.minutes_silent) : null;
     const window = typeof detail.expected_window_local === 'string' ? detail.expected_window_local : null;
+    const validDays = typeof detail.window_basis_valid_days === 'number' ? detail.window_basis_valid_days : null;
+    const productiveDays = typeof detail.window_basis_productive_days === 'number' ? detail.window_basis_productive_days : null;
     const parts: string[] = [];
-    if (minutes !== null) parts.push(`Silent for ${minutes} min`);
-    if (window) parts.push(`expected productive window ${window} local`);
-    return parts.length > 0 ? parts.join(' — ') : 'No detail recorded';
+    if (minutes !== null) parts.push(`Reporting zero solar output for ${minutes} min`);
+    if (window) parts.push(`during its normal ${window} local productive hours`);
+    if (validDays !== null && productiveDays !== null) {
+      parts.push(`(based on ${productiveDays} productive of the last ${validDays} days with data)`);
+    }
+    return parts.length > 0 ? parts.join(' ') : 'No detail recorded';
+  }
+  if (a.anomaly_type === 'quiet_drift') {
+    const recent = typeof detail.recent_mean_kwh_adj === 'number' ? detail.recent_mean_kwh_adj : null;
+    const baseline = typeof detail.baseline_mean_kwh_adj === 'number' ? detail.baseline_mean_kwh_adj : null;
+    const ratio = typeof detail.ratio_recent_to_baseline === 'number' ? detail.ratio_recent_to_baseline : null;
+    const days = typeof detail.days_flagged === 'number' ? detail.days_flagged : null;
+    const window = typeof detail.recent_window_days === 'number' ? detail.recent_window_days : null;
+    const parts: string[] = [];
+    if (recent !== null && baseline !== null) {
+      parts.push(`Generating ~${recent.toFixed(1)} kWh/day recently vs. ~${baseline.toFixed(1)} kWh/day normally`);
+    }
+    if (ratio !== null) parts.push(`(${Math.round(ratio * 100)}% of its own recent baseline)`);
+    if (days !== null && window !== null) parts.push(`— ${days} of the last ${window} days below threshold`);
+    return parts.length > 0 ? parts.join(' ') : 'No detail recorded';
+  }
+  if (a.anomaly_type === 'underperformance') {
+    const pvKwh = typeof detail.best_recent_pv_kwh === 'number' ? detail.best_recent_pv_kwh : null;
+    const expectedKwh = typeof detail.best_recent_expected_kwh === 'number' ? detail.best_recent_expected_kwh : null;
+    const pr = typeof detail.best_recent_pr === 'number' ? detail.best_recent_pr : null;
+    const pvKwp = typeof detail.pv_kwp === 'number' ? detail.pv_kwp : null;
+    const date = typeof detail.best_recent_date === 'string' ? formatPlainDate(detail.best_recent_date) : null;
+    const parts: string[] = [];
+    if (pvKwh !== null && expectedKwh !== null) {
+      parts.push(`Best day recently produced ${pvKwh.toFixed(1)} kWh vs. an expected ${expectedKwh.toFixed(1)} kWh`);
+    }
+    if (pvKwp !== null) parts.push(`for this ${pvKwp} kWp system`);
+    if (pr !== null) parts.push(`(${Math.round(pr * 100)}% of design)`);
+    if (date) parts.push(`— best day was ${date}`);
+    return parts.length > 0 ? parts.join(' ') : 'No detail recorded';
   }
   return JSON.stringify(detail);
 }
@@ -241,8 +295,9 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
       <div className={styles.gaugeCard} style={{ marginBottom: 24 }}>
         <h2>Anomalies</h2>
         <div className={styles.cardSub}>
-          Deterministic checks against this site&apos;s own history (Fleet Dashboard Phase 3b) — not folded into the
-          health score above. Checked every ~15 minutes, same sweep as the live reading.
+          Deterministic checks against this site&apos;s own history (Fleet Dashboard Phase 3) — not folded into the
+          health score above. Unexpected silence is checked every ~15 minutes, same sweep as the live reading; quiet
+          drift and underperformance vs. design are checked daily.
         </div>
         {site.active_anomalies.length === 0 ? (
           <p className={styles.sub}>No active anomalies.</p>

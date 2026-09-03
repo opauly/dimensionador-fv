@@ -425,6 +425,21 @@ class FleetSnapshotsRefreshOut(BaseModel):
     failed: int
 
 
+class FleetAnomalyDetectDailyOut(BaseModel):
+    """`POST /v1/vrm-fleet/detect-anomalies-daily`'s response — Fleet
+    Dashboard Phase 3a/3c (2026-09-03, PLAN_PHASE19_FLEET_P3.md §4/§5). Same
+    "counts only, a cron log line that says how much it did is the only
+    visibility this job gets" shape `FleetSnapshotsRefreshOut` already
+    established for 3b's sibling sweep — the actual per-site
+    flagged/cleared/skipped outcomes are logged (`victron/anomaly_drift.py`'s
+    own `logger.warning`/`.info` calls), not itemized in this response,
+    same division of labor as that endpoint."""
+
+    checked: int
+    skipped: int
+    failed: int
+
+
 class SiteShapeOut(BaseModel):
     """`GET /v1/vrm-fleet/site-shape`'s response — Fleet Dashboard Phase 2.5
     (2026-08-30). 24 hour-of-day buckets (index 0 = midnight local time),

@@ -155,6 +155,17 @@ export default async function AdminFleetPage() {
   // outage is inherently a past event by the time it's counted).
   const outageSites = sites.filter((s) => s.week.outageCount > 0);
 
+  // Per-type anomaly counts (Fleet Dashboard Phase 3a/3b/3c) — computed here
+  // from each site's own `active_anomalies` rather than adding three more
+  // rollup fields to getFleetOverview(): the full per-anomaly detail
+  // (including `anomaly_type`) already travels with every site, so slicing
+  // it three ways client-side is enough, no new server-side aggregation
+  // needed.
+  const allActiveAnomalies = sites.flatMap((s) => s.active_anomalies);
+  const silenceCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'unexpected_silence').length;
+  const driftCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'quiet_drift').length;
+  const underperformanceCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'underperformance').length;
+
   // Fleet averages for the three IE-0499 §4 daily-indicator formulas —
   // same per-site numbers `_dailyIndicators()` already computes, averaged
   // only over sites that actually have a value today (never treating a
@@ -330,22 +341,6 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
-            <span className={styles.rollupLabel}>Active anomalies</span>
-            <span className={styles.rollupValue}>{overview.rollup.total_active_anomalies}</span>
-            <span className={styles.rollupDesc}>Unexpected silence during a site&apos;s own productive hours</span>
-          </summary>
-          <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
-              <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
-                <span>{s.active_anomalies.length}</span>
-              </div>
-            ))}
-          </div>
-        </details>
-
-        <details className={styles.rollupCard}>
-          <summary>
             <span className={styles.rollupLabel}>Outages (7d)</span>
             <span className={styles.rollupValue}>
               {outageSites.length}/{sites.length}
@@ -424,6 +419,61 @@ export default async function AdminFleetPage() {
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
                 <span>{s.display_name}</span>
                 <span>{s.grid_dependency_pct === null ? '—' : `${s.grid_dependency_pct}%`}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      </div>
+
+      <h2 className={styles.rollupGroupLabel}>AI Insights</h2>
+      <p className={styles.sub}>
+        Deterministic checks against each site&apos;s own history — not a model. Split by type below so a spike in
+        one kind of anomaly doesn&apos;t hide in a single combined count.
+      </p>
+      <div className={styles.rollupRow}>
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Unexpected silence</span>
+            <span className={styles.rollupValue}>{silenceCount}</span>
+            <span className={styles.rollupDesc}>A real zero during hours this site has historically produced</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'unexpected_silence').length}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Quiet drift</span>
+            <span className={styles.rollupValue}>{driftCount}</span>
+            <span className={styles.rollupDesc}>Trending down vs. this site&apos;s own recent baseline</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'quiet_drift').length}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Underperformance</span>
+            <span className={styles.rollupValue}>{underperformanceCount}</span>
+            <span className={styles.rollupDesc}>Below what this site&apos;s installed size should deliver</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'underperformance').length}</span>
               </div>
             ))}
           </div>

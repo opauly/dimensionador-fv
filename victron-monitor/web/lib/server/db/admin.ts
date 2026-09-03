@@ -270,8 +270,9 @@ export type FleetConnectionStatus = 'online' | 'stale' | 'never_synced';
 // `vrm.site_anomalies` (migration 038) — see FleetOverviewRow.active_anomalies'
 // own comment. `detail`'s shape varies by `anomaly_type` (the table's own
 // COMMENT ON COLUMN says so) — kept as a loose record here rather than a
-// narrower type per known anomaly_type, since only one (`unexpected_silence`)
-// exists today and its own shape may still change during tuning (PLAN_PHASE19_FLEET_P3.md
+// narrower type per known anomaly_type, since all three (`unexpected_silence`,
+// `quiet_drift`, `underperformance`) are real, live-written shapes whose own
+// thresholds/keys may still change during tuning (PLAN_PHASE19_FLEET_P3.md
 // §7 item 1: thresholds are "starting points, not locked").
 export type SiteAnomalyRow = {
   id: string;
@@ -314,13 +315,16 @@ export type FleetOverviewRow = {
   // snapshot yet, same as every other live-only field here.
   active_alarms: number;
   active_critical_alerts: number;
-  // Fleet Dashboard Phase 3b (2026-09-03) — every OPEN (`cleared_at IS
-  // NULL`) `vrm.site_anomalies` row for this site (migration 038), written
-  // by `victron/anomaly_silence.py` via the same ~15-minute
-  // `refresh-snapshots` sweep. Only `anomaly_type: 'unexpected_silence'` is
-  // ever written as of this phase — `quiet_drift`/`underperformance` (3a/3c)
-  // share the table's vocabulary but nothing writes them yet. `[]`, never
-  // omitted, when this site has no open anomaly.
+  // Fleet Dashboard Phase 3 (2026-09-03) — every OPEN (`cleared_at IS
+  // NULL`) `vrm.site_anomalies` row for this site (migration 038), any
+  // `anomaly_type`. `unexpected_silence` (3b) is written by
+  // `victron/anomaly_silence.py` via the ~15-minute `refresh-snapshots`
+  // sweep; `quiet_drift`/`underperformance` (3a/3c) are written by
+  // `victron/anomaly_drift.py` via the daily
+  // `POST /v1/vrm-fleet/detect-anomalies-daily` sweep. This query itself
+  // (below) already reads every `anomaly_type` generically — no change
+  // needed here when a new type starts being written. `[]`, never omitted,
+  // when this site has no open anomaly.
   active_anomalies: SiteAnomalyRow[];
   // Fleet Dashboard Phase 2 (2026-08-30) — from `vrm.site_snapshots`
   // (migration 031), upserted by the ~15-minute `refresh-snapshots` sweep
@@ -387,8 +391,9 @@ export type FleetOverview = {
     avg_health_score: number | null;
     total_active_alarms: number;
     total_active_critical_alerts: number;
-    // Fleet Dashboard Phase 3b — count of OPEN vrm.site_anomalies rows
-    // across every site, any anomaly_type (today: only unexpected_silence).
+    // Fleet Dashboard Phase 3 — count of OPEN vrm.site_anomalies rows
+    // across every site, any anomaly_type (unexpected_silence, quiet_drift,
+    // underperformance).
     total_active_anomalies: number;
   };
 };
@@ -489,18 +494,21 @@ function _dailyIndicators(
 export type BatteryStress = 'normal' | 'working_hard' | 'high_stress' | 'no_data';
 
 export type PeriodIndicators = {
-  // Equivalent full cycles over the window, computed exactly the way
-  // `victron/weekly_report.py:build_report_data()` already does for the PDF
-  // report — sum real discharge over the window, divide by usable
-  // capacity — instead of trusting `vrm.daily_health.battery_cycles`
-  // (`vrm.compute_daily_health()`, migration 012), which still does
-  // `COALESCE(battery_discharge_kwh, 0) / capacity` and so fabricates a
-  // confident 0.0 for every VRM-API site (that column is NULL there by
-  // design). `null` only when EVERY day in the window has both charge and
-  // discharge NULL — a CSV-sourced site can have a real zero-discharge
-  // day, which must stay a real 0, not get swept into "unavailable"
-  // alongside the VRM-API case.
+  // Equivalent full cycles over the window. Two possible bases, same split
+  // `vrm.compute_daily_health()` (migration 039) now uses per-day:
+  //   - Exact: sum real discharge over the window, divide by usable
+  //     capacity — computed exactly the way
+  //     `victron/weekly_report.py:build_report_data()` does for the PDF
+  //     report. `null` only when EVERY day in the window has both charge
+  //     and discharge NULL (every VRM-API site, by design) — a CSV-sourced
+  //     site can have a real zero-discharge day, which must stay a real 0.
+  //   - Estimated (VRM-API sites, migration 039): sum each day's own SOC
+  //     swing `(max_soc - min_soc) / 100` across the window — an
+  //     approximation (assumes ~one discharge/recharge swing per day), but
+  //     real, not a fabricated 0. `batteryCyclesEstimated` distinguishes
+  //     which basis produced `batteryCycles`, so the UI can label it.
   batteryCycles: number | null;
+  batteryCyclesEstimated: boolean;
   // Same 3-tier-plus-"no data" label `weekly_report.py` shows on the PDF,
   // thresholds scaled by the window's own length the same way that
   // module's own comment describes ("a 30-day custom range naturally
@@ -510,7 +518,10 @@ export type PeriodIndicators = {
   // longer than a week. `'no_data'` is a genuine fourth state, not lumped
   // in with `'normal'` — the report's own comment on why: "'Normal' would
   // actively assert everything's fine for data that is actually just
-  // absent."
+  // absent." The estimated basis uses its own, much smaller-scale
+  // thresholds (see `_EST_CYCLES_*_PER_DAY`) — SOC swing is bounded to
+  // [0,1] per day, so reusing the exact metric's 7.0/10.0-per-week
+  // thresholds would make it structurally incapable of ever firing.
   batteryStress: BatteryStress;
   outageMinutes: number;
   outageCount: number;
@@ -523,6 +534,14 @@ export type PeriodIndicators = {
 
 const _BATTERY_CYCLES_HIGH = 10.0;
 const _BATTERY_CYCLES_MID = 7.0;
+// Per-day, matching vrm.compute_daily_health()'s estCyclesHigh/Mid defaults
+// (migration 039) — calibrated against the real distribution of daily SOC
+// swings across the current VRM-API fleet (523 days: median 0.45, p90 0.74,
+// max ever seen 0.82). Summed across the window below, same "per-day rate
+// scaled by how many real days you have" shape the exact metric already
+// uses via `weekScale`.
+const _EST_CYCLES_HIGH_PER_DAY = 0.85;
+const _EST_CYCLES_MID_PER_DAY = 0.65;
 
 function _periodIndicators(
   rows: {
@@ -540,9 +559,20 @@ function _periodIndicators(
   const batteryKwhAvailable = !(
     rows.every((r) => r.battery_charge_kwh === null) && rows.every((r) => r.battery_discharge_kwh === null)
   );
-  const batteryCycles = rows.length > 0 && batteryKwhAvailable
+  const exactCycles = rows.length > 0 && batteryKwhAvailable
     ? Math.round((rows.reduce((sum, r) => sum + (r.battery_discharge_kwh ?? 0), 0) / (batteryUsableKwh || 1)) * 100) / 100
     : null;
+  // Estimated fallback — only when the exact metric has nothing to work
+  // with. A day missing either end of its SOC swing contributes 0, same
+  // "treat missing as 0 within a sum, not null" convention the exact
+  // metric already uses for `battery_discharge_kwh ?? 0`.
+  const estCycles = rows.length > 0 && !batteryKwhAvailable
+    ? Math.round(
+        rows.reduce((sum, r) => sum + (r.min_soc !== null && r.max_soc !== null ? (r.max_soc - r.min_soc) / 100 : 0), 0) * 100
+      ) / 100
+    : null;
+  const batteryCyclesEstimated = exactCycles === null && estCycles !== null;
+  const batteryCycles = batteryCyclesEstimated ? estCycles : exactCycles;
 
   // `weekScale` from the actual row COUNT, same as `weekly_report.py`'s own
   // `len(days) / 7` — a site with gaps in its history gets thresholds
@@ -551,6 +581,10 @@ function _periodIndicators(
   const weekScale = rows.length > 0 ? rows.length / 7 : 1;
   const batteryStress: BatteryStress =
     batteryCycles === null ? 'no_data'
+    : batteryCyclesEstimated
+      ? (batteryCycles > _EST_CYCLES_HIGH_PER_DAY * rows.length ? 'high_stress'
+         : batteryCycles > _EST_CYCLES_MID_PER_DAY * rows.length ? 'working_hard'
+         : 'normal')
     : batteryCycles > _BATTERY_CYCLES_HIGH * weekScale ? 'high_stress'
     : batteryCycles > _BATTERY_CYCLES_MID * weekScale ? 'working_hard'
     : 'normal';
@@ -561,6 +595,7 @@ function _periodIndicators(
 
   return {
     batteryCycles,
+    batteryCyclesEstimated,
     batteryStress,
     outageMinutes: Math.round(rows.reduce((sum, r) => sum + (r.outage_minutes ?? 0), 0) * 10) / 10,
     outageCount: rows.reduce((sum, r) => sum + (r.outage_count ?? 0), 0),

@@ -6,7 +6,7 @@ name: Scheduled reports
 # Actions runs a bash `run:` step with `-e` by default, so a failed curl
 # aborts the step on its own, no extra error handling needed).
 #
-# Three steps, in order:
+# Four steps, in order:
 #   1. Sync due VRM-API sites (`POST /v1/vrm-sync/run-due`, §3.5/§0.6 Q9 —
 #      Phase 15's own deferred Step 7, finally wired). `continue-on-error:
 #      true` on PURPOSE: every schedulable site is `source='vrm_api'` by
@@ -18,12 +18,23 @@ name: Scheduled reports
 #      isolation (§3.4's try/except in `post_run_due()`) is what actually
 #      protects the rest; this flag just keeps the workflow alive long
 #      enough to reach it.
-#   2. Run due reports — a bounded loop over `POST /v1/reports/run-due`
+#   2. Detect fleet anomalies (`POST /v1/vrm-fleet/detect-anomalies-daily`,
+#      Fleet Dashboard Phase 3a/3c, PLAN_PHASE19_FLEET_P3.md §4 point 4 —
+#      "piggyback on the existing daily sync cadence" rather than a new
+#      schedule). Placed right after Step 1 on purpose: this is the same
+#      job that keeps `vrm.energy_daily` current, which is exactly what
+#      3a/3c read. `continue-on-error: true` for the same reason as Step 1
+#      — this step's own per-site isolation (`victron/anomaly_drift.py`'s
+#      own try/except in `post_detect_anomalies_daily()`) already protects
+#      one site's failure from another; this flag just keeps the workflow
+#      alive to reach the report step below even if this whole step errors
+#      out for some unrelated reason (e.g. a transient PVGIS outage).
+#   3. Run due reports — a bounded loop over `POST /v1/reports/run-due`
 #      (§3.4: batched, because a report is slow — an Anthropic call, a
 #      weather fetch, a WeasyPrint render). Loops until `remaining == 0` or
 #      a 20-iteration cap is hit (at `max_sites: 10` per call, 200 sites'
 #      worth of headroom in one run — a runaway can never loop forever).
-#   3. (Step 8) Nothing extra — email happens INSIDE the report run
+#   4. (Step 8) Nothing extra — email happens INSIDE the report run
 #      (`vrm_api/report_delivery.py`, called from `post_run_due()` itself),
 #      not as a separate pass, so a rendered-but-unsent report is not a
 #      state that can exist.
@@ -71,6 +82,16 @@ jobs:
         run: |
           curl -sS -f \
             -X POST "${PIPELINE_API_URL}/v1/vrm-sync/run-due" \
+            -H "Authorization: Bearer ${PIPELINE_API_KEY}"
+
+      - name: Detect fleet anomalies (quiet drift / underperformance)
+        continue-on-error: true
+        env:
+          PIPELINE_API_URL: ${{ secrets.PIPELINE_API_URL }}
+          PIPELINE_API_KEY: ${{ secrets.PIPELINE_API_KEY }}
+        run: |
+          curl -sS -f \
+            -X POST "${PIPELINE_API_URL}/v1/vrm-fleet/detect-anomalies-daily" \
             -H "Authorization: Bearer ${PIPELINE_API_KEY}"
 
       - name: Run due reports

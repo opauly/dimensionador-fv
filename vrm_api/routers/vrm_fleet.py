@@ -70,6 +70,7 @@ from pydantic import ValidationError
 from database.supabase_client import get_client
 
 from victron import ingest as victron_ingest
+from victron.anomaly_drift import check_quiet_drift, check_underperformance
 from victron.anomaly_silence import check_unexpected_silence
 from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
@@ -81,6 +82,7 @@ from vrm_api import jobs, secrets, tenancy
 from vrm_api.deps import require_pipeline_key
 from vrm_api.routers.vrm_sync import _do_sync
 from vrm_api.schemas import (
+    FleetAnomalyDetectDailyOut,
     FleetSnapshotsRefreshOut,
     JobCreated,
     SiteFieldsIn,
@@ -118,6 +120,16 @@ SCHEMA = "vrm"
 # equal to victron/anomaly_silence.py's own _LOOKBACK_DAYS by convention,
 # not by import (a plain int literal, not worth a cross-module constant).
 _ANOMALY_ENERGY_LOOKBACK_DAYS = 30
+
+# See post_detect_anomalies_daily()'s own comment on energy_daily_by_site —
+# needs to comfortably cover anomaly_drift.py's own
+# _BASELINE_WINDOW_DAYS (90) + _RECENT_WINDOW_DAYS (14) = 104, with a little
+# slack for a site whose most recent valid day isn't literally yesterday
+# (a sync gap, etc.) so the baseline window doesn't quietly shrink below
+# that module's own _MIN_BASELINE_VALID_DAYS floor. Restated here rather
+# than imported, same "OK to duplicate a small literal across a module
+# boundary" call _ANOMALY_ENERGY_LOOKBACK_DAYS above already makes.
+_DRIFT_ENERGY_LOOKBACK_DAYS = 120
 
 
 def _t(name: str):
@@ -536,6 +548,97 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
                              site["site_id"])
 
     return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
+
+
+@router.post("/detect-anomalies-daily", response_model=FleetAnomalyDetectDailyOut)
+def post_detect_anomalies_daily() -> FleetAnomalyDetectDailyOut:
+    """Fleet Dashboard Phase 3a ("quiet drift") + Phase 3c ("underperformance
+    vs. design") anomaly detection, added 2026-09-03
+    (PLAN_PHASE19_FLEET_P3.md §4/§5 — see `victron/anomaly_drift.py`'s own
+    module docstring for the full checks). Sibling of
+    `post_refresh_snapshots()` above (same per-site isolation, same "one
+    query for the whole sweep, not N+1" batching of `vrm.energy_daily`), but
+    NOT hooked into that ~15-minute live sweep — 3a/3c read `vrm.
+    energy_daily`, which is daily-grain and only actually advances once per
+    site per day (via `vrm_sync.py:post_run_due()`'s own due-ness gate), so
+    running this on the same 15-minute cadence would just recompute an
+    identical result ~96 times a day for nothing.
+
+    Meant to be called once daily, piggybacking on the existing daily sync
+    cadence per PLAN_PHASE19_FLEET_P3.md §4 point 4 / §5 ("same cadence as
+    3a") — wired into `.github/workflows/scheduled-reports.yml`, right after
+    that workflow's own "Sync due VRM-API sites" step, the same job that
+    already keeps `vrm.energy_daily` current. That workflow's own cron is
+    hourly, not daily (§0 of that file's own comment explains why: coarser
+    per-site local-hour scheduling doesn't mean anything at daily
+    granularity) — calling this endpoint on every one of those hourly ticks
+    is harmless, not wasteful in any way that matters: `vrm.energy_daily`
+    itself only changes once a day per site (same due-ness gate above), so
+    every call before that day's sync lands just recomputes the same
+    result idempotently, and each check's own Supabase read/write cost is
+    trivial next to a VRM API call. This is a real, deliberate choice, not
+    an oversight — building a literal once-daily-only trigger would need
+    this workflow to track its own last-run date somewhere, additional
+    state for no behavioral gain over "safe to call more often than it
+    needs to matter."
+
+    One site's failure never stops the sweep — same per-site isolation
+    `post_refresh_snapshots()` above and `vrm_sync.py:post_run_due()` both
+    already use for exactly this reason.
+    """
+    sites = (_t("sites").select("site_id, latitude, longitude, pv_kwp")
+            .eq("source", "vrm_api").eq("active", True).execute().data or [])
+    site_ids = [s["site_id"] for s in sites]
+
+    # One query for the whole sweep, not per-site — same discipline
+    # post_refresh_snapshots() already uses for its own energy_daily_by_site.
+    energy_daily_by_site: dict[str, list[dict]] = {}
+    if site_ids:
+        lookback_date = (datetime.now(timezone.utc) - timedelta(days=_DRIFT_ENERGY_LOOKBACK_DAYS)).date().isoformat()
+        energy_rows = (_t("energy_daily").select("site_id, date, pv_kwh, complete_day")
+                      .in_("site_id", site_ids).gte("date", lookback_date).execute().data or [])
+        for row in energy_rows:
+            energy_daily_by_site.setdefault(row["site_id"], []).append(row)
+
+    checked, skipped, failed = 0, 0, 0
+    for site in sites:
+        checked += 1
+        lat, lon = site.get("latitude"), site.get("longitude")
+        rows = energy_daily_by_site.get(site["site_id"], [])
+
+        if lat is None or lon is None:
+            # Neither check can derive a PVGIS shape at all without
+            # coordinates -- both 3a (which otherwise needs no pv_kwp) and
+            # 3c are equally blocked. Counted once here rather than twice
+            # (once per check) so "skipped" means "this site, this sweep,"
+            # not "this site-check pair."
+            skipped += 1
+            continue
+
+        try:
+            check_quiet_drift(
+                _t("site_anomalies"), site_id=site["site_id"],
+                lat=float(lat), lon=float(lon), energy_daily_rows=rows,
+            )
+        except Exception:  # noqa: BLE001 — one site's failure must not stop the rest of the sweep
+            logger.exception("vrm-fleet detect-anomalies-daily: quiet_drift check failed for site %s",
+                             site["site_id"])
+            failed += 1
+
+        pv_kwp = site.get("pv_kwp")
+        try:
+            check_underperformance(
+                _t("site_anomalies"), site_id=site["site_id"],
+                lat=float(lat), lon=float(lon),
+                pv_kwp=float(pv_kwp) if pv_kwp is not None else None,
+                energy_daily_rows=rows,
+            )
+        except Exception:  # noqa: BLE001 — see this block's own comment above
+            logger.exception("vrm-fleet detect-anomalies-daily: underperformance check failed for site %s",
+                             site["site_id"])
+            failed += 1
+
+    return FleetAnomalyDetectDailyOut(checked=checked, skipped=skipped, failed=failed)
 
 
 @router.get("/site-shape", response_model=SiteShapeOut)
