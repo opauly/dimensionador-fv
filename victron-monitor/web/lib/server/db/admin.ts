@@ -602,13 +602,14 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     { data: energyDaily, error: energyDailyError },
   ] = await Promise.all([
     admin.schema('vrm').from('customers').select('id, name'),
-    // `battery_cycles` deliberately NOT selected here — `vrm.compute_daily_health()`
-    // (migration 012) still does `COALESCE(battery_discharge_kwh, 0) / capacity`,
-    // fabricating a confident 0.0 for every VRM-API site (that field is
-    // NULL there by design — see `energyDaily`'s own comment below). Cycles
-    // are computed independently a few lines down, mirroring
-    // `weekly_report.py`'s own already-correct guard instead of trusting
-    // that column.
+    // `battery_cycles` deliberately NOT selected here — migration 037 fixed
+    // `vrm.compute_daily_health()` to store NULL (not a fabricated 0.0) when
+    // `battery_discharge_kwh` is NULL (every VRM-API site, by design — see
+    // `energyDaily`'s own comment below), but this dashboard still computes
+    // cycles independently a few lines down rather than trusting the stored
+    // column, mirroring `weekly_report.py`'s own guard — one shared
+    // client-side computation for both, instead of relying on the SQL
+    // function to have applied the same all-null guard correctly.
     // `notes` — the same human-readable reasons `vrm.compute_daily_health()`
     // (migration 012) already builds while scoring (e.g. "High grid
     // dependency; Low battery voltage (45.2V)") and stores right alongside
