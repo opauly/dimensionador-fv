@@ -29,17 +29,22 @@ def main() -> None:
     print("1. Finding a real day with a deep SOC swing to verify against...")
     sites = c.schema("vrm").table("sites").select("site_id").eq("source", "vrm_api").execute().data
     site_ids = [s["site_id"] for s in sites]
+    # Must actually exercise the NEW code path: battery_discharge_kwh IS NULL
+    # (otherwise it's a csv_upload-tagged historical row with real discharge
+    # data, which correctly takes the exact-kWh branch instead and was never
+    # what this migration touches).
     ed = (
-        c.schema("vrm").table("energy_daily").select("site_id,date,min_soc,max_soc")
+        c.schema("vrm").table("energy_daily").select("site_id,date,dump_type,min_soc,max_soc,battery_discharge_kwh")
         .in_("site_id", site_ids).not_.is_("min_soc", "null").not_.is_("max_soc", "null")
+        .is_("battery_discharge_kwh", "null")
         .execute().data
     )
     candidate = max(ed, key=lambda r: r["max_soc"] - r["min_soc"])
     swing = (candidate["max_soc"] - candidate["min_soc"]) / 100
-    print(f"   {candidate['site_id']} {candidate['date']}: swing={swing:.2f} (min={candidate['min_soc']}, max={candidate['max_soc']})")
+    print(f"   {candidate['site_id']} {candidate['date']} (dump_type={candidate['dump_type']}): swing={swing:.2f} (min={candidate['min_soc']}, max={candidate['max_soc']})")
 
     row = c.schema("vrm").rpc(
-        "compute_daily_health", {"p_site_id": candidate["site_id"], "p_date": candidate["date"], "p_dump_type": "vrm_api"}
+        "compute_daily_health", {"p_site_id": candidate["site_id"], "p_date": candidate["date"], "p_dump_type": candidate["dump_type"]}
     ).execute().data
     print(f"   notes: {row.get('notes')}")
     if swing > 0.65:
