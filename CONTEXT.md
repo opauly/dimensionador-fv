@@ -7,10 +7,15 @@
 
 ## Current state
 
+> **Corrected 2026-09-02** — this table had gone stale (still said "Phase next: Phase 6" while
+> Phase 6 had been fully built since its original commit) after ~2.5 weeks of unrecorded work.
+> Reconciled against `git log` and the actual code, not memory of what was planned. See
+> `PHASES.md`'s own 2026-09-02 note and its new Phase 19 section for the full account.
+
 | Item | Value |
 |---|---|
-| **Phase completed** | Phase 5 full (Off-Grid + Hybrid wizard, PDF templates) + Phase 4 full + Phase 3 UX polish (Cotizaciones directed-flow, per-version PDF) + Phase 7 partial (Admin equipment catalog, ARESEP tariff xlsx parser, Clientes/Prospectos tab) |
-| **Phase next** | Phase 6 — Projects Module |
+| **Phase completed** | Solar tool: Phases 0–6 complete (wizard for all 3 system types, PDF, versioning, AI features, Projects financial module); Phase 7 partial (equipment catalog, ARESEP tariff xlsx parser + sync-guard, tariff manager, Clientes/Prospectos incl. vrm+monitoring linker, tariff formula simplified & corrected against real invoices — all ✅; cost templates + settings page still missing). VRM Monitor: Phases 13–18 complete; Phase 19 (Admin Fleet Health Dashboard, previously undocumented) Phases 1–2.5 complete. |
+| **Phase next** | Solar tool: Phase 7 remainder (cost templates, Settings page), then Phase 8 QA/handoff. VRM Monitor: Phase 19 Phase 3 (anomaly detection) is an open decision with Oscar, not yet scheduled; Phases 9/10/11/12 remain off the critical path, triggered by business need. |
 | **Branch** | main |
 | **Last commit** | see `git log` |
 | **Working tree** | Clean |
@@ -233,6 +238,105 @@ client list doesn't fill up with people who never converted. Full spec in
   `get_client().schema('monitoring')` — confirmed supported by the installed `supabase-py`
   2.31.0, zero new grants needed since `service_role` already has full `monitoring` access).
   Read-only Prospectos sub-tab for visibility, no actions (matches automatic-only promotion).
+  - **(2026-09-02)** the linker now spans **both** `vrm` and `monitoring` schemas, tagged by
+    brand. `vrm.sites` needed no new column (VRM Portal is always Victron); added
+    `monitoring.sites.brand` instead, backfilled explicitly rather than defaulted, so a future
+    non-Victron insert can't silently inherit `'Victron Energy'`. Also added the one-off scripts
+    used to consolidate 7 placeholder `vrm.customers` rows into one Portfolio customer and
+    resolve the resulting `monitoring`/`vrm` duplicate sites this surfaced.
+
+---
+
+## Admin Fleet Health Dashboard (added 2026-08-30, documented here 2026-09-02)
+
+**Not part of the solar proposal/projects tool** — belongs to VRM Monitor, same as Section
+"Victron Monitor integration" above, documented here only because it shipped without ever being
+scoped in `REQUIREMENTS.md`/`PHASES.md` and was found only by reconciling `git log` against those
+docs. Full build history, decisions, and validation: `REQUIREMENTS.md` §4.8, `PHASES.md` Phase 19.
+
+- A cross-customer, **admin-only** ops view at `victron-monitor/web/app/(admin)/admin/fleet/` of
+  every `source='vrm_api'` site — connection freshness, live PV/load/battery/grid power and SOC,
+  most recent health score, and any currently-active alarm/critical alert.
+- Origin: informed by a UCR capstone project's own requirements doc (a separate ~17-week academic
+  project Oscar is sponsoring with the same idea) — built independently against real production
+  data rather than waiting on that timeline.
+- **Phase 1** (`d56b163`, 2026-08-30): health score + connection freshness + open alarm/critical
+  counts, built entirely from existing tables, no new migration.
+- **Phase 2** (`aea03c8`): live snapshots (`victron/vrm_live.py`, `vrm.site_snapshots` — migration
+  031) refreshed ~every 15 minutes via a new GitHub Actions cron
+  (`.github/workflows/fleet-snapshots.yml`). Found and handled a real multi-charger PV
+  disambiguation trap: Victron's stats endpoint can't target one PV-producing device instance, so
+  `pv_power_w` is withheld (`NULL`) rather than risk an under-reported sum, on any site with more
+  than one PV-reporting instance.
+- **Phase 2.5** (`49dc77d`): per-site drill-down page, live shape chart, `/admin/help`.
+- **Live alarm/critical-alert detection** — built twice. First pass (`bf9a142`) wrote
+  transition-only rows into the same historical `vrm.alarm_events`/`vrm.critical_alerts` tables
+  from a live ~15-minute sweep, to close the gap where a transient alarm that starts and clears
+  within one day would never show as active (the historical sync only covers through yesterday).
+  Rebuilt (`c25563b`) after direct feedback that this is a live monitoring view, not a second
+  history log — VRM's own portal already serves that. Final shape: live alarm/critical-alert
+  state folds into the same `site_snapshots` row every other live field lives in; the dashboard
+  counts true entries straight from that blob (present in the latest fetch = shown, full stop) —
+  `vrm.alarm_events`/`vrm.critical_alerts` stay untouched by this path, exclusively the historical
+  sync's record for report/health-score purposes.
+- **KPI reorganization** (`17756aa`): 12 rollup cards across 3 labeled groups (Fleet &
+  connectivity / Health & alerts / Energy performance), each with a visible one-line description.
+  A "Battery Stress" card was considered and dropped — `battery_discharge_kwh` reads `None` for
+  every real VRM-API site by design elsewhere in this pipeline, so the card would always show
+  "no data." Replaced with "Outages (7d)," confirmed to actually vary against real data.
+- **Real bugs found only via live use:** fleet-wide totals summing stale sites' months-old
+  readings as if current (`af364fc` — now gated on `connection_status === 'online'`); one flaky
+  site's VRM call failing the entire fleet shape chart via `Promise.all` (`dd7e55a` — switched to
+  `Promise.allSettled`, adding a distinct "partial" status); a flow-diagram battery-line overlap
+  and a missing active-nav-tab highlight (`df6bffe`).
+- **Not built:** anomaly detection (the original plan's Phase 3) — an open decision with Oscar,
+  not a scheduling gap. Worth confirming whether the live alarm/critical-alert work above already
+  covers what was wanted, or whether true anomaly detection (drift with no alarm code behind it)
+  is still needed.
+
+---
+
+## Tariff formula: corrected against real invoices, then simplified (2026-09-02)
+
+Validated `estimate_bill_crc()` (`calculations/tariff_calculator.py`) against 6 real CNFL
+invoices across two customers (one T-RE residential, one T-CO commercial with a full itemized
+breakdown for 3 months) — found it was missing real charges and had a silent correctness bug:
+
+- **Real bugs found (`3ca3ffa`):** missing alumbrado público (CRC 3.02/kWh, CNFL-wide) and IOS
+  (Impuesto Otros Servicios, flat monthly, confirmed NOT Generación Distribuida-specific via a
+  non-solar T-CO customer, correcting an earlier version of this fix that had derived it as 13%
+  of COA); `int(x.get("iva_threshold_kwh") or 9999)` silently discarding a real, intentional `0`
+  (T-CO's seeded value, meaning IVA always applies) because `0` is falsy in Python — **IVA was
+  never being applied to any T-CO bill estimate before this fix.**
+- **Deliberate simplification, decided after that fix (`1d4764f`):** rather than keep adding
+  distributor-specific, periodically-revised charges to a static tariff table, **bomberos,
+  alumbrado público, IVA, and Generación Distribuida access charges (COA/CVG/DER) are now
+  excluded from every bill estimate**, not partially modeled — every one of them turned out to be
+  bracket-dependent, ARESEP-resolution-revised, or verified for only a single distributor.
+  `estimate_bill_crc()` now computes only energy charge (tiered or flat) + access charge. Every
+  client-facing bill estimate (proposal PDFs ES+EN, the solar-savings-table skill) carries a
+  plain, always-shown disclaimer stating what it excludes. CNFL's confirmed T-CO flat-rate
+  structure (no demand charge, no separate access charge) was applied to all 8 seeded
+  distributors, using each one's own already-seeded low-consumption tier rate as the flat rate —
+  structurally consistent with CNFL's real invoices, but the specific rate is invoice-confirmed
+  only for CNFL.
+- **Cleanup pass (`3fdf55e`):** `database/tariffs_db.py`'s `upsert_tariff_type_row()` now defaults
+  the newer alumbrado/IOS/COA/CVG fields to `None` (write-only-if-passed) instead of `0.0`
+  unconditionally — the routine ARESEP sync button didn't know about these fields and would have
+  silently reset CNFL's confirmed alumbrado value back to 0 on the next routine edit. Confirmed
+  via full-codebase grep: no remaining `include_gd_charges` references anywhere.
+- **Admin ARESEP tariff-sync tool hardened (`437a6e6`):** investigated CNFL's actual ARESEP
+  Cuadro E-8 structure and confirmed T-CO genuinely is ARESEP's single official tariff for both
+  Baja and Media Tensión — `aresep/tariff_parser.py`'s extraction was already reading it
+  correctly. The real regression risk was narrower: `pages/05_admin.py`'s "Aplicar actualización"
+  now splits a sync diff into demand fields (reference-only, unused by any bill estimate, safe to
+  auto-apply) and energy fields (`access_charge_crc`/tiers, what actually feeds every estimate) —
+  a T-CO energy-structure change now requires an explicit per-distributor confirmation checkbox
+  before it can overwrite the DB, so a routine sync can no longer silently revert the fix above.
+- **New public API surface:** `GET /public/tariffs/*` on `vrm_api`, gated by its own
+  `PUBLIC_TARIFF_API_KEY` (never `PIPELINE_API_KEY`), so an external tool can read live tariff
+  data instead of values being hand-copied and going stale.
+- Migrations: `034_alumbrado_publico.sql`, `035_gd_access_charges.sql`, `036_ios_charge.sql`.
 
 ---
 
@@ -305,6 +409,10 @@ reproduce them exactly.
 All modules exist as stubs with `raise NotImplementedError("Phase N")`.
 The phase tag tells you when each function gets implemented.
 
+> **Corrected 2026-09-02:** the `database/projects_db.py` and `ai/proposal_writer.py` rows below
+> had been left showing their phase tag (implying not-yet-done) long after both actually shipped —
+> found only by grepping for `NotImplementedError` while reconciling this file against reality.
+
 | Module | Phase | Notes |
 |---|---|---|
 | `proposals/generator.py` | ✅ done | `generate_pdf()` + `upload_pdf()` implemented; `build_from_wizard_blob()` accepts optional `version_date` (DD/MM/YYYY) for historical PDF dates |
@@ -313,7 +421,7 @@ The phase tag tells you when each function gets implemented.
 | `wizard/state.py` | ✅ done | Auto-save, load_draft, company/bank defaults |
 | `wizard/common.py` | ✅ done | Steps 1–3: system type, client, site+PVGIS |
 | `wizard/grid_zero.py` | ✅ done | Steps 4–8: utility, consumption, equipment, costs, review |
-| `calculations/tariffs.py` | ✅ done | Block-tier bill calculator, IVA threshold, bomberos |
+| `calculations/tariffs.py` | ✅ done | Block-tier bill calculator; bomberos/IVA excluded as of v3.9 (see below) |
 | `calculations/sizing_grid_zero.py` | ✅ done | System kW, monthly generation, savings table, averages |
 | `calculations/pvgis.py` | ✅ done | PVGIS API call + Supabase cache + CR geocode lookup table |
 | `calculations/mppt.py` | ✅ done | Explores all valid (series × parallel) combos; A/B/C scenarios; manual `check_design()` |
@@ -325,18 +433,18 @@ The phase tag tells you when each function gets implemented.
 | `pages/01_proposals.py` | ✅ done | Proposals list + directed status flow + per-version PDF buttons (see Phase 3 UX polish below) |
 | `pages/02_new_proposal.py` | ✅ done | Full 8-step wizard orchestrator |
 | `calculations/bill_parser.py` | ✅ done | Bill PDF extraction + 12-month grid builder |
-| `calculations/tariff_calculator.py` | ✅ done | CR tariff formula: fixed + tiered + bomberos + IVA |
+| `calculations/tariff_calculator.py` | ✅ done | CR tariff formula: energy (tiered/flat) + access charge only as of v3.9 — bomberos/alumbrado público/IVA/GD charges deliberately excluded, disclosed on every client-facing output |
 | `calculations/tablero_parser.py` | ✅ done | Electrical panel schedule → loads list via Claude vision |
 | `calculations/load_estimator.py` | ✅ done | Seasonal load estimation; `DEFAULT_LOADS` seeded; `estimate_loads_12_months_ai()` |
 | `calculations/datasheet_parser.py` | ✅ done | AI panel + inverter spec extraction from PDF datasheets |
-| `ai/proposal_writer.py` | 4 | Intro paragraph generation |
+| `ai/proposal_writer.py` | ✅ done | Intro paragraph generation, ES+EN in one call |
 | `calculations/sizing_off_grid.py` | ✅ done | Battery bank, array, split-phase check — validated against Jorge Ramírez |
 | `calculations/load_profile_off_grid.py` | ✅ done | 5-category load taxonomy, Open-Meteo climate integration — new in Phase 5, not in original scope |
 | `wizard/off_grid.py` | ✅ done | Steps 4–8, verified live in browser incl. real PDF generation |
 | `wizard/hybrid.py` | ✅ done | Thin wrapper over off_grid.py + grid-connection option + AC-coupling note |
 | `proposals/templates/off_grid_{es,en}.html` | ✅ done | Built against real Jorge Ramírez reference PDF |
-| `database/projects_db.py` | 6 | Project financial CRUD |
-| `ai/tariff_updater.py` | 7 | CNFL PDF tariff refresh |
+| `database/projects_db.py` | ✅ done | Full CRUD for projects + all financial sub-tables (Presupuesto, expense ledgers, labor advances, invoice items, extras) — 670 lines, `pages/03_projects.py` (268 lines) + `pages/04_project_detail.py` (649 lines) are the matching UI |
+| `ai/tariff_updater.py` | 7 | Still a stub — CNFL tariff refresh in production actually runs through a different path, `aresep/tariff_parser.py` + `pages/05_admin.py`'s "Aplicar actualización" (xlsx-based, not this module's originally-planned PDF-based approach) |
 
 ---
 

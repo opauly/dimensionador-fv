@@ -1,11 +1,51 @@
-# Pauly&Co Solar Design Tool — Final Requirements v3.8
+# Pauly&Co Solar Design Tool — Final Requirements v3.9
 
-**Version:** 3.8  
-**Date:** 2026-08-16  
+**Version:** 3.9  
+**Date:** 2026-09-02  
 **Scope:** Grid Zero, Off-Grid, Hybrid (On-Grid placeholder)  
 **Deployment:** macOS local first (Streamlit), later web (Supabase backend)
 
 ---
+
+## Change log v3.8 → v3.9
+
+Reconciles this document against ~2.5 weeks of real, shipped work (2026-08-16 → 2026-09-02)
+that had gone unrecorded here — found by cross-checking `git log` against `PHASES.md` and the
+actual code, not by memory of what was planned. See `PHASES.md`'s own 2026-09-02 note for the
+full account.
+
+- **Phase 6 (Projects Module) was already complete** — this document's own MVP scope (§14)
+  always listed it, but `PHASES.md`'s status table had incorrectly read "Not started" since
+  before this document's v3.5 changelog. `database/projects_db.py` (670 lines),
+  `pages/03_projects.py` (268 lines), and `pages/04_project_detail.py` (649 lines) are full
+  implementations, not stubs.
+- **Tariff formula: simplified, then corrected against real invoices, added to a new public
+  read-only API (§9 updated).** Validated `estimate_bill_crc()` against 6 real CNFL invoices
+  across two customers, found it was missing alumbrado público and IOS charges and silently
+  dropping IVA on any tariff seeded with a real `0` threshold (Python falsy-zero bug — T-CO's
+  seeded value, meaning IVA always applies, was never being charged). Rather than keep adding
+  distributor-specific and periodically-revised charges (bomberos, alumbrado público, IVA,
+  Generación Distribuida access charges) to a static tariff table that can't responsibly track
+  them, the decision was to **exclude all of them** and compute every bill estimate as energy
+  charge (tiered or flat) + access charge only — plainly disclosed as a partial estimate on
+  every client-facing output (proposal PDFs, the solar-savings-table skill) rather than
+  presented as a complete bill. CNFL's confirmed T-CO flat-rate structure (no demand charge, no
+  separate access charge) was applied to all 8 seeded distributors. A new
+  `GET /public/tariffs/*` route on `vrm_api`, gated by its own `PUBLIC_TARIFF_API_KEY`, lets an
+  external tool read live tariff data instead of it being hand-copied and going stale.
+- **Admin ARESEP tariff-sync tool hardened against silently reverting hand-corrected
+  fields.** `pages/05_admin.py`'s "Aplicar actualización" now splits a sync diff into demand
+  fields (reference-only, unused by any bill estimate, safe to auto-apply) and energy fields
+  (`access_charge_crc`/tiers — what actually feeds every bill estimate); a T-CO energy-structure
+  change now requires an explicit per-distributor confirmation before it can overwrite a
+  hand-corrected value.
+- **Admin Fleet Health Dashboard (new — §4.8, Phase 19 in PHASES.md, Phases 1–2.5 complete):**
+  a cross-customer, admin-only VRM Monitor ops view (`/admin/fleet`) was built and shipped
+  without ever being scoped in this document — discovered only during this reconciliation.
+  See §4.8 below and `PHASES.md` Phase 19 for the full build history.
+- **Clients ↔ Victron sites linker (§4.6) now spans both `vrm` and `monitoring` schemas**,
+  tagged by brand (`monitoring.sites.brand`, backfilled explicitly, not defaulted) — previously
+  only `monitoring.sites` was linkable from Admin → Clientes.
 
 ## Change log v3.7 → v3.8
 
@@ -403,6 +443,30 @@ Replaces the manual `Registro de mantenimientos FV.xlsx` (analyzed 2026-07-18: `
 
 ---
 
+### 4.8 Admin Fleet Health Dashboard (added v3.9, Phases 1–2.5 complete — see PHASES.md Phase 19)
+
+A cross-customer, **admin-only** operations view of every `source='vrm_api'` VRM Monitor site,
+at `victron-monitor/web/app/(admin)/admin/fleet/`. Not part of the solar proposal/projects tool's
+functional scope, same as Section 4.5 — documented here only because it shares this repo and
+Supabase project, and because it shipped without ever being scoped in this document (found only
+via a 2026-09-02 reconciliation against `git log`; full build history in PHASES.md Phase 19).
+
+- **Origin:** informed by a UCR capstone project's own requirements doc — a separate ~17-week
+  academic project Oscar is sponsoring with the same idea, scoped as an internal Pauly & Co ops
+  tool — built independently against real production data rather than waiting on that timeline.
+- **What it shows:** connection freshness, live PV/load/battery/grid power and SOC (refreshed
+  ~every 15 minutes via a GitHub Actions cron into `vrm.site_snapshots`, migration 031 —
+  latest-reading-only, not a history table), the most recent daily health score, and any
+  currently-active alarm/critical alert — read directly off the live snapshot blob
+  (`raw.alarms`/`raw.critical_alerts`), not inferred from historical episode rows. A per-site
+  drill-down page adds a flow diagram, self-sufficiency/self-consumption/DoD gauges, and an
+  interactive shape chart (Today/7-day/30-day).
+- **Explicitly admin-only, not a customer-facing Growth/Fleet feature** — confirmed with Oscar.
+- **Not built:** anomaly detection (the original plan's Phase 3) — an open decision, not a gap
+  in scheduling.
+
+---
+
 ## 5. Projects Module
 
 ### 5.1 Concept
@@ -746,9 +810,11 @@ The ARESEP website uses a JavaScript-rendered widget — static scraping is not 
 
 **CNFL auto-refresh:** The CNFL publishes a PDF at cnfl.go.cr. "Refresh CNFL tariffs" button fetches the PDF → sends to Claude → extracts tariff table as JSON → updates DB. Covers the most common distributor in the GAM area.
 
-**Manual override:** Any tariff can be edited per distributor in the Tariff Manager. Each row shows `last_updated` timestamp. Warning shown if any distributor tariffs are >90 days old.
+**Manual override:** Any tariff can be edited per distributor in the Tariff Manager. Each row shows `last_updated` timestamp. Warning shown if any distributor tariffs are >90 days old. **(v3.9)** the sync diff behind "Aplicar actualización" now splits into demand fields (reference-only, unused by any bill estimate, auto-applied) and energy fields (`access_charge_crc`/tiers, what actually feeds every bill estimate) — an energy-structure change on T-CO requires an explicit per-distributor confirmation before it can overwrite a hand-corrected value, so a routine sync can no longer silently revert a real fix.
 
 **Bill-based fallback:** If the client's actual bill PDF is available, the actual amount paid / kWh consumed is a more accurate basis than recalculated tariffs. The bill parser extracts this directly.
+
+**Bill formula scope (added v3.9, deliberate simplification).** `estimate_bill_crc()` computes only **energy charge (tiered or flat) + access charge** — bomberos, alumbrado público, IVA, and Generación Distribuida access charges (COA/CVG/DER) are excluded from every estimate, not partially modeled. Validated against 6 real CNFL invoices across two customers: every one of these charges turned out to be bracket-dependent, revised by periodic ARESEP resolution, or verified for only a single distributor — none of which a static tariff table can responsibly reproduce for all 8 distributors. Every client-facing bill estimate (proposal PDFs, the solar-savings-table skill) carries a plain, always-shown disclaimer stating what it excludes, rather than presenting a partial figure as a complete bill. A new `GET /public/tariffs/*` route on `vrm_api` (gated by its own `PUBLIC_TARIFF_API_KEY`) exposes live tariff data to external tools instead of values being hand-copied.
 
 ---
 

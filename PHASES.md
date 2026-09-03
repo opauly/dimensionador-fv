@@ -2,9 +2,16 @@
 
 **Builder:** Oscar Pauly (solo)  
 **Stack:** Streamlit · Supabase · WeasyPrint/Jinja2 · Anthropic SDK · numpy-financial  
-**Reference:** Requirements v3.5  
+**Reference:** Requirements v3.9  
 **Goal:** Real proposals in production as fast as possible  
-**Last updated:** 2026-08-16
+**Last updated:** 2026-09-02
+
+> **Note (2026-09-02):** this file went stale for about 2.5 weeks — real work shipped to
+> `main` that was never recorded here, most visibly Phase 6 (was marked "Not started" while
+> a real 649–670-line implementation had existed since the initial build), Phase 18 (marked
+> "in progress" after both its steps had already shipped and been verified), and an entire
+> undocumented feature (Phase 19 below). Reconciled against `git log` and the actual code,
+> not against memory of what was planned.
 
 | Phase | Status |
 |---|---|
@@ -14,8 +21,8 @@
 | 3 — Proposal Management | ✅ Complete + UX polish (directed flow, per-version PDF) |
 | 4 — AI Features | ✅ Complete (bill parser, tablero, datasheet, load estimator, daytime fraction) |
 | 5 — Off-Grid + Hybrid | ✅ Complete — includes a taxonomy-driven load profile estimator beyond the original spec (see below) |
-| 6 — Projects Module | ⬜ Not started |
-| 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅, tariff manager UI ✅, Clientes/Prospectos ✅; cost templates, settings pending) |
+| 6 — Projects Module | ✅ Complete (corrected 2026-09-02 — this row previously said "Not started"; the module has been fully built since Phase 6's original commit, see `database/projects_db.py`/`pages/03_projects.py`/`pages/04_project_detail.py`) |
+| 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅ — now with a demand/energy-field split guard, see below — tariff manager UI ✅, Clientes/Prospectos ✅, tariff formula simplified and corrected against real invoices ✅; cost templates, settings page still pending) |
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
 | 10 — Site Register & Preventive Maintenance Scheduler | ⬜ Not started (spans both products, no dependency on 0–9) |
@@ -23,9 +30,11 @@
 | 12 — Victron Monitor: Retire Apps Script Scheduling/Email/Archiving | ⬜ Not started (separate product, no dependency on 0–11) |
 | 13 — VRM Monitor Customer Portal (Streamlit) | 🔶 Superseded by Phase 14 — Step 1 built & validated (migration 021, login, role resolution) |
 | 14 — VRM Monitor unified Next.js site (marketing + portal + admin) + Python pipeline API | 🔶 Steps 1–7 built & validated (design system, auth, tenancy, vrm_api, upload/reports, admin+invites); Step 8 (deploy/cutover) pending — see PLAN_PHASE14.md |
-| 15 — VRM Monitor: direct VRM API ingestion (customer-connected Victron accounts + Oscar's own admin fleet access) | ✅ Steps 0–6 built & independently verified (see PLAN_PHASE15.md); Step 7 (scheduled sync) deferred at Oscar's request |
+| 15 — VRM Monitor: direct VRM API ingestion (customer-connected Victron accounts + Oscar's own admin fleet access) | ✅ Steps 0–6 built & independently verified (see PLAN_PHASE15.md); Step 7 (scheduled sync) deferred at Oscar's request, later closed by Phase 17 |
 | 16 — VRM Monitor: public signup + customer self-service billing on ONVO Pay | ✅ Complete — Steps 0–7 built & verified (see PLAN_PHASE16.md) |
-| 17 — VRM Monitor: scheduled reports, report cost limits, tiered white-label branding, visible trial | ✅ Complete — Steps 0–9 built & live-verified (see PLAN_PHASE17.md); CSV-sourced sites are structurally excluded from scheduling (§0.7) |
+| 17 — VRM Monitor: scheduled reports, report cost limits, tiered white-label branding, visible trial | ✅ Complete — Steps 0–9 built & live-verified (see PLAN_PHASE17.md); CSV-sourced sites are structurally excluded from scheduling (§0.7); also closed Phase 15's deferred Step 7 |
+| 18 — VRM Monitor: personalized report modules for Growth/Fleet | ✅ Complete (corrected 2026-09-02 — this row previously said "Phase 2 in progress") — Phase 1 shipped 2026-08-28, Phase 2 (critical alerts, grid meter, generator, tank modules) shipped and verified 2026-08-29, including a real row-sizing regression and a default-rollout scope question both caught and fixed before being called done (see PLAN_PHASE18.md) |
+| 19 — VRM Monitor: Admin Fleet Health Dashboard (new, added 2026-09-02) | ✅ Phases 1–2.5 complete and live (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection, from the original plan) not built — see below |
 
 ---
 
@@ -530,7 +539,12 @@ The register currently lives in a spreadsheet with no connection to this tool's 
 
 ### Tasks
 
-**Schema (`database/migrations/011_site_maintenance_register.sql`)**
+**Schema (`database/migrations/037_site_maintenance_register.sql`** — renumbered 2026-09-02;
+`011` is taken by `011_import_maintenance_sites.sql`, a smaller prep step that already ran the
+`monitoring.sites` column additions and the 22-site data import below ahead of this phase (see
+its own header for exactly what it does and doesn't cover). `037` is the next free number as of
+this writing — confirm against `database/migrations/` before creating the file, in case another
+migration lands first.**
 ```sql
 ALTER TABLE monitoring.sites
   ADD COLUMN IF NOT EXISTS property_id      uuid;  -- REFERENCES public.site_properties(id), added once that table exists
@@ -1234,12 +1248,13 @@ which also settled Q9 (the deferred Phase 15 VRM sync) as load-bearing rather th
 2026-08-25, **third-party report recipients allowed, capped at 5 per site**, with an unsubscribe footer
 link (Q5) — the fuller option, not the "customer's own address only" fallback.
 
-## Phase 18 — VRM Monitor: personalized report modules for Growth/Fleet (in progress, started 2026-08-26)
+## Phase 18 — VRM Monitor: personalized report modules for Growth/Fleet (complete, 2026-08-26 → 2026-08-29)
 
 **Goal:** let Growth/Fleet installer accounts choose which content modules appear in a given site's
 report, instead of every site getting the same fixed set — the content-personalization sibling of Phase
 17's tiered white-label branding (appearance only). Phase 1 (module toggling on the existing 12 modules)
-shipped 2026-08-28; Phase 2 (new module types) is in progress.
+shipped 2026-08-28; Phase 2 (new module types — critical alerts, grid meter, generator, tank) shipped and
+was verified live 2026-08-29.
 
 Full build plan, the module inventory (verified against a live VRM API diagnostics probe, not assumed),
 and per-step validation gates: [`PLAN_PHASE18.md`](PLAN_PHASE18.md). Not duplicated in full here.
@@ -1314,6 +1329,96 @@ deselected modules once entitlement was actually met.
 
 ---
 
+## Phase 19 — VRM Monitor: Admin Fleet Health Dashboard (Phases 1–2.5 complete, 2026-08-30 → 2026-09-02; added to this file 2026-09-02)
+
+**Goal:** a cross-customer, admin-only operations view of every `source='vrm_api'` site — connection
+freshness, live power/SOC, health score, and open alarms/critical alerts — in one place, instead of Oscar
+checking sites one at a time. Not previously in this file: built and shipped without ever being scoped
+here, discovered only by reconciling `git log` against these docs on 2026-09-02.
+
+### Why this phase exists
+
+Informed by a UCR capstone project's own requirements doc — a separate ~17-week academic project Oscar is
+sponsoring with the same idea, scoped as an internal Pauly & Co ops tool — built independently now against
+real production data rather than waiting on that timeline. Confirmed with Oscar: admin-only, not a
+customer-facing Growth/Fleet feature.
+
+### Where this sits relative to other phases
+
+- Lives in `victron-monitor/web/app/(admin)/admin/fleet/`, built on Phase 14's Next.js app and `vrm_api` —
+  depends on that infrastructure the same way Phases 15–18 do.
+- Off the critical path, same posture as Phases 9–12.
+
+### What shipped
+
+- **Phase 1 (2026-08-30, `d56b163`):** `/admin/fleet` — health score, connection freshness, and open
+  alarm/critical-alert counts per site, built entirely from existing tables (`vrm.sites`,
+  `vrm.daily_health`, `vrm.alarm_events`, `vrm.critical_alerts`) with no new migration or endpoint.
+  Deliberately excluded live/instantaneous readings and anomaly detection (scoped as Phases 2 and 3 of the
+  original 3-phase plan).
+- **Phase 2 (`aea03c8`):** `victron/vrm_live.py` + `POST /v1/vrm-fleet/refresh-snapshots` — live per-site
+  PV/load/battery/grid power and SOC, fetched from the VRM API every ~15 minutes via a new
+  `.github/workflows/fleet-snapshots.yml` cron into `vrm.site_snapshots` (migration 031, latest-reading-only,
+  not a history table). Resolves each site's own connected VRM token where one exists, falling back to
+  `VRM_ADMIN_TOKEN` for admin-linked sites. A real multi-charger PV disambiguation trap (Victron's stats
+  endpoint can't target one PV-producing device instance) was found and handled by withholding `pv_power_w`
+  (`NULL`, not a guessed sum) rather than risk an under-reported total.
+- **Phase 2.5 (`49dc77d`):** `GET /v1/vrm-fleet/site-shape` (`victron/vrm_shape.py`) + a per-site
+  drill-down page (`/admin/fleet/[site_id]`) with a flow diagram, self-sufficiency/self-consumption/DoD
+  gauges, and an interactive Today/7-day/30-day shape chart; a new `/admin/help` page.
+- **Live alarm/critical-alert detection (`bf9a142`, then rebuilt per feedback in `c25563b`):** the
+  historical sync only covers data through yesterday, so a transient alarm that starts and clears within
+  one day would never show as active. First pass wrote transition-only WARNING/CLEARED rows into
+  `vrm.alarm_events`/`vrm.critical_alerts` from a ~15-minute live sweep; rebuilt after direct feedback that
+  this is a live monitoring view, not a second history log — VRM's own portal already serves that. Final
+  shape: live state folds directly into the same `site_snapshots` row every other live field already lives
+  in (`raw.alarms`/`raw.critical_alerts`), and the dashboard counts true entries straight from that blob —
+  present in the latest fetch = shown, not present = not shown, no episode/history reasoning on this path.
+  `vrm.alarm_events`/`vrm.critical_alerts` are untouched by this path and remain exclusively the historical
+  sync's record for report/health-score purposes.
+- **KPI reorganization (`17756aa`):** 12 rollup cards across 3 labeled groups (Fleet & connectivity,
+  Health & alerts, Energy performance) replacing an earlier 7-card single row, each with a visible one-line
+  description. A "Battery Stress" card was considered and dropped after live verification showed
+  `battery_discharge_kwh` is `None` for every real VRM-API site by design elsewhere in this pipeline —
+  replaced with "Outages (7d)," confirmed to actually vary against real data.
+- **Real bugs found and fixed via live use, not by code review:** fleet-wide totals summing stale sites'
+  months-old readings as if current (`af364fc` — now gated on `connection_status === 'online'`); a flaky
+  site's VRM call failing the *entire* fleet shape chart via `Promise.all` (`dd7e55a` — switched to
+  `Promise.allSettled` with a distinct "partial" status); a flow-diagram battery-line/text overlap and a
+  missing active-nav-tab highlight (`df6bffe`).
+
+### Phase 3 — Anomaly detection (planned 2026-09-03, not yet built)
+
+Anomaly detection was explicitly scoped as this feature's Phase 3 and was never given a dedicated
+implementation pass. The live alarm/critical-alert detection work above covers part of what Phase 3 would
+have addressed (surfacing transient problems the daily sync misses) but is not the same thing as detecting
+an anomaly with no alarm code behind it (e.g. a healthy-looking site whose output has quietly drifted).
+
+Planned in conversation with Oscar 2026-09-03: three sub-phases sharing one new `vrm.site_anomalies`
+table — **3b unexpected silence** (build first — a real, persistent zero during hours a site has
+historically produced, debounced against the live ~15-min snapshot), **3a quiet drift** (a site trending
+down relative to its own history, deliberately season-adjusted via PVGIS's relative shape rather than an
+absolute `pv_kwp` conversion, since only 7 of 13 real sites have `pv_kwp` set), and **3c underperformance
+vs. design** (needs `pv_kwp`, so honestly scoped to those same 7 sites until it's backfilled for the
+rest). **No ML, no training** — deterministic and explainable throughout, consistent with this codebase's
+existing rule that AI/ML is used only for bounded classification/extraction, never the core math; the
+fleet is also far too small (~13 sites) to train anything trustworthy. Dashboard-only for v1 (no
+email/notification), and a separate signal from `daily_health` rather than folded into it. Full build
+plan, schema, and validation gates: [`PLAN_PHASE19_FLEET_P3.md`](PLAN_PHASE19_FLEET_P3.md).
+
+### Validation
+
+Every step verified against real production data, not synthetic fixtures: Phase 1's health scores and
+alarm-episode resolution checked against 3 real synced sites and 70 real `alarm_events` rows; Phase 2's
+snapshot refresh run against all 4 real `vrm_api` sites with 0 failures, correct per-site token resolution,
+and the multi-charger withholding confirmed on the one real multi-charger site; the live alarm sweep run
+clean against all 12 real sites with the transition-only write logic manually verified (WARNING on
+activation, nothing on a repeat, CLEARED on deactivation, nothing on a repeat); every new KPI computation
+replicated against real production data and checked for sane values (not `NaN`/`undefined`), including
+cross-checking that self-sufficiency and grid-dependency landed near-inverses as expected.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -1324,8 +1429,8 @@ deselected modules once entitlement was actually met.
 | 3 | Proposal management | 3–4 | Week 4–5 |
 | 4 | AI features | 4–5 | Week 5–6 |
 | 5 | Off-Grid + Hybrid | 5–7 | Week 7–8 |
-| 6 | Projects module | 5–6 | Week 9–10 |
-| 7 | Admin + polish | 3–4 | Week 11 |
+| 6 | Projects module | 5–6 | Complete |
+| 7 | Admin + polish | 3–4 | Partial — cost templates + settings page remain |
 | 8 | QA + handoff | 2–3 | Week 11–12 |
 | 9 | Victron Monitor multi-tenant hardening | 3–5 | Whenever needed — independent of 0–8 |
 | 10 | Site register & maintenance scheduler | 4–6 | Whenever needed — independent of 0–9 |
@@ -1336,6 +1441,8 @@ deselected modules once entitlement was actually met.
 | 15 | VRM Monitor: direct VRM API ingestion (customer-connected accounts + Oscar's admin fleet access) | 10–14 | Whenever needed — triggered by a customer who shouldn't have to export a CSV weekly, or by Oscar wanting fleet visibility without one |
 | 16 | VRM Monitor: public signup + customer self-service billing on ONVO Pay | 13–18 | Complete (2026-08-19 → 2026-08-21) — the first phase that gives the product its own revenue and acquisition mechanism |
 | 17 | VRM Monitor: scheduled reports, report cost limits, tiered branding, visible trial | 9–13 | Complete (2026-08-21 → 2026-08-25) — the phase where the product's marketing copy and its behaviour were made to agree |
+| 18 | VRM Monitor: personalized report modules for Growth/Fleet | — | Complete (2026-08-26 → 2026-08-29) |
+| 19 | VRM Monitor: Admin Fleet Health Dashboard | — | Phases 1–2.5 complete (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection) not built |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
@@ -1390,6 +1497,10 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 16 (public signup + ONVO billing) is off this critical path too, and is now complete.** Like Phase 15 it depends on Phase 14's web app, `vrm_api`, and tenancy model. Unlike every previous phase, its failure modes are financial rather than informational, and it opened this system's first door that starts outside it (a stranger with no session, at `/signup`) — which is why its plan spent most of its length on reconciliation, tenancy, and the trust boundary rather than on features. It is the first phase that makes VRM Monitor self-sustaining: a stranger can now sign up, verify, pay, and become a working customer with no action from Oscar, and an existing customer manages their own subscription end to end.
 
 **Phase 17 (scheduled reports, report cost limits, tiered branding, visible trial) is off this critical path too, and is now complete.** It depends on 14/15/16. It is the phase where the product's marketing copy and the product's behaviour were made to agree: three of its four features were already on the Pricing page and none of the three existed. It is also the first phase whose primary deliverable runs when nobody is watching (`.github/workflows/scheduled-reports.yml`, hourly), which is why its plan spent more of its length on failure visibility, idempotency, and timezone arithmetic than on features. Triggered by the first customer who should not have to click Generate every Monday morning.
+
+**Phase 18 (personalized report modules for Growth/Fleet) is off this critical path too, and is now complete.** It depends on Phase 17's branding/tier-gating pattern, reused verbatim for module selection. Built on its own branch given the blast radius of a mistake (every existing customer's report, not just Growth/Fleet's), merged back only after live verification. Triggered by the same installer accounts Phase 17's branding tier already serves.
+
+**Phase 19 (Admin Fleet Health Dashboard) is off this critical path too, and its first 2.5 phases are complete.** It was never scoped in this file until 2026-09-02, discovered only by reconciling `git log` against these docs — see its section above for the full account. Its Phase 3 (anomaly detection) remains an open decision with Oscar, not a scheduling gap.
 
 ---
 
