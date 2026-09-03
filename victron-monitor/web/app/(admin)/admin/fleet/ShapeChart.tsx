@@ -25,6 +25,11 @@ type ShapeData = {
   grid: (number | null)[];
 };
 
+// Mirrors victron/vrm_shape.py's own _EMPTY_SHAPE — what a single site
+// contributes to the fleet sum when its own fetch fails, so one bad site
+// degrades to "contributes nothing" rather than failing the whole chart.
+const _EMPTY_SHAPE: ShapeData = { solar: Array(24).fill(null), load: Array(24).fill(null), battery: Array(24).fill(null), grid: Array(24).fill(null) };
+
 const RANGES: { key: Range; label: string }[] = [
   { key: 'today', label: 'Today' },
   { key: 'week', label: '7-day avg' },
@@ -184,7 +189,11 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
   // refetch, which is indistinguishable from Today/7-day/30-day simply not
   // working when a fetch takes more than an instant.
   const [ready, setReady] = useState<Ready | null>(null);
-  const [status, setStatus] = useState<'loading' | 'idle' | 'error'>('loading');
+  // 'partial' = at least one site's fetch failed but at least the request
+  // itself completed for the rest — distinct from 'error' (nothing came
+  // back at all), so a single flaky site doesn't read as "the chart is
+  // broken" when 12 of 13 sites are fine.
+  const [status, setStatus] = useState<'loading' | 'idle' | 'partial' | 'error'>('loading');
 
   useEffect(() => {
     let cancelled = false;
@@ -199,14 +208,33 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       if (!cancelled) setStatus('loading');
     });
 
-    Promise.all(
+    // `allSettled`, not `all` — the backend (`victron/vrm_shape.py`'s own
+    // docstring: "one site's failure must not break a fleet-wide
+    // aggregate") already isolates a single site's VRM timeout/rate-limit
+    // from every other site's data; `Promise.all` was throwing that away by
+    // failing the WHOLE chart the instant any one of 13+ concurrent VRM
+    // calls hiccuped, which is exactly the "Couldn't refresh" seen live far
+    // more often than a real fleet-wide outage would explain. A rejected
+    // site now contributes an all-null shape instead, same shape the
+    // backend itself already returns for a site with nothing usable.
+    Promise.allSettled(
       siteIds.map((siteId) =>
         fetch(`/api/admin/pipeline/vrm-fleet/site-shape?siteId=${encodeURIComponent(siteId)}&range=${range}`)
           .then((r) => (r.ok ? (r.json() as Promise<ShapeData>) : Promise.reject(new Error('fetch failed'))))
       )
     )
-      .then((results) => {
+      .then((settled) => {
         if (cancelled) return;
+        const failedCount = settled.filter((s) => s.status === 'rejected').length;
+        if (failedCount === settled.length) {
+          // Every site failed — genuinely nothing to show. Leave `ready` as
+          // whatever it already was (the last successfully loaded data, or
+          // still null on a first load) rather than overwriting it with a
+          // blank all-null aggregate.
+          setStatus('error');
+          return;
+        }
+        const results = settled.map((s) => (s.status === 'fulfilled' ? s.value : { ..._EMPTY_SHAPE }));
         setReady({
           data: {
             solar: sumSeries(results.map((r) => r.solar)),
@@ -216,11 +244,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
           },
           gridAvailableCount: results.filter((r) => r.grid.some((v) => v !== null)).length,
         });
-        setStatus('idle');
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setStatus('error');
+        setStatus(failedCount === 0 ? 'idle' : 'partial');
       });
 
     return () => {
@@ -246,28 +270,32 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       if (!cancelled) setSavingsStatus('loading');
     });
 
-    Promise.all(
+    // Same `allSettled` fix as the shape fetch above — one site's savings
+    // call failing must not blank out every other site's real number.
+    Promise.allSettled(
       siteIds.map((siteId) =>
         fetch(`/api/admin/pipeline/vrm-fleet/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
           .then((r) => (r.ok ? (r.json() as Promise<SiteSavingsOut>) : Promise.reject(new Error('fetch failed'))))
       )
-    )
-      .then((results) => {
-        if (cancelled) return;
-        const byCurrency = new Map<string, number>();
-        let sitesWithSavings = 0;
-        for (const r of results) {
-          if (r.amount === null || r.currency === null) continue;
-          sitesWithSavings += 1;
-          byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.amount);
-        }
-        setSavings({ groups: [...byCurrency.entries()].map(([currency, amount]) => ({ currency, amount })), sitesWithSavings });
-        setSavingsStatus('idle');
-      })
-      .catch(() => {
-        if (cancelled) return;
+    ).then((settled) => {
+      if (cancelled) return;
+      const failedCount = settled.filter((s) => s.status === 'rejected').length;
+      if (failedCount === settled.length) {
         setSavingsStatus('error');
-      });
+        return;
+      }
+      const byCurrency = new Map<string, number>();
+      let sitesWithSavings = 0;
+      for (const s of settled) {
+        if (s.status !== 'fulfilled') continue;
+        const r = s.value;
+        if (r.amount === null || r.currency === null) continue;
+        sitesWithSavings += 1;
+        byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.amount);
+      }
+      setSavings({ groups: [...byCurrency.entries()].map(([currency, amount]) => ({ currency, amount })), sitesWithSavings });
+      setSavingsStatus('idle');
+    });
 
     return () => {
       cancelled = true;
@@ -343,6 +371,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
         {ready && scale && (
           <>
             {status === 'loading' && <div className={styles.updating}>Updating…</div>}
+            {status === 'partial' && <div className={styles.updating}>Some sites couldn&apos;t be reached — totals may be undercounted.</div>}
             {status === 'error' && <div className={styles.updating}>Couldn&apos;t refresh — showing the last loaded data.</div>}
             <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
               <line x1="0" y1={ZERO_Y} x2={W} y2={ZERO_Y} stroke="var(--line)" strokeWidth={1.2} />
