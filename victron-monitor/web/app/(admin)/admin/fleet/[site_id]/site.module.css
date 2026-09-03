@@ -172,6 +172,69 @@
   margin-bottom: 18px;
 }
 
+/* Health score badge + reasoning — same 4-tier thresholds/colors as
+   fleet/page.tsx's own healthClass()/.healthBadge (duplicated here rather
+   than cross-imported, same "each page module restates its own small badge
+   set" precedent .stressBadge/.stress_* below already follows). */
+.healthRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.healthBadge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+}
+.healthExcellent {
+  background: rgba(63, 191, 143, 0.16);
+  color: var(--good);
+}
+.healthGood {
+  background: rgba(7, 137, 212, 0.16);
+  color: var(--victron-glow);
+}
+.healthFair {
+  background: rgba(242, 169, 59, 0.18);
+  color: var(--signal);
+}
+.healthPoor {
+  background: rgba(201, 64, 64, 0.18);
+  color: #e37b7b;
+}
+.healthNone {
+  background: var(--panel-2);
+  color: var(--mute);
+}
+.healthStatus {
+  font-size: 13px;
+  color: var(--paper-dim);
+}
+.healthNotes {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.healthNotes li {
+  font-size: 12.5px;
+  color: var(--paper-dim);
+  padding-left: 14px;
+  position: relative;
+}
+.healthNotes li::before {
+  content: '\2022';
+  position: absolute;
+  left: 0;
+  color: var(--mute);
+}
+
 .metaRow {
   display: flex;
   flex-wrap: wrap;

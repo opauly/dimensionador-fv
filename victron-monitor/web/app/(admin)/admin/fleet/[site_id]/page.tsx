@@ -27,6 +27,25 @@ function formatWatts(w: number | null): string {
   return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
 }
 
+// Same 4-tier thresholds as fleet/page.tsx's own healthClass() — a health
+// score must read the same way everywhere it's shown.
+function healthClass(score: number | null): string {
+  if (score === null) return styles.healthNone;
+  if (score >= 90) return styles.healthExcellent;
+  if (score >= 80) return styles.healthGood;
+  if (score >= 70) return styles.healthFair;
+  return styles.healthPoor;
+}
+
+// `vrm.compute_daily_health()` (migration 012) joins its reasons with
+// "; " — split back into a list so "High grid dependency; Low battery
+// voltage (45.2V)" reads as two distinct, scannable points instead of one
+// run-on sentence.
+function healthNotesList(notes: string | null): string[] {
+  if (!notes) return [];
+  return notes.split(';').map((n) => n.trim()).filter(Boolean);
+}
+
 // "America/Costa_Rica" -> "Costa Rica" — the site's own configured
 // timezone (its Cerbo's local time), shown so it's clear this timestamp is
 // NOT the viewer's own clock, unlike the fleet-wide badge on `/admin/fleet`.
@@ -154,6 +173,21 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
             From <code>vrm.energy_daily</code> / <code>vrm.daily_health</code> — already computed, no new capture
             needed.
           </div>
+
+          <div className={styles.healthRow}>
+            <span className={`${styles.healthBadge} ${healthClass(site.health_score)}`}>
+              {site.health_score === null ? '—' : `${site.health_score}/100`}
+            </span>
+            {site.health_status && <span className={styles.healthStatus}>{site.health_status}</span>}
+          </div>
+          {site.health_score !== null && (
+            <ul className={styles.healthNotes}>
+              {healthNotesList(site.health_notes).map((note, i) => (
+                <li key={i}>{note}</li>
+              ))}
+            </ul>
+          )}
+
           <Gauge
             pct={site.self_sufficiency_pct}
             color="var(--good)"

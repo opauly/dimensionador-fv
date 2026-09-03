@@ -287,6 +287,11 @@ export type FleetOverviewRow = {
   health_score: number | null;
   health_status: string | null;
   health_date: string | null;
+  // The reasons behind health_score, straight from vrm.compute_daily_health()
+  // (migration 012) — semicolon-joined (e.g. "High grid dependency; Low
+  // battery voltage (45.2V)"), or "Normal operation" when nothing was
+  // penalized. `null` only when there's no daily_health row at all yet.
+  health_notes: string | null;
   // Live-only (2026-09-01): counts categories present in the MOST RECENT
   // live snapshot's raw.alarms/raw.critical_alerts, nothing else — not an
   // episode/history count. A category active yesterday but cleared by the
@@ -604,7 +609,13 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     // are computed independently a few lines down, mirroring
     // `weekly_report.py`'s own already-correct guard instead of trusting
     // that column.
-    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, grid_dependency_pct').in('site_id', siteIds).gte('date', lookbackDate),
+    // `notes` — the same human-readable reasons `vrm.compute_daily_health()`
+    // (migration 012) already builds while scoring (e.g. "High grid
+    // dependency; Low battery voltage (45.2V)") and stores right alongside
+    // the score, previously computed and thrown away by never being
+    // selected here. Surfaced on the per-site page so a low score isn't
+    // just a bare number with no way to tell what actually needs attention.
+    admin.schema('vrm').from('daily_health').select('site_id, date, health_score, health_status, grid_dependency_pct, notes').in('site_id', siteIds).gte('date', lookbackDate),
     // `alarm_events`/`critical_alerts` deliberately NOT fetched here any
     // more (2026-09-01) — this is a live monitoring dashboard, and those
     // tables are the HISTORICAL sync's own record (through yesterday only,
@@ -644,11 +655,11 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   // dump_types for the same date) keeps the higher health_score, same
   // dedup rule `database/vrm_report_db.py:bucket_health_days()` already
   // uses for exactly this "which row represents this date" question.
-  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null }>();
+  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null; notes: string | null }>();
   for (const row of health ?? []) {
     const existing = latestHealthBySite.get(row.site_id);
     if (!existing || row.date > existing.date || (row.date === existing.date && (row.health_score ?? -1) > (existing.health_score ?? -1))) {
-      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, grid_dependency_pct: row.grid_dependency_pct });
+      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, grid_dependency_pct: row.grid_dependency_pct, notes: row.notes });
     }
   }
 
@@ -723,6 +734,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       health_score: latestHealth?.health_score ?? null,
       health_status: latestHealth?.health_status ?? null,
       health_date: latestHealth?.date ?? null,
+      health_notes: latestHealth?.notes ?? null,
       active_alarms: _activeCountFromRaw(snapshot?.raw, 'alarms'),
       active_critical_alerts: _activeCountFromRaw(snapshot?.raw, 'critical_alerts'),
       live_captured_at: snapshot?.captured_at ?? null,

@@ -73,7 +73,10 @@ function row(site: FleetOverviewRow) {
         </div>
       </td>
       <td>
-        <span className={`${styles.healthBadge} ${healthClass(site.health_score)}`}>
+        <span
+          className={`${styles.healthBadge} ${healthClass(site.health_score)}`}
+          title={site.health_notes ? site.health_notes.split(';').map((n) => n.trim()).filter(Boolean).join('\n') : undefined}
+        >
           {site.health_score === null ? '—' : `${site.health_score}/100`}
         </span>
         {site.health_date && <div className={styles.sub}>as of {site.health_date}</div>}
