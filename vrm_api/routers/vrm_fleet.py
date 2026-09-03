@@ -61,7 +61,7 @@ and `tab_upload()`'s CSV path already use) are called directly, matching
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -70,6 +70,7 @@ from pydantic import ValidationError
 from database.supabase_client import get_client
 
 from victron import ingest as victron_ingest
+from victron.anomaly_silence import check_unexpected_silence
 from victron.vrm_live import fetch_live_snapshot
 from victron.vrm_remote import VrmRemoteAuthError, VrmRemoteClient
 from victron.vrm_series import DEFAULT_TZ_NAME
@@ -112,6 +113,11 @@ router = APIRouter(prefix="/v1/vrm-fleet", tags=["vrm-fleet"],
                    dependencies=[Depends(require_pipeline_key)])
 
 SCHEMA = "vrm"
+
+# See post_refresh_snapshots()'s own comment on energy_daily_by_site — kept
+# equal to victron/anomaly_silence.py's own _LOOKBACK_DAYS by convention,
+# not by import (a plain int literal, not worth a cross-module constant).
+_ANOMALY_ENERGY_LOOKBACK_DAYS = 30
 
 
 def _t(name: str):
@@ -414,10 +420,51 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
     present right now" read, not an episode/history record. The historical
     sync still owns `vrm.alarm_events`/`vrm.critical_alerts` for report/
     health-score purposes, untouched by this.
+
+    Unexpected-silence anomaly detection added 2026-09-03 (Fleet Dashboard
+    Phase 3b, PLAN_PHASE19_FLEET_P3.md §3 — see `victron/anomaly_silence.py`'s
+    own module docstring for the full check). Same "reuse data this sweep
+    already fetched, zero extra VRM API cost" reasoning as the live-alarm
+    work above; this one is DB-only (no VRM call of its own), it just needs
+    each site's PREVIOUS `site_snapshots` reading (for the 2-consecutive-
+    check debounce) fetched BEFORE this loop's own upserts overwrite it, and
+    each site's recent `vrm.energy_daily` rows (for the "should be
+    producing" gate) — both batched in ONE query each for the whole sweep,
+    not per-site, same "one query for the whole page, not N+1" discipline
+    `_monitoring_suggestions_by_installation()` already uses above.
     """
     sites = (_t("sites").select("site_id, customer_id, vrm_installation_id, timezone")
             .eq("source", "vrm_api").eq("active", True).execute().data or [])
     admin_token = os.environ.get("VRM_ADMIN_TOKEN")
+    site_ids = [s["site_id"] for s in sites]
+
+    # Snapshot BEFORE this sweep's own upserts overwrite it — the "previous
+    # check" half of anomaly_silence.py's debounce. `site_snapshots` is
+    # latest-only (migration 031), so this is the only place that prior
+    # reading is ever visible; read once for every site up front rather than
+    # per-site inside the loop below (which would race against that same
+    # site's own upsert a few lines down).
+    previous_snapshots_by_site: dict[str, dict] = {}
+    if site_ids:
+        prev_rows = (_t("site_snapshots").select("site_id, captured_at, pv_power_w")
+                    .in_("site_id", site_ids).execute().data or [])
+        previous_snapshots_by_site = {r["site_id"]: r for r in prev_rows}
+
+    # This sweep's own view of each site's "should be producing" history —
+    # see anomaly_silence.py's module docstring for exactly what this gates.
+    # `_ANOMALY_ENERGY_LOOKBACK_DAYS` mirrors that module's own
+    # `_LOOKBACK_DAYS` constant (restated here rather than imported so this
+    # query's window can't silently drift out of sync with what that module
+    # actually reads — same "OK to duplicate a small literal across a module
+    # boundary, not OK to duplicate real logic" call this codebase already
+    # makes elsewhere).
+    energy_daily_by_site: dict[str, list[dict]] = {}
+    if site_ids:
+        lookback_date = (datetime.now(timezone.utc) - timedelta(days=_ANOMALY_ENERGY_LOOKBACK_DAYS)).date().isoformat()
+        energy_rows = (_t("energy_daily").select("site_id, pv_kwh, complete_day")
+                      .in_("site_id", site_ids).gte("date", lookback_date).execute().data or [])
+        for row in energy_rows:
+            energy_daily_by_site.setdefault(row["site_id"], []).append(row)
 
     refreshed, skipped, failed = 0, 0, 0
     for site in sites:
@@ -464,6 +511,29 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }).execute()
         refreshed += 1
+
+        # Unexpected-silence check (Fleet Dashboard Phase 3b) — reads the
+        # PRE-upsert previous reading captured above, and this site's own
+        # recent energy_daily history; writes at most one vrm.site_anomalies
+        # row. A failure here must not un-count a snapshot refresh that
+        # already succeeded (nor stop the rest of the sweep) — logged and
+        # skipped, same per-site isolation this whole loop already uses for
+        # every other step.
+        try:
+            previous = previous_snapshots_by_site.get(site["site_id"])
+            check_unexpected_silence(
+                _t("site_anomalies"),
+                site_id=site["site_id"],
+                tz_name=site.get("timezone"),
+                new_pv_power_w=snapshot.get("pv_power_w"),
+                new_captured_at=snapshot.get("captured_at"),
+                previous_pv_power_w=previous.get("pv_power_w") if previous else None,
+                previous_captured_at=previous.get("captured_at") if previous else None,
+                energy_daily_rows=energy_daily_by_site.get(site["site_id"], []),
+            )
+        except Exception:  # noqa: BLE001 — see this block's own comment above
+            logger.exception("vrm-fleet refresh-snapshots: unexpected_silence check failed for site %s",
+                             site["site_id"])
 
     return FleetSnapshotsRefreshOut(checked=len(sites), refreshed=refreshed, skipped=skipped, failed=failed)
 

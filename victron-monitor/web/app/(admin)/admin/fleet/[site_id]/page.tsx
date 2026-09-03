@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireAdmin } from '@/lib/server/auth';
-import { getFleetSiteDetail } from '@/lib/server/db/admin';
+import { getFleetSiteDetail, type SiteAnomalyRow } from '@/lib/server/db/admin';
 import { formatDateTimeInZone } from '@/lib/dates';
 import { FlowDiagram } from '../FlowDiagram';
 import { Gauge } from '../Gauge';
@@ -52,6 +52,35 @@ function healthNotesList(notes: string | null): string[] {
 function tzLabel(tz: string | null): string {
   if (!tz) return 'CR';
   return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
+}
+
+// Fleet Dashboard Phase 3b (2026-09-03) — `vrm.site_anomalies.anomaly_type`'s
+// full vocabulary (migration 038), even though only 'unexpected_silence' is
+// ever written today (3a quiet_drift / 3c underperformance are future
+// phases, PLAN_PHASE19_FLEET_P3.md §1) — labeling every known value now
+// means this page needs no change when those ship.
+function anomalyTypeLabel(type: string): string {
+  if (type === 'unexpected_silence') return 'Unexpected silence';
+  if (type === 'quiet_drift') return 'Quiet drift';
+  if (type === 'underperformance') return 'Underperformance';
+  return type;
+}
+
+// `detail`'s shape is anomaly_type-specific (the migration's own COMMENT ON
+// COLUMN) — only 'unexpected_silence''s own keys
+// (victron/anomaly_silence.py:_build_detail()) are understood here; any
+// other/unknown shape falls back to raw JSON rather than showing nothing.
+function anomalyDetailSummary(a: SiteAnomalyRow): string {
+  const detail = a.detail ?? {};
+  if (a.anomaly_type === 'unexpected_silence') {
+    const minutes = typeof detail.minutes_silent === 'number' ? Math.round(detail.minutes_silent) : null;
+    const window = typeof detail.expected_window_local === 'string' ? detail.expected_window_local : null;
+    const parts: string[] = [];
+    if (minutes !== null) parts.push(`Silent for ${minutes} min`);
+    if (window) parts.push(`expected productive window ${window} local`);
+    return parts.length > 0 ? parts.join(' — ') : 'No detail recorded';
+  }
+  return JSON.stringify(detail);
 }
 
 export default async function AdminFleetSitePage({ params }: { params: Promise<{ site_id: string }> }) {
@@ -207,6 +236,26 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
             desc={site.dod_pct === null ? 'Not enough data yet' : `Battery cycled ${site.dod_pct}% overnight`}
           />
         </div>
+      </div>
+
+      <div className={styles.gaugeCard} style={{ marginBottom: 24 }}>
+        <h2>Anomalies</h2>
+        <div className={styles.cardSub}>
+          Deterministic checks against this site&apos;s own history (Fleet Dashboard Phase 3b) — not folded into the
+          health score above. Checked every ~15 minutes, same sweep as the live reading.
+        </div>
+        {site.active_anomalies.length === 0 ? (
+          <p className={styles.sub}>No active anomalies.</p>
+        ) : (
+          <ul className={styles.healthNotes}>
+            {site.active_anomalies.map((a) => (
+              <li key={a.id}>
+                <strong>{anomalyTypeLabel(a.anomaly_type)}</strong> — {anomalyDetailSummary(a)} (since{' '}
+                {formatDateTimeInZone(a.detected_at, site.timezone, 'en-US')})
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <PeriodStatsPanel week={site.week} month={site.month} />

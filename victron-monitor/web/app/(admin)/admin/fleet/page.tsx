@@ -330,6 +330,22 @@ export default async function AdminFleetPage() {
 
         <details className={styles.rollupCard}>
           <summary>
+            <span className={styles.rollupLabel}>Active anomalies</span>
+            <span className={styles.rollupValue}>{overview.rollup.total_active_anomalies}</span>
+            <span className={styles.rollupDesc}>Unexpected silence during a site&apos;s own productive hours</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sites.map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <span>{s.display_name}</span>
+                <span>{s.active_anomalies.length}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
             <span className={styles.rollupLabel}>Outages (7d)</span>
             <span className={styles.rollupValue}>
               {outageSites.length}/{sites.length}

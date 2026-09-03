@@ -267,6 +267,20 @@ export async function listAllSites(): Promise<SiteRecord[]> {
 // rather than adding a new FastAPI router just to proxy the same read.
 export type FleetConnectionStatus = 'online' | 'stale' | 'never_synced';
 
+// `vrm.site_anomalies` (migration 038) — see FleetOverviewRow.active_anomalies'
+// own comment. `detail`'s shape varies by `anomaly_type` (the table's own
+// COMMENT ON COLUMN says so) — kept as a loose record here rather than a
+// narrower type per known anomaly_type, since only one (`unexpected_silence`)
+// exists today and its own shape may still change during tuning (PLAN_PHASE19_FLEET_P3.md
+// §7 item 1: thresholds are "starting points, not locked").
+export type SiteAnomalyRow = {
+  id: string;
+  site_id: string;
+  anomaly_type: string;
+  detected_at: string;
+  detail: Record<string, unknown> | null;
+};
+
 export type FleetOverviewRow = {
   site_id: string;
   display_name: string;
@@ -300,6 +314,14 @@ export type FleetOverviewRow = {
   // snapshot yet, same as every other live-only field here.
   active_alarms: number;
   active_critical_alerts: number;
+  // Fleet Dashboard Phase 3b (2026-09-03) — every OPEN (`cleared_at IS
+  // NULL`) `vrm.site_anomalies` row for this site (migration 038), written
+  // by `victron/anomaly_silence.py` via the same ~15-minute
+  // `refresh-snapshots` sweep. Only `anomaly_type: 'unexpected_silence'` is
+  // ever written as of this phase — `quiet_drift`/`underperformance` (3a/3c)
+  // share the table's vocabulary but nothing writes them yet. `[]`, never
+  // omitted, when this site has no open anomaly.
+  active_anomalies: SiteAnomalyRow[];
   // Fleet Dashboard Phase 2 (2026-08-30) — from `vrm.site_snapshots`
   // (migration 031), upserted by the ~15-minute `refresh-snapshots` sweep
   // (`vrm_api/routers/vrm_fleet.py`). `null` for every field, including
@@ -365,6 +387,9 @@ export type FleetOverview = {
     avg_health_score: number | null;
     total_active_alarms: number;
     total_active_critical_alerts: number;
+    // Fleet Dashboard Phase 3b — count of OPEN vrm.site_anomalies rows
+    // across every site, any anomaly_type (today: only unexpected_silence).
+    total_active_anomalies: number;
   };
 };
 
@@ -561,7 +586,8 @@ function _activeCountFromRaw(raw: unknown, key: 'alarms' | 'critical_alerts'): n
 }
 
 /** Every `source='vrm_api'` site's current status in one call — connection
- * freshness, latest health score, and open alarm/critical-alert counts.
+ * freshness, latest health score, open alarm/critical-alert counts, and
+ * (2026-09-03) open `vrm.site_anomalies` rows (Fleet Dashboard Phase 3b).
  * `monitoring`-schema (Node-RED) sites are deliberately excluded: they have
  * no `vrm.daily_health` row shaped the same way, and mixing the two would
  * make "average fleet health" mean two different things silently. */
@@ -592,7 +618,13 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   const siteIds = siteRows.map((s) => s.site_id);
 
   if (siteIds.length === 0) {
-    return { sites: [], rollup: { site_count: 0, online_count: 0, avg_health_score: null, total_active_alarms: 0, total_active_critical_alerts: 0 } };
+    return {
+      sites: [],
+      rollup: {
+        site_count: 0, online_count: 0, avg_health_score: null,
+        total_active_alarms: 0, total_active_critical_alerts: 0, total_active_anomalies: 0,
+      },
+    };
   }
 
   const [
@@ -600,16 +632,16 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     { data: health, error: healthError },
     { data: snapshots, error: snapshotsError },
     { data: energyDaily, error: energyDailyError },
+    { data: anomalies, error: anomaliesError },
   ] = await Promise.all([
     admin.schema('vrm').from('customers').select('id, name'),
-    // `battery_cycles` deliberately NOT selected here — migration 037 fixed
-    // `vrm.compute_daily_health()` to store NULL (not a fabricated 0.0) when
-    // `battery_discharge_kwh` is NULL (every VRM-API site, by design — see
-    // `energyDaily`'s own comment below), but this dashboard still computes
-    // cycles independently a few lines down rather than trusting the stored
-    // column, mirroring `weekly_report.py`'s own guard — one shared
-    // client-side computation for both, instead of relying on the SQL
-    // function to have applied the same all-null guard correctly.
+    // `battery_cycles` deliberately NOT selected here — `vrm.compute_daily_health()`
+    // (migration 012) still does `COALESCE(battery_discharge_kwh, 0) / capacity`,
+    // fabricating a confident 0.0 for every VRM-API site (that field is
+    // NULL there by design — see `energyDaily`'s own comment below). Cycles
+    // are computed independently a few lines down, mirroring
+    // `weekly_report.py`'s own already-correct guard instead of trusting
+    // that column.
     // `notes` — the same human-readable reasons `vrm.compute_daily_health()`
     // (migration 012) already builds while scoring (e.g. "High grid
     // dependency; Low battery voltage (45.2V)") and stores right alongside
@@ -643,14 +675,29 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     admin.schema('vrm').from('energy_daily')
       .select('site_id, date, pv_kwh, grid_kwh, grid_export_kwh, pv_kwp_snapshot, min_soc, max_soc, avg_soc, outage_count, outage_minutes, battery_charge_kwh, battery_discharge_kwh')
       .in('site_id', siteIds).gte('date', lookback30Date),
+    // Fleet Dashboard Phase 3b (migration 038) — every OPEN anomaly across
+    // every site in one query, same "no bulk vrm_api endpoint exists for
+    // this and none is needed, direct Postgres read" precedent every other
+    // query in this function already follows (see this function's own
+    // header comment).
+    admin.schema('vrm').from('site_anomalies')
+      .select('id, site_id, anomaly_type, detected_at, detail')
+      .in('site_id', siteIds).is('cleared_at', null).order('detected_at', { ascending: false }),
   ]);
   if (customersError) throw customersError;
   if (healthError) throw healthError;
   if (snapshotsError) throw snapshotsError;
   if (energyDailyError) throw energyDailyError;
+  if (anomaliesError) throw anomaliesError;
 
   const customerNameById = new Map((customers ?? []).map((c) => [c.id as string, c.name as string]));
   const snapshotBySite = new Map((snapshots ?? []).map((s) => [s.site_id as string, s]));
+  const anomaliesBySite = new Map<string, SiteAnomalyRow[]>();
+  for (const row of (anomalies ?? []) as SiteAnomalyRow[]) {
+    const list = anomaliesBySite.get(row.site_id) ?? [];
+    list.push(row);
+    anomaliesBySite.set(row.site_id, list);
+  }
 
   // Latest daily_health row per site — but "latest" means the most recent
   // COMPLETE day, not just the highest date. A row whose own notes say
@@ -754,6 +801,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
       health_notes: latestHealth?.notes ?? null,
       active_alarms: _activeCountFromRaw(snapshot?.raw, 'alarms'),
       active_critical_alerts: _activeCountFromRaw(snapshot?.raw, 'critical_alerts'),
+      active_anomalies: anomaliesBySite.get(s.site_id) ?? [],
       live_captured_at: snapshot?.captured_at ?? null,
       live_pv_power_w: snapshot?.pv_power_w ?? null,
       live_load_power_w: snapshot?.load_power_w ?? null,
@@ -782,6 +830,7 @@ export async function getFleetOverview(): Promise<FleetOverview> {
     avg_health_score: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
     total_active_alarms: rows.reduce((a, r) => a + r.active_alarms, 0),
     total_active_critical_alerts: rows.reduce((a, r) => a + r.active_critical_alerts, 0),
+    total_active_anomalies: rows.reduce((a, r) => a + r.active_anomalies.length, 0),
   };
 
   return { sites: rows, rollup };
