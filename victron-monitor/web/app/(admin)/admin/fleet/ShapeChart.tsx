@@ -15,6 +15,37 @@
 import { useEffect, useMemo, useState } from 'react';
 import styles from './shape-chart.module.css';
 
+// Every site's site-shape/site-savings call gets its own fresh
+// `VrmRemoteClient` on the backend (`victron/vrm_remote.py`'s own docstring:
+// "one instance = one bounded budget for one run... never a long-lived
+// singleton shared across runs"). That client's self-imposed 2 req/s pacer
+// only throttles calls *within* one instance — it does nothing to stop many
+// instances hitting Victron's API concurrently through the same shared
+// admin token, which is exactly what firing all `siteIds` at once does.
+// `MAX_CONCURRENT_SITE_FETCHES` caps how many of those requests are ever
+// in flight together, so 13+ sites sharing one token don't collectively
+// blow past Victron's real (if not fully documented) rate limit — worst
+// on "month" (interval="15mins" over 30 days is the widest, slowest
+// per-request window, maximizing how many instances overlap at once).
+const MAX_CONCURRENT_SITE_FETCHES = 3;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      try {
+        results[i] = { status: 'fulfilled', value: await fn(items[i]) };
+      } catch (err) {
+        results[i] = { status: 'rejected', reason: err };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 type Range = 'today' | 'week' | 'month';
 type SeriesKey = 'solar' | 'load' | 'grid' | 'battery';
 
@@ -208,20 +239,21 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       if (!cancelled) setStatus('loading');
     });
 
-    // `allSettled`, not `all` — the backend (`victron/vrm_shape.py`'s own
-    // docstring: "one site's failure must not break a fleet-wide
-    // aggregate") already isolates a single site's VRM timeout/rate-limit
-    // from every other site's data; `Promise.all` was throwing that away by
-    // failing the WHOLE chart the instant any one of 13+ concurrent VRM
-    // calls hiccuped, which is exactly the "Couldn't refresh" seen live far
-    // more often than a real fleet-wide outage would explain. A rejected
-    // site now contributes an all-null shape instead, same shape the
-    // backend itself already returns for a site with nothing usable.
-    Promise.allSettled(
-      siteIds.map((siteId) =>
-        fetch(`/api/admin/pipeline/vrm-fleet/site-shape?siteId=${encodeURIComponent(siteId)}&range=${range}`)
-          .then((r) => (r.ok ? (r.json() as Promise<ShapeData>) : Promise.reject(new Error('fetch failed'))))
-      )
+    // Concurrency-limited, not a bare `Promise.allSettled(siteIds.map(...))`
+    // — see `MAX_CONCURRENT_SITE_FETCHES`'s own comment: many sites sharing
+    // one VRM admin token defeats that token's per-instance rate pacer if
+    // every site's request fires at once. `allSettled` semantics (not
+    // `all`) still apply within the limited pool — the backend
+    // (`victron/vrm_shape.py`'s own docstring: "one site's failure must not
+    // break a fleet-wide aggregate") already isolates a single site's VRM
+    // timeout/rate-limit from every other site's data; failing the WHOLE
+    // chart the instant any one call hiccups was the "Couldn't refresh"
+    // seen live far more often than a real fleet-wide outage would explain.
+    // A rejected site now contributes an all-null shape instead, same shape
+    // the backend itself already returns for a site with nothing usable.
+    mapWithConcurrency(siteIds, MAX_CONCURRENT_SITE_FETCHES, (siteId) =>
+      fetch(`/api/admin/pipeline/vrm-fleet/site-shape?siteId=${encodeURIComponent(siteId)}&range=${range}`)
+        .then((r) => (r.ok ? (r.json() as Promise<ShapeData>) : Promise.reject(new Error('fetch failed'))))
     )
       .then((settled) => {
         if (cancelled) return;
@@ -270,13 +302,13 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
       if (!cancelled) setSavingsStatus('loading');
     });
 
-    // Same `allSettled` fix as the shape fetch above — one site's savings
-    // call failing must not blank out every other site's real number.
-    Promise.allSettled(
-      siteIds.map((siteId) =>
-        fetch(`/api/admin/pipeline/vrm-fleet/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
-          .then((r) => (r.ok ? (r.json() as Promise<SiteSavingsOut>) : Promise.reject(new Error('fetch failed'))))
-      )
+    // Same concurrency-limited `allSettled` fix as the shape fetch above —
+    // one site's savings call failing must not blank out every other
+    // site's real number, and this shares the same VRM admin token so it
+    // needs the same throttle against the same rate-limit risk.
+    mapWithConcurrency(siteIds, MAX_CONCURRENT_SITE_FETCHES, (siteId) =>
+      fetch(`/api/admin/pipeline/vrm-fleet/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
+        .then((r) => (r.ok ? (r.json() as Promise<SiteSavingsOut>) : Promise.reject(new Error('fetch failed'))))
     ).then((settled) => {
       if (cancelled) return;
       const failedCount = settled.filter((s) => s.status === 'rejected').length;
