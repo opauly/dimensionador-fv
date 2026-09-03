@@ -651,16 +651,32 @@ export async function getFleetOverview(): Promise<FleetOverview> {
   const customerNameById = new Map((customers ?? []).map((c) => [c.id as string, c.name as string]));
   const snapshotBySite = new Map((snapshots ?? []).map((s) => [s.site_id as string, s]));
 
-  // Latest daily_health row per site — highest `date` wins; a tie (two
+  // Latest daily_health row per site — but "latest" means the most recent
+  // COMPLETE day, not just the highest date. A row whose own notes say
+  // "Partial day" was scored from an incomplete sync window (confirmed live
+  // 2026-09-03: a backfill bounded by "now" at sync time rather than that
+  // date's own midnight-to-midnight span — every site's rows for two
+  // different, fully-elapsed past dates all showed the identical ~21h
+  // coverage, which is a sync-timing artifact, not real per-site outages)
+  // — not the concrete, trustworthy signal a customer/admin should see as
+  // "the" site's health. Highest-date-among-complete-days wins; a tie (two
   // dump_types for the same date) keeps the higher health_score, same
   // dedup rule `database/vrm_report_db.py:bucket_health_days()` already
-  // uses for exactly this "which row represents this date" question.
-  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null; notes: string | null }>();
+  // uses for exactly this "which row represents this date" question. Only
+  // falls back to a partial row when literally nothing complete exists yet
+  // in the lookback window (a brand-new site with no full day scored yet) —
+  // better to show something, clearly labeled as partial, than nothing.
+  const healthRowsBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null; notes: string | null }[]>();
   for (const row of health ?? []) {
-    const existing = latestHealthBySite.get(row.site_id);
-    if (!existing || row.date > existing.date || (row.date === existing.date && (row.health_score ?? -1) > (existing.health_score ?? -1))) {
-      latestHealthBySite.set(row.site_id, { date: row.date, health_score: row.health_score, health_status: row.health_status, grid_dependency_pct: row.grid_dependency_pct, notes: row.notes });
-    }
+    const list = healthRowsBySite.get(row.site_id) ?? [];
+    list.push({ date: row.date, health_score: row.health_score, health_status: row.health_status, grid_dependency_pct: row.grid_dependency_pct, notes: row.notes });
+    healthRowsBySite.set(row.site_id, list);
+  }
+  const isPartialDay = (notes: string | null) => !!notes && notes.includes('Partial day');
+  const latestHealthBySite = new Map<string, { date: string; health_score: number | null; health_status: string | null; grid_dependency_pct: number | null; notes: string | null }>();
+  for (const [siteId, rows] of healthRowsBySite) {
+    rows.sort((a, b) => (a.date === b.date ? (b.health_score ?? -1) - (a.health_score ?? -1) : b.date.localeCompare(a.date)));
+    latestHealthBySite.set(siteId, rows.find((r) => !isPartialDay(r.notes)) ?? rows[0]);
   }
 
   // Latest energy_daily row per site — same "highest date wins" rule.
