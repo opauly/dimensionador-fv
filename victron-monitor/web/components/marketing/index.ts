@@ -4,6 +4,7 @@ export { Readout } from './Readout/Readout';
 export { FlowSteps } from './FlowSteps/FlowSteps';
 export { ModuleGrid } from './ModuleGrid/ModuleGrid';
 export { ReportPreview } from './ReportPreview/ReportPreview';
+export { LiveDashboard } from './LiveDashboard/LiveDashboard';
 export { Pricing } from './Pricing/Pricing';
 export type { PricingProps } from './Pricing/Pricing';
 export { Footer } from './Footer/Footer';

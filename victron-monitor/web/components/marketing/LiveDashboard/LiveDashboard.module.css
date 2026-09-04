@@ -1,0 +1,125 @@
+/* Same two-column shape as ReportPreview.module.css's own .grid, plus the
+   readout content classes ReadOut.module.css defines for itself (Panel's
+   own comment: "surface only, content stays with marketing" — every
+   marketing component using variant="readout" defines its own head/stats/
+   narr classes rather than importing another component's CSS module). */
+
+.grid {
+  display: grid;
+  grid-template-columns: 0.72fr 1.28fr;
+  gap: 56px;
+  align-items: start;
+}
+
+/* AI Insight list — a name + a full-sentence description per item, so a
+   space-between row (like ReportPreview's .miniList, built for short
+   values) doesn't fit; a stacked block per item does. */
+.insightList {
+  list-style: none;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.insightList li {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.insightList li:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.insightList b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--paper);
+  margin-bottom: 3px;
+}
+.insightList span {
+  font-size: 13.5px;
+  color: var(--paper-dim);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--mute);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 7px 14px 7px 10px;
+}
+.badge a {
+  color: var(--victron-glow);
+  text-decoration: none;
+}
+.badge a:hover {
+  text-decoration: underline;
+}
+.badgeDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--victron-glow);
+  box-shadow: 0 0 6px 1px var(--victron-glow);
+}
+
+/* Readout panel content (mirrors Readout.module.css's own head/site/
+   liveEyebrow/stats/narr — see this file's own header comment on why it's
+   restated here rather than shared). */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.site {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper-dim);
+}
+.site b {
+  color: #fff;
+  font-weight: 500;
+}
+.liveEyebrow {
+  font-size: 10.5px;
+}
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.narr {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--paper-dim);
+  border-left: 2px solid var(--victron);
+  padding-left: 13px;
+  font-style: italic;
+}
+.narr b {
+  color: var(--paper);
+  font-style: normal;
+  font-weight: 500;
+}
+
+@media (max-width: 920px) {
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+}
+@media (max-width: 560px) {
+  .stats {
+    gap: 10px;
+  }
+}

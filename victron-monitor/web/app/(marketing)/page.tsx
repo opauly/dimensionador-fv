@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { FlowSteps, Footer, Hero, ModuleGrid, Nav, Pricing, ReportPreview } from '@/components/marketing';
+import { FlowSteps, Footer, Hero, LiveDashboard, ModuleGrid, Nav, Pricing, ReportPreview } from '@/components/marketing';
 import { getFeaturedSelfServePlanIds } from '@/lib/server/db/signup';
 
 // Page-specific metadata layered on top of the root layout's defaults
@@ -44,6 +44,7 @@ export default async function MarketingPage() {
       <FlowSteps />
       <ModuleGrid />
       <ReportPreview />
+      <LiveDashboard />
       <Pricing starterPlanId={featuredPlans.starter} growthPlanId={featuredPlans.growth} />
       <Footer />
     </>

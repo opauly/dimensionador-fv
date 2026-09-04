@@ -46,6 +46,7 @@ export function Nav() {
           <Link href="/#how">How it works</Link>
           <Link href="/#modules">What&apos;s inside</Link>
           <Link href="/#preview">Sample report</Link>
+          <Link href="/#dashboard">Live Dashboard</Link>
           <Link href="/#pricing">Pricing</Link>
           {/* padding override matches the template's own inline
               style="padding:9px 16px;" on these two nav .btn.ghost links —

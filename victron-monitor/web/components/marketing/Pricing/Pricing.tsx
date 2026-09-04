@@ -37,7 +37,7 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
       <div className="wrap">
         <SectionHead
           eyebrow="Pricing"
-          lede="One flat rate per tier — no per-site math, no surprise bill as you add sites. Or skip the commitment and try one report first."
+          lede="One flat rate per tier — no per-site math, no surprise bill as you add sites. Reports for every tier; live monitoring from Growth up. Or skip the commitment and try one report first."
         >
           Subscribe one system,
           <br />
@@ -123,6 +123,10 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
               </p>
               <ul className={styles.features}>
                 <li className={styles.carry}>Everything in Starter, plus</li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  Live dashboard with AI-powered insights <em>(Beta)</em>
+                </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
                   Up to 300 scheduled reports / mo
