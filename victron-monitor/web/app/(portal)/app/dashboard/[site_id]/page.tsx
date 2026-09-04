@@ -1,25 +1,28 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireAdmin } from '@/lib/server/auth';
-import { getFleetSiteDetail, type SiteAnomalyRow } from '@/lib/server/db/admin';
+import { requireCustomer } from '@/lib/server/auth';
+import { getCustomer, getDashboardAccess, getCustomerFleetSiteDetail, type SiteAnomalyRow } from '@/lib/server/db';
 import { formatDateTimeInZone } from '@/lib/dates';
-import { FlowDiagram } from '../FlowDiagram';
-import { Gauge } from '../Gauge';
-import { PeriodStatsPanel } from '../PeriodStatsPanel';
-import { ShapeChart } from '../ShapeChart';
+import { t } from '@/lib/i18n/strings';
+import { Panel, Button } from '@/components/ui';
+import { FlowDiagram } from '../../../../(admin)/admin/fleet/FlowDiagram';
+import { Gauge } from '../../../../(admin)/admin/fleet/Gauge';
+import { PeriodStatsPanel } from '../../../../(admin)/admin/fleet/PeriodStatsPanel';
+import { ShapeChart } from '../../../../(admin)/admin/fleet/ShapeChart';
+import dashboardStyles from '../dashboard.module.css';
 import styles from './site.module.css';
 
-// `/admin/fleet/[site_id]` — the "Vista de proyecto" drill-down IE-0499's
-// own requirements doc calls for (§9), reached from the "View live →" link
-// on `/admin/fleet`'s table (Fleet Dashboard Phase 2.5). Same data source
-// as the fleet table (`getFleetSiteDetail()`, itself built on
-// `getFleetOverview()`) — this page never computes an indicator the fleet
-// table doesn't already compute the same way, by construction.
+// `/app/dashboard/[site_id]` — the customer-facing counterpart of
+// `/admin/fleet/[site_id]` (2026-09-03). Same data source
+// (`getCustomerFleetSiteDetail()`, itself built on `getCustomerFleetOverview()`
+// -> `fleetOverviewCore.ts`) so this page never computes an indicator the
+// list page doesn't already compute the same way, by construction — and
+// never diverges from what `/admin/fleet/[site_id]` shows for the same
+// site, since both ultimately read the same shared core.
 export async function generateMetadata({ params }: { params: Promise<{ site_id: string }> }): Promise<Metadata> {
   const { site_id } = await params;
-  const site = await getFleetSiteDetail(site_id);
-  return { title: site ? `${site.display_name} — VRM Fleet` : 'Site not found — VRM Fleet' };
+  return { title: `Dashboard — ${site_id}` };
 }
 
 function formatWatts(w: number | null): string {
@@ -27,8 +30,6 @@ function formatWatts(w: number | null): string {
   return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
 }
 
-// Same 4-tier thresholds as fleet/page.tsx's own healthClass() — a health
-// score must read the same way everywhere it's shown.
 function healthClass(score: number | null): string {
   if (score === null) return styles.healthNone;
   if (score >= 90) return styles.healthExcellent;
@@ -37,67 +38,42 @@ function healthClass(score: number | null): string {
   return styles.healthPoor;
 }
 
-// `vrm.compute_daily_health()` (migration 012) joins its reasons with
-// "; " — split back into a list so "High grid dependency; Low battery
-// voltage (45.2V)" reads as two distinct, scannable points instead of one
-// run-on sentence.
 function healthNotesList(notes: string | null): string[] {
   if (!notes) return [];
   return notes.split(';').map((n) => n.trim()).filter(Boolean);
 }
 
-// "America/Costa_Rica" -> "Costa Rica" — the site's own configured
-// timezone (its Cerbo's local time), shown so it's clear this timestamp is
-// NOT the viewer's own clock, unlike the fleet-wide badge on `/admin/fleet`.
 function tzLabel(tz: string | null): string {
   if (!tz) return 'CR';
   return tz.split('/').pop()?.replace(/_/g, ' ') ?? tz;
 }
 
-// Fleet Dashboard Phase 3 (2026-09-03) — `vrm.site_anomalies.anomaly_type`'s
-// full vocabulary (migration 038/040). All four now write real rows: 3b
-// (unexpected_silence, ~15-min live sweep), 3a (quiet_drift), 3c
-// (underperformance), and 3d (incomplete_charging) (all three daily checks
-// wired into `POST /v1/vrm-fleet/detect-anomalies-daily`).
-//
-// `incomplete_charging` was missing from this function until 2026-09-03
-// (found while building the customer-facing `/app/dashboard` counterpart,
-// which needed the same label mapping and exposed the gap) — it fell
-// through to the raw `type` string (`"incomplete_charging"`, unreadable)
-// instead of a real label. Fixed here and added fresh in the customer
-// version at the same time.
-function anomalyTypeLabel(type: string): string {
-  if (type === 'unexpected_silence') return 'Unexpected silence';
-  if (type === 'quiet_drift') return 'Quiet drift';
-  if (type === 'underperformance') return 'Underperformance';
-  if (type === 'incomplete_charging') return 'Incomplete charging';
+// Fleet Dashboard Phase 3's full vocabulary (migration 038/040) — all four
+// checks now write real rows. `incomplete_charging` (3d) was missing from
+// the admin version's own copy of this function until this same change
+// (2026-09-03 drive-by fix, see admin/fleet/[site_id]/page.tsx) — fixed in
+// both places at once so they can't drift again.
+function anomalyTypeLabel(lang: Parameters<typeof t>[0], type: string): string {
+  if (type === 'unexpected_silence') return t(lang, 'dashboard_anomaly_unexpected_silence');
+  if (type === 'quiet_drift') return t(lang, 'dashboard_anomaly_quiet_drift');
+  if (type === 'underperformance') return t(lang, 'dashboard_anomaly_underperformance');
+  if (type === 'incomplete_charging') return t(lang, 'dashboard_anomaly_incomplete_charging');
   return type;
 }
 
-// `detail`'s shape is anomaly_type-specific (the migration's own COMMENT ON
-// COLUMN) — each known anomaly_type has its own keys
-// (victron/anomaly_silence.py:_build_detail() for unexpected_silence;
-// victron/anomaly_drift.py's own detail dicts for quiet_drift/
-// underperformance); any other/unknown shape falls back to raw JSON rather
-// than showing nothing.
-// Plain calendar dates in `detail` (e.g. "2026-08-30") come from Python's
-// `date.isoformat()` — no time-of-day, no timezone component. Running them
-// through `formatDateTimeInZone` (built for real timestamps) would parse
-// the bare date as UTC midnight and could shift the displayed day by one
-// depending on the site's own timezone, so this is a separate, deliberately
-// UTC-pinned formatter for date-only values.
+// `detail`'s shape is anomaly_type-specific — see
+// `admin/fleet/[site_id]/page.tsx`'s own copy of this function for the full
+// per-field reasoning (kept in English here even on this bilingual page;
+// see this file's own header comment on that scope line). Plain calendar
+// dates (e.g. "2026-08-30") are UTC-pinned deliberately — see the admin
+// version's own comment on why a real-timestamp formatter would shift the
+// displayed day.
 function formatPlainDate(isoDate: string): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return isoDate;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
-// Natural-language summary for a non-technical reader, with the real
-// numbers a support conversation would actually need attached — not just a
-// derived ratio. Every field read here is optional (typeof-guarded): a
-// `detail` shape from an older row, or a partial update, must not crash
-// this page, same "one bad field can't break the render" posture the rest
-// of this pipeline's live-data code already takes.
 function anomalyDetailSummary(a: SiteAnomalyRow): string {
   const detail = a.detail ?? {};
   if (a.anomaly_type === 'unexpected_silence') {
@@ -156,23 +132,38 @@ function anomalyDetailSummary(a: SiteAnomalyRow): string {
   return JSON.stringify(detail);
 }
 
-export default async function AdminFleetSitePage({ params }: { params: Promise<{ site_id: string }> }) {
-  await requireAdmin();
+export default async function CustomerDashboardSitePage({ params }: { params: Promise<{ site_id: string }> }) {
+  const session = await requireCustomer();
+  const lang = session.uiLanguage;
   const { site_id } = await params;
-  const site = await getFleetSiteDetail(site_id);
+
+  const customer = await getCustomer(session.customerId);
+  const allowed = await getDashboardAccess(customer);
+  if (!allowed) {
+    return (
+      <div>
+        <h1>{t(lang, 'dashboard_title')}</h1>
+        <Panel className={dashboardStyles.upsell}>
+          <h2>{t(lang, 'dashboard_upsell_title')}</h2>
+          <p>{t(lang, 'dashboard_upsell_body')}</p>
+          <Button href="/app/billing">{t(lang, 'dashboard_upsell_cta')}</Button>
+        </Panel>
+      </div>
+    );
+  }
+
+  const site = await getCustomerFleetSiteDetail(session.customerId, site_id);
   if (!site) notFound();
 
   return (
     <div>
       <div className={styles.crumb}>
-        <Link href="/admin/fleet">VRM Fleet</Link> / <span>{site.display_name}</span>
+        <Link href="/app/dashboard">{t(lang, 'dashboard_title')}</Link> / <span>{site.display_name}</span>
       </div>
       <div className={styles.pagehead}>
         <div>
           <h1>{site.display_name}</h1>
-          <div className={styles.sub}>
-            {site.customer_name} · {site.system_type} system
-          </div>
+          <div className={styles.sub}>{site.system_type} system</div>
         </div>
         {site.live_captured_at && (
           <div className={styles.live}>
@@ -271,10 +262,7 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
 
         <div className={styles.gaugeCard}>
           <h2>{site.health_metrics_date ? `As of ${site.health_metrics_date}` : 'Today, at a glance'}</h2>
-          <div className={styles.cardSub}>
-            From <code>vrm.energy_daily</code> / <code>vrm.daily_health</code> — already computed, no new capture
-            needed.
-          </div>
+          <div className={styles.cardSub}>Health score, self-sufficiency, self-consumption, and depth of discharge.</div>
 
           <div className={styles.healthRow}>
             <span className={`${styles.healthBadge} ${healthClass(site.health_score)}`}>
@@ -312,19 +300,17 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
       </div>
 
       <div className={styles.gaugeCard} style={{ marginBottom: 24 }}>
-        <h2>Anomalies</h2>
-        <div className={styles.cardSub}>
-          Deterministic checks against this site&apos;s own history (Fleet Dashboard Phase 3) — not folded into the
-          health score above. Unexpected silence is checked every ~15 minutes, same sweep as the live reading; quiet
-          drift and underperformance vs. design are checked daily.
-        </div>
+        <h2>
+          {t(lang, 'dashboard_ai_insights_title')} <span className={styles.betaBadge}>{t(lang, 'dashboard_beta_badge')}</span>
+        </h2>
+        <div className={styles.cardSub}>{t(lang, 'dashboard_ai_insights_intro')}</div>
         {site.active_anomalies.length === 0 ? (
-          <p className={styles.sub}>No active anomalies.</p>
+          <p className={styles.sub}>{t(lang, 'dashboard_no_active_anomalies')}</p>
         ) : (
           <ul className={styles.healthNotes}>
             {site.active_anomalies.map((a) => (
               <li key={a.id}>
-                <strong>{anomalyTypeLabel(a.anomaly_type)}</strong> — {anomalyDetailSummary(a)} (since{' '}
+                <strong>{anomalyTypeLabel(lang, a.anomaly_type)}</strong> — {anomalyDetailSummary(a)} (since{' '}
                 {formatDateTimeInZone(a.detected_at, site.timezone, 'en-US')})
               </li>
             ))}
@@ -338,6 +324,7 @@ export default async function AdminFleetSitePage({ params }: { params: Promise<{
         siteIds={[site.site_id]}
         title="Site shape"
         cardSub="This site's real 15-min VRM data, fetched on demand — nothing here is stored."
+        apiBasePath="/api/pipeline/vrm-fleet"
       />
 
       <div className={styles.metaRow}>

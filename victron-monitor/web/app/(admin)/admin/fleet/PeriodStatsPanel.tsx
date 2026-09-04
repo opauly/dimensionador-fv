@@ -7,7 +7,7 @@
 // `lib/server/db/admin.ts:getFleetOverview()` and handed down as props;
 // switching is just picking which of the two to render.
 import { useState } from 'react';
-import type { BatteryStress, PeriodIndicators } from '@/lib/server/db/admin';
+import type { BatteryStress, PeriodIndicators } from '@/lib/server/db/fleetOverviewCore';
 import styles from './[site_id]/site.module.css';
 
 type Period = 'week' | 'month';

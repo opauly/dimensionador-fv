@@ -86,6 +86,39 @@ export async function getWhiteLabelAllowed(plan: string | null): Promise<boolean
 }
 
 /**
+ * `vrm.plan_limits.live_dashboard` for `vrm.customers.plan` (migration 041),
+ * same resolution rule as `getWhiteLabelAllowed()` above. Used by
+ * `lib/server/db/fleetDashboard.ts:getDashboardAccess()` — the UI-facing
+ * half of the gate for the customer-facing Fleet Dashboard (`/app/dashboard`,
+ * 2026-09-03); hiding the page is UX, never the control — the
+ * `/api/pipeline/vrm-fleet/*` routes it depends on re-check this too.
+ */
+export async function getDashboardAllowed(plan: string | null): Promise<boolean> {
+  const key = plan || DEFAULT_PLAN_KEY;
+
+  const { data, error } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('plan_limits')
+    .select('live_dashboard')
+    .eq('plan_key', key)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data.live_dashboard;
+
+  const { data: defaultRow, error: defaultError } = await getSupabaseAdmin()
+    .schema('vrm')
+    .from('plan_limits')
+    .select('live_dashboard')
+    .eq('plan_key', DEFAULT_PLAN_KEY)
+    .maybeSingle();
+  if (defaultError) throw defaultError;
+  if (!defaultRow) {
+    throw new Error("vrm.plan_limits has no 'default' row — migration 026 must be applied.");
+  }
+  return defaultRow.live_dashboard;
+}
+
+/**
  * Cap B's own ceiling (PLAN_PHASE17.md §2.2 point 2, §2.3) — the number
  * `SitesManager.tsx`'s bulk "apply to all sites" action shows *before*
  * confirming (§3.7, §2.2 "moment 1"). This is a UI-side PROJECTION only, an

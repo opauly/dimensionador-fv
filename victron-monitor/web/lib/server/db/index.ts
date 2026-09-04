@@ -35,11 +35,21 @@ export type { VrmLinkStatusOut, VrmLinkSiteStatus } from './vrmLink';
 export { getBillingStatus, getBillingPlans, getBillingInvoices } from './billing';
 export type { BillingStatusOut, BillingPlanOut, BillingInvoiceOut, BillingInvoicesOut, BillingAddressIn } from './billing';
 
-export { getManualReportLimits, getWhiteLabelAllowed, getScheduledCapLimit, estimatedReportsPerPeriod } from './reportLimits';
+export { getManualReportLimits, getWhiteLabelAllowed, getDashboardAllowed, getScheduledCapLimit, estimatedReportsPerPeriod } from './reportLimits';
 export type { ManualReportLimits } from './reportLimits';
 
 export { getBranding, getBrandingAccess, updateBranding, BrandingNotAllowed } from './branding';
 export type { BrandingFields } from './branding';
+
+export { getDashboardAccess, getCustomerFleetOverview, getCustomerFleetSiteDetail } from './fleetDashboard';
+export type {
+  FleetConnectionStatus,
+  SiteAnomalyRow,
+  FleetOverviewRow,
+  FleetOverview,
+  BatteryStress,
+  PeriodIndicators,
+} from './fleetOverviewCore';
 
 export { listReportRuns, getReportRunScoped } from './reportRuns';
 export type { ReportRunRecord } from './reportRuns';

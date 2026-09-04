@@ -208,7 +208,24 @@ function sumSeries(all: (number | null)[][]): (number | null)[] {
 
 type Ready = { data: ShapeData; gridAvailableCount: number };
 
-export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; title: string; cardSub: string }) {
+export function ShapeChart({
+  siteIds,
+  title,
+  cardSub,
+  // Defaults to the admin route — the customer-facing `/app/dashboard`
+  // (2026-09-03) passes `/api/pipeline/vrm-fleet` instead, the tenant-scoped
+  // counterpart that additionally checks `assertOwnsSite()`/
+  // `getDashboardAccess()` before returning anything (see that route's own
+  // comment). Same component either way: the only real difference between
+  // the two dashboards' shape chart is which backend endpoint is allowed to
+  // answer for a given siteId, which is exactly what this prop parameterizes.
+  apiBasePath = '/api/admin/pipeline/vrm-fleet',
+}: {
+  siteIds: string[];
+  title: string;
+  cardSub: string;
+  apiBasePath?: string;
+}) {
   const [range, setRange] = useState<Range>('today');
   const [checked, setChecked] = useState<Record<SeriesKey, boolean>>({ solar: true, load: true, grid: false, battery: false });
   // `ready` is the last successfully loaded data — kept on screen across a
@@ -252,7 +269,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
     // A rejected site now contributes an all-null shape instead, same shape
     // the backend itself already returns for a site with nothing usable.
     mapWithConcurrency(siteIds, MAX_CONCURRENT_SITE_FETCHES, (siteId) =>
-      fetch(`/api/admin/pipeline/vrm-fleet/site-shape?siteId=${encodeURIComponent(siteId)}&range=${range}`)
+      fetch(`${apiBasePath}/site-shape?siteId=${encodeURIComponent(siteId)}&range=${range}`)
         .then((r) => (r.ok ? (r.json() as Promise<ShapeData>) : Promise.reject(new Error('fetch failed'))))
     )
       .then((settled) => {
@@ -307,7 +324,7 @@ export function ShapeChart({ siteIds, title, cardSub }: { siteIds: string[]; tit
     // site's real number, and this shares the same VRM admin token so it
     // needs the same throttle against the same rate-limit risk.
     mapWithConcurrency(siteIds, MAX_CONCURRENT_SITE_FETCHES, (siteId) =>
-      fetch(`/api/admin/pipeline/vrm-fleet/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
+      fetch(`${apiBasePath}/site-savings?siteId=${encodeURIComponent(siteId)}&range=${range}`)
         .then((r) => (r.ok ? (r.json() as Promise<SiteSavingsOut>) : Promise.reject(new Error('fetch failed'))))
     ).then((settled) => {
       if (cancelled) return;

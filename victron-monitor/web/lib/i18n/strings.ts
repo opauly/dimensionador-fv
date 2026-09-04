@@ -46,6 +46,7 @@ export const STRINGS = {
     nav_reports: 'Reports',
     nav_upload: 'Upload CSV',
     nav_my_sites: 'My Sites',
+    nav_dashboard: 'Dashboard',
     nav_branding: 'Branding',
     nav_profile: 'Profile',
     nav_billing: 'Billing',
@@ -619,6 +620,26 @@ export const STRINGS = {
     branding_preview_period_label: 'Report period',
     branding_preview_powered_by: 'Monitoring powered by',
 
+    // ── Dashboard (customer-facing Fleet Dashboard, /app/dashboard,
+    // 2026-09-03 — Growth/Fleet only, see lib/server/db/fleetDashboard.ts) ─
+    dashboard_title: 'Dashboard',
+    dashboard_beta_badge: 'Beta',
+    dashboard_intro: 'Live status, health scores, and AI-powered insights for your sites — updated every ~15 minutes.',
+    dashboard_upsell_title: 'Available on Growth and Fleet',
+    dashboard_upsell_body:
+      'The live dashboard — real-time PV/load/battery readings, health scores, and AI-powered anomaly detection across your sites — is included on the Growth and Fleet plans.',
+    dashboard_upsell_cta: 'View plans',
+    dashboard_no_sites: "You don't have any VRM-connected sites yet.",
+    dashboard_ai_insights_title: 'AI Insights',
+    dashboard_ai_insights_intro:
+      "Deterministic checks against each site's own history — not a model. Thresholds are still being tuned, so treat a flag here as a prompt to look closer, not a certainty.",
+    dashboard_anomaly_unexpected_silence: 'Unexpected silence',
+    dashboard_anomaly_quiet_drift: 'Quiet drift',
+    dashboard_anomaly_underperformance: 'Underperformance',
+    dashboard_anomaly_incomplete_charging: 'Incomplete charging',
+    dashboard_view_site: 'View site →',
+    dashboard_no_active_anomalies: 'No active anomalies.',
+
     // ── Help (customer-facing guide + FAQ + support contact) ────────────
     help_title: 'Help & guide',
     help_intro:
@@ -717,6 +738,7 @@ export const STRINGS = {
     nav_reports: 'Reportes',
     nav_upload: 'Cargar CSV',
     nav_my_sites: 'Mis sitios',
+    nav_dashboard: 'Panel',
     nav_branding: 'Marca',
     nav_profile: 'Perfil',
     nav_billing: 'Facturación',
@@ -1255,6 +1277,25 @@ export const STRINGS = {
     branding_preview_label: 'Vista previa',
     branding_preview_period_label: 'Período del reporte',
     branding_preview_powered_by: 'Monitoreo por',
+
+    // ── Dashboard (Fleet Dashboard para clientes, /app/dashboard) ───────
+    dashboard_title: 'Panel',
+    dashboard_beta_badge: 'Beta',
+    dashboard_intro: 'Estado en vivo, puntajes de salud e insights con IA para tus sitios — actualizado cada ~15 minutos.',
+    dashboard_upsell_title: 'Disponible en Growth y Fleet',
+    dashboard_upsell_body:
+      'El panel en vivo — lecturas de PV/consumo/batería en tiempo real, puntajes de salud y detección de anomalías con IA en todos tus sitios — está incluido en los planes Growth y Fleet.',
+    dashboard_upsell_cta: 'Ver planes',
+    dashboard_no_sites: 'Todavía no tenés sitios conectados por VRM.',
+    dashboard_ai_insights_title: 'Insights de IA',
+    dashboard_ai_insights_intro:
+      'Chequeos determinísticos contra el propio historial de cada sitio — no es un modelo. Los umbrales todavía se están ajustando, así que una alerta acá es una señal para revisar más de cerca, no una certeza.',
+    dashboard_anomaly_unexpected_silence: 'Silencio inesperado',
+    dashboard_anomaly_quiet_drift: 'Caída sostenida',
+    dashboard_anomaly_underperformance: 'Bajo rendimiento',
+    dashboard_anomaly_incomplete_charging: 'Carga incompleta',
+    dashboard_view_site: 'Ver sitio →',
+    dashboard_no_active_anomalies: 'Sin anomalías activas.',
 
     // ── Help (customer-facing guide + FAQ + support contact) ────────────
     help_title: 'Ayuda y guía',
