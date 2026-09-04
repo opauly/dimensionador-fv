@@ -250,6 +250,16 @@ section.band { background: var(--ink-2); border-top: 1px solid var(--line); bord
 }
 .preview-badge .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--victron-glow); box-shadow: 0 0 6px 1px var(--victron-glow); }
 
+/* AI Insight list (#dashboard) — mini-list's own label/value row assumes a
+   short value ("PDF, 2 pages"); these are full-sentence descriptions, so a
+   stacked name-then-description block reads better than forcing a
+   space-between row. Same type tokens as the rest of the page. */
+.insight-list { list-style: none; margin-top: 20px; display: flex; flex-direction: column; gap: 14px; }
+.insight-list li { padding-top: 14px; border-top: 1px solid var(--line); }
+.insight-list li:first-child { padding-top: 0; border-top: none; }
+.insight-list b { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--paper); margin-bottom: 3px; }
+.insight-list span { font-size: 13.5px; color: var(--paper-dim); }
+
 /* real rendered report screenshot, in a document-frame chrome */
 .report-frame {
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
@@ -422,6 +432,7 @@ footer .flinks a:hover { color: var(--victron-glow); }
       <a href="#how">How it works</a>
       <a href="#modules">What's inside</a>
       <a href="#preview">Sample report</a>
+      <a href="#dashboard">Live Dashboard</a>
       <a href="#pricing">Pricing</a>
       <a href="#cta" class="btn ghost" style="padding:9px 16px;">Request access</a>
     </div>
@@ -624,12 +635,55 @@ footer .flinks a:hover { color: var(--victron-glow); }
   </div>
 </section>
 
+<section id="dashboard" class="band">
+  <div class="wrap preview-grid">
+    <div>
+      <span class="eyebrow"><span class="dot"></span>Live Dashboard</span>
+      <h2>The report tells you last week.<br>This shows you right now.</h2>
+      <p style="margin-top:16px;">Real-time solar, load, battery, and grid readings — refreshed every ~15 minutes. A health score that's always current, not just once a week. And AI Insights: four deterministic checks against each site's own history, not a model.</p>
+      <ul class="insight-list">
+        <li><b>Unexpected silence</b><span>A real zero during hours this site has historically produced</span></li>
+        <li><b>Quiet drift</b><span>Trending down vs. this site's own recent baseline</span></li>
+        <li><b>Underperformance</b><span>Below what this site's installed size should deliver</span></li>
+        <li><b>Incomplete charging</b><span>Battery hasn't reached full charge in 5+ of the last 7 days</span></li>
+      </ul>
+      <span class="preview-badge"><span class="dot"></span>Included with Growth and Fleet — <a href="#pricing" style="color:inherit;">Starter stays report-only</a></span>
+    </div>
+
+    <div class="readout" role="img" aria-label="Sample live dashboard readout showing 12 of 12 sites online, average health score 91 out of 100, 88 percent self-sufficiency, and 1 active AI Insight">
+      <div class="readout-head">
+        <span class="site">SAMPLE FLEET <b>· LIVE VIEW</b></span>
+        <span class="eyebrow amber" style="font-size:10.5px;"><span class="dot"></span>Live</span>
+      </div>
+      <div class="readout-stats">
+        <div class="stat good">
+          <div class="lbl">Sites online</div>
+          <div class="val">12<small>/12</small></div>
+        </div>
+        <div class="stat good">
+          <div class="lbl">Avg health score</div>
+          <div class="val">91<small>/100</small></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Self-sufficiency</div>
+          <div class="val">88<small>%</small></div>
+        </div>
+        <div class="stat">
+          <div class="lbl">Active AI Insights</div>
+          <div class="val">1<small>flag</small></div>
+        </div>
+      </div>
+      <p class="readout-narr">"1 site flagged for <b>quiet drift</b> — generating 18% below its own recent baseline. Everything else is within its normal range."</p>
+    </div>
+  </div>
+</section>
+
 <section id="pricing">
   <div class="wrap">
     <div class="section-head">
       <span class="eyebrow"><span class="dot"></span>Pricing</span>
       <h2>Subscribe one system,<br>or a whole fleet.</h2>
-      <p>No seats, no per-user math — you pay for what's actually being monitored, whether that's your own home or fifty customers. Or skip the commitment and try one report first.</p>
+      <p>No seats, no per-user math — you pay for what's actually being monitored, whether that's a weekly report for your own home or live monitoring across fifty customer sites. Or skip the commitment and try one report first.</p>
     </div>
 
     <div class="mode-toggle-row">
@@ -881,6 +935,7 @@ footer .flinks a:hover { color: var(--victron-glow); }
       <a href="mailto:proyectos@paulyco.com">proyectos@paulyco.com</a>
       <a href="#how">How it works</a>
       <a href="#modules">What's inside</a>
+      <a href="#dashboard">Live Dashboard</a>
     </div>
   </div>
 </footer>
