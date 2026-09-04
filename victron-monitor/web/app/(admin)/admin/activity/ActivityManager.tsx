@@ -92,21 +92,21 @@ export function ActivityManager({
       <ActivityTable ingestions={filteredIngestions} customerNameBySite={customerNameBySite} displayNameBySite={displayNameBySite} />
 
       <h2 style={{ marginTop: 36 }}>Billing events</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         ONVO webhook deliveries (<code>vrm.billing_events</code>), most recent first — including rejected-secret
         deliveries, the only visible evidence an attempted forgery happened.
       </p>
       <BillingEventsTable events={filteredBillingEvents} customerNameById={customerNameById} />
 
       <h2 style={{ marginTop: 36 }}>Recent signups</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         Public <code>/signup</code> requests (<code>vrm.signup_requests</code>), most recent first — the only place a
         spam wave is visible before it shows up in the Resend bill.
       </p>
       <RecentSignupsPanel signups={filteredSignups} customerNameById={customerNameById} />
 
       <h2 style={{ marginTop: 36 }}>Scheduled reports</h2>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         <code>vrm.report_runs</code>, most recent first — the detection surface for &quot;the scheduled-reports
         cron silently stopped&quot; (a GitHub Actions workflow with no commits for 60 days gets disabled
         automatically). &quot;Run due reports now&quot; is the same manual spot-check a <code>workflow_dispatch</code>{' '}

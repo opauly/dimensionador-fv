@@ -40,7 +40,7 @@ export default async function AdminActivityPage() {
   return (
     <div>
       <h1>Activity</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         Upload log (<code>vrm.ingestion_log</code>) across all customers, most recent first.
       </p>
       <ActivityManager

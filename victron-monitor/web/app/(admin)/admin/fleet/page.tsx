@@ -229,7 +229,7 @@ export default async function AdminFleetPage() {
       <Link href="/admin/vrm-fleet" className={styles.manageLink}>
         + Link a new installation →
       </Link>
-      <p className={`mono ${styles.pageDesc}`}>
+      <p className="mono page-desc">
         Every <code>source=&apos;vrm_api&apos;</code> site&apos;s current status — the most recent{' '}
         <code>vrm.daily_health</code>/<code>vrm.energy_daily</code> figures, any alarm/critical-alert episode still
         open, and a live PV/load/battery/SOC reading refreshed every ~15 minutes by{' '}

@@ -27,7 +27,7 @@ export default async function AdminReportsPage() {
   return (
     <div>
       <h1>Reports</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         The same generator serves both schemas: <code>vrm</code> (external customers, from CSV) and{' '}
         <code>monitoring</code> (Oscar&apos;s own sites with Cerbo GX and Node-RED).
       </p>

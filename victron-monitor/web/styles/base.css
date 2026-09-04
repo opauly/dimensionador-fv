@@ -96,6 +96,16 @@ p.lede {
 .mono {
   font-family: var(--font-mono);
 }
+/* The admin section's own page-intro paragraph (every `/admin/**` page has
+   one, right under its <h1>) opts out of the 60ch cap above — these are
+   dashboard captions, not landing-page prose, and should use the full
+   content width like the rest of the page. */
+.page-desc {
+  max-width: none;
+  font-size: 12px;
+  color: var(--paper-dim);
+  margin-bottom: 20px;
+}
 .num {
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);

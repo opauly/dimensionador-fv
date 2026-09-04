@@ -24,7 +24,7 @@ export default async function AdminUploadPage() {
   return (
     <div>
       <h1>Upload VRM CSV export</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         Upload a file on behalf of a customer. The file is processed and a summary is shown before anything is written to the
         database.
       </p>

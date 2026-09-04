@@ -19,7 +19,7 @@ export default async function AdminSitesPage() {
   return (
     <div>
       <h1>Sites</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         All sites in the <code>vrm</code> schema, across every customer.
       </p>
       <AdminSitesManager sites={sites} customers={customers} />

@@ -54,13 +54,6 @@
   }
 }
 
-.pageDesc {
-  max-width: none;
-  color: var(--paper-dim);
-  font-size: 12px;
-  margin-bottom: 20px;
-}
-
 .rollupHint {
   font-size: 12px;
   color: var(--mute);

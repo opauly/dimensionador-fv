@@ -34,7 +34,7 @@ export default async function AdminVrmFleetPage() {
         <Link href="/admin/fleet" style={{ color: 'var(--mute)' }}>VRM Fleet</Link> / <span style={{ color: 'var(--paper-dim)' }}>Link installations</span>
       </div>
       <h1>Link installations</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         Installations visible with Pauly&amp;Co&apos;s VRM token. Link any of them to a customer (existing or new) and sync
         their data directly from the VRM API, without exporting or uploading a CSV. A linked, active site is picked up
         automatically by the live dashboard&apos;s ~15-minute snapshot sync — no separate step.

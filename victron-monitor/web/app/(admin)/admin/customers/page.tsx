@@ -19,7 +19,7 @@ export default async function AdminCustomersPage() {
   return (
     <div>
       <h1>Customers</h1>
-      <p className="mono" style={{ color: 'var(--paper-dim)', marginBottom: 20 }}>
+      <p className="mono page-desc">
         External customers of the VRM Monitor product — a schema separate from <code>clients</code> (Pauly &amp; Co&apos;s CRM)
         and from the <code>monitoring</code> schema of Oscar&apos;s own sites.
       </p>
