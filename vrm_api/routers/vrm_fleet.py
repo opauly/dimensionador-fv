@@ -70,6 +70,7 @@ from pydantic import ValidationError
 from database.supabase_client import get_client
 
 from victron import ingest as victron_ingest
+from victron.anomaly_battery import check_incomplete_charging
 from victron.anomaly_drift import check_quiet_drift, check_underperformance
 from victron.anomaly_silence import check_unexpected_silence
 from victron.vrm_live import fetch_live_snapshot
@@ -553,12 +554,16 @@ def post_refresh_snapshots() -> FleetSnapshotsRefreshOut:
 @router.post("/detect-anomalies-daily", response_model=FleetAnomalyDetectDailyOut)
 def post_detect_anomalies_daily() -> FleetAnomalyDetectDailyOut:
     """Fleet Dashboard Phase 3a ("quiet drift") + Phase 3c ("underperformance
-    vs. design") anomaly detection, added 2026-09-03
-    (PLAN_PHASE19_FLEET_P3.md §4/§5 — see `victron/anomaly_drift.py`'s own
-    module docstring for the full checks). Sibling of
-    `post_refresh_snapshots()` above (same per-site isolation, same "one
-    query for the whole sweep, not N+1" batching of `vrm.energy_daily`), but
-    NOT hooked into that ~15-minute live sweep — 3a/3c read `vrm.
+    vs. design") + Phase 3d ("incomplete charging") anomaly detection —
+    3a/3c added 2026-09-03 (PLAN_PHASE19_FLEET_P3.md §4/§5 — see
+    `victron/anomaly_drift.py`'s own module docstring for the full checks),
+    3d added the same day once those three were live (see
+    `victron/anomaly_battery.py`'s own module docstring — needs no PVGIS/
+    coordinates at all, unlike 3a/3c, so it runs for every site regardless
+    of the lat/lon gate below). Sibling of `post_refresh_snapshots()` above
+    (same per-site isolation, same "one query for the whole sweep, not N+1"
+    batching of `vrm.energy_daily`), but NOT hooked into that ~15-minute
+    live sweep — all three read `vrm.
     energy_daily`, which is daily-grain and only actually advances once per
     site per day (via `vrm_sync.py:post_run_due()`'s own due-ness gate), so
     running this on the same 15-minute cadence would just recompute an
@@ -586,16 +591,18 @@ def post_detect_anomalies_daily() -> FleetAnomalyDetectDailyOut:
     `post_refresh_snapshots()` above and `vrm_sync.py:post_run_due()` both
     already use for exactly this reason.
     """
-    sites = (_t("sites").select("site_id, latitude, longitude, pv_kwp")
+    sites = (_t("sites").select("site_id, system_type, latitude, longitude, pv_kwp")
             .eq("source", "vrm_api").eq("active", True).execute().data or [])
     site_ids = [s["site_id"] for s in sites]
 
     # One query for the whole sweep, not per-site — same discipline
     # post_refresh_snapshots() already uses for its own energy_daily_by_site.
+    # `battery_reached_float` is only for check_incomplete_charging() (3d)
+    # below — the PVGIS-based checks never touch it.
     energy_daily_by_site: dict[str, list[dict]] = {}
     if site_ids:
         lookback_date = (datetime.now(timezone.utc) - timedelta(days=_DRIFT_ENERGY_LOOKBACK_DAYS)).date().isoformat()
-        energy_rows = (_t("energy_daily").select("site_id, date, pv_kwh, complete_day")
+        energy_rows = (_t("energy_daily").select("site_id, date, pv_kwh, complete_day, battery_reached_float")
                       .in_("site_id", site_ids).gte("date", lookback_date).execute().data or [])
         for row in energy_rows:
             energy_daily_by_site.setdefault(row["site_id"], []).append(row)
@@ -603,11 +610,23 @@ def post_detect_anomalies_daily() -> FleetAnomalyDetectDailyOut:
     checked, skipped, failed = 0, 0, 0
     for site in sites:
         checked += 1
-        lat, lon = site.get("latitude"), site.get("longitude")
         rows = energy_daily_by_site.get(site["site_id"], [])
 
+        # 3d (incomplete_charging) needs no PVGIS/coordinates at all — runs
+        # for every site regardless of the lat/lon gate below, unlike 3a/3c.
+        try:
+            check_incomplete_charging(
+                _t("site_anomalies"), site_id=site["site_id"],
+                system_type=site.get("system_type") or "hybrid", energy_daily_rows=rows,
+            )
+        except Exception:  # noqa: BLE001 — one site's failure must not stop the rest of the sweep
+            logger.exception("vrm-fleet detect-anomalies-daily: incomplete_charging check failed for site %s",
+                             site["site_id"])
+            failed += 1
+
+        lat, lon = site.get("latitude"), site.get("longitude")
         if lat is None or lon is None:
-            # Neither check can derive a PVGIS shape at all without
+            # Neither PVGIS-based check can derive a shape at all without
             # coordinates -- both 3a (which otherwise needs no pv_kwp) and
             # 3c are equally blocked. Counted once here rather than twice
             # (once per check) so "skipped" means "this site, this sweep,"

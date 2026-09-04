@@ -270,10 +270,11 @@ export type FleetConnectionStatus = 'online' | 'stale' | 'never_synced';
 // `vrm.site_anomalies` (migration 038) — see FleetOverviewRow.active_anomalies'
 // own comment. `detail`'s shape varies by `anomaly_type` (the table's own
 // COMMENT ON COLUMN says so) — kept as a loose record here rather than a
-// narrower type per known anomaly_type, since all three (`unexpected_silence`,
-// `quiet_drift`, `underperformance`) are real, live-written shapes whose own
-// thresholds/keys may still change during tuning (PLAN_PHASE19_FLEET_P3.md
-// §7 item 1: thresholds are "starting points, not locked").
+// narrower type per known anomaly_type, since all four (`unexpected_silence`,
+// `quiet_drift`, `underperformance`, `incomplete_charging` — migration 040)
+// are real, live-written shapes whose own thresholds/keys may still change
+// during tuning (PLAN_PHASE19_FLEET_P3.md §7 item 1: thresholds are
+// "starting points, not locked").
 export type SiteAnomalyRow = {
   id: string;
   site_id: string;
@@ -393,7 +394,7 @@ export type FleetOverview = {
     total_active_critical_alerts: number;
     // Fleet Dashboard Phase 3 — count of OPEN vrm.site_anomalies rows
     // across every site, any anomaly_type (unexpected_silence, quiet_drift,
-    // underperformance).
+    // underperformance, incomplete_charging).
     total_active_anomalies: number;
   };
 };

@@ -191,6 +191,7 @@ export default async function AdminFleetPage() {
   const silenceCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'unexpected_silence').length;
   const driftCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'quiet_drift').length;
   const underperformanceCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'underperformance').length;
+  const incompleteChargingCount = allActiveAnomalies.filter((a) => a.anomaly_type === 'incomplete_charging').length;
 
   // Fleet averages for the three IE-0499 §4 daily-indicator formulas —
   // same per-site numbers `_dailyIndicators()` already computes, averaged
@@ -503,6 +504,22 @@ export default async function AdminFleetPage() {
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
                 <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'underperformance').length}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <details className={styles.rollupCard}>
+          <summary>
+            <span className={styles.rollupLabel}>Incomplete charging</span>
+            <span className={styles.rollupValue}>{incompleteChargingCount}</span>
+            <span className={styles.rollupDesc}>Battery hasn&apos;t reached full charge in 5+ of the last 7 days</span>
+          </summary>
+          <div className={styles.rollupBreakdown}>
+            {sortedByValue(sites, (s) => s.active_anomalies.filter((a) => a.anomaly_type === 'incomplete_charging').length).map((s) => (
+              <div key={s.site_id} className={styles.rollupBreakdownRow}>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
+                <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'incomplete_charging').length}</span>
               </div>
             ))}
           </div>
