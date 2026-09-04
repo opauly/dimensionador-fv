@@ -163,6 +163,18 @@
 .rollupBreakdownRow span:first-child {
   color: var(--paper-dim);
 }
+/* The site name is a Link, not a span, so it can open that site's own
+   page — styled to match the plain-text look .rollupBreakdownRow's
+   first-child already has, with just a hover state to signal it's
+   clickable (2026-09-03, Oscar's own request). */
+.rollupBreakdownLink {
+  color: var(--paper-dim);
+  text-decoration: none;
+}
+.rollupBreakdownLink:hover {
+  color: var(--victron-glow);
+  text-decoration: underline;
+}
 .rollupBreakdownRow span:last-child {
   font-family: var(--font-mono);
   color: var(--paper);

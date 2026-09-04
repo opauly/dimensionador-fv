@@ -58,6 +58,32 @@ function formatWatts(w: number | null): string {
   return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)}kW` : `${Math.round(w)}W`;
 }
 
+// Every rollup card's breakdown list, sorted by whatever value that card
+// itself displays (2026-09-03, Oscar's own request) — highest first, `null`
+// (nothing to rank) always last, and alphabetical by display_name as the
+// tiebreaker for equal or absent values. Never mutates the input array.
+function sortedByValue(sites: FleetOverviewRow[], valueFn: (s: FleetOverviewRow) => number | null): FleetOverviewRow[] {
+  return [...sites].sort((a, b) => {
+    const va = valueFn(a);
+    const vb = valueFn(b);
+    if (va === null && vb === null) return a.display_name.localeCompare(b.display_name);
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    if (va !== vb) return vb - va;
+    return a.display_name.localeCompare(b.display_name);
+  });
+}
+
+// Worst-first rank for the two cards that only have a categorical (not
+// numeric) value to show — surfaces the sites actually worth looking at
+// instead of an arbitrary DB-fetch order, without pretending "Online" vs
+// "Stale" is a continuous quantity.
+const _CONNECTION_RANK: Record<FleetConnectionStatus, number> = { never_synced: 2, stale: 1, online: 0 };
+
+function sortedAlphabetically(sites: FleetOverviewRow[]): FleetOverviewRow[] {
+  return [...sites].sort((a, b) => a.display_name.localeCompare(b.display_name));
+}
+
 function row(site: FleetOverviewRow) {
   return (
     <tr key={site.site_id}>
@@ -221,9 +247,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Total sites currently linked via the VRM API</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedAlphabetically(sites).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{connectionLabel(s.connection_status)}</span>
               </div>
             ))}
@@ -239,9 +265,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Live snapshot received in the last 45 minutes</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => _CONNECTION_RANK[s.connection_status]).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{connectionLabel(s.connection_status)}</span>
               </div>
             ))}
@@ -257,9 +283,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Sites reporting grid power, via meter or inverter</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedAlphabetically(sites).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>
                   {s.live_grid_source === 'meter' ? 'dedicated meter'
                     : s.live_grid_source === 'inverter' ? 'via inverter'
@@ -279,9 +305,12 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Daily report data synced in the last 24 hours</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {/* Oldest/never-synced first — a negated epoch so "never"
+               (null) sorts as the largest, most-concerning value via the
+               same descending numeric sort every other card uses. */}
+            {sortedByValue(sites, (s) => (s.vrm_last_synced_at ? -new Date(s.vrm_last_synced_at).getTime() : Infinity)).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.vrm_last_synced_at ? formatDateTime(s.vrm_last_synced_at, 'en-US') : 'never'}</span>
               </div>
             ))}
@@ -298,9 +327,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Average of each site&apos;s latest daily health score</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.health_score).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.health_score === null ? '—' : `${s.health_score}/100`}</span>
               </div>
             ))}
@@ -314,9 +343,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Low battery / overload, present in the latest live fetch</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.active_alarms).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_alarms}</span>
               </div>
             ))}
@@ -330,9 +359,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>DC ripple, cell imbalance, temp fault — live, right now</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.active_critical_alerts).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_critical_alerts}</span>
               </div>
             ))}
@@ -348,9 +377,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Sites with a grid outage in the last 7 days</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => (s.week.daysWithData === 0 ? null : s.week.outageMinutes)).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.week.daysWithData === 0 ? '—' : s.week.outageCount > 0 ? `${s.week.outageCount} (${s.week.outageMinutes} min)` : '0'}</span>
               </div>
             ))}
@@ -367,9 +396,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Average state of charge across the fleet, right now</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.live_soc_pct).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.live_soc_pct === null ? '—' : `${s.live_soc_pct}%`}</span>
               </div>
             ))}
@@ -383,9 +412,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Share of today&apos;s load covered by solar + battery</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.self_sufficiency_pct).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.self_sufficiency_pct === null ? '—' : `${s.self_sufficiency_pct}%`}</span>
               </div>
             ))}
@@ -399,9 +428,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Share of solar generated that was used on-site</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.self_consumption_pct).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.self_consumption_pct === null ? '—' : `${s.self_consumption_pct}%`}</span>
               </div>
             ))}
@@ -415,9 +444,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Share of today&apos;s load pulled from the grid</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.grid_dependency_pct).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.grid_dependency_pct === null ? '—' : `${s.grid_dependency_pct}%`}</span>
               </div>
             ))}
@@ -438,9 +467,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>A real zero during hours this site has historically produced</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.active_anomalies.filter((a) => a.anomaly_type === 'unexpected_silence').length).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'unexpected_silence').length}</span>
               </div>
             ))}
@@ -454,9 +483,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Trending down vs. this site&apos;s own recent baseline</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.active_anomalies.filter((a) => a.anomaly_type === 'quiet_drift').length).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'quiet_drift').length}</span>
               </div>
             ))}
@@ -470,9 +499,9 @@ export default async function AdminFleetPage() {
             <span className={styles.rollupDesc}>Below what this site&apos;s installed size should deliver</span>
           </summary>
           <div className={styles.rollupBreakdown}>
-            {sites.map((s) => (
+            {sortedByValue(sites, (s) => s.active_anomalies.filter((a) => a.anomaly_type === 'underperformance').length).map((s) => (
               <div key={s.site_id} className={styles.rollupBreakdownRow}>
-                <span>{s.display_name}</span>
+                <Link href={`/admin/fleet/${encodeURIComponent(s.site_id)}`} className={styles.rollupBreakdownLink}>{s.display_name}</Link>
                 <span>{s.active_anomalies.filter((a) => a.anomaly_type === 'underperformance').length}</span>
               </div>
             ))}
