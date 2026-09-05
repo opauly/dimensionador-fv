@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
-import { FlowSteps, Footer, Hero, LiveDashboard, ModuleGrid, Nav, Pricing, ReportPreview } from '@/components/marketing';
+import { FlowSteps, Footer, Hero, LiveDashboard, ModuleGrid, Nav, Pricing, ReportPreview, StatsBanner } from '@/components/marketing';
 import { getFeaturedSelfServePlanIds } from '@/lib/server/db/signup';
+import { getMarketingStats } from '@/lib/server/db/marketingStats';
 
 // Page-specific metadata layered on top of the root layout's defaults
 // (app/layout.tsx) — the marketing home page is the one URL that should
@@ -35,12 +36,19 @@ export const metadata: Metadata = {
 // props — `Pricing`'s own "Get started" buttons need a real id to
 // preselect, not the marketing `plan_key` string.
 export default async function MarketingPage() {
-  const featuredPlans = await getFeaturedSelfServePlanIds();
+  const [featuredPlans, stats] = await Promise.all([getFeaturedSelfServePlanIds(), getMarketingStats()]);
 
   return (
     <>
       <Nav />
       <Hero />
+      {stats && (
+        <StatsBanner
+          sitesMonitored={stats.sitesMonitored}
+          installedKwp={stats.installedKwp}
+          kwhTracked={stats.kwhTracked}
+        />
+      )}
       <FlowSteps />
       <ModuleGrid />
       <ReportPreview />

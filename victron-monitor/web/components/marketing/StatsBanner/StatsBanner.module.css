@@ -1,0 +1,58 @@
+/* Thin trust-bar strip right under the hero — own big-number type rather
+   than reusing components/ui/Stat (that component is a boxed KPI tile
+   built for the Readout panel's compact grid; a "very visible" banner
+   number reads better large and unboxed, floating in open space). */
+
+.banner {
+  padding: 36px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.row {
+  display: flex;
+  justify-content: center;
+  gap: 72px;
+  flex-wrap: wrap;
+}
+
+.item {
+  text-align: center;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-size: 42px;
+  font-weight: 600;
+  color: var(--victron-glow);
+  letter-spacing: -0.01em;
+  text-shadow: 0 0 18px rgba(var(--victron-glow-rgb), 0.35);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.unit {
+  font-size: 16px;
+  color: var(--paper-dim);
+  font-weight: 400;
+  margin-left: 4px;
+  text-shadow: none;
+}
+
+.label {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mute);
+}
+
+@media (max-width: 560px) {
+  .row {
+    gap: 32px;
+  }
+  .num {
+    font-size: 30px;
+  }
+}
