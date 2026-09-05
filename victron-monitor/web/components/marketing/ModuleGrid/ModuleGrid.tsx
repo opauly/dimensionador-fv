@@ -61,7 +61,7 @@ export function ModuleGrid() {
               <span className={styles.groupCount}>3 sections</span>
             </summary>
             <div className={styles.groupGrid}>
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.kpi}</span>
                 <span className={styles.tag}>Scoring</span>
                 <h3>Health score</h3>
@@ -71,7 +71,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.narrative}</span>
                 <span className={styles.tag}>Narrative</span>
                 <h3>AI narrative</h3>
@@ -82,7 +82,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.savings}</span>
                 <span className={styles.tag}>Savings</span>
                 <h3>Estimated savings</h3>
@@ -100,7 +100,7 @@ export function ModuleGrid() {
               <span className={styles.groupCount}>5 sections</span>
             </summary>
             <div className={styles.groupGrid}>
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{FIXED_MODULE_ICONS.bar_chart}</span>
                 <span className={styles.adapts}>Adapts to range</span>
                 <h3>{mode === 'detallado' ? 'Daily solar vs. consumption' : 'Solar vs. consumption'}</h3>
@@ -111,7 +111,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.energy_mix}</span>
                 <span className={styles.tag}>Energy mix</span>
                 <h3>Where your energy came from</h3>
@@ -121,7 +121,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.solar_performance}</span>
                 <span className={styles.tag}>Performance</span>
                 <h3>Solar performance</h3>
@@ -131,7 +131,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.trend}</span>
                 <span className={styles.fixedBadge}>Always weekly</span>
                 <h3>4-week solar trend</h3>
@@ -141,7 +141,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.weather}</span>
                 <span className={styles.tag}>Weather</span>
                 <h3>Weather context</h3>
@@ -159,7 +159,7 @@ export function ModuleGrid() {
               <span className={styles.groupCount}>2 sections</span>
             </summary>
             <div className={styles.groupGrid}>
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.battery_health}</span>
                 <span className={styles.tag}>Battery</span>
                 <h3>Battery health</h3>
@@ -169,7 +169,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.soc_chart}</span>
                 <span className={styles.adapts}>Adapts to range</span>
                 <h3>Battery SOC timeline</h3>
@@ -188,7 +188,7 @@ export function ModuleGrid() {
               <span className={styles.groupCount}>3 sections</span>
             </summary>
             <div className={styles.groupGrid}>
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.grid_quality}</span>
                 <span className={styles.tag}>Grid</span>
                 <h3>Grid quality</h3>
@@ -198,7 +198,7 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.events}</span>
                 <span className={styles.tag}>Events</span>
                 <h3>Outages &amp; alarms</h3>
@@ -213,7 +213,7 @@ export function ModuleGrid() {
                  three (in "Optional add-ons" below) are opt-in and depend on
                  hardware most systems don't have, so both get said outright
                  rather than implied. */}
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.critical_alerts}</span>
                 <span className={styles.tag}>Safety</span>
                 <h3>Critical alerts</h3>
@@ -231,7 +231,7 @@ export function ModuleGrid() {
               <span className={styles.groupCount}>3 sections</span>
             </summary>
             <div className={styles.groupGrid}>
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.grid_meter_detail}</span>
                 <span className={styles.conditional}>If a meter is installed</span>
                 <h3>Grid meter detail</h3>
@@ -241,14 +241,14 @@ export function ModuleGrid() {
                 </p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.generator_runtime}</span>
                 <span className={styles.conditional}>If a generator is installed</span>
                 <h3>Generator runtime</h3>
                 <p className={styles.body}>Hours the backup generator ran during the period.</p>
               </Panel>
 
-              <Panel variant="card" interactive led>
+              <Panel className={styles.moduleCard} variant="card" interactive led>
                 <span className={styles.icon} aria-hidden="true">{REPORT_MODULE_ICONS.tank_level}</span>
                 <span className={styles.conditional}>If a tank sensor is installed</span>
                 <h3>Tank level</h3>

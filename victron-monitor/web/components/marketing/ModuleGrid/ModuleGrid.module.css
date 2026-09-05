@@ -77,14 +77,25 @@
 
 /* The module cards' own grid, nested inside .group — no border/radius of
    its own (the .group panel above already provides both, via
-   overflow:hidden), just the collapsed-border divider trick between
-   cards. */
+   overflow:hidden).
+   Previously used the collapsed-border trick (gap:1px + background:
+   var(--line) showing through the gaps) — that background also fills any
+   UNFILLED grid cell in a row that doesn't divide evenly by 3 (Battery's 2
+   cards, Solar & energy's 5), since the column track still exists
+   structurally even with no item placed in it. Found live, 2026-09-05: it
+   rendered as a lit, card-shaped empty rectangle. Fixed by giving each
+   card its own border instead (.moduleCard below) and dropping the
+   container's own background to transparent — an empty track then shows
+   nothing but .group's own panel-color background, indistinguishable from
+   "no cell there." */
 .groupGrid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--line);
   border-top: 1px solid var(--line);
+}
+.moduleCard {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 @media (max-width: 920px) {
