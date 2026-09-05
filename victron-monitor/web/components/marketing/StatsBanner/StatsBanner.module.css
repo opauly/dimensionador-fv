@@ -1,11 +1,14 @@
-/* Thin trust-bar strip right under the hero — own big-number type rather
-   than reusing components/ui/Stat (that component is a boxed KPI tile
-   built for the Readout panel's compact grid; a "very visible" banner
-   number reads better large and unboxed, floating in open space). */
+/* Thin trust-bar strip right under the nav, above the hero (2026-09-05,
+   moved up front so it's seen immediately rather than requiring a scroll
+   past the hero) — own big-number type rather than reusing
+   components/ui/Stat (that component is a boxed KPI tile built for the
+   Readout panel's compact grid; a "very visible" banner number reads
+   better large and unboxed, floating in open space). No border-top: Nav
+   is sticky and already has its own border-bottom directly above this,
+   so a second hairline here would just double up against it. */
 
 .banner {
-  padding: 36px 0;
-  border-top: 1px solid var(--line);
+  padding: 28px 0;
   border-bottom: 1px solid var(--line);
 }
 

@@ -41,7 +41,6 @@ export default async function MarketingPage() {
   return (
     <>
       <Nav />
-      <Hero />
       {stats && (
         <StatsBanner
           sitesMonitored={stats.sitesMonitored}
@@ -49,6 +48,7 @@ export default async function MarketingPage() {
           kwhTracked={stats.kwhTracked}
         />
       )}
+      <Hero />
       <FlowSteps />
       <ModuleGrid />
       <ReportPreview />
