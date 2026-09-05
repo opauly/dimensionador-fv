@@ -185,8 +185,9 @@
   font-weight: 500;
 }
 
-/* Illustrative 7-day shape, same 4 series (PV/load/battery/grid) the real
-   dashboard's ShapeChart.tsx plots — see this component's own header
+/* Illustrative daily shape (hours of one representative day, averaged over
+   7 days — not 7 separate days), same 4 series (PV/load/battery/grid) the
+   real dashboard's ShapeChart.tsx plots — see this component's own header
    comment for why it's static SVG here rather than the real interactive
    chart. */
 .chartBlock {
@@ -232,7 +233,7 @@
 .chartLineGrid {
   stroke: var(--mute);
 }
-.chartDayLabel {
+.chartAxisLabel {
   font-family: var(--font-mono);
   font-size: 8px;
   fill: var(--mute);

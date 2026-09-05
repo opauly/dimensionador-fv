@@ -21,6 +21,43 @@ const SAMPLE_SITES: SampleSite[] = [
   { name: 'Bodega Central', status: 'flagged', health: 76, pv: '0.6kW' },
 ];
 
+// Illustrative "shape" chart below the site list — an averaged DAILY curve
+// (hours of one representative day, 12a-9p), not seven separate weekday
+// points. This mirrors the real ShapeChart.tsx's own "week" range exactly:
+// that range averages each hour across the last 7 days into one typical
+// daily shape, it does not plot 7 distinct days side by side (Oscar's own
+// correction, 2026-09-05).
+const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'] as const;
+const PV_POINTS: readonly (readonly [number, number])[] = [
+  [10, 130], [67, 130], [124, 125], [181, 75], [239, 30], [296, 40], [353, 105], [410, 130],
+];
+const LOAD_POINTS: readonly (readonly [number, number])[] = [
+  [10, 80], [67, 90], [124, 85], [181, 70], [239, 65], [296, 68], [353, 50], [410, 75],
+];
+const BATTERY_POINTS: readonly (readonly [number, number])[] = [
+  [10, 105], [67, 110], [124, 108], [181, 120], [239, 125], [296, 123], [353, 95], [410, 90],
+];
+const GRID_POINTS: readonly (readonly [number, number])[] = [
+  [10, 115], [67, 120], [124, 123], [181, 130], [239, 130], [296, 130], [353, 118], [410, 120],
+];
+
+// Same horizontal-tangent cubic Bezier technique ShapeChart.tsx's own
+// buildPaths() uses (admin/fleet/ShapeChart.tsx) — a plain point-to-point
+// polyline reads as sharp zigzags; this rounds it off without overshooting
+// past the points, matching the real dashboard's own line style exactly
+// (Oscar's request, 2026-09-05: "soften the curves like we do in the real
+// dashboard").
+function smoothPath(points: readonly (readonly [number, number])[]): string {
+  let path = `M ${points[0][0]} ${points[0][1]}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const [x0, y0] = points[i];
+    const [x1, y1] = points[i + 1];
+    const cpx = (x0 + x1) / 2;
+    path += ` C ${cpx} ${y0}, ${cpx} ${y1}, ${x1} ${y1}`;
+  }
+  return path;
+}
+
 // The dashboard existed on this page only as a single bullet inside
 // Pricing's Growth card — everything else was written when reports were
 // the only product. This section (2026-09-04) gives it the same
@@ -113,7 +150,7 @@ export function LiveDashboard() {
             <b>Bodega Central</b> flagged for quiet drift — generating 18% below its own recent baseline.
           </p>
 
-          {/* Illustrative 7-day shape — the same 4 series ShapeChart.tsx
+          {/* Illustrative daily shape — the same 4 series ShapeChart.tsx
              plots on the real dashboard (admin/fleet/ShapeChart.tsx and its
              customer-facing counterpart), drawn as static SVG here rather
              than the real interactive component: this panel is presented as
@@ -122,16 +159,21 @@ export function LiveDashboard() {
              screenshot just above this section. Numbers are illustrative —
              see this file's own header comment on why. */}
           <div className={styles.chartBlock}>
-            <div className={styles.chartHead}>7-day energy shape</div>
-            <svg viewBox="0 0 420 150" className={styles.chartSvg} role="img" aria-label="Illustrative 7-day chart of solar, load, battery, and grid power across the sample fleet">
+            <div className={styles.chartHead}>Daily shape · 7-day average</div>
+            <svg
+              viewBox="0 0 420 150"
+              className={styles.chartSvg}
+              role="img"
+              aria-label="Illustrative chart of the sample fleet's typical daily shape, averaged over the last 7 days: solar rising to a midday peak, load relatively flat with an evening peak, battery covering mornings and evenings, and a small grid draw at the edges of the day"
+            >
               <line x1="10" y1="130" x2="410" y2="130" className={styles.chartBaseline} />
-              <polyline points="10,115 77,120 143,105 210,118 277,120 343,108 410,113" className={styles.chartLineBattery} />
-              <polyline points="10,125 77,128 143,110 210,125 277,130 343,115 410,123" className={styles.chartLineGrid} />
-              <polyline points="10,55 77,50 143,53 210,48 277,50 343,43 410,45" className={styles.chartLineLoad} />
-              <polyline points="10,35 77,25 143,68 210,30 277,20 343,55 410,40" className={styles.chartLinePv} />
-              {(['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const).map((day, i) => (
-                <text key={i} x={10 + i * 66.67} y="144" className={styles.chartDayLabel}>
-                  {day}
+              <path d={smoothPath(BATTERY_POINTS)} className={styles.chartLineBattery} />
+              <path d={smoothPath(GRID_POINTS)} className={styles.chartLineGrid} />
+              <path d={smoothPath(LOAD_POINTS)} className={styles.chartLineLoad} />
+              <path d={smoothPath(PV_POINTS)} className={styles.chartLinePv} />
+              {HOUR_LABELS.map((label, i) => (
+                <text key={label} x={10 + i * (400 / 7)} y="144" className={styles.chartAxisLabel}>
+                  {label}
                 </text>
               ))}
             </svg>
