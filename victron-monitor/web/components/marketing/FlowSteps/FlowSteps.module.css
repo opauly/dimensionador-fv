@@ -30,21 +30,22 @@
 
 /* Dashed connector between steps, with a glowing dot at its trailing edge.
    Absent for the first step (nothing to trace back to).
-   Fixed-width (28px, matching .step's own right-padding — the actual
-   gutter between columns), anchored to the LEFT of the current step and
-   reaching backward into the previous step's padding, rather than
-   left:-14px/right:14px stretching to fill the whole (very wide, no grid
-   gap) column — that math made each trace ~370px long on desktop,
-   spanning almost the entirety of the NEXT column instead of just
-   bridging the gutter (found live, 2026-09-05: looked like an empty gap
-   from 01 to 02 and one long stray line from 02 to past 03, because two
-   full-column traces sitting end to end read as one continuous line
-   offset from where the numbers actually are). */
+   Anchored to the LEFT of the current step (left:-28px lands its start
+   exactly where the previous step's own text ends — .step's right-padding
+   is 28px), reaching backward into the gutter — NOT left:-14px/right:14px
+   stretching to fill the whole (very wide, no grid gap) column, which made
+   each trace ~370px long on desktop and read as one long line offset from
+   the actual step numbers (found live, 2026-09-05).
+   width:16px (not the full 28px gutter) — a first fix at 28px pulled the
+   dot (::after's own right:-3px offset from the trace's right edge) flush
+   against the next step's number, overlapping "02"/"03" (found live,
+   2026-09-05 round two). 16px leaves ~9px of clear space before the
+   number instead. */
 .trace {
   position: absolute;
   top: 8px;
   left: -28px;
-  width: 28px;
+  width: 16px;
   height: 1px;
   background: repeating-linear-gradient(90deg, var(--line) 0 6px, transparent 6px 11px);
 }
