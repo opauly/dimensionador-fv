@@ -28,18 +28,30 @@ const SAMPLE_SITES: SampleSite[] = [
 // daily shape, it does not plot 7 distinct days side by side (Oscar's own
 // correction, 2026-09-05).
 const HOUR_LABELS = ['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'] as const;
+// x shifted +24 from the original 10-410 span to leave room for the y-axis
+// kW labels at the left edge (2026-09-05); y still 130=0kW down to
+// 17.5=45kW, matching the gridlines drawn alongside these paths.
 const PV_POINTS: readonly (readonly [number, number])[] = [
-  [10, 130], [67, 130], [124, 125], [181, 75], [239, 30], [296, 40], [353, 105], [410, 130],
+  [34, 130], [91, 130], [148, 125], [205, 75], [263, 30], [320, 40], [377, 105], [434, 130],
 ];
 const LOAD_POINTS: readonly (readonly [number, number])[] = [
-  [10, 80], [67, 90], [124, 85], [181, 70], [239, 65], [296, 68], [353, 50], [410, 75],
+  [34, 80], [91, 90], [148, 85], [205, 70], [263, 65], [320, 68], [377, 50], [434, 75],
 ];
 const BATTERY_POINTS: readonly (readonly [number, number])[] = [
-  [10, 105], [67, 110], [124, 108], [181, 120], [239, 125], [296, 123], [353, 95], [410, 90],
+  [34, 105], [91, 110], [148, 108], [205, 120], [263, 125], [320, 123], [377, 95], [434, 90],
 ];
 const GRID_POINTS: readonly (readonly [number, number])[] = [
-  [10, 115], [67, 120], [124, 123], [181, 130], [239, 130], [296, 130], [353, 118], [410, 120],
+  [34, 115], [91, 120], [148, 123], [205, 130], [263, 130], [320, 130], [377, 118], [434, 120],
 ];
+// kW value each gridline y-position represents — 0/15/30/45kW mapped at
+// y=130/92.5/55/17.5 (same v -> y scale the points above already use,
+// v*2.5 below the 130 baseline).
+const Y_GRIDLINES = [
+  { y: 130, label: '0kW' },
+  { y: 92.5, label: '15kW' },
+  { y: 55, label: '30kW' },
+  { y: 17.5, label: '45kW' },
+] as const;
 
 // Same horizontal-tangent cubic Bezier technique ShapeChart.tsx's own
 // buildPaths() uses (admin/fleet/ShapeChart.tsx) — a plain point-to-point
@@ -160,19 +172,36 @@ export function LiveDashboard() {
              see this file's own header comment on why. */}
           <div className={styles.chartBlock}>
             <div className={styles.chartHead}>Daily shape · 7-day average</div>
+            <div className={styles.chartNow}>
+              <span className={styles.chartNowDot} aria-hidden="true" />
+              Right now: <b>24kW</b> PV · <b>19kW</b> Load · <b>68%</b> SOC
+            </div>
             <svg
-              viewBox="0 0 420 150"
+              viewBox="0 0 444 150"
               className={styles.chartSvg}
               role="img"
-              aria-label="Illustrative chart of the sample fleet's typical daily shape, averaged over the last 7 days: solar rising to a midday peak, load relatively flat with an evening peak, battery covering mornings and evenings, and a small grid draw at the edges of the day"
+              aria-label="Illustrative chart of the sample fleet's typical daily shape, averaged over the last 7 days, with a y-axis in kilowatts: solar rising to a midday peak around 44 kilowatts, load relatively flat with an evening peak, battery covering mornings and evenings, and a small grid draw at the edges of the day"
             >
-              <line x1="10" y1="130" x2="410" y2="130" className={styles.chartBaseline} />
+              {Y_GRIDLINES.map(({ y, label }) => (
+                <g key={label}>
+                  <line
+                    x1="34"
+                    y1={y}
+                    x2="434"
+                    y2={y}
+                    className={y === 130 ? styles.chartBaseline : styles.chartGridline}
+                  />
+                  <text x="28" y={y + 3} className={styles.chartAxisLabel} textAnchor="end">
+                    {label}
+                  </text>
+                </g>
+              ))}
               <path d={smoothPath(BATTERY_POINTS)} className={styles.chartLineBattery} />
               <path d={smoothPath(GRID_POINTS)} className={styles.chartLineGrid} />
               <path d={smoothPath(LOAD_POINTS)} className={styles.chartLineLoad} />
               <path d={smoothPath(PV_POINTS)} className={styles.chartLinePv} />
               {HOUR_LABELS.map((label, i) => (
-                <text key={label} x={10 + i * (400 / 7)} y="144" className={styles.chartAxisLabel}>
+                <text key={label} x={34 + i * (400 / 7)} y="144" className={styles.chartAxisLabel} textAnchor="middle">
                   {label}
                 </text>
               ))}

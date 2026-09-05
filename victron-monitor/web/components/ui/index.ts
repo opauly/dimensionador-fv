@@ -10,6 +10,9 @@ export type { StatProps } from './Stat/Stat';
 export { Eyebrow } from './Eyebrow/Eyebrow';
 export type { EyebrowProps } from './Eyebrow/Eyebrow';
 
+export { Gauge } from './Gauge/Gauge';
+export type { GaugeProps } from './Gauge/Gauge';
+
 export { SectionHead } from './SectionHead/SectionHead';
 export type { SectionHeadProps } from './SectionHead/SectionHead';
 

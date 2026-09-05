@@ -1,4 +1,4 @@
-import { Eyebrow, Panel, Stat } from '@/components/ui';
+import { Eyebrow, Gauge, Panel, Stat } from '@/components/ui';
 import styles from './Readout.module.css';
 
 // The hero's "instrument readout" module — landing_template.html's
@@ -14,7 +14,7 @@ export function Readout() {
       variant="readout"
       hairline
       role="img"
-      aria-label="Sample weekly report readout showing health score 84 out of 100, 429 kilowatt hours solar generated, and 96.1 percent grid independence"
+      aria-label="Sample weekly report readout showing health score 84 out of 100, 429 kilowatt hours solar generated, 96.1 percent grid independence, and live gauges for self-sufficiency, self-consumption, and depth of discharge"
     >
       <div className={styles.head}>
         <span className={styles.site}>
@@ -34,6 +34,19 @@ export function Readout() {
         &quot;The system produced <b>96.1% of what the home used</b> this week, with the battery covering every
         evening peak. Grid draw stayed under 17 kWh total…&quot;
       </p>
+
+      {/* Added 2026-09-05 (Oscar's request, seeing the real per-site
+         dashboard's own gauge card) — the readout was all report numbers;
+         this row is what the LIVE half of the new "Your system, live"
+         headline actually looks like. Same colors the real page uses:
+         self-sufficiency/good, self-consumption/victron-glow, depth of
+         discharge/signal (admin/fleet/[site_id]/page.tsx's own Gauge
+         color choices). */}
+      <div className={styles.gaugeRow}>
+        <Gauge pct={96.3} color="var(--good)" label="Self-sufficiency" compact />
+        <Gauge pct={91} color="var(--victron-glow)" label="Self-consumption" compact />
+        <Gauge pct={42} color="var(--signal)" label="Depth of discharge" compact />
+      </div>
     </Panel>
   );
 }

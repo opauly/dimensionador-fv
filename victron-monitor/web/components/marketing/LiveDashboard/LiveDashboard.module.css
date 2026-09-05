@@ -203,6 +203,31 @@
   color: var(--mute);
   margin-bottom: 10px;
 }
+/* The one truly-live number in this panel, paired with the averaged chart
+   below it — same "instantaneous reading beside a historical trend"
+   pairing the real per-site page makes with its own KPI tiles + shape
+   chart. */
+.chartNow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--paper-dim);
+  margin-bottom: 14px;
+}
+.chartNow b {
+  font-family: var(--font-mono);
+  color: var(--paper);
+  font-weight: 600;
+}
+.chartNowDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  box-shadow: 0 0 6px 1px rgba(63, 191, 143, 0.5);
+  flex: none;
+}
 .chartSvg {
   display: block;
   width: 100%;
@@ -211,6 +236,12 @@
 .chartBaseline {
   stroke: var(--line);
   stroke-width: 1;
+}
+.chartGridline {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
 }
 .chartLinePv,
 .chartLineLoad,
@@ -233,11 +264,15 @@
 .chartLineGrid {
   stroke: var(--mute);
 }
+/* No text-anchor here — the x-axis hour labels (center-anchored) and the
+   y-axis kW labels (end-anchored) share this class but need different
+   anchors, set per-use via the JSX textAnchor attribute instead (a CSS
+   text-anchor rule would win over that attribute in the cascade, so it
+   can't live here). */
 .chartAxisLabel {
   font-family: var(--font-mono);
   font-size: 8px;
   fill: var(--mute);
-  text-anchor: middle;
 }
 .chartLegend {
   display: flex;
