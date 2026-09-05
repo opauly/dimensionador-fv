@@ -20,7 +20,7 @@ export function Footer() {
           <a href="mailto:proyectos@paulyco.com">proyectos@paulyco.com</a>
           <Link href="/#how">How it works</Link>
           <Link href="/#modules">What&apos;s inside</Link>
-          <Link href="/#dashboard">Live Dashboard</Link>
+          <Link href="/#dashboard">Live dashboard</Link>
           <Link href="/terms">Terms</Link>
           <Link href="/privacy">Privacy</Link>
         </div>

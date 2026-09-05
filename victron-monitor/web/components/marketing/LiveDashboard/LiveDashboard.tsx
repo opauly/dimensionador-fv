@@ -91,7 +91,7 @@ export function LiveDashboard() {
     <section id="dashboard" className="band">
       <div className={`wrap ${styles.grid}`}>
         <div>
-          <Eyebrow>Live Dashboard</Eyebrow>
+          <Eyebrow>Live dashboard</Eyebrow>
           <h2>
             The report tells you last week.
             <br />
