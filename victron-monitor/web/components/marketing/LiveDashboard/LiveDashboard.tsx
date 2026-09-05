@@ -112,6 +112,36 @@ export function LiveDashboard() {
           <p className={styles.narr}>
             <b>Bodega Central</b> flagged for quiet drift — generating 18% below its own recent baseline.
           </p>
+
+          {/* Illustrative 7-day shape — the same 4 series ShapeChart.tsx
+             plots on the real dashboard (admin/fleet/ShapeChart.tsx and its
+             customer-facing counterpart), drawn as static SVG here rather
+             than the real interactive component: this panel is presented as
+             one still image of what the dashboard looks like, not a live
+             widget, same as ReportPreview's own real-but-static PDF
+             screenshot just above this section. Numbers are illustrative —
+             see this file's own header comment on why. */}
+          <div className={styles.chartBlock}>
+            <div className={styles.chartHead}>7-day energy shape</div>
+            <svg viewBox="0 0 420 150" className={styles.chartSvg} role="img" aria-label="Illustrative 7-day chart of solar, load, battery, and grid power across the sample fleet">
+              <line x1="10" y1="130" x2="410" y2="130" className={styles.chartBaseline} />
+              <polyline points="10,115 77,120 143,105 210,118 277,120 343,108 410,113" className={styles.chartLineBattery} />
+              <polyline points="10,125 77,128 143,110 210,125 277,130 343,115 410,123" className={styles.chartLineGrid} />
+              <polyline points="10,55 77,50 143,53 210,48 277,50 343,43 410,45" className={styles.chartLineLoad} />
+              <polyline points="10,35 77,25 143,68 210,30 277,20 343,55 410,40" className={styles.chartLinePv} />
+              {(['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const).map((day, i) => (
+                <text key={i} x={10 + i * 66.67} y="144" className={styles.chartDayLabel}>
+                  {day}
+                </text>
+              ))}
+            </svg>
+            <div className={styles.chartLegend}>
+              <span><span className={`${styles.legendDot} ${styles.legendPv}`} aria-hidden="true" />PV</span>
+              <span><span className={`${styles.legendDot} ${styles.legendLoad}`} aria-hidden="true" />Load</span>
+              <span><span className={`${styles.legendDot} ${styles.legendBattery}`} aria-hidden="true" />Battery</span>
+              <span><span className={`${styles.legendDot} ${styles.legendGrid}`} aria-hidden="true" />Grid</span>
+            </div>
+          </div>
         </Panel>
       </div>
     </section>
