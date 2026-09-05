@@ -120,100 +120,102 @@ export function LiveDashboard() {
               <span>Battery hasn&apos;t reached full charge in 5+ of the last 7 days</span>
             </li>
           </ul>
+        </div>
+
+        <div>
+          <Panel
+            variant="readout"
+            hairline
+            role="img"
+            aria-label="Sample fleet dashboard listing three sites: Casa Rodríguez online at health score 94, Finca El Roble online at 88, and Bodega Central flagged for quiet drift at 76, each with a live solar reading"
+          >
+            <div className={styles.head}>
+              <span className={styles.site}>
+                SAMPLE FLEET <b>· LIVE VIEW</b>
+              </span>
+              <Eyebrow amber className={styles.liveEyebrow}>
+                Live
+              </Eyebrow>
+            </div>
+            <div className={styles.summaryRow}>
+              <span>
+                <b className={styles.summaryGood}>12/12</b> sites online
+              </span>
+              <span>
+                avg health <b className={styles.summaryGood}>91/100</b>
+              </span>
+            </div>
+            <ul className={styles.siteList}>
+              {SAMPLE_SITES.map((site) => (
+                <li key={site.name} className={styles.siteRow}>
+                  <span className={`${styles.dot} ${site.status === 'flagged' ? styles.dotFlag : styles.dotOnline}`} aria-hidden="true" />
+                  <span className={styles.siteName}>{site.name}</span>
+                  <span className={site.status === 'flagged' ? styles.healthFlag : styles.health}>{site.health}</span>
+                  <span className={styles.pv}>{site.pv} PV</span>
+                </li>
+              ))}
+            </ul>
+            <p className={styles.narr}>
+              <b>Bodega Central</b> flagged for quiet drift — generating 18% below its own recent baseline.
+            </p>
+
+            {/* Illustrative daily shape — the same 4 series ShapeChart.tsx
+               plots on the real dashboard (admin/fleet/ShapeChart.tsx and its
+               customer-facing counterpart), drawn as static SVG here rather
+               than the real interactive component: this panel is presented as
+               one still image of what the dashboard looks like, not a live
+               widget, same as ReportPreview's own real-but-static PDF
+               screenshot just above this section. Numbers are illustrative —
+               see this file's own header comment on why. */}
+            <div className={styles.chartBlock}>
+              <div className={styles.chartHead}>Daily shape · 7-day average</div>
+              <div className={styles.chartNow}>
+                <span className={styles.chartNowDot} aria-hidden="true" />
+                Right now: <b>24kW</b> PV · <b>19kW</b> Load · <b>68%</b> SOC
+              </div>
+              <svg
+                viewBox="0 0 444 150"
+                className={styles.chartSvg}
+                role="img"
+                aria-label="Illustrative chart of the sample fleet's typical daily shape, averaged over the last 7 days, with a y-axis in kilowatts: solar rising to a midday peak around 44 kilowatts, load relatively flat with an evening peak, battery covering mornings and evenings, and a small grid draw at the edges of the day"
+              >
+                {Y_GRIDLINES.map(({ y, label }) => (
+                  <g key={label}>
+                    <line
+                      x1="34"
+                      y1={y}
+                      x2="434"
+                      y2={y}
+                      className={y === 130 ? styles.chartBaseline : styles.chartGridline}
+                    />
+                    <text x="28" y={y + 3} className={styles.chartAxisLabel} textAnchor="end">
+                      {label}
+                    </text>
+                  </g>
+                ))}
+                <path d={smoothPath(BATTERY_POINTS)} className={styles.chartLineBattery} />
+                <path d={smoothPath(GRID_POINTS)} className={styles.chartLineGrid} />
+                <path d={smoothPath(LOAD_POINTS)} className={styles.chartLineLoad} />
+                <path d={smoothPath(PV_POINTS)} className={styles.chartLinePv} />
+                {HOUR_LABELS.map((label, i) => (
+                  <text key={label} x={34 + i * (400 / 7)} y="144" className={styles.chartAxisLabel} textAnchor="middle">
+                    {label}
+                  </text>
+                ))}
+              </svg>
+              <div className={styles.chartLegend}>
+                <span><span className={`${styles.legendDot} ${styles.legendPv}`} aria-hidden="true" />PV</span>
+                <span><span className={`${styles.legendDot} ${styles.legendLoad}`} aria-hidden="true" />Load</span>
+                <span><span className={`${styles.legendDot} ${styles.legendBattery}`} aria-hidden="true" />Battery</span>
+                <span><span className={`${styles.legendDot} ${styles.legendGrid}`} aria-hidden="true" />Grid</span>
+              </div>
+            </div>
+          </Panel>
           <span className={styles.badge}>
             <span className={styles.badgeDot} aria-hidden="true" />
             Included with Growth and Fleet — <a href="#pricing">Starter stays report-only</a>
           </span>
         </div>
-
-        <Panel
-          variant="readout"
-          hairline
-          role="img"
-          aria-label="Sample fleet dashboard listing three sites: Casa Rodríguez online at health score 94, Finca El Roble online at 88, and Bodega Central flagged for quiet drift at 76, each with a live solar reading"
-        >
-          <div className={styles.head}>
-            <span className={styles.site}>
-              SAMPLE FLEET <b>· LIVE VIEW</b>
-            </span>
-            <Eyebrow amber className={styles.liveEyebrow}>
-              Live
-            </Eyebrow>
-          </div>
-          <div className={styles.summaryRow}>
-            <span>
-              <b className={styles.summaryGood}>12/12</b> sites online
-            </span>
-            <span>
-              avg health <b className={styles.summaryGood}>91/100</b>
-            </span>
-          </div>
-          <ul className={styles.siteList}>
-            {SAMPLE_SITES.map((site) => (
-              <li key={site.name} className={styles.siteRow}>
-                <span className={`${styles.dot} ${site.status === 'flagged' ? styles.dotFlag : styles.dotOnline}`} aria-hidden="true" />
-                <span className={styles.siteName}>{site.name}</span>
-                <span className={site.status === 'flagged' ? styles.healthFlag : styles.health}>{site.health}</span>
-                <span className={styles.pv}>{site.pv} PV</span>
-              </li>
-            ))}
-          </ul>
-          <p className={styles.narr}>
-            <b>Bodega Central</b> flagged for quiet drift — generating 18% below its own recent baseline.
-          </p>
-
-          {/* Illustrative daily shape — the same 4 series ShapeChart.tsx
-             plots on the real dashboard (admin/fleet/ShapeChart.tsx and its
-             customer-facing counterpart), drawn as static SVG here rather
-             than the real interactive component: this panel is presented as
-             one still image of what the dashboard looks like, not a live
-             widget, same as ReportPreview's own real-but-static PDF
-             screenshot just above this section. Numbers are illustrative —
-             see this file's own header comment on why. */}
-          <div className={styles.chartBlock}>
-            <div className={styles.chartHead}>Daily shape · 7-day average</div>
-            <div className={styles.chartNow}>
-              <span className={styles.chartNowDot} aria-hidden="true" />
-              Right now: <b>24kW</b> PV · <b>19kW</b> Load · <b>68%</b> SOC
-            </div>
-            <svg
-              viewBox="0 0 444 150"
-              className={styles.chartSvg}
-              role="img"
-              aria-label="Illustrative chart of the sample fleet's typical daily shape, averaged over the last 7 days, with a y-axis in kilowatts: solar rising to a midday peak around 44 kilowatts, load relatively flat with an evening peak, battery covering mornings and evenings, and a small grid draw at the edges of the day"
-            >
-              {Y_GRIDLINES.map(({ y, label }) => (
-                <g key={label}>
-                  <line
-                    x1="34"
-                    y1={y}
-                    x2="434"
-                    y2={y}
-                    className={y === 130 ? styles.chartBaseline : styles.chartGridline}
-                  />
-                  <text x="28" y={y + 3} className={styles.chartAxisLabel} textAnchor="end">
-                    {label}
-                  </text>
-                </g>
-              ))}
-              <path d={smoothPath(BATTERY_POINTS)} className={styles.chartLineBattery} />
-              <path d={smoothPath(GRID_POINTS)} className={styles.chartLineGrid} />
-              <path d={smoothPath(LOAD_POINTS)} className={styles.chartLineLoad} />
-              <path d={smoothPath(PV_POINTS)} className={styles.chartLinePv} />
-              {HOUR_LABELS.map((label, i) => (
-                <text key={label} x={34 + i * (400 / 7)} y="144" className={styles.chartAxisLabel} textAnchor="middle">
-                  {label}
-                </text>
-              ))}
-            </svg>
-            <div className={styles.chartLegend}>
-              <span><span className={`${styles.legendDot} ${styles.legendPv}`} aria-hidden="true" />PV</span>
-              <span><span className={`${styles.legendDot} ${styles.legendLoad}`} aria-hidden="true" />Load</span>
-              <span><span className={`${styles.legendDot} ${styles.legendBattery}`} aria-hidden="true" />Battery</span>
-              <span><span className={`${styles.legendDot} ${styles.legendGrid}`} aria-hidden="true" />Grid</span>
-            </div>
-          </div>
-        </Panel>
       </div>
     </section>
   );
