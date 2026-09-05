@@ -26,7 +26,7 @@ def main() -> None:
     c = get_client()
 
     print("1. Calling vrm.get_marketing_stats()...")
-    row = c.schema("vrm").rpc("get_marketing_stats").execute().data
+    row = c.schema("vrm").rpc("get_marketing_stats", {}).execute().data
     assert row, "get_marketing_stats() returned no rows"
     stats = row[0] if isinstance(row, list) else row
     print(f"   sites_monitored={stats['sites_monitored']}")
