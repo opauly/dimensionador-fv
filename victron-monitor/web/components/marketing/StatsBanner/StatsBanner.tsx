@@ -42,7 +42,11 @@ function useCountUp(target: number, durationMs: number, delayMs: number): number
     function tick(ts: number) {
       if (start === null) start = ts;
       const progress = Math.min((ts - start) / durationMs, 1);
-      const eased = 1 - (1 - progress) ** 3;
+      // Ease-out-quad rather than cubic — cubic front-loads almost all the
+      // movement into the first third of the duration, which reads as a
+      // flash-then-freeze rather than a visible count. Quad spreads the
+      // "counting" motion out over more of the duration before settling.
+      const eased = 1 - (1 - progress) ** 2;
       setValue(Math.round(target * eased));
       if (progress < 1) raf = requestAnimationFrame(tick);
     }
@@ -63,10 +67,12 @@ function useCountUp(target: number, durationMs: number, delayMs: number): number
 export function StatsBanner({ sitesMonitored, installedKwp, kwhTracked }: StatsBannerProps) {
   // Slightly staggered starts so the three numbers don't all land at
   // once — a small cascade reads as more alive than three synchronized
-  // counters.
-  const sites = useCountUp(sitesMonitored, 1200, 0);
-  const kwp = useCountUp(Math.round(installedKwp), 1400, 150);
-  const kwh = useCountUp(Math.round(kwhTracked), 1800, 300);
+  // counters. Durations long enough to actually read as "counting" rather
+  // than a quick flash to the final value (Oscar's own feedback,
+  // 2026-09-05: "like a running clock").
+  const sites = useCountUp(sitesMonitored, 1800, 0);
+  const kwp = useCountUp(Math.round(installedKwp), 2000, 150);
+  const kwh = useCountUp(Math.round(kwhTracked), 2400, 300);
 
   return (
     <section className={styles.banner} aria-label="Platform totals">
