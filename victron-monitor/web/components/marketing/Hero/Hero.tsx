@@ -9,14 +9,14 @@ export function Hero() {
         <div>
           <Eyebrow className={styles.eyebrow}>Built on Victron VRM data</Eyebrow>
           <h1 className={styles.h1}>
-            The export nobody opens.
+            Your system, <em className={styles.em}>live</em>.
             <br />
-            Now a report <em className={styles.em}>everyone</em> reads.
+            Your story, <em className={styles.em}>weekly</em>.
           </h1>
           <p className={`lede ${styles.lede}`}>
-            Every Cerbo GX is already logging health score, grid independence, and battery behavior. We turn that
-            CSV into a branded, AI-narrated report that actually gets opened — for your own system, or every
-            customer on your fleet — automatically, every week.
+            Every Cerbo GX is already logging health score, grid independence, and battery behavior. Watch it live
+            on a dashboard that updates every ~15 minutes, and get the full story in a branded, AI-narrated report —
+            for your own system, or every customer on your fleet — automatically, every week.
           </p>
           <div className={styles.ctas}>
             {/* PLAN_PHASE16.md §8 Step 5.5 — replaces the old `#cta` anchor

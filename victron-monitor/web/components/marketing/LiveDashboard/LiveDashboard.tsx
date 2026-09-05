@@ -1,5 +1,25 @@
-import { Eyebrow, Panel, Stat } from '@/components/ui';
+import { Eyebrow, Panel } from '@/components/ui';
 import styles from './LiveDashboard.module.css';
+
+// One illustrative row of the sample fleet panel below — deliberately NOT
+// a stat-grid-plus-quote (that's Hero's own Readout shape; Oscar's own
+// feedback, 2026-09-04, was that the two panels read as the same thing
+// with different numbers). A site list is what a live dashboard actually
+// looks like day to day — this one's rows are the same three fields
+// admin/fleet's real table shows: connection status, health score, live
+// PV reading.
+type SampleSite = {
+  name: string;
+  status: 'online' | 'flagged';
+  health: number;
+  pv: string;
+};
+
+const SAMPLE_SITES: SampleSite[] = [
+  { name: 'Casa Rodríguez', status: 'online', health: 94, pv: '2.1kW' },
+  { name: 'Finca El Roble', status: 'online', health: 88, pv: '1.4kW' },
+  { name: 'Bodega Central', status: 'flagged', health: 76, pv: '0.6kW' },
+];
 
 // The dashboard existed on this page only as a single bullet inside
 // Pricing's Growth card — everything else was written when reports were
@@ -61,7 +81,7 @@ export function LiveDashboard() {
           variant="readout"
           hairline
           role="img"
-          aria-label="Sample live dashboard readout showing 12 of 12 sites online, average health score 91 out of 100, 88 percent self-sufficiency, and 1 active AI Insight"
+          aria-label="Sample fleet dashboard listing three sites: Casa Rodríguez online at health score 94, Finca El Roble online at 88, and Bodega Central flagged for quiet drift at 76, each with a live solar reading"
         >
           <div className={styles.head}>
             <span className={styles.site}>
@@ -71,15 +91,26 @@ export function LiveDashboard() {
               Live
             </Eyebrow>
           </div>
-          <div className={styles.stats}>
-            <Stat label="Sites online" value={12} unit="/12" good />
-            <Stat label="Avg health score" value={91} unit="/100" good />
-            <Stat label="Self-sufficiency" value={88} unit="%" />
-            <Stat label="Active AI Insights" value={1} unit="flag" />
+          <div className={styles.summaryRow}>
+            <span>
+              <b className={styles.summaryGood}>12/12</b> sites online
+            </span>
+            <span>
+              avg health <b className={styles.summaryGood}>91/100</b>
+            </span>
           </div>
+          <ul className={styles.siteList}>
+            {SAMPLE_SITES.map((site) => (
+              <li key={site.name} className={styles.siteRow}>
+                <span className={`${styles.dot} ${site.status === 'flagged' ? styles.dotFlag : styles.dotOnline}`} aria-hidden="true" />
+                <span className={styles.siteName}>{site.name}</span>
+                <span className={site.status === 'flagged' ? styles.healthFlag : styles.health}>{site.health}</span>
+                <span className={styles.pv}>{site.pv} PV</span>
+              </li>
+            ))}
+          </ul>
           <p className={styles.narr}>
-            &quot;1 site flagged for <b>quiet drift</b> — generating 18% below its own recent baseline.
-            Everything else is within its normal range.&quot;
+            <b>Bodega Central</b> flagged for quiet drift — generating 18% below its own recent baseline.
           </p>
         </Panel>
       </div>

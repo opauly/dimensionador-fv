@@ -91,12 +91,83 @@
 .liveEyebrow {
   font-size: 10.5px;
 }
-.stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 18px;
+/* Summary line + site list — deliberately NOT Hero's Readout stat-grid
+   shape (Oscar's own feedback, 2026-09-04: the report and dashboard
+   panels read as the same component with different numbers). A live
+   dashboard's own defining visual is a list of sites, not four abstract
+   KPIs, so this mimics the real /app/dashboard table's three fields
+   instead: connection status, health score, live PV reading. */
+.summaryRow {
+  display: flex;
+  gap: 20px;
+  font-size: 12.5px;
+  color: var(--paper-dim);
+  margin-bottom: 16px;
 }
+.summaryGood {
+  font-family: var(--font-mono);
+  color: var(--good);
+  font-weight: 600;
+}
+
+.siteList {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.siteRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--ink-2);
+  font-size: 13px;
+}
+.siteRow + .siteRow {
+  border-top: 1px solid var(--line);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.dotOnline {
+  background: var(--good);
+  box-shadow: 0 0 6px 1px rgba(63, 191, 143, 0.5);
+}
+.dotFlag {
+  background: var(--signal);
+  box-shadow: 0 0 6px 1px rgba(242, 169, 59, 0.5);
+}
+.siteName {
+  color: var(--paper);
+  flex: 1;
+}
+.health,
+.healthFlag {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.health {
+  color: var(--good);
+}
+.healthFlag {
+  color: var(--signal);
+}
+.pv {
+  font-family: var(--font-mono);
+  color: var(--mute);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .narr {
   font-family: var(--font-body);
   font-size: 13px;
@@ -104,11 +175,9 @@
   color: var(--paper-dim);
   border-left: 2px solid var(--victron);
   padding-left: 13px;
-  font-style: italic;
 }
 .narr b {
   color: var(--paper);
-  font-style: normal;
   font-weight: 500;
 }
 
@@ -119,7 +188,11 @@
   }
 }
 @media (max-width: 560px) {
-  .stats {
-    gap: 10px;
+  .summaryRow {
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .pv {
+    display: none;
   }
 }

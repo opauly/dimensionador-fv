@@ -10,13 +10,13 @@ import { getFeaturedSelfServePlanIds } from '@/lib/server/db/signup';
 // template — the home page's title already reads as a full sentence, not a
 // page name that wants "VRM Monitor" appended a second time.
 export const metadata: Metadata = {
-  title: { absolute: 'VRM Monitor — Weekly reports from your Victron system' },
+  title: { absolute: 'VRM Monitor — Live dashboard + weekly reports for your Victron system' },
   description:
-    'The Victron VRM export nobody opens, turned into a branded, AI-narrated report your customers actually read — automatically, every week. For one home or a whole installer fleet.',
+    'Watch your Victron system live, and get a branded, AI-narrated report every week — for your own home, or every customer on an installer fleet.',
   openGraph: {
-    title: 'VRM Monitor — Weekly reports from your Victron system',
+    title: 'VRM Monitor — Live dashboard + weekly reports for your Victron system',
     description:
-      'The Victron VRM export nobody opens, turned into a branded, AI-narrated report your customers actually read — automatically, every week.',
+      'Watch your Victron system live, and get a branded, AI-narrated report every week — for your own home, or every customer on an installer fleet.',
     images: [{ url: '/sample_report.png', width: 1819, height: 2573, alt: 'A sample VRM Monitor weekly report' }],
   },
 };

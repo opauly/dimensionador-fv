@@ -125,7 +125,15 @@ export function Pricing({ starterPlanId, growthPlanId }: PricingProps) {
                 <li className={styles.carry}>Everything in Starter, plus</li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
-                  Live dashboard with AI-powered insights <em>(Beta)</em>
+                  Live dashboard — real-time solar, load &amp; battery
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  Health score updated continuously, not just weekly
+                </li>
+                <li>
+                  <span className={styles.dot} aria-hidden="true" />
+                  AI Insights — 4 automated checks per site <em>(Beta)</em>
                 </li>
                 <li>
                   <span className={styles.dot} aria-hidden="true" />
