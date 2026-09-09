@@ -1,7 +1,6 @@
-/* The signed-in account menu — a circular avatar trigger + dropdown,
-   replacing the Log in / Sign up pair once a session is confirmed
-   (NavAuthArea.tsx's own header comment explains why this can't be decided
-   server-side on this ISR-cached page). */
+/* The signed-in account menu — a circular avatar trigger + dropdown, used
+   identically by the marketing nav and the in-app header (AccountMenu.tsx's
+   own header comment explains why one component covers both). */
 
 .wrap {
   position: relative;

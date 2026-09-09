@@ -24,3 +24,6 @@ export type { ModeToggleProps, ModeToggleOption } from './ModeToggle/ModeToggle'
 
 export { Table } from './Table/Table';
 export type { TableProps } from './Table/Table';
+
+export { AccountMenu } from './AccountMenu/AccountMenu';
+export type { AccountMenuLink } from './AccountMenu/AccountMenu';

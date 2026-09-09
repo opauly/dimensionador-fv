@@ -117,6 +117,35 @@ SCHEMA = "vrm"
 # caller yet to configure.
 _DEFAULT_BACKFILL_DAYS = 31
 
+# Bug found live 2026-09-08: every active site's `vrm.daily_health` was
+# stuck showing a score 5-9+ days old, fleet-wide. Root cause was here, not
+# in the health-score query that surfaces it (`fleetOverviewCore.ts` — its
+# own "skip Partial day rows" logic is correct and already documented; it
+# was just never being fed a complete day to find). `start` used to be
+# derived from `vrm_last_synced_at`'s DATE, and that stamp is written as
+# `_now()` — today's date — the moment a run finishes, not the date it
+# actually finished covering. So the very next calendar day, `start` was
+# already >= that day's own `yesterday`, and the site was marked
+# "skipped_up_to_date" forever after syncing a given date exactly once —
+# even though Victron's own device→cloud backfill for that date may not
+# have finished landing yet at the moment it was first (and, under the old
+# logic, ONLY ever) fetched. Confirmed live: every recent day for every
+# site showed the same ~18-21h-of-24h "Partial day" coverage, never
+# revisited. `_RECENT_REFRESH_DAYS` below re-covers a small trailing
+# window on every run regardless of the stamp, so a date that landed
+# partial gets another chance to complete once Victron's backfill catches
+# up — self-healing within a few days instead of getting stuck forever.
+_RECENT_REFRESH_DAYS = 3
+# Paired with the trailing-window re-fetch above: without this, re-covering
+# 3 days on every run would mean every hourly tick actually calls Victron
+# for every site (a ~24x jump in daily VRM API volume) instead of the
+# original ~once/day cadence. Skip on ELAPSED TIME since the last real run
+# instead of on calendar date, so the cadence this was originally tuned for
+# is preserved — a site that already ran within the last 20 hours is still
+# skipped even though the trailing window would otherwise make it "due"
+# again on every single tick.
+_MIN_HOURS_BETWEEN_RUNS = 20
+
 
 def _t(name: str):
     return get_client().schema(SCHEMA).table(name)
@@ -339,15 +368,20 @@ def post_run_due() -> VrmSyncRunDueOut:
     admin_token = os.environ.get("VRM_ADMIN_TOKEN")
 
     results: list[VrmSyncSiteResult] = []
+    now = datetime.now(timezone.utc)
     yesterday = date.today() - timedelta(days=1)
     for site in due_sites:
         site_id = site["site_id"]
         last_synced = site.get("vrm_last_synced_at")
-        start = (date.fromisoformat(last_synced[:10]) if last_synced
-                else yesterday - timedelta(days=_DEFAULT_BACKFILL_DAYS))
-        if start > yesterday:
+        last_synced_dt = datetime.fromisoformat(last_synced) if last_synced else None
+        # Elapsed-time check, not a date comparison — see _MIN_HOURS_BETWEEN_RUNS'
+        # own comment above for why. A brand-new site (`last_synced_dt is
+        # None`) always proceeds.
+        if last_synced_dt is not None and (now - last_synced_dt) < timedelta(hours=_MIN_HOURS_BETWEEN_RUNS):
             results.append(VrmSyncSiteResult(site_id=site_id, status="skipped_up_to_date"))
             continue
+        start = (min(date.fromisoformat(last_synced[:10]), yesterday - timedelta(days=_RECENT_REFRESH_DAYS - 1))
+                if last_synced else yesterday - timedelta(days=_DEFAULT_BACKFILL_DAYS))
 
         # Only check WHETHER a customer token exists, to route correctly —
         # if one does, `_do_sync` below is still called with token=None so

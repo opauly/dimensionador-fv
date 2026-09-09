@@ -14,16 +14,14 @@
 // the cached HTML's own server render always looks like, so hydration
 // never mismatches), then check `/api/session` — a genuinely dynamic route
 // (lib/server/auth.ts:getSessionContext(), which re-validates the token
-// against Supabase on every call) — after mount, and swap in a profile menu
+// against Supabase on every call) — after mount, and swap in the shared
+// `AccountMenu` (same avatar/dropdown the in-app header uses, 2026-09-08)
 // if one exists. A returning logged-in visitor sees a brief flash of "Log
 // in / Sign up" before the swap; that's the accepted tradeoff for keeping
 // the page itself cacheable rather than making every anonymous visitor's
 // page load pay for a live Supabase round trip too.
-import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { Button } from '@/components/ui';
-import { signOutAction } from '@/lib/server/auth-actions';
-import styles from './NavAuthArea.module.css';
+import { useEffect, useState } from 'react';
+import { AccountMenu, Button } from '@/components/ui';
 
 type SessionInfo =
   | { authenticated: false }
@@ -33,8 +31,6 @@ export function NavAuthArea() {
   // `null` = not checked yet (renders the same logged-out buttons the
   // server did, so the initial client render matches SSR exactly).
   const [session, setSession] = useState<SessionInfo | null>(null);
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -50,22 +46,6 @@ export function NavAuthArea() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
 
   if (session === null || !session.authenticated) {
     return (
@@ -83,46 +63,18 @@ export function NavAuthArea() {
     );
   }
 
-  const homeHref = session.role === 'admin' ? '/admin' : '/app';
-  const initial = session.email.charAt(0).toUpperCase() || '?';
+  // From outside the app, the dropdown's first job is getting the visitor
+  // BACK into it — Profile/Help are real pages there too, but a visitor who
+  // hasn't followed the "My account"/"Admin dashboard" link yet has never
+  // seen the in-app nav that would otherwise surface them.
+  const items =
+    session.role === 'admin'
+      ? [{ href: '/admin', label: 'Admin dashboard' }]
+      : [
+          { href: '/app', label: 'My account' },
+          { href: '/app/profile', label: 'Profile' },
+          { href: '/app/help', label: 'Help' },
+        ];
 
-  return (
-    <div className={styles.wrap} ref={wrapRef}>
-      <button
-        type="button"
-        className={styles.trigger}
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={`Account menu — signed in as ${session.email}`}
-      >
-        <span className={styles.avatar} aria-hidden="true">
-          {initial}
-        </span>
-      </button>
-      {open && (
-        <div className={styles.menu} role="menu">
-          <div className={styles.menuEmail}>{session.email}</div>
-          <Link href={homeHref} className={styles.menuItem} role="menuitem" onClick={() => setOpen(false)}>
-            {session.role === 'admin' ? 'Admin dashboard' : 'My account'}
-          </Link>
-          {session.role === 'customer' && (
-            <>
-              <Link href="/app/profile" className={styles.menuItem} role="menuitem" onClick={() => setOpen(false)}>
-                Profile
-              </Link>
-              <Link href="/app/help" className={styles.menuItem} role="menuitem" onClick={() => setOpen(false)}>
-                Help
-              </Link>
-            </>
-          )}
-          <form action={signOutAction}>
-            <button type="submit" className={styles.menuItemButton} role="menuitem">
-              Log out
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  );
+  return <AccountMenu email={session.email} items={items} />;
 }

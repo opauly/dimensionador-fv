@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { signOutAction } from '@/lib/server/auth-actions';
-import { t, type Lang } from '@/lib/i18n/strings';
+import { AccountMenu } from '@/components/ui';
+import type { Lang } from '@/lib/i18n/strings';
 import { NavLink } from './NavLink';
 import styles from './AppShell.module.css';
 
@@ -30,12 +30,13 @@ export type AppShellProps = {
   role: 'customer' | 'admin';
   email: string;
   navItems: AppNavItem[];
-  /** English/Spanish label language for the chrome around `navItems`
-   * (signed-in-as / log out). Customer sessions pass their own
-   * `vrm.customers.ui_language`; admin sessions are always `'en'` (admin
-   * views went English-only 2026-08-19). The `navItems` labels themselves
-   * are supplied pre-translated by the caller, since Step 4/7 build the
-   * real routes each one points at. */
+  /** English/Spanish label language for `navItems`' OWN pre-translated
+   * labels' surrounding chrome — currently unused by this component itself
+   * (the account corner's `AccountMenu` is English-only, matching the
+   * marketing nav's identical menu, 2026-09-08) but kept on the type since
+   * both callers already pass their session's real language and a future
+   * translated addition to this shell's own chrome (not a `navItems` label)
+   * would want it immediately rather than threading it through again. */
   lang: Lang;
   children: ReactNode;
 };
@@ -43,10 +44,11 @@ export type AppShellProps = {
 // Shared nav/header chrome for both `/app` and `/admin` — the one
 // `components/app/AppShell` PLAN_PHASE14.md §1.7 lists, first used here at
 // Step 3 with placeholder pages, reused as-is once Steps 4-7 fill in real
-// dashboard content. Server Component: nothing here needs client state, and
-// keeping it a Server Component means `signOutAction` can be wired directly
-// to a `<form action>` with no client-side plumbing at all.
-export function AppShell({ role, email, navItems, lang, children }: AppShellProps) {
+// dashboard content. Server Component: nothing here needs client state
+// itself — the account corner's avatar/dropdown interaction lives inside
+// `AccountMenu`, its own small Client Component, same split `NavAuthArea`
+// already uses on the marketing nav for the identical reason.
+export function AppShell({ role, email, navItems, children }: AppShellProps) {
   // Two groups, not one — see `AppNavItem.personal`'s own doc comment.
   // `/app`'s customer nav never sets `personal` on anything, so
   // `personalItems` is always empty there and this renders exactly as
@@ -83,12 +85,7 @@ export function AppShell({ role, email, navItems, lang, children }: AppShellProp
           </nav>
         )}
         <div className={styles.account}>
-          <span className={styles.email}>{t(lang, 'signed_in_as').replace('{email}', email)}</span>
-          <form action={signOutAction}>
-            <button type="submit" className={styles.signOut}>
-              {t(lang, 'log_out')}
-            </button>
-          </form>
+          <AccountMenu email={email} />
         </div>
       </header>
       <main className={styles.main}>{children}</main>
