@@ -22,12 +22,20 @@ export function Hero() {
             {/* PLAN_PHASE16.md §8 Step 5.5 — replaces the old `#cta` anchor
                 into the now-deleted `AccessForm`; the real self-serve
                 signup flow lives at /signup instead (Oscar's explicit
-                decision to retire the request-access form). */}
+                decision to retire the request-access form).
+                Both CTAs point at /signup now (2026-09-08, Oscar's
+                decision) — the sample report is still reachable without
+                committing via Nav's own "Sample report" link (/#preview),
+                so this isn't removing that path, just no longer giving it
+                its own hero-level button. Second button's label changed to
+                match its real destination (Pricing's own "every plan
+                starts with a 7-day free trial" line) rather than promising
+                a sample and delivering a signup form. */}
             <Button href="/signup" arrow>
               Get started
             </Button>
-            <Button href="#preview" variant="ghost">
-              See a sample report
+            <Button href="/signup" variant="ghost">
+              Start free trial
             </Button>
           </div>
           <span className={styles.note}>

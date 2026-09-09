@@ -58,17 +58,19 @@ export function ReportPreview() {
           </div>
           <div className={styles.shotFoot}>
             <span>Page 1 of 2</span>
-            {/* PLAN_PHASE16.md §8 Step 5.5 — `#cta` pointed at the
-                now-deleted `AccessForm` (Oscar's explicit decision to
-                retire it). "Request the full sample" isn't a signup, so
-                this becomes a mailto, the same pattern Fleet's/Single
-                Report's own CTAs already use, rather than /signup. */}
-            <Button
-              href="mailto:proyectos@paulyco.com?subject=VRM%20Monitor%20-%20Full%20sample%20report"
-              variant="ghost"
-              style={{ padding: '9px 16px' }}
-            >
-              Request the full sample
+            {/* Was a mailto ("Request the full sample" — PLAN_PHASE16.md §8
+                Step 5.5's original reasoning: not a signup, so not
+                /signup). Changed 2026-09-08 (Oscar's decision): now that
+                self-serve /signup + a 7-day free trial exists, asking
+                someone to email in for a sample is the obsolete path —
+                they can see their own real report faster by signing up
+                directly. Fleet's own "Talk to us" and Single Report's own
+                "Get a report" stay mailto — neither has a self-serve
+                checkout to send them to (Fleet is hand-negotiated;
+                single_report has no seeded vrm.plans price at all, see
+                tools/seed_onvo_plans.py's own docstring). */}
+            <Button href="/signup" variant="ghost" style={{ padding: '9px 16px' }}>
+              Start free trial
             </Button>
           </div>
         </div>
