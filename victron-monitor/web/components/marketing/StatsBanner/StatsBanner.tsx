@@ -78,20 +78,23 @@ export function StatsBanner({ sitesMonitored, installedKwp, kwhTracked }: StatsB
     <section className={styles.banner} aria-label="Platform totals">
       <div className={`wrap ${styles.row}`}>
         <div className={styles.item}>
-          <div className={styles.num}>{sites.toLocaleString('en-US')}</div>
+          <div className={styles.num}>
+            {sites.toLocaleString('en-US')}
+            <span className={styles.unit}>+</span>
+          </div>
           <div className={styles.label}>Sites monitored</div>
         </div>
         <div className={styles.item}>
           <div className={styles.num}>
             {kwp.toLocaleString('en-US')}
-            <span className={styles.unit}>kW</span>
+            <span className={styles.unit}>+kW</span>
           </div>
           <div className={styles.label}>Installed capacity</div>
         </div>
         <div className={styles.item}>
           <div className={styles.num}>
             {kwh.toLocaleString('en-US')}
-            <span className={styles.unit}>kWh</span>
+            <span className={styles.unit}>+kWh</span>
           </div>
           <div className={styles.label}>Tracked so far</div>
         </div>

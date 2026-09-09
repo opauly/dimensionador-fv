@@ -22,6 +22,19 @@ export const metadata: Metadata = {
   },
 };
 
+// ISR, not static-forever (2026-09-08) — found live via `npm run build`'s
+// own route table: with no revalidate/dynamic export at all, this page had
+// been fully static (`○ /`, "prerendered as static content"), meaning
+// StatsBanner's numbers were frozen at whatever they happened to be at the
+// last deploy, not actually "auto-updated each day" the way the banner's
+// own "Tracked so far" framing implies. 86400s (24h) matches that stated
+// expectation exactly: Next.js serves the cached page for up to a day, then
+// regenerates it in the background on the next request past that window —
+// still CDN-cacheable in between, no per-request Supabase round trip, but
+// genuinely fresh at most once a day rather than only at the next
+// unrelated deploy.
+export const revalidate = 86400;
+
 // (marketing) is a route group — it does not add a URL segment, so this is
 // still the site root ("/"). Grouped so later steps' (auth)/(portal)/(admin)
 // route groups can each carry their own layout without this one's Nav/
