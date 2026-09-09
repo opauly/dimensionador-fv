@@ -87,9 +87,9 @@ export function StatsBanner({ sitesMonitored, installedKwp, kwhTracked }: StatsB
         <div className={styles.item}>
           <div className={styles.num}>
             {kwp.toLocaleString('en-US')}
-            <span className={styles.unit}>+kW</span>
+            <span className={styles.unit}>+kWp</span>
           </div>
-          <div className={styles.label}>Installed capacity</div>
+          <div className={styles.label}>Installed power</div>
         </div>
         <div className={styles.item}>
           <div className={styles.num}>
