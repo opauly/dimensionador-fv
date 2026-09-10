@@ -372,9 +372,13 @@ def _current_tariffs() -> None:
 
 # ── service defaults ─────────────────────────────────────────────────────────
 
+_SYSTEM_TYPE_LABELS = [("grid_zero", "Grid Zero"), ("off_grid", "Off-Grid"), ("hybrid", "Híbrido")]
+
+
 def _service_form(existing: dict | None = None) -> None:
     src = existing or {}
     is_edit = existing is not None
+    src_types = src.get("system_types")  # None = applies to every type
 
     with st.form(key="service_form"):
         st.markdown("#### " + ("Editar servicio" if is_edit else "Nuevo servicio"))
@@ -392,6 +396,13 @@ def _service_form(existing: dict | None = None) -> None:
         specs    = st.text_area("Descripción / Specs (ES)", value=src.get("specs") or "", height=60)
         specs_en = st.text_area("Descripción / Specs (EN)", value=src.get("specs_en") or "", height=60)
 
+        st.caption("Tipos de sistema donde aparece por defecto en el Paso 7:")
+        type_cols = st.columns(3)
+        type_checks = {}
+        for (key, label), col in zip(_SYSTEM_TYPE_LABELS, type_cols):
+            default_checked = (src_types is None) or (key in src_types)
+            type_checks[key] = col.checkbox(label, value=default_checked, key=f"svc_type_{key}")
+
         col_save, col_cancel = st.columns([1, 4])
         submitted = col_save.form_submit_button("Guardar", type="primary")
         cancelled = col_cancel.form_submit_button("Cancelar")
@@ -405,6 +416,13 @@ def _service_form(existing: dict | None = None) -> None:
         if not str(item).strip():
             st.error("El nombre es obligatorio.")
             return
+        chosen_types = [key for key, _ in _SYSTEM_TYPE_LABELS if type_checks[key]]
+        if not chosen_types:
+            st.error(
+                "Selecciona al menos un tipo de sistema — para quitar el servicio de "
+                "todas las propuestas nuevas, usa 'Habilitado' en vez de esto."
+            )
+            return
         from database.equipment_db import upsert_service_default
         payload: dict = {
             "item":          str(item).strip(),
@@ -415,6 +433,10 @@ def _service_form(existing: dict | None = None) -> None:
             "specs":         str(specs).strip(),
             "specs_en":      str(specs_en).strip(),
             "sort_order":    int(sort_ord),
+            # None means "applies to every type" — store it that way rather than
+            # a redundant 3-element list, matching how an unrestricted row already
+            # reads from the DB.
+            "system_types":  None if len(chosen_types) == len(_SYSTEM_TYPE_LABELS) else chosen_types,
         }
         if is_edit and existing.get("id"):
             payload["id"] = existing["id"]
@@ -480,6 +502,10 @@ def _services_section() -> None:
         c1.markdown(f"**{r['item']}**")
         if r.get("item_en"):
             c1.caption(r["item_en"])
+        _types = r.get("system_types")
+        if _types:
+            _type_labels = [lbl for key, lbl in _SYSTEM_TYPE_LABELS if key in _types]
+            c1.caption("Solo: " + ", ".join(_type_labels))
 
         c2.number_input(
             "Precio", value=float(r.get("unit_cost_usd") or 0),
@@ -678,6 +704,165 @@ def _client_sites_linker(client: dict) -> None:
                 st.error(f"Error al vincular {s['site_id']}: {e}")
 
 
+def _client_new_site_form(client: dict) -> None:
+    """Register a brand-new site for this client — the mandatory-client-link
+    counterpart to `_client_sites_linker()` above, which only links *existing*
+    sites. Routes to `monitoring.sites` (own fleet, any brand) or `vrm.sites`
+    (VRM Portal, always Victron, via the shared "Pauly & Co Portfolio" tenant)
+    based on the checkbox below — see `database/site_registration_db.py`.
+    """
+    from config import COUNTRIES, SYSTEM_TYPES, SYSTEM_TYPE_LABELS
+
+    key_prefix = f"ns_{client['id']}"
+
+    with st.expander("➕ Registrar sitio nuevo"):
+        is_victron = st.checkbox(
+            "¿Usa equipo Victron?", key=f"{key_prefix}_victron",
+            help="Determina la tabla destino: monitoring.sites (equipo propio, "
+                 "cualquier marca) o vrm.sites (VRM Portal, siempre Victron).",
+        )
+
+        country_codes = sorted(COUNTRIES, key=lambda k: COUNTRIES[k])
+        default_country_idx = country_codes.index("CR") if "CR" in country_codes else 0
+
+        with st.form(f"{key_prefix}_form"):
+            display_name = st.text_input("Nombre del sitio *", key=f"{key_prefix}_name")
+
+            a, b, c = st.columns(3)
+            location = a.text_input("Ubicación", key=f"{key_prefix}_loc")
+            country = b.selectbox(
+                "País", country_codes, index=default_country_idx,
+                format_func=lambda k: COUNTRIES[k], key=f"{key_prefix}_country",
+            )
+            timezone = c.text_input(
+                "Timezone", value="America/Costa_Rica", key=f"{key_prefix}_tz",
+            )
+
+            a, b = st.columns(2)
+            latitude = a.number_input(
+                "Latitud", value=0.0, format="%.6f", key=f"{key_prefix}_lat",
+                help="Necesaria para el clima/rendimiento — 0,0 es 'sin dato', no una ubicación real.",
+            )
+            longitude = b.number_input("Longitud", value=0.0, format="%.6f", key=f"{key_prefix}_lng")
+
+            a, b, c = st.columns(3)
+            stype_options = SYSTEM_TYPES + (["on_grid"] if not is_victron else [])
+            system_type = a.selectbox(
+                "Tipo de sistema", stype_options,
+                format_func=lambda v: SYSTEM_TYPE_LABELS.get(v, v.replace("_", " ").title()),
+                key=f"{key_prefix}_stype",
+            )
+            pv_kwp = b.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, key=f"{key_prefix}_kwp")
+            owner = c.text_input("Owner", key=f"{key_prefix}_owner")
+
+            a, b, c = st.columns(3)
+            commissioned_at = a.date_input("Fecha de comisión", value=None, key=f"{key_prefix}_comm")
+            report_language = b.selectbox("Idioma de reportes", ["es", "en"], key=f"{key_prefix}_lang")
+            active = c.checkbox("Activo", value=True, key=f"{key_prefix}_active")
+
+            a, b = st.columns(2)
+            battery_nominal_kwh = a.number_input(
+                "Batería nominal (kWh)", min_value=0.0, step=0.1, key=f"{key_prefix}_battnom",
+                help="Capacidad de placa (datasheet) — la usable se calcula automáticamente "
+                     "(columna generada, no se escribe directamente).",
+            )
+            battery_dod_pct = b.number_input(
+                "DoD (%)", min_value=0.0, max_value=100.0, step=1.0, key=f"{key_prefix}_batdod",
+            )
+            usable = (round(battery_nominal_kwh * battery_dod_pct / 100, 2)
+                      if battery_nominal_kwh and battery_dod_pct else None)
+            if usable:
+                st.caption(f"Batería usable: **{usable:.2f} kWh**")
+
+            if is_victron:
+                a, b = st.columns(2)
+                exports_to_grid = a.checkbox("Exporta a la red", key=f"{key_prefix}_exports")
+                notes = st.text_area("Notas", key=f"{key_prefix}_notes", height=60)
+                savings_rate = savings_currency = None
+                if country != "CR":
+                    a, b = st.columns(2)
+                    savings_rate = a.number_input(
+                        "Tarifa de ahorro (por kWh)", min_value=0.0, step=0.01, format="%.4f",
+                        key=f"{key_prefix}_savrate",
+                        help="Solo se usa si el país no es CR (CR usa tarifas ARESEP).",
+                    )
+                    from victron import savings as vrm_savings
+                    savings_currency = b.selectbox(
+                        "Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES, key=f"{key_prefix}_savcur",
+                    )
+            else:
+                brand = st.text_input(
+                    "Marca del equipo *", value="Victron Energy", key=f"{key_prefix}_brand",
+                    help="monitoring.sites no tiene un default — hoy el 100% del parque es "
+                         "Victron Energy, pero puede registrarse otra (p. ej. Fronius).",
+                )
+                a, b, c = st.columns(3)
+                panel_count = a.number_input("Paneles", min_value=0, step=1, key=f"{key_prefix}_panels")
+                inverter_count = b.number_input("Inversores", min_value=0, step=1, key=f"{key_prefix}_inv")
+                battery_count = c.number_input("Baterías", min_value=0, step=1, key=f"{key_prefix}_batcount")
+                monitoring_urls_raw = st.text_area(
+                    "URLs de monitoreo (una por línea)", key=f"{key_prefix}_urls",
+                )
+
+            submitted = st.form_submit_button("Registrar sitio", type="primary")
+
+        if submitted:
+            if not display_name.strip():
+                st.error("El nombre del sitio es obligatorio.")
+                return
+            if not is_victron and not brand.strip():
+                st.error("La marca del equipo es obligatoria.")
+                return
+
+            common = dict(
+                location=location or None,
+                latitude=latitude or None,
+                longitude=longitude or None,
+                country=(country or "CR").strip().upper() or "CR",
+                timezone=timezone.strip() or "America/Costa_Rica",
+                system_type=system_type,
+                pv_kwp=pv_kwp or None,
+                owner=owner or None,
+                commissioned_at=commissioned_at.isoformat() if commissioned_at else None,
+                report_language=report_language,
+                active=active,
+                battery_nominal_kwh=battery_nominal_kwh or None,
+                battery_dod_pct=battery_dod_pct or None,
+            )
+
+            try:
+                from database.site_registration_db import register_new_site
+                if is_victron:
+                    site = register_new_site(
+                        client["id"], display_name.strip(), is_victron=True,
+                        exports_to_grid=exports_to_grid,
+                        notes=notes or None,
+                        savings_rate=savings_rate or None,
+                        savings_currency=savings_currency if savings_rate else None,
+                        **common,
+                    )
+                else:
+                    urls = ([u.strip() for u in monitoring_urls_raw.splitlines() if u.strip()]
+                            if monitoring_urls_raw else [])
+                    site = register_new_site(
+                        client["id"], display_name.strip(), is_victron=False,
+                        brand=brand.strip(),
+                        panel_count=panel_count or None,
+                        inverter_count=inverter_count or None,
+                        battery_count=battery_count or None,
+                        monitoring_urls=urls or None,
+                        **common,
+                    )
+                st.success(
+                    f"Sitio registrado: `{site['site_id']}`. Se creó automáticamente una "
+                    "propiedad de mantenimiento — si corresponde, puede fusionarse con una "
+                    "existente desde Configurar propiedades."
+                )
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error al registrar el sitio: {e}")
+
+
 def _clients_section() -> None:
     from database.clients_db import list_all_clients
 
@@ -744,6 +929,7 @@ def _clients_section() -> None:
             st.markdown("##### Editando cliente")
             _client_form(existing=edit_client)
             _client_sites_linker(r)
+            _client_new_site_form(r)
 
         st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
                     unsafe_allow_html=True)
@@ -2041,6 +2227,138 @@ def _monitoring_section() -> None:
                     unsafe_allow_html=True)
 
 
+def _settings_company_form() -> None:
+    from wizard.state import get_company_info, save_company_info
+
+    co = get_company_info()
+
+    with st.form(key="settings_company_form"):
+        st.markdown("#### Datos de la empresa")
+        st.caption("Aparecen en el encabezado y pie de página de cada propuesta generada.")
+        col1, col2 = st.columns(2)
+        with col1:
+            name           = st.text_input("Nombre de la empresa", value=co.get("name") or "")
+            license_no     = st.text_input("Licencia/Registro", value=co.get("license") or "")
+            contact_name   = st.text_input("Nombre de contacto", value=co.get("contact_name") or "")
+            contact_title  = st.text_input("Puesto (ES)", value=co.get("contact_title") or "")
+        with col2:
+            phone             = st.text_input("Teléfono", value=co.get("phone") or "")
+            email             = st.text_input("Email", value=co.get("email") or "")
+            website           = st.text_input("Sitio web", value=co.get("website") or "")
+            contact_title_en  = st.text_input("Puesto (EN)", value=co.get("contact_title_en") or "")
+
+        submitted = st.form_submit_button("Guardar datos de la empresa", type="primary")
+
+    if submitted:
+        try:
+            save_company_info({
+                "name": name, "license": license_no,
+                "contact_name": contact_name, "contact_title": contact_title,
+                "phone": phone, "email": email, "website": website,
+                "contact_title_en": contact_title_en,
+            })
+            st.success("✅ Datos de la empresa actualizados.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al guardar: {e}")
+
+
+def _settings_bank_form() -> None:
+    from wizard.state import get_bank_info, save_company_info
+
+    bank = get_bank_info()
+
+    with st.form(key="settings_bank_form"):
+        st.markdown("#### Datos bancarios")
+        st.caption("Una línea por renglón — aparecen tal cual en la tabla de pago de la propuesta.")
+        col1, col2 = st.columns(2)
+        with col1:
+            local_es = st.text_area(
+                "Transferencia local (ES)", height=140,
+                value="\n".join(bank.get("bank_local_lines", [])),
+            )
+            intl_es = st.text_area(
+                "Transferencia internacional (ES)", height=180,
+                value="\n".join(bank.get("bank_intl_lines", [])),
+            )
+        with col2:
+            local_en = st.text_area(
+                "Transferencia local (EN)", height=140,
+                value="\n".join(bank.get("bank_local_lines_en", [])),
+            )
+            intl_en = st.text_area(
+                "Transferencia internacional (EN)", height=180,
+                value="\n".join(bank.get("bank_intl_lines_en", [])),
+            )
+
+        submitted = st.form_submit_button("Guardar datos bancarios", type="primary")
+
+    if submitted:
+        def _lines(text: str) -> list[str]:
+            return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+        try:
+            save_company_info({
+                "bank_local_lines": _lines(local_es),
+                "bank_intl_lines": _lines(intl_es),
+                "bank_local_lines_en": _lines(local_en),
+                "bank_intl_lines_en": _lines(intl_en),
+            })
+            st.success("✅ Datos bancarios actualizados.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al guardar: {e}")
+
+
+def _settings_assets_section() -> None:
+    from wizard.state import get_asset_b64, save_asset
+
+    st.markdown("#### Logo y firma")
+    st.caption(
+        "Reemplazan las imágenes por defecto en el PDF de la propuesta. "
+        "Sin un archivo subido, se usa la imagen incluida en el proyecto."
+    )
+
+    assets = [
+        ("logo",             "Logo"),
+        ("signature",        "Firma (fondo claro)"),
+        ("signature_white",  "Firma (fondo oscuro)"),
+        ("isotipo_white",    "Isotipo (fondo oscuro)"),
+    ]
+
+    for kind, label in assets:
+        col_preview, col_upload = st.columns([1, 3])
+        with col_preview:
+            try:
+                st.image(get_asset_b64(kind), width=120)
+            except Exception:
+                st.caption("(sin vista previa)")
+        with col_upload:
+            st.markdown(f"**{label}**")
+            uploaded = st.file_uploader(
+                "PNG", type=["png"], key=f"settings_asset_{kind}", label_visibility="collapsed",
+            )
+            if uploaded is not None and st.button(f"Subir {label.lower()}", key=f"settings_asset_btn_{kind}"):
+                try:
+                    save_asset(kind, uploaded.getvalue())
+                    st.success(f"✅ {label} actualizado.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error al subir: {e}")
+        st.divider()
+
+
+def _settings_section() -> None:
+    st.markdown("### Configuración")
+    st.caption("Datos que se usan en cada propuesta nueva, sin necesidad de tocar código.")
+    st.divider()
+    _settings_company_form()
+    st.divider()
+    _settings_bank_form()
+    st.divider()
+    _settings_assets_section()
+
+
 def _equipment_catalog() -> None:
     tab_panels, tab_inverters, tab_batteries, tab_cc, tab_monitoring = st.tabs([
         "Paneles solares", "Inversores", "Baterías", "Controladores de carga", "Monitoreo",
@@ -2066,11 +2384,12 @@ def main() -> None:
     )
     st.divider()
 
-    tab_equip, tab_services, tab_aresep, tab_clients = st.tabs([
+    tab_equip, tab_services, tab_aresep, tab_clients, tab_settings = st.tabs([
         "Catálogo de equipos",
         "Servicios",
         "Tarifas ARESEP",
         "Clientes",
+        "Configuración",
     ])
 
     with tab_equip:
@@ -2092,6 +2411,9 @@ def main() -> None:
             _clients_section()
         with sub_prospects:
             _prospects_section()
+
+    with tab_settings:
+        _settings_section()
 
 
 main()

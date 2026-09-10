@@ -85,6 +85,19 @@ def upsert_site(customer_id: str, site_id: str, display_name: str, **fields) -> 
     return _t("sites").insert(payload).execute().data[0]
 
 
+_ADMIN_PORTFOLIO_SLUG = "pauly-co-portfolio"
+
+
+def get_or_create_admin_portfolio_customer() -> dict:
+    """The one shared vrm.customers tenant every admin-managed Victron site already
+    uses (confirmed live, 2026-09-09: all of them point at this same customer_id) —
+    never create a second one. This is an implementation detail of "register a new
+    site for one of Oscar's own clients" (database/site_registration_db.py), not a
+    real VRM Monitor product-tenant decision — nothing here should ever surface this
+    row as something to pick or edit."""
+    return upsert_customer("Pauly & Co Portfolio", slug=_ADMIN_PORTFOLIO_SLUG, origin="admin")
+
+
 # ──────────────────────────────────────────────────────────────────
 # Ingest
 # ──────────────────────────────────────────────────────────────────
