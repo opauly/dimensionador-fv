@@ -1074,7 +1074,7 @@ def _sites_section() -> None:
     )
 
     c_add, _ = st.columns([2, 8])
-    if c_add.button("Nuevo sitio", key="admin_site_toggle_add"):
+    if c_add.button("Nuevo sitio", key="admin_site_toggle_add", type="primary"):
         st.session_state["admin_site_mode"] = "add"
         st.rerun()
 
@@ -1149,6 +1149,25 @@ def _client_row_html(r: dict, site_count: int) -> str:
 </div>"""
 
 
+def _clients_kpi_strip(rows: list[dict], site_counts: dict[str, int]) -> None:
+    unlinked = sum(1 for r in rows if not site_counts.get(r["id"]))
+    cards = [
+        ("Total clientes", len(rows), "#1E2D54"),
+        ("Con sitios vinculados", len(rows) - unlinked, "#1d4ed8"),
+        ("Sin sitios vinculados", unlinked, "#a16207" if unlinked else "#16a34a"),
+    ]
+    cols = st.columns(len(cards))
+    for col, (label, value, color) in zip(cols, cards):
+        col.markdown(
+            f'<div style="border-left:4px solid {color};background:#f8f9fa;'
+            f'border-radius:6px;padding:0.6rem 0.9rem;">'
+            f'<div style="font-size:0.78rem;color:#6b7280;">{label}</div>'
+            f'<div style="font-size:1.5rem;font-weight:700;color:{color};">{value}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def _render_client_row(r: dict, site_count: int) -> bool:
     """Renders one client's row. Returns True if its '›' button was clicked."""
     content_col, btn_col = st.columns([16, 1])
@@ -1188,7 +1207,7 @@ def _clients_section() -> None:
     )
 
     c_add, _ = st.columns([2, 8])
-    if c_add.button("Nuevo cliente", key="admin_client_toggle_add"):
+    if c_add.button("Nuevo cliente", key="admin_client_toggle_add", type="primary"):
         st.session_state["admin_client_mode"] = "add"
         st.rerun()
 
@@ -1203,6 +1222,9 @@ def _clients_section() -> None:
         return
 
     site_counts = _client_site_counts()
+
+    _clients_kpi_strip(rows, site_counts)
+    st.divider()
 
     with st.container(key="admin_clients_list"):
         st.markdown(_CLIENTS_HEADER_HTML, unsafe_allow_html=True)
@@ -2663,11 +2685,12 @@ def main() -> None:
     st.markdown(_list_css("admin_clients_list", "admin_sites_list"), unsafe_allow_html=True)
     st.divider()
 
-    tab_equip, tab_services, tab_aresep, tab_clients, tab_settings = st.tabs([
+    tab_equip, tab_services, tab_aresep, tab_clients, tab_sites, tab_settings = st.tabs([
         "Catálogo de equipos",
         "Servicios",
         "Tarifas ARESEP",
         "Clientes",
+        "Sitios",
         "Configuración",
     ])
 
@@ -2685,13 +2708,14 @@ def main() -> None:
             _current_tariffs()
 
     with tab_clients:
-        sub_clients, sub_sites, sub_prospects = st.tabs(["Clientes", "Sitios", "Prospectos"])
+        sub_clients, sub_prospects = st.tabs(["Clientes", "Prospectos"])
         with sub_clients:
             _clients_section()
-        with sub_sites:
-            _sites_section()
         with sub_prospects:
             _prospects_section()
+
+    with tab_sites:
+        _sites_section()
 
     with tab_settings:
         _settings_section()
