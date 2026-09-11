@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{% block title %}Pauly&amp;Co Solar Tool{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+<script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-name">Pauly&amp;Co</div>
+        <div class="brand-sub">Solar Design Tool</div>
+      </div>
+      <div class="db-status {{ 'ok' if db_ok else 'warn' }}">
+        {{ '● Supabase conectado' if db_ok else 'Supabase no conectado' }}
+      </div>
+      <nav class="nav">
+        <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.endpoint == 'dashboard.index' else '' }}">Panel de Control</a>
+        <a href="{{ url_for('dashboard.stub', section='proposals') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'proposals' else '' }}">Cotizaciones</a>
+        <a href="{{ url_for('dashboard.stub', section='projects') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'projects' else '' }}">Proyectos</a>
+        <a href="{{ url_for('dashboard.stub', section='admin') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'admin' else '' }}">Admin</a>
+        <a href="{{ url_for('dashboard.stub', section='maintenance') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'maintenance' else '' }}">Mantenimiento</a>
+        <a href="{{ url_for('dashboard.stub', section='vrm-monitor') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'vrm-monitor' else '' }}">VRM Monitor</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <div id="flash"></div>
+  <script>
+    document.body.addEventListener("htmx:afterRequest", (e) => {
+      const verb = (e.detail.requestConfig?.verb || "get").toLowerCase();
+      if (verb === "get") return;
+      const flash = document.getElementById("flash");
+      flash.textContent = e.detail.successful ? "Guardado" : "Algo salió mal — recargue e intente de nuevo";
+      flash.classList.add("show");
+      clearTimeout(window.__flashTimer);
+      window.__flashTimer = setTimeout(() => flash.classList.remove("show"), 1400);
+    });
+  </script>
+</body>
+</html>

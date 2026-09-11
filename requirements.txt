@@ -1,3 +1,4 @@
+flask>=3.0.0
 streamlit>=1.35.0
 # Without this, Streamlit's dev-mode file watcher falls back to a degraded
 # polling mode that doesn't reliably pick up changes to imported modules

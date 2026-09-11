@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Panel de Control — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+  <p class="page-header">Panel de Control</p>
+  <p class="page-sub">Herramienta de diseño solar — Pauly&amp;Co</p>
+  <hr />
+
+  <div class="cards">
+    <div class="card-green">
+      <b>Borradores abiertos</b><br>
+      <span class="card-value">{{ drafts_count }}</span>
+    </div>
+    <div class="card-green">
+      <b>En espera de respuesta</b><br>
+      <span class="card-value">{{ sent_count }}</span>
+    </div>
+    <div class="card-green">
+      <b>Proyectos activos</b><br>
+      <span class="card-value">{{ active_count }}</span>
+      <br><span class="card-note">Recibido {{ active_received_pct }} · Utilidad {{ active_profit_pct }}</span>
+    </div>
+  </div>
+
+  <hr />
+  <a class="btn" href="{{ url_for('dashboard.stub', section='proposals') }}">Nueva cotización</a>
+
+  <hr />
+  <h4>Estado del proyecto</h4>
+  <ul class="phase-list">
+    {% for name, status in phases %}
+      <li><span class="phase-status {{ 'done' if status == 'Completa' else 'pending' }}">{{ status }}</span> {{ name }}</li>
+    {% endfor %}
+  </ul>
+{% endblock %}
