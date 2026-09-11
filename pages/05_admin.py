@@ -886,7 +886,13 @@ def _new_site_form(clients: list[dict]) -> None:
                 "URLs de monitoreo (una por línea)", key=f"{key_prefix}_urls",
             )
 
-        submitted = st.form_submit_button("Registrar sitio", type="primary")
+        col_save, col_cancel = st.columns([1, 4])
+        submitted = col_save.form_submit_button("Registrar sitio", type="primary")
+        cancelled = col_cancel.form_submit_button("Cancelar")
+
+    if cancelled:
+        st.session_state.pop("admin_site_mode", None)
+        st.rerun()
 
     if submitted:
         if not display_name.strip():
@@ -940,6 +946,7 @@ def _new_site_form(clients: list[dict]) -> None:
                 "propiedad de mantenimiento — si corresponde, puede fusionarse con una "
                 "existente desde Configurar propiedades."
             )
+            st.session_state.pop("admin_site_mode", None)
             st.rerun()
         except Exception as e:
             st.error(f"Error al registrar el sitio: {e}")
@@ -1044,11 +1051,7 @@ def _sites_kpi_strip(rows: list[dict]) -> None:
 def _sites_section() -> None:
     from database.clients_db import list_all_clients
 
-    st.markdown("### Sitios")
-    st.caption(
-        "Instalaciones monitoreadas, en monitoring.sites (equipo propio) o "
-        "vrm.sites (VRM Portal) — cada sitio nuevo requiere un cliente desde el inicio."
-    )
+    mode = st.session_state.get("admin_site_mode")   # None | "add"
 
     try:
         clients = list_all_clients()
@@ -1056,10 +1059,24 @@ def _sites_section() -> None:
         st.error(f"Error al cargar clientes: {e}")
         return
 
-    st.markdown("#### ➕ Registrar sitio nuevo")
-    _new_site_form(clients)
+    # Same "button reveals the form, replacing the list" convention as
+    # Clientes' "Nuevo cliente" — not shown inline every time, since most
+    # visits to this tab are to check the list, not to register a site.
+    if mode == "add":
+        st.markdown("### Nuevo sitio")
+        _new_site_form(clients)
+        return
 
-    st.divider()
+    st.markdown("### Sitios")
+    st.caption(
+        "Instalaciones monitoreadas, en monitoring.sites (equipo propio) o "
+        "vrm.sites (VRM Portal) — cada sitio nuevo requiere un cliente desde el inicio."
+    )
+
+    c_add, _ = st.columns([2, 8])
+    if c_add.button("Nuevo sitio", key="admin_site_toggle_add"):
+        st.session_state["admin_site_mode"] = "add"
+        st.rerun()
 
     with st.container(key="admin_sites_list"):
         active_rows = [r for r in _sites_overview_rows(clients) if r["active"]]
