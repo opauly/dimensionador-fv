@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Panel de Control — Pauly&amp;Co Solar Tool{% endblock %}
 {% block content %}
-  <p class="page-header">Panel de Control</p>
-  <p class="page-sub">Herramienta de diseño solar — Pauly&amp;Co</p>
+  <p class="section-title">Panel de Control</p>
+  <p class="section-sub">Herramienta de diseño solar — Pauly&amp;Co</p>
   <hr />
 
   <div class="cards">
@@ -17,7 +17,7 @@
     <div class="card-green">
       <b>Proyectos activos</b><br>
       <span class="card-value">{{ active_count }}</span>
-      <br><span class="card-note">Recibido {{ active_received_pct }} · Utilidad {{ active_profit_pct }}</span>
+      <br><span class="card-note-sm">Recibido {{ active_received_pct }} · Utilidad {{ active_profit_pct }}</span>
     </div>
   </div>
 

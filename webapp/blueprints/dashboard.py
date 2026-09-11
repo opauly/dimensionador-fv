@@ -22,7 +22,6 @@ PHASES = [
 STUBS = {
     "proposals": "Cotizaciones",
     "projects": "Proyectos",
-    "admin": "Admin",
     "maintenance": "Mantenimiento",
     "vrm-monitor": "VRM Monitor",
 }

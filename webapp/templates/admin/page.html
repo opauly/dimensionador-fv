@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Admin — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+  <p class="section-title">Admin</p>
+
+  <div class="tabs">
+    {% for s in sections %}
+      <a href="{{ url_for('admin.index', section=s) }}"
+         class="{{ 'active' if s == active_section else '' }}">{{ section_meta[s].label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if sub_list %}
+    <div class="tabs sub">
+      {% for sub in sub_list %}
+        <a href="{{ url_for('admin.sub_view', section=active_section, sub=sub) }}"
+           class="{{ 'active' if sub == active_sub else '' }}"
+           hx-get="{{ url_for('admin.sub_view', section=active_section, sub=sub) }}"
+           hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true"
+           hx-on::after-request="document.querySelectorAll('.tabs.sub a').forEach(a=>a.classList.remove('active')); this.classList.add('active')">
+          {{ sub_labels[sub] }}
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div id="subpanel">{{ panel_html|safe }}</div>
+{% endblock %}

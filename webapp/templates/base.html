@@ -11,8 +11,8 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-name">Pauly&amp;Co</div>
-        <div class="brand-sub">Solar Design Tool</div>
+        <span class="brand-dot"></span>
+        <span class="brand-name">Pauly&amp;Co</span>
       </div>
       <div class="db-status {{ 'ok' if db_ok else 'warn' }}">
         {{ '● Supabase conectado' if db_ok else 'Supabase no conectado' }}
@@ -21,7 +21,7 @@
         <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.endpoint == 'dashboard.index' else '' }}">Panel de Control</a>
         <a href="{{ url_for('dashboard.stub', section='proposals') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'proposals' else '' }}">Cotizaciones</a>
         <a href="{{ url_for('dashboard.stub', section='projects') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'projects' else '' }}">Proyectos</a>
-        <a href="{{ url_for('dashboard.stub', section='admin') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'admin' else '' }}">Admin</a>
+        <a href="{{ url_for('admin.index', section='equipos') }}" class="{{ 'active' if request.blueprint == 'admin' else '' }}">Admin</a>
         <a href="{{ url_for('dashboard.stub', section='maintenance') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'maintenance' else '' }}">Mantenimiento</a>
         <a href="{{ url_for('dashboard.stub', section='vrm-monitor') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'vrm-monitor' else '' }}">VRM Monitor</a>
       </nav>

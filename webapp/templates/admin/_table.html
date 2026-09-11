@@ -1,0 +1,20 @@
+{% if rows %}
+<div class="dtable-wrap">
+  <table class="dtable">
+    <thead>
+      <tr>
+        {% for col in columns %}<td>{{ col.label }}</td>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          {% for col in columns %}<td>{{ row[col.key] if row[col.key] not in (None, '') else '—' }}</td>{% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="dtable-empty">{{ empty_message }}</p></div>
+{% endif %}

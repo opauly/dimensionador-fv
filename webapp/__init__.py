@@ -8,9 +8,11 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config["JSON_AS_ASCII"] = False
 
+    from webapp.blueprints.admin import bp as admin_bp
     from webapp.blueprints.dashboard import bp as dashboard_bp
 
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(admin_bp)
 
     @app.context_processor
     def inject_db_status():
