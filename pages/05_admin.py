@@ -585,7 +585,53 @@ def _services_section() -> None:
         st.rerun()
 
 
-# ── clients / prospects ────────────────────────────────────────────────────────
+# ── clients / sites / prospects ─────────────────────────────────────────────────
+
+def _list_css(*keys: str) -> str:
+    """Compact styled-list CSS (pages/03_projects.py/pages/07_maintenance.py's
+    pattern), scoped to specific st.container(key=...) wrappers via Streamlit's
+    `st-key-<key>` class rather than applied page-wide — this page's other tabs
+    (Catálogo de equipos, Servicios, Configuración) also lean on st.columns/
+    st.button and would otherwise get their spacing/button sizing squeezed too."""
+    sel = ", ".join(f".st-key-{k}" for k in keys)
+    return f"""
+<style>
+{sel} [data-testid="column"] {{
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}}
+{sel} [data-testid="column"] > [data-testid="element-container"] {{
+    margin-bottom: 0 !important;
+    padding: 0 !important;
+}}
+{sel} [data-testid="stMarkdownContainer"] p {{
+    margin: 0 !important;
+    line-height: 1 !important;
+}}
+{sel} [data-testid="stVerticalBlock"] > [data-testid="element-container"] {{
+    margin-bottom: 0 !important;
+}}
+{sel} button[data-testid="baseButton-secondary"] {{
+    min-height: 0 !important;
+    height: 34px !important;
+    padding: 0 10px !important;
+    font-size: 0.9rem !important;
+}}
+{sel} [data-testid="stHorizontalBlock"] {{
+    gap: 4px !important;
+    align-items: center !important;
+}}
+</style>
+"""
+
+
+def _pill(label: str, bg: str, fg: str) -> str:
+    return (
+        f'<span style="display:inline-flex;align-items:center;height:20px;padding:0 9px;'
+        f'border-radius:10px;font-size:0.7rem;font-weight:600;background:{bg};color:{fg};">'
+        f'{label}</span>'
+    )
+
 
 def _client_form(existing: dict | None = None) -> None:
     src = existing or {}
@@ -636,6 +682,32 @@ def _client_form(existing: dict | None = None) -> None:
             st.rerun()
         except Exception as e:
             st.error(f"Error al guardar: {e}")
+
+
+def _client_delete_control(client: dict) -> None:
+    """Moved here from the old flat Clientes list (which had its own inline
+    Eliminar button per row) now that the list only exposes a single '›' to
+    open this same edit view — deleting belongs next to Guardar/Cancelar,
+    not as a second action competing with it in the list."""
+    if st.button("Eliminar cliente", key=f"dclient_{client['id']}"):
+        st.session_state[f"confirm_del_client_{client['id']}"] = True
+        st.rerun()
+
+    if st.session_state.get(f"confirm_del_client_{client['id']}"):
+        st.warning(f"¿Eliminar **{client['name']}**? Esta acción no se puede deshacer.")
+        cy, cn, _ = st.columns([1, 1, 6])
+        if cy.button("Sí, eliminar", key=f"yes_del_client_{client['id']}"):
+            try:
+                from database.supabase_client import get_client
+                get_client().table("clients").delete().eq("id", client["id"]).execute()
+                st.session_state.pop("admin_edit_client", None)
+            except Exception as e:
+                st.error(f"No se pudo eliminar (¿tiene propuestas asociadas?): {e}")
+            st.session_state.pop(f"confirm_del_client_{client['id']}", None)
+            st.rerun()
+        if cn.button("Cancelar", key=f"no_del_client_{client['id']}"):
+            st.session_state.pop(f"confirm_del_client_{client['id']}", None)
+            st.rerun()
 
 
 def _client_sites_linker(client: dict) -> None:
@@ -704,163 +776,369 @@ def _client_sites_linker(client: dict) -> None:
                 st.error(f"Error al vincular {s['site_id']}: {e}")
 
 
-def _client_new_site_form(client: dict) -> None:
-    """Register a brand-new site for this client — the mandatory-client-link
-    counterpart to `_client_sites_linker()` above, which only links *existing*
-    sites. Routes to `monitoring.sites` (own fleet, any brand) or `vrm.sites`
-    (VRM Portal, always Victron, via the shared "Pauly & Co Portfolio" tenant)
-    based on the checkbox below — see `database/site_registration_db.py`.
+def _new_site_form(clients: list[dict]) -> None:
+    """Register a brand-new site — always tied to a client from the start, the
+    same requirement `_client_sites_linker()` above only enforces for *existing*
+    sites. Lives in its own Sitios tab (not nested under one client's edit view
+    anymore) so it needs its own client picker; everything past that is
+    unchanged. Routes to `monitoring.sites` (own fleet, any brand) or
+    `vrm.sites` (VRM Portal, always Victron, via the shared "Pauly & Co
+    Portfolio" tenant) based on the checkbox below — see
+    `database/site_registration_db.py`.
     """
     from config import COUNTRIES, SYSTEM_TYPES, SYSTEM_TYPE_LABELS
 
+    if not clients:
+        st.caption("Agrega un cliente primero en la pestaña Clientes.")
+        return
+
+    clients_by_name = {c["name"]: c for c in sorted(clients, key=lambda c: c["name"])}
+    client_name = st.selectbox("Cliente *", list(clients_by_name), key="ns_client_pick")
+    client = clients_by_name[client_name]
+
     key_prefix = f"ns_{client['id']}"
 
-    with st.expander("➕ Registrar sitio nuevo"):
-        is_victron = st.checkbox(
-            "¿Usa equipo Victron?", key=f"{key_prefix}_victron",
-            help="Determina la tabla destino: monitoring.sites (equipo propio, "
-                 "cualquier marca) o vrm.sites (VRM Portal, siempre Victron).",
+    is_victron = st.checkbox(
+        "¿Usa equipo Victron?", key=f"{key_prefix}_victron",
+        help="Determina la tabla destino: monitoring.sites (equipo propio, "
+             "cualquier marca) o vrm.sites (VRM Portal, siempre Victron).",
+    )
+
+    country_codes = sorted(COUNTRIES, key=lambda k: COUNTRIES[k])
+    default_country_idx = country_codes.index("CR") if "CR" in country_codes else 0
+
+    with st.form(f"{key_prefix}_form"):
+        display_name = st.text_input("Nombre del sitio *", key=f"{key_prefix}_name")
+
+        a, b, c = st.columns(3)
+        location = a.text_input("Ubicación", key=f"{key_prefix}_loc")
+        country = b.selectbox(
+            "País", country_codes, index=default_country_idx,
+            format_func=lambda k: COUNTRIES[k], key=f"{key_prefix}_country",
+        )
+        timezone = c.text_input(
+            "Timezone", value="America/Costa_Rica", key=f"{key_prefix}_tz",
         )
 
-        country_codes = sorted(COUNTRIES, key=lambda k: COUNTRIES[k])
-        default_country_idx = country_codes.index("CR") if "CR" in country_codes else 0
+        a, b = st.columns(2)
+        latitude = a.number_input(
+            "Latitud", value=0.0, format="%.6f", key=f"{key_prefix}_lat",
+            help="Necesaria para el clima/rendimiento — 0,0 es 'sin dato', no una ubicación real.",
+        )
+        longitude = b.number_input("Longitud", value=0.0, format="%.6f", key=f"{key_prefix}_lng")
 
-        with st.form(f"{key_prefix}_form"):
-            display_name = st.text_input("Nombre del sitio *", key=f"{key_prefix}_name")
+        a, b, c = st.columns(3)
+        stype_options = SYSTEM_TYPES + (["on_grid"] if not is_victron else [])
+        system_type = a.selectbox(
+            "Tipo de sistema", stype_options,
+            format_func=lambda v: SYSTEM_TYPE_LABELS.get(v, v.replace("_", " ").title()),
+            key=f"{key_prefix}_stype",
+        )
+        pv_kwp = b.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, key=f"{key_prefix}_kwp")
+        owner = c.text_input("Owner", key=f"{key_prefix}_owner")
 
-            a, b, c = st.columns(3)
-            location = a.text_input("Ubicación", key=f"{key_prefix}_loc")
-            country = b.selectbox(
-                "País", country_codes, index=default_country_idx,
-                format_func=lambda k: COUNTRIES[k], key=f"{key_prefix}_country",
-            )
-            timezone = c.text_input(
-                "Timezone", value="America/Costa_Rica", key=f"{key_prefix}_tz",
-            )
+        a, b, c = st.columns(3)
+        commissioned_at = a.date_input("Fecha de comisión", value=None, key=f"{key_prefix}_comm")
+        report_language = b.selectbox("Idioma de reportes", ["es", "en"], key=f"{key_prefix}_lang")
+        active = c.checkbox("Activo", value=True, key=f"{key_prefix}_active")
 
+        a, b = st.columns(2)
+        battery_nominal_kwh = a.number_input(
+            "Batería nominal (kWh)", min_value=0.0, step=0.1, key=f"{key_prefix}_battnom",
+            help="Capacidad de placa (datasheet) — la usable se calcula automáticamente "
+                 "(columna generada, no se escribe directamente).",
+        )
+        battery_dod_pct = b.number_input(
+            "DoD (%)", min_value=0.0, max_value=100.0, step=1.0, key=f"{key_prefix}_batdod",
+        )
+        usable = (round(battery_nominal_kwh * battery_dod_pct / 100, 2)
+                  if battery_nominal_kwh and battery_dod_pct else None)
+        if usable:
+            st.caption(f"Batería usable: **{usable:.2f} kWh**")
+
+        if is_victron:
             a, b = st.columns(2)
-            latitude = a.number_input(
-                "Latitud", value=0.0, format="%.6f", key=f"{key_prefix}_lat",
-                help="Necesaria para el clima/rendimiento — 0,0 es 'sin dato', no una ubicación real.",
-            )
-            longitude = b.number_input("Longitud", value=0.0, format="%.6f", key=f"{key_prefix}_lng")
-
-            a, b, c = st.columns(3)
-            stype_options = SYSTEM_TYPES + (["on_grid"] if not is_victron else [])
-            system_type = a.selectbox(
-                "Tipo de sistema", stype_options,
-                format_func=lambda v: SYSTEM_TYPE_LABELS.get(v, v.replace("_", " ").title()),
-                key=f"{key_prefix}_stype",
-            )
-            pv_kwp = b.number_input("Potencia FV (kWp)", min_value=0.0, step=0.1, key=f"{key_prefix}_kwp")
-            owner = c.text_input("Owner", key=f"{key_prefix}_owner")
-
-            a, b, c = st.columns(3)
-            commissioned_at = a.date_input("Fecha de comisión", value=None, key=f"{key_prefix}_comm")
-            report_language = b.selectbox("Idioma de reportes", ["es", "en"], key=f"{key_prefix}_lang")
-            active = c.checkbox("Activo", value=True, key=f"{key_prefix}_active")
-
-            a, b = st.columns(2)
-            battery_nominal_kwh = a.number_input(
-                "Batería nominal (kWh)", min_value=0.0, step=0.1, key=f"{key_prefix}_battnom",
-                help="Capacidad de placa (datasheet) — la usable se calcula automáticamente "
-                     "(columna generada, no se escribe directamente).",
-            )
-            battery_dod_pct = b.number_input(
-                "DoD (%)", min_value=0.0, max_value=100.0, step=1.0, key=f"{key_prefix}_batdod",
-            )
-            usable = (round(battery_nominal_kwh * battery_dod_pct / 100, 2)
-                      if battery_nominal_kwh and battery_dod_pct else None)
-            if usable:
-                st.caption(f"Batería usable: **{usable:.2f} kWh**")
-
-            if is_victron:
+            exports_to_grid = a.checkbox("Exporta a la red", key=f"{key_prefix}_exports")
+            notes = st.text_area("Notas", key=f"{key_prefix}_notes", height=60)
+            savings_rate = savings_currency = None
+            if country != "CR":
                 a, b = st.columns(2)
-                exports_to_grid = a.checkbox("Exporta a la red", key=f"{key_prefix}_exports")
-                notes = st.text_area("Notas", key=f"{key_prefix}_notes", height=60)
-                savings_rate = savings_currency = None
-                if country != "CR":
-                    a, b = st.columns(2)
-                    savings_rate = a.number_input(
-                        "Tarifa de ahorro (por kWh)", min_value=0.0, step=0.01, format="%.4f",
-                        key=f"{key_prefix}_savrate",
-                        help="Solo se usa si el país no es CR (CR usa tarifas ARESEP).",
-                    )
-                    from victron import savings as vrm_savings
-                    savings_currency = b.selectbox(
-                        "Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES, key=f"{key_prefix}_savcur",
-                    )
-            else:
-                brand = st.text_input(
-                    "Marca del equipo *", value="Victron Energy", key=f"{key_prefix}_brand",
-                    help="monitoring.sites no tiene un default — hoy el 100% del parque es "
-                         "Victron Energy, pero puede registrarse otra (p. ej. Fronius).",
+                savings_rate = a.number_input(
+                    "Tarifa de ahorro (por kWh)", min_value=0.0, step=0.01, format="%.4f",
+                    key=f"{key_prefix}_savrate",
+                    help="Solo se usa si el país no es CR (CR usa tarifas ARESEP).",
                 )
-                a, b, c = st.columns(3)
-                panel_count = a.number_input("Paneles", min_value=0, step=1, key=f"{key_prefix}_panels")
-                inverter_count = b.number_input("Inversores", min_value=0, step=1, key=f"{key_prefix}_inv")
-                battery_count = c.number_input("Baterías", min_value=0, step=1, key=f"{key_prefix}_batcount")
-                monitoring_urls_raw = st.text_area(
-                    "URLs de monitoreo (una por línea)", key=f"{key_prefix}_urls",
+                from victron import savings as vrm_savings
+                savings_currency = b.selectbox(
+                    "Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES, key=f"{key_prefix}_savcur",
                 )
-
-            submitted = st.form_submit_button("Registrar sitio", type="primary")
-
-        if submitted:
-            if not display_name.strip():
-                st.error("El nombre del sitio es obligatorio.")
-                return
-            if not is_victron and not brand.strip():
-                st.error("La marca del equipo es obligatoria.")
-                return
-
-            common = dict(
-                location=location or None,
-                latitude=latitude or None,
-                longitude=longitude or None,
-                country=(country or "CR").strip().upper() or "CR",
-                timezone=timezone.strip() or "America/Costa_Rica",
-                system_type=system_type,
-                pv_kwp=pv_kwp or None,
-                owner=owner or None,
-                commissioned_at=commissioned_at.isoformat() if commissioned_at else None,
-                report_language=report_language,
-                active=active,
-                battery_nominal_kwh=battery_nominal_kwh or None,
-                battery_dod_pct=battery_dod_pct or None,
+        else:
+            brand = st.text_input(
+                "Marca del equipo *", value="Victron Energy", key=f"{key_prefix}_brand",
+                help="monitoring.sites no tiene un default — hoy el 100% del parque es "
+                     "Victron Energy, pero puede registrarse otra (p. ej. Fronius).",
+            )
+            a, b, c = st.columns(3)
+            panel_count = a.number_input("Paneles", min_value=0, step=1, key=f"{key_prefix}_panels")
+            inverter_count = b.number_input("Inversores", min_value=0, step=1, key=f"{key_prefix}_inv")
+            battery_count = c.number_input("Baterías", min_value=0, step=1, key=f"{key_prefix}_batcount")
+            monitoring_urls_raw = st.text_area(
+                "URLs de monitoreo (una por línea)", key=f"{key_prefix}_urls",
             )
 
-            try:
-                from database.site_registration_db import register_new_site
-                if is_victron:
-                    site = register_new_site(
-                        client["id"], display_name.strip(), is_victron=True,
-                        exports_to_grid=exports_to_grid,
-                        notes=notes or None,
-                        savings_rate=savings_rate or None,
-                        savings_currency=savings_currency if savings_rate else None,
-                        **common,
-                    )
-                else:
-                    urls = ([u.strip() for u in monitoring_urls_raw.splitlines() if u.strip()]
-                            if monitoring_urls_raw else [])
-                    site = register_new_site(
-                        client["id"], display_name.strip(), is_victron=False,
-                        brand=brand.strip(),
-                        panel_count=panel_count or None,
-                        inverter_count=inverter_count or None,
-                        battery_count=battery_count or None,
-                        monitoring_urls=urls or None,
-                        **common,
-                    )
-                st.success(
-                    f"Sitio registrado: `{site['site_id']}`. Se creó automáticamente una "
-                    "propiedad de mantenimiento — si corresponde, puede fusionarse con una "
-                    "existente desde Configurar propiedades."
+        submitted = st.form_submit_button("Registrar sitio", type="primary")
+
+    if submitted:
+        if not display_name.strip():
+            st.error("El nombre del sitio es obligatorio.")
+            return
+        if not is_victron and not brand.strip():
+            st.error("La marca del equipo es obligatoria.")
+            return
+
+        common = dict(
+            location=location or None,
+            latitude=latitude or None,
+            longitude=longitude or None,
+            country=(country or "CR").strip().upper() or "CR",
+            timezone=timezone.strip() or "America/Costa_Rica",
+            system_type=system_type,
+            pv_kwp=pv_kwp or None,
+            owner=owner or None,
+            commissioned_at=commissioned_at.isoformat() if commissioned_at else None,
+            report_language=report_language,
+            active=active,
+            battery_nominal_kwh=battery_nominal_kwh or None,
+            battery_dod_pct=battery_dod_pct or None,
+        )
+
+        try:
+            from database.site_registration_db import register_new_site
+            if is_victron:
+                site = register_new_site(
+                    client["id"], display_name.strip(), is_victron=True,
+                    exports_to_grid=exports_to_grid,
+                    notes=notes or None,
+                    savings_rate=savings_rate or None,
+                    savings_currency=savings_currency if savings_rate else None,
+                    **common,
                 )
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error al registrar el sitio: {e}")
+            else:
+                urls = ([u.strip() for u in monitoring_urls_raw.splitlines() if u.strip()]
+                        if monitoring_urls_raw else [])
+                site = register_new_site(
+                    client["id"], display_name.strip(), is_victron=False,
+                    brand=brand.strip(),
+                    panel_count=panel_count or None,
+                    inverter_count=inverter_count or None,
+                    battery_count=battery_count or None,
+                    monitoring_urls=urls or None,
+                    **common,
+                )
+            st.success(
+                f"Sitio registrado: `{site['site_id']}`. Se creó automáticamente una "
+                "propiedad de mantenimiento — si corresponde, puede fusionarse con una "
+                "existente desde Configurar propiedades."
+            )
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al registrar el sitio: {e}")
+
+
+_SITES_HEADER_HTML = """
+<div style="display:grid;
+  grid-template-columns:2fr 1.6fr 1.2fr 0.8fr;
+  gap:10px;align-items:center;padding:5px 8px;
+  border-bottom:2px solid #e2e8f0;margin-bottom:2px;">
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Sitio</div>
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Cliente</div>
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Marca</div>
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Estado</div>
+</div>"""
+
+
+def _sites_overview_rows(clients: list[dict]) -> list[dict]:
+    """Every active site from both schemas, tagged with its resolved client
+    name — the read-only counterpart to `_client_sites_linker()`'s per-client
+    checklist, showing the whole fleet at once instead of one client at a
+    time. Reuses the exact same two list functions that checklist already
+    calls, merged the same way."""
+    from database.monitoring_sites_db import list_monitoring_sites
+    from database.vrm_sites_db import list_vrm_sites_for_linking
+
+    clients_by_id = {c["id"]: c["name"] for c in clients}
+    rows = []
+
+    try:
+        for s in list_monitoring_sites():
+            rows.append({
+                "site_id": s["site_id"],
+                "display_name": s.get("display_name") or s["site_id"],
+                "brand": s.get("brand") or "Victron Energy",
+                "client_name": clients_by_id.get(s.get("client_id")),
+                "active": s.get("active", True),
+            })
+    except Exception as e:
+        st.caption(f"No se pudieron cargar los sitios de monitoreo: {e}")
+
+    try:
+        for s in list_vrm_sites_for_linking():
+            rows.append({
+                "site_id": s["site_id"],
+                "display_name": s.get("display_name") or s["site_id"],
+                "brand": "Victron Energy",
+                "client_name": clients_by_id.get(s.get("public_client_id")),
+                "active": s.get("active", True),
+            })
+    except Exception as e:
+        st.caption(f"No se pudieron cargar los sitios de VRM Monitor: {e}")
+
+    rows.sort(key=lambda r: r["display_name"])
+    return rows
+
+
+def _site_row_html(r: dict) -> str:
+    client_pill = (
+        _pill(r["client_name"], "#eff6ff", "#1d4ed8") if r["client_name"]
+        else _pill("Sin cliente", "#fef9c3", "#a16207")
+    )
+    active_pill = (
+        _pill("Activo", "#dcfce7", "#16a34a") if r["active"]
+        else _pill("Inactivo", "#f1f5f9", "#6b7280")
+    )
+    return f"""
+<div style="background:white;display:grid;
+  grid-template-columns:2fr 1.6fr 1.2fr 0.8fr;
+  gap:10px;align-items:center;padding:9px 8px;
+  border-bottom:1px solid #f1f5f9;border-radius:4px;">
+  <div>
+    <div style="font-size:0.85rem;font-weight:600;color:#1e293b;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{r['display_name']}</div>
+    <div style="font-size:0.72rem;color:#94a3b8;">{r['site_id']}</div>
+  </div>
+  <div>{client_pill}</div>
+  <div style="font-size:0.8rem;color:#475569;">{r['brand']}</div>
+  <div>{active_pill}</div>
+</div>"""
+
+
+def _sites_kpi_strip(rows: list[dict]) -> None:
+    unlinked = sum(1 for r in rows if not r["client_name"])
+    cards = [
+        ("Total sitios", len(rows), "#1E2D54"),
+        ("Victron", sum(1 for r in rows if r["brand"] == "Victron Energy"), "#1d4ed8"),
+        ("Sin cliente vinculado", unlinked, "#a16207" if unlinked else "#16a34a"),
+    ]
+    cols = st.columns(len(cards))
+    for col, (label, value, color) in zip(cols, cards):
+        col.markdown(
+            f'<div style="border-left:4px solid {color};background:#f8f9fa;'
+            f'border-radius:6px;padding:0.6rem 0.9rem;">'
+            f'<div style="font-size:0.78rem;color:#6b7280;">{label}</div>'
+            f'<div style="font-size:1.5rem;font-weight:700;color:{color};">{value}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _sites_section() -> None:
+    from database.clients_db import list_all_clients
+
+    st.markdown("### Sitios")
+    st.caption(
+        "Instalaciones monitoreadas, en monitoring.sites (equipo propio) o "
+        "vrm.sites (VRM Portal) — cada sitio nuevo requiere un cliente desde el inicio."
+    )
+
+    try:
+        clients = list_all_clients()
+    except Exception as e:
+        st.error(f"Error al cargar clientes: {e}")
+        return
+
+    st.markdown("#### ➕ Registrar sitio nuevo")
+    _new_site_form(clients)
+
+    st.divider()
+
+    with st.container(key="admin_sites_list"):
+        active_rows = [r for r in _sites_overview_rows(clients) if r["active"]]
+
+        if not active_rows:
+            st.info("No hay sitios activos todavía.")
+            return
+
+        _sites_kpi_strip(active_rows)
+        st.divider()
+
+        st.markdown(_SITES_HEADER_HTML, unsafe_allow_html=True)
+        for r in active_rows:
+            st.markdown(_site_row_html(r), unsafe_allow_html=True)
+
+
+_CLIENTS_HEADER_HTML = """
+<div style="display:grid;
+  grid-template-columns:2fr 2fr 0.8fr;
+  gap:10px;align-items:center;padding:5px 8px;
+  border-bottom:2px solid #e2e8f0;margin-bottom:2px;">
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Cliente</div>
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Contacto</div>
+  <div style="font-size:0.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Sitios</div>
+</div>"""
+
+
+def _client_site_counts() -> dict[str, int]:
+    """How many sites (either schema) each client has linked — the list's own
+    at-a-glance version of what `_client_sites_linker()`'s checkbox column
+    already shows one client at a time."""
+    from database.monitoring_sites_db import list_monitoring_sites
+    from database.vrm_sites_db import list_vrm_sites_for_linking
+
+    counts: dict[str, int] = {}
+    try:
+        for s in list_monitoring_sites():
+            if s.get("client_id"):
+                counts[s["client_id"]] = counts.get(s["client_id"], 0) + 1
+    except Exception:
+        pass
+    try:
+        for s in list_vrm_sites_for_linking():
+            if s.get("public_client_id"):
+                counts[s["public_client_id"]] = counts.get(s["public_client_id"], 0) + 1
+    except Exception:
+        pass
+    return counts
+
+
+def _client_row_html(r: dict, site_count: int) -> str:
+    contact = " · ".join(filter(None, [r.get("phone"), r.get("email")])) or "—"
+    empresa_html = (
+        f'<div style="font-size:0.72rem;color:#94a3b8;">{r["empresa"]}</div>'
+        if r.get("empresa") else ""
+    )
+    count_pill = _pill(str(site_count), "#eff6ff", "#1d4ed8") if site_count else _pill("0", "#f1f5f9", "#94a3b8")
+    return f"""
+<div style="background:white;display:grid;
+  grid-template-columns:2fr 2fr 0.8fr;
+  gap:10px;align-items:center;padding:9px 8px;
+  border-bottom:1px solid #f1f5f9;border-radius:4px;">
+  <div>
+    <div style="font-size:0.85rem;font-weight:600;color:#1e293b;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{r['name']}</div>
+    {empresa_html}
+  </div>
+  <div style="font-size:0.8rem;color:#475569;">{contact}</div>
+  <div>{count_pill}</div>
+</div>"""
+
+
+def _render_client_row(r: dict, site_count: int) -> bool:
+    """Renders one client's row. Returns True if its '›' button was clicked."""
+    content_col, btn_col = st.columns([16, 1])
+    with content_col:
+        st.markdown(_client_row_html(r, site_count), unsafe_allow_html=True)
+    with btn_col:
+        return st.button("›", key=f"client_sel_{r['id']}", type="secondary", use_container_width=True)
 
 
 def _clients_section() -> None:
@@ -869,6 +1147,22 @@ def _clients_section() -> None:
     edit_client = st.session_state.get("admin_edit_client")
     mode        = st.session_state.get("admin_client_mode")   # None | "add"
 
+    # Detail/add views replace the list entirely (same "Resumen" ↔
+    # "_detail_section()" convention pages/07_maintenance.py uses) rather than
+    # nesting them above/below it — Cancelar inside _client_form() already
+    # pops back to the list, so no separate "← Volver" control is needed.
+    if edit_client:
+        st.markdown("### Editando cliente")
+        _client_form(existing=edit_client)
+        _client_delete_control(edit_client)
+        _client_sites_linker(edit_client)
+        return
+
+    if mode == "add":
+        st.markdown("### Nuevo cliente")
+        _client_form()
+        return
+
     st.markdown("### Clientes")
     st.caption(
         "Personas o empresas que han comprado un proyecto. Los interesados que aún "
@@ -876,16 +1170,10 @@ def _clients_section() -> None:
         "cuando una propuesta se marca como Ganada."
     )
 
-    if not edit_client and mode != "add":
-        c_add, _ = st.columns([2, 8])
-        if c_add.button("Nuevo cliente", key="admin_client_toggle_add"):
-            st.session_state["admin_client_mode"] = "add"
-            st.rerun()
-
-    if mode == "add" and not edit_client:
-        st.divider()
-        _client_form()
-        st.divider()
+    c_add, _ = st.columns([2, 8])
+    if c_add.button("Nuevo cliente", key="admin_client_toggle_add"):
+        st.session_state["admin_client_mode"] = "add"
+        st.rerun()
 
     try:
         rows = list_all_clients()
@@ -897,42 +1185,15 @@ def _clients_section() -> None:
         st.info("No hay clientes todavía.")
         return
 
-    for r in rows:
-        c1, c2, c3 = st.columns([2.9, 2.9, 1.6])
-        c1.markdown(f"**{r['name']}**" + (f" — {r['empresa']}" if r.get("empresa") else ""))
-        c2.caption(" · ".join(filter(None, [r.get("phone"), r.get("email")])) or "—")
-        with c3:
-            if st.button("Editar", key=f"eclient_{r['id']}", help="Editar", use_container_width=True):
+    site_counts = _client_site_counts()
+
+    with st.container(key="admin_clients_list"):
+        st.markdown(_CLIENTS_HEADER_HTML, unsafe_allow_html=True)
+        for r in rows:
+            if _render_client_row(r, site_counts.get(r["id"], 0)):
                 st.session_state["admin_edit_client"] = r
                 st.session_state["admin_client_mode"] = None
                 st.rerun()
-            if st.button("Eliminar", key=f"dclient_{r['id']}", help="Eliminar", use_container_width=True):
-                st.session_state[f"confirm_del_client_{r['id']}"] = True
-                st.rerun()
-
-        if st.session_state.get(f"confirm_del_client_{r['id']}"):
-            st.warning(f"¿Eliminar **{r['name']}**? Esta acción no se puede deshacer.")
-            cy, cn, _ = st.columns([1, 1, 6])
-            if cy.button("Sí, eliminar", key=f"yes_del_client_{r['id']}"):
-                try:
-                    from database.supabase_client import get_client
-                    get_client().table("clients").delete().eq("id", r["id"]).execute()
-                except Exception as e:
-                    st.error(f"No se pudo eliminar (¿tiene propuestas asociadas?): {e}")
-                st.session_state.pop(f"confirm_del_client_{r['id']}", None)
-                st.rerun()
-            if cn.button("Cancelar", key=f"no_del_client_{r['id']}"):
-                st.session_state.pop(f"confirm_del_client_{r['id']}", None)
-                st.rerun()
-
-        if edit_client and edit_client.get("id") == r["id"]:
-            st.markdown("##### Editando cliente")
-            _client_form(existing=edit_client)
-            _client_sites_linker(r)
-            _client_new_site_form(r)
-
-        st.markdown('<hr style="margin:4px 0;border:none;border-top:1px solid #f1f5f9;">',
-                    unsafe_allow_html=True)
 
 
 def _prospects_section() -> None:
@@ -2382,6 +2643,7 @@ def main() -> None:
         '<p style="color:#1E2D54;font-size:1.4rem;font-weight:700;margin:0;">Administración</p>',
         unsafe_allow_html=True,
     )
+    st.markdown(_list_css("admin_clients_list", "admin_sites_list"), unsafe_allow_html=True)
     st.divider()
 
     tab_equip, tab_services, tab_aresep, tab_clients, tab_settings = st.tabs([
@@ -2406,9 +2668,11 @@ def main() -> None:
             _current_tariffs()
 
     with tab_clients:
-        sub_clients, sub_prospects = st.tabs(["Clientes", "Prospectos"])
+        sub_clients, sub_sites, sub_prospects = st.tabs(["Clientes", "Sitios", "Prospectos"])
         with sub_clients:
             _clients_section()
+        with sub_sites:
+            _sites_section()
         with sub_prospects:
             _prospects_section()
 
