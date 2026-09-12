@@ -162,14 +162,62 @@ def get_company_info() -> dict:
     return _DEFAULT_COMPANY
 
 
+def _read_company_info_raw() -> dict:
+    """Raw app_settings.company_info blob (unmerged with defaults), or {}."""
+    try:
+        from database.supabase_client import get_client
+        result = (
+            get_client()
+            .table("app_settings")
+            .select("value")
+            .eq("key", "company_info")
+            .single()
+            .execute()
+        )
+        if result.data and result.data.get("value"):
+            stored = result.data["value"]
+            if isinstance(stored, str):
+                import json
+                stored = json.loads(stored)
+            return stored
+    except Exception:
+        pass
+    return {}
+
+
 def get_bank_info() -> dict:
-    """Return bank lines from app_settings, falling back to defaults."""
-    return {
+    """Return bank lines from app_settings, falling back to defaults.
+
+    Shares the same app_settings.company_info blob as get_company_info()
+    (Admin's Ajustes tab saves both company and bank fields together via
+    save_company_info()) rather than a separate row, so one read/write
+    path covers both."""
+    stored = _read_company_info_raw()
+    defaults = {
         "bank_local_lines": _DEFAULT_BANK_LOCAL_ES,
         "bank_intl_lines": _DEFAULT_BANK_INTL_ES,
         "bank_local_lines_en": _DEFAULT_BANK_LOCAL_EN,
         "bank_intl_lines_en": _DEFAULT_BANK_INTL_EN,
     }
+    merged = dict(defaults)
+    for k in defaults:
+        v = stored.get(k)
+        if v:
+            merged[k] = v
+    return merged
+
+
+def save_company_info(patch: dict) -> None:
+    """Merge `patch` into app_settings.company_info (creates the row if it
+    doesn't exist yet). Used by Admin's Ajustes tab for both the company
+    form and the bank form — same underlying blob, see get_bank_info()."""
+    from database.supabase_client import get_client
+
+    current = _read_company_info_raw()
+    merged = {**current, **patch}
+    get_client().table("app_settings").upsert(
+        {"key": "company_info", "value": merged}, on_conflict="key"
+    ).execute()
 
 
 # ── Downloaded-PDF filename convention ──────────────────────────────────────

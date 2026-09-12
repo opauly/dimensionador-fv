@@ -1,0 +1,86 @@
+<style>
+.finput { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.link-btn { color: var(--navy); font-weight: 600; }
+.danger-btn { background: none; border: none; color: #B84345; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: inherit; }
+</style>
+
+{% if form_mode %}
+  <div class="card" style="margin-bottom:16px;">
+    <p class="card-note" style="margin:0 0 12px;"><b>{{ 'Editar cliente' if form_mode == 'edit' else 'Nuevo cliente' }}</b></p>
+    {% if form_mode == 'add' %}<p class="card-note-sm">Agregar un cliente aquí es una acción intencional — entra directamente a Clientes, no a Prospectos.</p>{% endif %}
+    {% if error %}<p style="color:#B84345;font-size:13px;">{{ error }}</p>{% endif %}
+    <form hx-post="{{ url_for('admin.clients_save') }}" hx-target="#subpanel" hx-swap="innerHTML">
+      {% if existing.id %}<input type="hidden" name="id" value="{{ existing.id }}">{% endif %}
+      <div class="fgrid">
+        <div><label class="flabel">Nombre *</label><input class="finput" type="text" name="name" value="{{ existing.name or '' }}"></div>
+        <div><label class="flabel">Empresa</label><input class="finput" type="text" name="empresa" value="{{ existing.empresa or '' }}"></div>
+        <div><label class="flabel">Teléfono</label><input class="finput" type="text" name="phone" value="{{ existing.phone or '' }}"></div>
+        <div><label class="flabel">Email</label><input class="finput" type="text" name="email" value="{{ existing.email or '' }}"></div>
+      </div>
+      <div style="margin-top:12px;"><label class="flabel">Notas</label><textarea class="finput" name="notes" rows="2">{{ existing.notes or '' }}</textarea></div>
+      <div style="margin-top:16px;">
+        <button class="btn" type="submit">Guardar</button>
+        <a hx-get="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}" hx-target="#subpanel" hx-push-url="true"
+           href="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}" style="margin-left:12px;color:var(--muted);">Cancelar</a>
+      </div>
+    </form>
+  </div>
+
+  {% if form_mode == 'edit' %}
+    <div class="card" style="margin-bottom:16px;">
+      <form hx-post="{{ url_for('admin.clients_delete', client_id=existing.id) }}" hx-target="#subpanel"
+            hx-confirm="¿Eliminar {{ existing.name }}? Esta acción no se puede deshacer.">
+        <button type="submit" class="danger-btn">Eliminar cliente</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <p class="card-note" style="margin:0 0 10px;"><b>Proyectos vinculados</b></p>
+      {% if sites %}
+        {% for s in sites %}
+          <label style="display:block;font-size:13px;padding:4px 0;">
+            <input type="checkbox" {{ 'checked' if s.linked else '' }}
+                   hx-post="{{ url_for('admin.clients_link_site', client_id=existing.id) }}"
+                   hx-target="#subpanel" hx-swap="innerHTML"
+                   hx-vals='{"site_id": "{{ s.site_id }}", "kind": "{{ s.kind }}", "linked": "{{ 0 if s.linked else 1 }}"}'>
+            {{ s.display_name }} — {{ s.brand }}
+          </label>
+        {% endfor %}
+      {% else %}
+        <p class="card-note-sm">No hay sitios registrados en Victron Monitor.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+{% else %}
+  <div style="margin-bottom:12px;">
+    <a class="btn" hx-get="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}?add=1" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}?add=1">Nuevo cliente</a>
+  </div>
+
+  {% if rows %}
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead><tr><td>Nombre</td><td>Empresa</td><td>Teléfono</td><td>Correo</td><td></td></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td>{{ r.empresa or '—' }}</td>
+            <td>{{ r.phone or '—' }}</td>
+            <td>{{ r.email or '—' }}</td>
+            <td>
+              <a class="link-btn" hx-get="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}?edit={{ r.id }}"
+                 hx-target="#subpanel" hx-push-url="true"
+                 href="{{ url_for('admin.sub_view', section='clientes', sub='clientes') }}?edit={{ r.id }}">Editar</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card"><p class="dtable-empty">No hay clientes todavía.</p></div>
+  {% endif %}
+{% endif %}

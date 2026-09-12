@@ -1,0 +1,95 @@
+<style>
+.finput { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.link-btn { color: var(--navy); font-weight: 600; }
+.danger-btn { background: none; border: none; color: #B84345; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: inherit; }
+</style>
+
+{% if form_mode %}
+  <div class="card" style="margin-bottom:16px;">
+    <p class="card-note" style="margin:0 0 12px;"><b>{{ 'Editar servicio' if form_mode == 'edit' else 'Nuevo servicio' }}</b></p>
+    {% if error %}<p style="color:#B84345;font-size:13px;">{{ error }}</p>{% endif %}
+    <form hx-post="{{ url_for('admin.services_save') }}" hx-target="#subpanel" hx-swap="innerHTML">
+      {% if existing.id %}<input type="hidden" name="id" value="{{ existing.id }}">{% endif %}
+      <div class="fgrid">
+        <div><label class="flabel">Nombre (ES) *</label><input class="finput" type="text" name="item" value="{{ existing.item or '' }}"></div>
+        <div><label class="flabel">Nombre (EN)</label><input class="finput" type="text" name="item_en" value="{{ existing.item_en or '' }}"></div>
+        <div><label class="flabel">Precio default (USD)</label><input class="finput" type="number" step="0.01" name="unit_cost_usd" value="{{ existing.unit_cost_usd or 0 }}"></div>
+        <div>
+          <label class="flabel">IVA</label>
+          <select class="finput" name="iva_pct">
+            {% for val, label in iva_options %}<option value="{{ val }}" {{ 'selected' if val == (existing.iva_pct or 0) else '' }}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label class="flabel">Orden</label><input class="finput" type="number" step="10" name="sort_order" value="{{ existing.sort_order or 0 }}"></div>
+        <div style="display:flex;align-items:end;">
+          <label style="font-size:13px;"><input type="checkbox" name="enabled" {{ 'checked' if existing.get('enabled', True) else '' }}> Habilitado</label>
+        </div>
+      </div>
+      <div class="fgrid" style="margin-top:12px;">
+        <div><label class="flabel">Descripción / Specs (ES)</label><textarea class="finput" name="specs" rows="2">{{ existing.specs or '' }}</textarea></div>
+        <div><label class="flabel">Descripción / Specs (EN)</label><textarea class="finput" name="specs_en" rows="2">{{ existing.specs_en or '' }}</textarea></div>
+      </div>
+      <div style="margin-top:12px;">
+        <label class="flabel">Tipos de sistema donde aparece por defecto en el Paso 7:</label>
+        {% for key, label in system_types %}
+          <label style="font-size:13px;margin-right:16px;"><input type="checkbox" name="stype_{{ key }}" {{ 'checked' if checked[key] else '' }}> {{ label }}</label>
+        {% endfor %}
+      </div>
+      <div style="margin-top:16px;">
+        <button class="btn" type="submit">Guardar</button>
+        <a hx-get="{{ url_for('admin.index', section='servicios') }}" hx-target="#subpanel" hx-push-url="true"
+           href="{{ url_for('admin.index', section='servicios') }}" style="margin-left:12px;color:var(--muted);">Cancelar</a>
+      </div>
+    </form>
+  </div>
+{% else %}
+  <div style="margin-bottom:12px;">
+    <a class="btn" hx-get="{{ url_for('admin.index', section='servicios') }}?add=1" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.index', section='servicios') }}?add=1">Agregar servicio</a>
+  </div>
+
+  {% if rows %}
+  {# services_batch is an out-of-line <form> (HTML5 form="" attaches inputs
+     to it from anywhere in the document) so each row's per-service delete
+     <form> below doesn't end up illegally nested inside it. #}
+  <form id="services_batch" hx-post="{{ url_for('admin.services_batch_save') }}" hx-target="#subpanel"></form>
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead><tr><td>Servicio</td><td>Precio (USD)</td><td>IVA</td><td>Habilitado</td><td></td></tr></thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>
+              <b>{{ r.item }}</b>
+              {% if r.item_en %}<div class="card-note-sm">{{ r.item_en }}</div>{% endif %}
+              {% if r.system_types %}<div class="card-note-sm">Solo: {{ r.system_types|join(', ') }}</div>{% endif %}
+            </td>
+            <td><input class="finput" form="services_batch" type="number" step="10" name="price_{{ r.id }}" value="{{ r.unit_cost_usd or 0 }}"></td>
+            <td>
+              <select class="finput" form="services_batch" name="iva_{{ r.id }}">
+                {% for val, label in iva_options %}<option value="{{ val }}" {{ 'selected' if val == (r.iva_pct or 0) else '' }}>{{ label }}</option>{% endfor %}
+              </select>
+            </td>
+            <td><input type="checkbox" form="services_batch" name="enabled_{{ r.id }}" {{ 'checked' if r.get('enabled', True) else '' }}></td>
+            <td style="white-space:nowrap;">
+              <a class="link-btn" hx-get="{{ url_for('admin.index', section='servicios') }}?edit={{ r.id }}"
+                 hx-target="#subpanel" hx-push-url="true"
+                 href="{{ url_for('admin.index', section='servicios') }}?edit={{ r.id }}">Editar</a>
+              <form hx-post="{{ url_for('admin.services_delete', item_id=r.id) }}" hx-target="#subpanel"
+                    hx-confirm="¿Eliminar {{ r.item }}? Esta acción no se puede deshacer."
+                    style="display:inline;margin-left:10px;">
+                <button type="submit" class="danger-btn">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:12px;"><button class="btn" type="submit" form="services_batch">Guardar cambios</button></div>
+  {% else %}
+  <div class="card"><p class="dtable-empty">No hay servicios configurados.</p></div>
+  {% endif %}
+{% endif %}

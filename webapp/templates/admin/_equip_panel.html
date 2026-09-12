@@ -1,0 +1,116 @@
+{% macro field_input(f) %}
+  {% if f.type == 'select' %}
+    <select name="{{ f.key }}" class="finput">
+      {% for val, label in f.options %}
+        <option value="{{ val }}" {{ 'selected' if val|string == f.value|string else '' }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  {% else %}
+    <input type="{{ 'number' if f.type == 'number' else 'text' }}" name="{{ f.key }}" value="{{ f.value }}"
+           {% if f.step %}step="{{ f.step }}"{% endif %} class="finput">
+  {% endif %}
+  {% if f.help %}<div class="card-note-sm">{{ f.help }}</div>{% endif %}
+{% endmacro %}
+
+<style>
+.finput { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.link-btn { color: var(--navy); font-weight: 600; }
+.danger-btn { background: none; border: none; color: #B84345; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: inherit; }
+</style>
+
+{% if form_mode == "dup_confirm" %}
+  <div class="card" style="margin-bottom:16px;">
+    <p class="card-note">Ya existe <b>{{ dup.brand }} {{ dup.model }}</b> en el catálogo. ¿Sobrescribir con los datos nuevos, o mantener el {{ kind_label }} actual sin cambios?</p>
+    <form hx-post="{{ url_for('admin.equipos_save', sub=sub) }}" hx-target="#subpanel" hx-swap="innerHTML" style="display:inline;">
+      {% for key, value in pending_form.items() %}
+        {% if key != 'confirm_overwrite' %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}
+      {% endfor %}
+      <input type="hidden" name="confirm_overwrite" value="1">
+      <button class="btn" type="submit">Sobrescribir {{ kind_label }} existente</button>
+    </form>
+    <a class="btn" style="background:var(--muted);margin-left:8px;"
+       hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}">Mantener el actual</a>
+  </div>
+{% elif form_mode %}
+  <div class="card" style="margin-bottom:16px;">
+    <p class="card-note" style="margin:0 0 12px;"><b>{{ 'Editar' if form_mode == 'edit' else 'Nuevo' }} {{ kind_label }}</b></p>
+    {% if error %}<p style="color:#B84345;font-size:13px;">{{ error }}</p>{% endif %}
+    <form hx-post="{{ url_for('admin.equipos_save', sub=sub) }}" hx-target="#subpanel" hx-swap="innerHTML">
+      {% if existing and existing.id %}<input type="hidden" name="id" value="{{ existing.id }}">{% endif %}
+      <div class="fgrid">
+        {% for f in fields %}
+          <div><label class="flabel">{{ f.label }}</label>{{ field_input(f) }}</div>
+        {% endfor %}
+      </div>
+      <div class="fgrid" style="margin-top:12px;">
+        <div>
+          <label class="flabel">Costo (USD)</label>
+          <input type="number" name="cost_usd" value="{{ cost_usd }}" step="0.01" class="finput">
+        </div>
+        <div>
+          <label class="flabel">IVA</label>
+          <select name="cost_iva_rate" class="finput">
+            {% for val, label in iva_options %}
+              <option value="{{ val }}" {{ 'selected' if val == cost_iva_rate else '' }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <label class="flabel">Notas</label>
+        <textarea name="notes" rows="2" class="finput">{{ notes }}</textarea>
+      </div>
+      <div style="margin-top:16px;">
+        <button class="btn" type="submit">Guardar</button>
+        <a hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}" hx-target="#subpanel" hx-push-url="true"
+           href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}"
+           style="margin-left:12px;color:var(--muted);">Cancelar</a>
+      </div>
+    </form>
+  </div>
+{% endif %}
+
+{% if not form_mode %}
+  <div style="margin-bottom:12px;">
+    <a class="btn" hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1">Agregar {{ kind_label }}</a>
+  </div>
+
+  {% if items %}
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead>
+        <tr>
+          <td>Marca</td><td>Modelo</td>
+          {% for col in display_cols %}<td>{{ col.label }}</td>{% endfor %}
+          <td></td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+          <tr>
+            <td>{{ it.brand }}</td>
+            <td>{{ it.model }}</td>
+            {% for col in display_cols %}<td>{{ it[col.key] if it[col.key] not in (None, '') else '—' }}</td>{% endfor %}
+            <td style="white-space:nowrap;">
+              <a class="link-btn" hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?edit={{ it.id }}"
+                 hx-target="#subpanel" hx-push-url="true"
+                 href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?edit={{ it.id }}">Editar</a>
+              <form hx-post="{{ url_for('admin.equipos_delete', sub=sub, item_id=it.id) }}" hx-target="#subpanel"
+                    hx-confirm="¿Eliminar {{ it.brand }} {{ it.model }}? Esta acción no se puede deshacer."
+                    style="display:inline;margin-left:10px;">
+                <button type="submit" class="danger-btn">Eliminar</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card"><p class="dtable-empty">No hay {{ kind_label }}es en el catálogo.</p></div>
+  {% endif %}
+{% endif %}

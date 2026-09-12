@@ -1,0 +1,103 @@
+<style>
+.finput { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.diff-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 8px 0; }
+.diff-col h6 { margin: 0 0 6px; font-size: 12px; color: var(--muted-2); }
+.diff-col p { margin: 2px 0; font-size: 13px; }
+.dist-block { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+.warn-box { background: #FBF0DF; border: 1px solid #E8CFA0; border-radius: 6px; padding: 10px 12px; font-size: 12px; margin: 8px 0; }
+</style>
+
+{% if stage == "upload" %}
+  <div class="card">
+    <p class="card-note" style="margin:0 0 8px;"><b>Actualizar tarifas ARESEP</b></p>
+    <p class="card-note-sm">
+      Sube el archivo Cuadro E-8 de ARESEP (.xlsx). El sistema leerá únicamente las hojas
+      Vigentes de cada distribuidora y extraerá las tarifas T-RE (residencial) y T-CO (comercial).
+    </p>
+    {% if error %}<p style="color:#B84345;font-size:13px;">{{ error }}</p>{% endif %}
+    {% if info %}<p style="color:#2f8a53;font-size:13px;">{{ info }}</p>{% endif %}
+    <form hx-post="{{ url_for('admin.aresep_upload') }}" hx-target="#subpanel" hx-swap="innerHTML"
+          hx-encoding="multipart/form-data" style="margin-top:12px;">
+      <input class="finput" type="file" name="file" accept=".xlsx">
+      <button class="btn" type="submit" style="margin-left:8px;">Extraer tarifas</button>
+    </form>
+    <p class="card-note-sm" style="margin-top:10px;">Descarga el archivo actualizado en aresep.go.cr → Estadísticas → Cuadro E-8.</p>
+  </div>
+
+{% elif stage == "confirm" %}
+  <div class="card" style="margin-bottom:16px;">
+    <p class="card-note" style="margin:0 0 8px;"><b>Comparación: valores actuales vs. archivo ARESEP</b></p>
+  </div>
+  <form hx-post="{{ url_for('admin.aresep_apply') }}" hx-target="#subpanel" hx-swap="innerHTML">
+    <input type="hidden" name="changes_json" value='{{ changes_json }}'>
+    {% for abbrev, dist_changes in by_dist.items() %}
+      {% set any_change = dist_changes|selectattr('has_change')|list|length > 0 %}
+      <div class="dist-block">
+        <p class="card-note" style="margin:0 0 8px;"><b>{{ '🟢' if any_change else '⚪' }} {{ abbrev }}</b></p>
+        {% if not any_change %}
+          <p class="card-note-sm">Sin cambios.</p>
+        {% else %}
+          {% for c in dist_changes %}
+            {% set label = 'T-RE — Residencial' if c.code == 'T-RE' else 'T-CO — Comercial' %}
+            <p class="card-note" style="margin:10px 0 4px;"><b>{{ label }}</b></p>
+            {% if not c.has_change %}
+              <p class="card-note-sm">Sin cambios.</p>
+            {% else %}
+              {% if c.is_new %}<p class="card-note-sm">Nuevo: {{ c.code }} no existe en la base de datos para {{ abbrev }}. Se creará.</p>{% endif %}
+              <div class="diff-cols">
+                <div class="diff-col">
+                  <h6>{{ 'Actual en DB' if not c.is_new else 'Actual en DB (no existe)' }}</h6>
+                  <p>Cargo fijo: {{ fmt_crc(c.cur.access_charge_crc or 0) }}</p>
+                  {% if c.code == 'T-CO' %}<p>Cargo demanda: {{ fmt_demand(c.cur.demand_rate_crc or 0, c.cur.demand_threshold_kw or 0) }}</p>{% endif %}
+                  {% for t in c.cur.tiers or [] %}<p>{{ tier_label(t) }}: {{ fmt_rate(t.rate_crc) }}</p>{% endfor %}
+                </div>
+                <div class="diff-col">
+                  <h6>Nuevo (ARESEP)</h6>
+                  <p>Cargo fijo: {{ fmt_crc(c.new.access_charge_crc) }}</p>
+                  {% if c.code == 'T-CO' %}<p>Cargo demanda: {{ fmt_demand(c.new.demand_rate_crc or 0, c.new.demand_threshold_kw or 0) }}</p>{% endif %}
+                  {% for t in c.new.tiers or [] %}<p>{{ tier_label(t) }}: {{ fmt_rate(t.rate_crc) }}</p>{% endfor %}
+                </div>
+              </div>
+              {% if c.code == 'T-CO' and c.energy_changed and not c.is_new %}
+                <div class="warn-box">
+                  ⚠️ El archivo ARESEP trae la estructura binomial oficial de T-CO (bloques de energía + cargo
+                  por demanda). El valor actual en la base de datos fue corregido a mano a partir de facturas
+                  reales de clientes &lt;100kW monofásicos sin medidor de demanda, donde nunca se cobra ese
+                  cargo — sobrescribirlo cambiará las estimaciones de factura de todos los proyectos que usan
+                  esta tarifa.
+                </div>
+                <label style="font-size:13px;">
+                  <input type="checkbox" name="confirm_{{ abbrev }}::{{ c.code }}">
+                  Sí, sobrescribir el cargo fijo y los bloques de energía de T-CO para {{ abbrev }} con los valores del archivo
+                </label>
+              {% elif c.code == 'T-CO' and c.demand_changed and not c.is_new %}
+                <p class="card-note-sm">El cargo por demanda es solo informativo (no se usa en ninguna estimación de factura) — se actualizará automáticamente.</p>
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      </div>
+    {% endfor %}
+    <div class="card">
+      <p class="card-note-sm">Esta acción reemplaza los bloques tarifarios en la base de datos para las tarifas con cambios confirmados.</p>
+      <button class="btn" type="submit">Aplicar actualización</button>
+      <a hx-get="{{ url_for('admin.sub_view', section='aresep', sub='actualizar') }}" hx-target="#subpanel" hx-push-url="true"
+         href="{{ url_for('admin.sub_view', section='aresep', sub='actualizar') }}" style="margin-left:12px;color:var(--muted);">Cancelar</a>
+    </div>
+  </form>
+
+{% elif stage == "done" %}
+  <div class="card">
+    {% if errors %}
+      <p style="color:#B84345;font-size:13px;"><b>Errores:</b></p>
+      {% for e in errors %}<p style="color:#B84345;font-size:13px;">{{ e }}</p>{% endfor %}
+    {% endif %}
+    {% if updated %}
+      <p style="color:#2f8a53;font-size:13px;">✅ {{ updated }} tarifa(s) actualizadas correctamente.</p>
+    {% elif not errors %}
+      <p class="card-note-sm">No hay cambios confirmados para aplicar.</p>
+    {% endif %}
+    <a class="btn" hx-get="{{ url_for('admin.sub_view', section='aresep', sub='actualizar') }}" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.sub_view', section='aresep', sub='actualizar') }}">Volver</a>
+  </div>
+{% endif %}

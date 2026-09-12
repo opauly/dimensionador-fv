@@ -1,19 +1,55 @@
+<style>
+.finput { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+</style>
+
 <div class="card" style="margin-bottom:16px;">
-  <p class="card-note" style="margin:0 0 10px;"><b>Empresa</b></p>
-  <p class="card-note">
-    {{ company.contact_name }} — {{ company.contact_title }}<br>
-    Licencia {{ company.license }}<br>
-    {{ company.phone }} · {{ company.email }}<br>
-    {{ company.website }}
-  </p>
+  <p class="card-note" style="margin:0 0 12px;"><b>Datos de la empresa</b></p>
+  <p class="card-note-sm" style="margin:0 0 12px;">Aparecen en el encabezado y pie de página de cada propuesta generada.</p>
+  <form hx-post="{{ url_for('admin.settings_company_save') }}" hx-target="#subpanel" hx-swap="innerHTML">
+    <div class="fgrid">
+      <div><label class="flabel">Nombre de la empresa</label><input class="finput" type="text" name="name" value="{{ company.name or '' }}"></div>
+      <div><label class="flabel">Licencia/Registro</label><input class="finput" type="text" name="license" value="{{ company.license or '' }}"></div>
+      <div><label class="flabel">Nombre de contacto</label><input class="finput" type="text" name="contact_name" value="{{ company.contact_name or '' }}"></div>
+      <div><label class="flabel">Puesto (ES)</label><input class="finput" type="text" name="contact_title" value="{{ company.contact_title or '' }}"></div>
+      <div><label class="flabel">Teléfono</label><input class="finput" type="text" name="phone" value="{{ company.phone or '' }}"></div>
+      <div><label class="flabel">Email</label><input class="finput" type="text" name="email" value="{{ company.email or '' }}"></div>
+      <div><label class="flabel">Sitio web</label><input class="finput" type="text" name="website" value="{{ company.website or '' }}"></div>
+      <div><label class="flabel">Puesto (EN)</label><input class="finput" type="text" name="contact_title_en" value="{{ company.contact_title_en or '' }}"></div>
+    </div>
+    <div style="margin-top:16px;"><button class="btn" type="submit">Guardar datos de la empresa</button></div>
+  </form>
 </div>
-<div class="card">
-  <p class="card-note" style="margin:0 0 10px;"><b>Datos bancarios (local)</b></p>
-  <p class="card-note">
-    {% for line in bank.bank_local_lines %}{{ line }}<br>{% endfor %}
-  </p>
-  <p class="card-note" style="margin:14px 0 10px;"><b>Datos bancarios (internacional)</b></p>
-  <p class="card-note">
-    {% for line in bank.bank_intl_lines %}{{ line }}<br>{% endfor %}
-  </p>
+
+<div class="card" style="margin-bottom:16px;">
+  <p class="card-note" style="margin:0 0 12px;"><b>Datos bancarios</b></p>
+  <p class="card-note-sm" style="margin:0 0 12px;">Una línea por renglón — aparecen tal cual en la tabla de pago de la propuesta.</p>
+  <form hx-post="{{ url_for('admin.settings_bank_save') }}" hx-target="#subpanel" hx-swap="innerHTML">
+    <div class="fgrid">
+      <div>
+        <label class="flabel">Transferencia local (ES)</label>
+        <textarea class="finput" name="bank_local_lines" rows="5">{{ bank.bank_local_lines|join('\n') }}</textarea>
+      </div>
+      <div>
+        <label class="flabel">Transferencia local (EN)</label>
+        <textarea class="finput" name="bank_local_lines_en" rows="5">{{ bank.bank_local_lines_en|join('\n') }}</textarea>
+      </div>
+      <div>
+        <label class="flabel">Transferencia internacional (ES)</label>
+        <textarea class="finput" name="bank_intl_lines" rows="7">{{ bank.bank_intl_lines|join('\n') }}</textarea>
+      </div>
+      <div>
+        <label class="flabel">Transferencia internacional (EN)</label>
+        <textarea class="finput" name="bank_intl_lines_en" rows="7">{{ bank.bank_intl_lines_en|join('\n') }}</textarea>
+      </div>
+    </div>
+    <div style="margin-top:16px;"><button class="btn" type="submit">Guardar datos bancarios</button></div>
+  </form>
+</div>
+
+<div class="stub-note">
+  Logo y firma (subida de imágenes para el PDF) aún no se ha migrado — depende de funciones
+  (<code>get_asset_b64</code>/<code>save_asset</code>) que todavía no existen en esta rama.
+  Use la versión Streamlit (puerto 8501) para esta sección por ahora.
 </div>

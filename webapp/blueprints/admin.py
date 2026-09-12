@@ -1,14 +1,27 @@
 """Admin section: equipment catalog, services, ARESEP tariffs, clients,
-sites and settings — read-only views for now (see module docstrings on
-each database/*.py function for the write-side calls still to port:
-upsert_panel/upsert_inverter/etc., the AI tariff updater, client/site
-forms). Faithful to pages/05_admin.py's section layout.
+sites and settings. Full CRUD parity with pages/05_admin.py, split across
+one module per section (admin_equipment.py, admin_services.py, etc.) —
+this file owns routing/dispatch, the modules own each section's logic.
+
+Not ported: equipment/AI datasheet extraction ("Extraer de datasheet"),
+and Ajustes' logo/signature upload (depends on wizard.state functions —
+get_asset_b64/save_asset — that don't exist yet in this snapshot).
 """
 from __future__ import annotations
 
 from flask import Blueprint, abort, render_template
 
+from webapp.blueprints import (
+    admin_aresep, admin_clients, admin_equipment, admin_services, admin_settings, admin_sites,
+)
+
 bp = Blueprint("admin", __name__, url_prefix="/admin")
+admin_equipment.register(bp)
+admin_services.register(bp)
+admin_clients.register(bp)
+admin_sites.register(bp)
+admin_settings.register(bp)
+admin_aresep.register(bp)
 
 SECTIONS = {
     "equipos": {"label": "Equipos", "sub": ["paneles", "inversores", "baterias", "controladores", "monitoreo"]},
@@ -51,27 +64,8 @@ def _equipment_table(rows, columns):
     return out
 
 
-PANEL_COLS = [("brand", "Marca", None), ("model", "Modelo", None), ("wp", "Wp", None),
-              ("voc", "Voc", None), ("vmp", "Vmp", None), ("isc", "Isc", None),
-              ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
-INVERTER_COLS = [("brand", "Marca", None), ("model", "Modelo", None), ("kw", "kW", None),
-                 ("type", "Tipo", None), ("phase", "Fase", None), ("mppt_channels", "MPPT", None),
-                 ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
-BATTERY_COLS = [("brand", "Marca", None), ("model", "Modelo", None), ("chemistry", "Química", None),
-                ("capacity_kwh", "kWh", None), ("voltage_v", "V", None), ("cycles", "Ciclos", None),
-                ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
-CC_COLS = [("brand", "Marca", None), ("model", "Modelo", None), ("type", "Tipo", None),
-           ("vin_max", "Vin máx", None), ("imax_out", "Imax salida", None),
-           ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
-MONITORING_COLS = [("brand", "Marca", None), ("model", "Modelo", None),
-                    ("compatible_with", "Compatible con", None),
-                    ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
-SERVICE_COLS = [("item", "Servicio", None), ("unit_cost_usd", "Costo unitario", _usd),
-                ("iva_pct", "IVA", _pct), ("enabled", "Activo", _yn)]
 CLIENT_COLS = [("name", "Nombre", None), ("empresa", "Empresa", None),
                ("phone", "Teléfono", None), ("email", "Correo", None)]
-SITE_COLS = [("display_name", "Sitio", None), ("client_name", "Cliente", None),
-             ("brand", "Marca", None), ("active", "Activo", _yn)]
 TARIFF_COLS = [("distributor", "Distribuidora", None), ("tariff", "Tarifa", None),
                ("access_charge", "Cargo fijo", _crc), ("last_updated", "Actualizada", None)]
 
@@ -140,40 +134,29 @@ def _table_partial(columns, rows, empty_message):
 
 
 def _render_equipos(sub):
-    from database.equipment_db import (
-        list_batteries, list_charge_controllers, list_inverters,
-        list_monitoring_devices, list_panels,
-    )
+    from flask import request
+
     try:
-        if sub == "paneles":
-            return _table_partial(PANEL_COLS, list_panels(), "Sin paneles registrados.")
-        if sub == "inversores":
-            return _table_partial(INVERTER_COLS, list_inverters(), "Sin inversores registrados.")
-        if sub == "baterias":
-            return _table_partial(BATTERY_COLS, list_batteries(), "Sin baterías registradas.")
-        if sub == "controladores":
-            return _table_partial(CC_COLS, list_charge_controllers(), "Sin controladores registrados.")
-        if sub == "monitoreo":
-            return _table_partial(MONITORING_COLS, list_monitoring_devices(), "Sin equipos de monitoreo registrados.")
+        return admin_equipment.render_equipos_panel(sub, request)
     except Exception as exc:
         return render_template("admin/_error.html", message=str(exc))
-    abort(404)
 
 
 def _render_servicios():
-    from database.equipment_db import list_service_defaults
+    from flask import request
+
     try:
-        return _table_partial(SERVICE_COLS, list_service_defaults(), "Sin servicios registrados.")
+        return admin_services.render_services_panel(request)
     except Exception as exc:
         return render_template("admin/_error.html", message=str(exc))
 
 
 def _render_aresep(sub):
     if sub == "actualizar":
-        return render_template(
-            "admin/_stub_panel.html",
-            message="El actualizador de tarifas (parseo AI de resoluciones ARESEP) aún no se ha migrado a Flask/Jinja2. Use la versión Streamlit (puerto 8501) por ahora.",
-        )
+        try:
+            return admin_aresep.render_aresep_actualizar()
+        except Exception as exc:
+            return render_template("admin/_error.html", message=str(exc))
     from database.tariffs_db import list_distributors, list_tariff_types
     try:
         rows = []
@@ -191,10 +174,11 @@ def _render_aresep(sub):
 
 
 def _render_clientes(sub):
+    from flask import request
+
     try:
         if sub == "clientes":
-            from database.clients_db import list_all_clients
-            return _table_partial(CLIENT_COLS, list_all_clients(), "Sin clientes registrados.")
+            return admin_clients.render_clients_panel(request)
         if sub == "prospectos":
             from database.prospects_db import list_all_prospects
             return _table_partial(CLIENT_COLS, list_all_prospects(), "Sin prospectos registrados.")
@@ -204,32 +188,16 @@ def _render_clientes(sub):
 
 
 def _render_sitios():
-    try:
-        from database.clients_db import list_all_clients
-        from database.monitoring_sites_db import list_monitoring_sites
+    from flask import request
 
-        client_names = {c["id"]: c["name"] for c in list_all_clients()}
-        rows = []
-        for s in list_monitoring_sites():
-            rows.append({
-                "display_name": s.get("display_name") or s.get("site_id"),
-                "client_name": client_names.get(s.get("client_id"), "—"),
-                "brand": s.get("brand"),
-                "active": s.get("active"),
-            })
-        return _table_partial(SITE_COLS, rows, "Sin sitios registrados.")
+    try:
+        return admin_sites.render_sites_panel(request)
     except Exception as exc:
         return render_template("admin/_error.html", message=str(exc))
 
 
 def _render_ajustes():
     try:
-        from wizard.state import get_bank_info, get_company_info
-
-        return render_template(
-            "admin/_ajustes.html",
-            company=get_company_info(),
-            bank=get_bank_info(),
-        )
+        return admin_settings.render_settings_panel()
     except Exception as exc:
         return render_template("admin/_error.html", message=str(exc))
