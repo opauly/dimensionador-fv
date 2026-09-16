@@ -31,7 +31,6 @@ def _overview_rows():
 
 def render_sites_panel(request):
     from database.clients_db import list_all_clients
-    from victron.savings import SUPPORTED_FLAT_CURRENCIES
     import config
 
     add = request.args.get("add") == "1"
@@ -40,7 +39,7 @@ def render_sites_panel(request):
             "admin/_sites_panel.html", mode="add", clients=list_all_clients(),
             countries=sorted(config.COUNTRIES.items(), key=lambda kv: kv[1]),
             system_types=config.SYSTEM_TYPES, system_type_labels=config.SYSTEM_TYPE_LABELS,
-            currencies=SUPPORTED_FLAT_CURRENCIES, error=None,
+            currencies=config.SUPPORTED_FLAT_CURRENCIES, error=None,
         )
 
     rows = _overview_rows()
@@ -59,7 +58,6 @@ def register(bp):
     def sites_save():
         from database.clients_db import list_all_clients
         from database.site_registration_db import register_new_site
-        from victron.savings import SUPPORTED_FLAT_CURRENCIES
         import config
 
         form = request.form
@@ -73,7 +71,7 @@ def register(bp):
                 "admin/_sites_panel.html", mode="add", clients=list_all_clients(),
                 countries=sorted(config.COUNTRIES.items(), key=lambda kv: kv[1]),
                 system_types=config.SYSTEM_TYPES, system_type_labels=config.SYSTEM_TYPE_LABELS,
-                currencies=SUPPORTED_FLAT_CURRENCIES, error=msg,
+                currencies=config.SUPPORTED_FLAT_CURRENCIES, error=msg,
             )
 
         if not display_name:

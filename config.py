@@ -12,6 +12,11 @@ SYSTEM_TYPE_LABELS = {
 PROPOSAL_STATUSES = ["draft", "active", "won", "lost", "cancelled"]
 PROJECT_STATUSES = ["active", "completed", "paused", "cancelled"]
 
+# Duplicated from victron/savings.py's own SUPPORTED_FLAT_CURRENCIES rather than
+# imported — victron/ is moving to its own repo (VRM Monitor split) and this is
+# only used here to populate a currency dropdown for non-CR Victron sites.
+SUPPORTED_FLAT_CURRENCIES = ["CRC", "USD", "EUR"]
+
 DEFAULT_IVA_RATE = 0.0
 DEFAULT_TARIFF_ESCALATION = 0.05
 DEFAULT_PROPOSAL_VALIDITY_DAYS = 15

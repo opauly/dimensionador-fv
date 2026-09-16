@@ -14,10 +14,15 @@ Deliberately separate from victron/ingest.py (which stays VRM-only in scope) and
 database/site_properties_db.py (which stays maintenance-register-only in scope,
 untouched here — migration 047's trigger creates the maintenance property for
 whatever this module inserts, automatically, regardless of which path).
+
+Uses database/vrm_sites_admin.py's forked copy of the vrm.customers/vrm.sites
+writes, not victron/ingest.py directly — victron/ is moving to its own repo
+(VRM Monitor split) and this admin-portfolio registration path needs to keep
+working here regardless.
 """
 from database.clients_db import get_client_by_id
 from database.monitoring_sites_db import create_monitoring_site
-from victron.ingest import slugify, get_or_create_admin_portfolio_customer, upsert_site
+from database.vrm_sites_admin import slugify, get_or_create_admin_portfolio_customer, upsert_site
 
 
 def _site_id_for(client_name: str, display_name: str) -> str:
