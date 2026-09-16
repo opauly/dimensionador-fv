@@ -786,7 +786,7 @@ def _new_site_form(clients: list[dict]) -> None:
     Portfolio" tenant) based on the checkbox below — see
     `database/site_registration_db.py`.
     """
-    from config import COUNTRIES, SYSTEM_TYPES, SYSTEM_TYPE_LABELS
+    from config import COUNTRIES, SUPPORTED_FLAT_CURRENCIES, SYSTEM_TYPES, SYSTEM_TYPE_LABELS
 
     if not clients:
         st.caption("Agrega un cliente primero en la pestaña Clientes.")
@@ -868,9 +868,8 @@ def _new_site_form(clients: list[dict]) -> None:
                     key=f"{key_prefix}_savrate",
                     help="Solo se usa si el país no es CR (CR usa tarifas ARESEP).",
                 )
-                from victron import savings as vrm_savings
                 savings_currency = b.selectbox(
-                    "Moneda", vrm_savings.SUPPORTED_FLAT_CURRENCIES, key=f"{key_prefix}_savcur",
+                    "Moneda", SUPPORTED_FLAT_CURRENCIES, key=f"{key_prefix}_savcur",
                 )
         else:
             brand = st.text_input(
