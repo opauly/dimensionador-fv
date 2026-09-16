@@ -23,7 +23,6 @@ STUBS = {
     "proposals": "Cotizaciones",
     "projects": "Proyectos",
     "maintenance": "Mantenimiento",
-    "vrm-monitor": "VRM Monitor",
 }
 
 
