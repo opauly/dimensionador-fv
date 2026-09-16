@@ -21,9 +21,9 @@ Kept deliberately narrow to match what "public" should mean here:
 from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
 
-from database import tariffs_db
 from vrm_api.deps import require_public_tariff_key
 from vrm_api.schemas import DistributorOut, TariffInfoOut
+from victron.vrm_shared import tariffs_db
 
 router = APIRouter(
     prefix="/public/tariffs",
@@ -44,10 +44,12 @@ def list_distributors() -> list[DistributorOut]:
 def get_tariff(abbreviation: str, code: str = "T-RE") -> TariffInfoOut:
     """Current tariff block for one distributor + tariff code (defaults to
     `T-RE`, the residential tariff every savings-table use case so far has
-    needed). `tariff_types` is upserted in place (`tariffs_db.py`'s
-    `upsert_tariff_type_row` — one row per distributor+code, no history
-    table), so this is always the latest block; `last_updated` is how a
-    caller confirms that rather than trusting it silently."""
+    needed). `tariff_types` is upserted in place (Dimensionador's own
+    `database/tariffs_db.py`'s `upsert_tariff_type_row` — victron/vrm_api's
+    forked `victron/vrm_shared/tariffs_db.py` is read-only in practice here,
+    same Supabase table either way — one row per distributor+code, no
+    history table), so this is always the latest block; `last_updated` is
+    how a caller confirms that rather than trusting it silently."""
     try:
         info = tariffs_db.get_tariff_info(abbreviation.upper(), code)
     except APIError as exc:

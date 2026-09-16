@@ -33,8 +33,8 @@ from datetime import date
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from database import vrm_report_db as db
-from proposals.assets.assets import get_logo_b64
 from victron import report_i18n, report_svg as S, savings as savings_mod
+from victron.vrm_shared.assets import get_logo_b64
 
 # The 9 optional report modules render_html() knows how to build
 # independently (PLAN_PHASE18.md's Decisions section). KPI header / AI
@@ -1196,10 +1196,13 @@ def render_html(d: dict, selected: set[str] | None = None) -> str:
         start_str=d["startStr"], end_str=d["endStr"],
         # `logo_b64` is either the customer's own uploaded logo (already
         # base64-encoded by resolve_branding()) or, same as before this
-        # feature existed, the shared Pauly & Co asset the proposal PDFs
-        # also use (proposals/assets/assets.py) — one shared source, so an
-        # UNBRANDED report's logo can never drift between the two PDF
-        # families (PLAN_PHASE17.md §4).
+        # feature existed, the same Pauly & Co asset the proposal PDFs use —
+        # victron/vrm_shared/assets.py's get_logo_b64(), forked from
+        # proposals/assets/assets.py (Phase 3 of the VRM Monitor split, so
+        # these two file trees can become separate repos). Identical PNG,
+        # duplicated rather than shared; the two copies can now drift if
+        # the logo is ever swapped in only one of them (PLAN_PHASE17.md §4
+        # originally relied on this being one shared source).
         logo_b64=logo_b64,
         company_name=company_name,
         brand_color=brand_color,

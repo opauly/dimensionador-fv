@@ -21,7 +21,8 @@ own "same cadence as 3a" instruction).
 §4/§5 both say: "write one utility function, parameterize... rather than
 duplicating the PVGIS plumbing twice." `_site_monthly_shape()` +
 `_build_daily_series()` below are that shared core — both read
-`calculations.pvgis.fetch_irradiance()` (per-site MONTHLY kWh/kWp, a
+`victron.vrm_shared.pvgis.fetch_irradiance()` (forked from
+`calculations/pvgis.py`; per-site MONTHLY kWh/kWp, a
 multi-year climatological average, Supabase-cached by lat/lon) and turn it
 into a per-calendar-day "expected shape" any site's real `pv_kwh` history
 can be compared against. The two checks below differ only in HOW they use
@@ -135,7 +136,7 @@ import calendar
 import logging
 from datetime import date, datetime, timedelta, timezone
 
-from calculations.pvgis import fetch_irradiance
+from victron.vrm_shared.pvgis import fetch_irradiance
 
 logger = logging.getLogger("victron.anomaly_drift")
 

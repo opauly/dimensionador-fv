@@ -8,8 +8,9 @@ Two paths, chosen automatically from `sites.country` (already a column on
 both `monitoring.sites` and `vrm.sites`, default 'CR'):
 
 - **country == 'CR'**: runs the real ARESEP tiered bill formula
-  (`calculations/tariff_calculator.py`) — the same engine the Grid Zero
-  proposal calculator uses — blended across every seeded Costa Rica
+  (`victron/vrm_shared/tariff_calculator.py`, forked from
+  `calculations/tariff_calculator.py` — same engine the Grid Zero
+  proposal calculator uses) — blended across every seeded Costa Rica
   distributor's T-RE tariff into one effective ₡/kWh
   (`estimate_blended_effective_rate_crc`). This covers `monitoring` (Pauly &
   Co's own fleet, currently 100% Costa Rica) and any `vrm` site the operator
@@ -26,13 +27,13 @@ modeling it without knowing the specific policy risks a confidently wrong
 number, which is worse than the honest gap this leaves for exporting sites.
 
 `rate` itself is energy charge ÷ kWh only — see
-`calculations/tariff_calculator.py`'s own docstring for why bomberos,
+`victron/vrm_shared/tariff_calculator.py`'s own docstring for why bomberos,
 alumbrado público, IVA, and Generación Distribuida charges are excluded
 from that formula entirely, not just from this weekly-report path.
 """
 import time
 
-from calculations.tariff_calculator import (
+from victron.vrm_shared.tariff_calculator import (
     estimate_bill_crc,
     estimate_blended_effective_rate_crc,
 )
@@ -55,7 +56,7 @@ def _cr_tariff_infos() -> list[dict]:
     if cached is not None and now - _CR_BLEND_CACHE["fetched_at"] < _CR_BLEND_TTL_S:
         return cached
 
-    from database import tariffs_db
+    from victron.vrm_shared import tariffs_db
     infos = []
     for d in tariffs_db.list_distributors():
         info = tariffs_db.get_tariff_info(d["abbreviation"], "T-RE")
