@@ -1,6 +1,8 @@
 # System Architecture
 
-How the two products in this repo — the **Solar Design Tool** (Streamlit) and **Victron Monitor** (Node-RED + Apps Script) — are wired together through one shared Supabase project. See [README.md](README.md) for what each product does; this doc is about how the pieces connect.
+How the **Solar Design Tool** (this repo, Streamlit) and **Victron Monitor / VRM Monitor** (split into [`github.com/opauly/vrm-monitor`](https://github.com/opauly/vrm-monitor), 2026-09-16) are wired together through one shared Supabase project. See [README.md](README.md) for what each product does; this doc is about how the pieces connect.
+
+**Note on this doc after the split:** every diagram below still describes the actual, unchanged *runtime* behavior — same Supabase project, same schemas, same data flows. Only the code's repo changed. Where a path below points at `victron-monitor/...`, that's now a path inside the *other* repo, not this one — those files no longer exist here.
 
 ---
 
@@ -116,7 +118,7 @@ erDiagram
     ENERGY_DAILY ||--|| DAILY_HEALTH : "auto-computes (trigger)"
 ```
 
-`public` (Solar Design Tool) and `monitoring` (Victron Monitor) are otherwise fully isolated — the **only** cross-schema link is `monitoring.sites.client_id → public.clients.id`, and it's read/written through a narrow `SECURITY DEFINER` function (`get_report_email`), not a direct grant on `clients` to the `anon` key. Full table list per schema in [database/schema.sql](database/schema.sql) (`public`) and [victron-monitor/sql/schema.sql](victron-monitor/sql/schema.sql) (`monitoring`).
+`public` (Solar Design Tool) and `monitoring` (Victron Monitor) are otherwise fully isolated — the **only** cross-schema link is `monitoring.sites.client_id → public.clients.id`, and it's read/written through a narrow `SECURITY DEFINER` function (`get_report_email`), not a direct grant on `clients` to the `anon` key. Full table list per schema in [database/schema.sql](database/schema.sql) (`public`, this repo) and `victron-monitor/sql/schema.sql` (`monitoring`, now in [vrm-monitor](https://github.com/opauly/vrm-monitor)).
 
 ---
 
@@ -142,9 +144,9 @@ stateDiagram-v2
 | Component | Runs where | Deployed how |
 |---|---|---|
 | Solar Design Tool | Local Mac (Streamlit), `service_role` key | `streamlit run app.py` |
-| Node-RED flow | Victron Cerbo GX (Venus OS), `anon` key via credential env var | Import `victron-monitor/node-red/victron_monitor_v1p8.json` |
-| Apps Script | Google's servers, container-bound to the Victron_Events Sheet | Paste `victron-monitor/apps-script/Victron_Events_App_Script_v1p7.js`, deploy as Web App |
-| Supabase | Managed, one project (`qqorjwnlawhlmrmxxgdb`) | Migrations in `database/migrations/`, applied via SQL Editor |
+| Node-RED flow | Victron Cerbo GX (Venus OS), `anon` key via credential env var | Import `victron-monitor/node-red/victron_monitor_v1p8.json` (now in [vrm-monitor](https://github.com/opauly/vrm-monitor)) |
+| Apps Script | Google's servers, container-bound to the Victron_Events Sheet | Paste `victron-monitor/apps-script/Victron_Events_App_Script_v1p7.js` (now in [vrm-monitor](https://github.com/opauly/vrm-monitor)), deploy as Web App |
+| Supabase | Managed, one project (`qqorjwnlawhlmrmxxgdb`) | Migrations in `database/migrations/` (this repo — schema stays shared even though the code split), applied via SQL Editor |
 
 Bootstrap credentials that can't live in the database (chicken-and-egg — needed to reach Supabase in the first place):
 - Node-RED: `SUPABASE_ANON_KEY` as a Global Environment Variable, type `credential`
@@ -156,6 +158,8 @@ Everything else — site specs, health thresholds, report email routing, Apps Sc
 ---
 
 ## 5. VRM Monitor billing wiring (Phase 16)
+
+**All code in this section now lives in [github.com/opauly/vrm-monitor](https://github.com/opauly/vrm-monitor)** (`vrm_api/`, `victron-monitor/web/`, the `billing-reconcile.yml` workflow) — the wiring itself is unchanged, only which repo it's version-controlled in.
 
 **Scope note:** this doc's earlier sections predate VRM Monitor's Next.js
 app / `vrm_api` (Phase 14) and its own `vrm` schema (Phase 15) — they were
@@ -226,6 +230,8 @@ mechanism, unchanged since Phase 14).
 ---
 
 ## 6. VRM Monitor scheduled reports wiring (Phase 17)
+
+**All code in this section now lives in [github.com/opauly/vrm-monitor](https://github.com/opauly/vrm-monitor)** (`vrm_api/`, `victron-monitor/web/`, the `scheduled-reports.yml` workflow) — the wiring itself is unchanged, only which repo it's version-controlled in.
 
 ```mermaid
 flowchart TB
