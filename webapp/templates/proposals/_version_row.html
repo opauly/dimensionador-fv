@@ -1,0 +1,45 @@
+{# One version's row inside the detail panel — port of
+   pages/01_proposals.py:_render_version_row_compact(). Rendered both from
+   _detail.html's versions loop and, standalone, as the swap target of
+   POST .../pdf (hx-target="#vrow-<id>" hx-swap="outerHTML"). #}
+{% from "proposals/_macros.html" import pill %}
+<div class="vrow" id="vrow-{{ v.id }}">
+  <div class="vrow-col vrow-quote">
+    <div class="vrow-quote-num">{{ v.vquote }}</div>
+    <div class="vrow-badges">
+      {{ pill('Bloqueada', '#f1f5f9', '#64748b') if v.locked else pill('Borrador', '#fef9c3', '#a16207') }}
+      {% if v.sent %}{{ pill('Enviada', '#dbeafe', '#1d4ed8') }}{% endif %}
+    </div>
+    {% if v.note %}<div class="vrow-note">{{ v.note }}</div>{% endif %}
+  </div>
+  <div class="vrow-col vrow-total">
+    <div class="vrow-total-amt">{{ v.total_str }}</div>
+    <div class="vrow-total-date">{{ v.created }}</div>
+  </div>
+  <div class="vrow-col vrow-pdf">
+    {# Streamlit only shows the PDF affordance (link or "Generar PDF") for
+       locked versions — a draft version's PDF would read stale numbers the
+       moment it's edited again. #}
+    {% if v.locked %}
+      {% if v.pdf_path %}
+        {# pdf_path set — show the link if the signed URL came back, otherwise
+           nothing (not "Generar PDF" again), matching pages/01_proposals.py
+           exactly: a transient signing failure isn't the same as "no PDF yet". #}
+        {% if v.signed_url %}
+          <a class="vrow-pill-btn" href="{{ v.signed_url }}" target="_blank" rel="noopener">⬇ PDF</a>
+        {% endif %}
+      {% else %}
+        <form hx-post="{{ url_for('proposals.generar_pdf', pid=v.pid, vid=v.id) }}"
+              hx-target="#vrow-{{ v.id }}" hx-swap="outerHTML"
+              hx-indicator="#vrow-{{ v.id }}-spin" hx-disabled-elt="find button">
+          <button type="submit" class="vrow-pill-btn vrow-pill-btn-action">Generar PDF</button>
+          <span id="vrow-{{ v.id }}-spin" class="htmx-indicator">…</span>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% if v.error %}<div class="vrow-error">{{ v.error }}</div>{% endif %}
+</div>
+{# Styling for .vrow-* lives in _detail.html — this partial is also returned
+   standalone (outerHTML swap from POST .../pdf), after the page has already
+   loaded that <style> block once via the detail panel. #}

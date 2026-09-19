@@ -1,0 +1,8 @@
+{# Shared Jinja macros for the proposals section. Split out of _list.html so
+   _detail.html / _version_row.html can import it too — Jinja's {% from %}
+   refuses to import names starting with an underscore, so this macro is
+   named `pill` (not `_pill`) even though pages/01_proposals.py's Python
+   helper is `_pill()`. #}
+{% macro pill(label, bg, fg) -%}
+<span class="pill" style="background:{{ bg }};color:{{ fg }};">{{ label }}</span>
+{%- endmacro %}

@@ -1,0 +1,104 @@
+{# Inline detail panel, swapped into #det-<pid> (innerHTML) by clicking a row
+   in _list.html. Port of pages/01_proposals.py:_render_detail_panel(). #}
+{% from "proposals/_macros.html" import pill %}
+<style>
+.det-panel {
+  border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 14px 16px 12px;
+  margin: 4px 8px 8px; background: #fff; text-align: left; white-space: normal;
+}
+.det-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.det-title { font-size: 14px; font-weight: 700; color: #1e293b; line-height: 1.4; }
+.det-title .pill { margin-left: 6px; }
+.det-flow { display: flex; gap: 6px; flex-wrap: wrap; }
+.det-flow button {
+  height: 28px; padding: 0 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: #fff; color: var(--muted-2); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+}
+.det-flow button:hover { border-color: var(--navy); color: var(--navy); }
+.det-final { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.det-message { font-size: 12.5px; margin: 8px 0 0; padding: 6px 10px; border-radius: 6px; }
+.det-message-info { background: var(--green-tint); color: #166534; }
+.det-message-warn { background: #FBF0DF; color: #a15c1b; }
+.det-message-error { background: #fdecea; color: #B84345; }
+.det-actions { display: flex; gap: 10px; margin-top: 12px; }
+.det-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 34px; padding: 0 16px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  font-family: var(--font); cursor: pointer; border: 1px solid transparent;
+}
+.det-btn-solid { background: var(--navy); color: #fff; }
+.det-btn-solid:hover { opacity: 0.9; }
+.det-btn-outline { background: transparent; color: var(--navy); border-color: var(--navy); }
+.det-btn-outline:hover { background: var(--header-bg); }
+.det-btn.disabled { background: #e2e8f0; border-color: #e2e8f0; color: #94a3b8; cursor: default; pointer-events: none; }
+.det-promote { border: 1.5px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; margin-top: 12px; background: #f8fefb; }
+.det-versions { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 10px; }
+.det-versions-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+</style>
+
+<div class="det-panel">
+  <div class="det-head">
+    <div>
+      <div class="det-title">
+        {{ quote_str }} &nbsp;·&nbsp; {{ client_name }} &nbsp;·&nbsp; {{ sys_label }}
+        {{ pill(badge_label, badge_bg, badge_fg) }}
+      </div>
+      {% if message %}<p class="det-message det-message-{{ message[0] }}">{{ message[1] }}</p>{% endif %}
+    </div>
+
+    {% if transitions %}
+      <form class="det-flow"
+            hx-post="{{ url_for('proposals.estado', pid=pid) }}"
+            hx-target="#det-{{ pid }}" hx-swap="innerHTML">
+        {% for t in transitions %}
+          <button type="submit" name="status" value="{{ t.status }}">{{ t.label }}</button>
+        {% endfor %}
+      </form>
+    {% else %}
+      <p class="det-final">Estado final</p>
+    {% endif %}
+  </div>
+
+  <div class="det-actions">
+    {% if cur_version_id and not cur_version_locked %}
+      <a class="det-btn det-btn-solid" href="{{ wizard_step_url }}">Continuar</a>
+    {% else %}
+      <span class="det-btn det-btn-solid disabled" aria-disabled="true">Continuar</span>
+    {% endif %}
+
+    {% if cur_version_id and cur_version_locked %}
+      <form method="post" action="{{ url_for('proposals.nueva_version', pid=pid, vid=cur_version_id) }}">
+        <button type="submit" class="det-btn det-btn-outline">Nueva versión</button>
+      </form>
+    {% else %}
+      <span class="det-btn det-btn-outline disabled" aria-disabled="true">Nueva versión</span>
+    {% endif %}
+  </div>
+
+  {% if status == 'won' %}
+    <div class="det-promote">
+      {% if project_error %}
+        <p style="color:#B84345;font-size:12.5px;margin:0;">Error verificando proyecto: {{ project_error }}</p>
+      {% elif project %}
+        <a class="det-btn det-btn-outline" href="{{ project_url }}">Ver proyecto →</a>
+      {% else %}
+        <span class="det-btn det-btn-outline disabled" aria-disabled="true">Mover a Proyecto</span>
+        <p class="card-note-sm" style="margin:6px 0 0;">disponible cuando se migre Proyectos</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="det-versions">
+    <p class="det-versions-title">Versiones</p>
+    {% if versions_error %}
+      <p style="color:#B84345;font-size:12.5px;">Error cargando versiones: {{ versions_error }}</p>
+    {% elif versions %}
+      {% for v in versions %}
+        {% include "proposals/_version_row.html" %}
+      {% endfor %}
+    {% else %}
+      <p class="card-note-sm">Sin versiones.</p>
+    {% endif %}
+  </div>
+</div>

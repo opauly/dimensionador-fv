@@ -1,6 +1,4 @@
-{% macro _pill(label, bg, fg) -%}
-<span class="pill" style="background:{{ bg }};color:{{ fg }};">{{ label }}</span>
-{%- endmacro %}
+{% from "proposals/_macros.html" import pill %}
 
 <style>
 .status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
@@ -8,6 +6,13 @@
   display: inline-flex; align-items: center; height: 20px; padding: 0 9px;
   border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap;
 }
+/* Row is the click target that expands the detail panel — Step 1's seven
+   columns are unchanged (no extra "arrow" column), the row itself is the
+   affordance. */
+.dtable tbody tr.prow { cursor: pointer; }
+.dtable tbody tr.prow:hover { background: var(--header-bg); }
+.det-row td { padding: 0; border-top: none; }
+.det-row td:empty { padding: 0; }
 </style>
 
 {% if error %}
@@ -29,19 +34,33 @@
       </thead>
       <tbody>
         {% for r in rows %}
-          <tr>
+          <tr class="prow"
+              hx-get="{{ url_for('proposals.detalle', pid=r.id) }}"
+              hx-target="#det-{{ r.id }}" hx-swap="innerHTML"
+              hx-trigger="click[toggleDetail('{{ r.id }}')]">
             <td><span class="status-dot" style="background:{{ r.dot_color }};"></span></td>
             <td>{{ r.quote_str }}</td>
             <td>{{ r.client_name }}</td>
             <td>{{ r.sys_label }}</td>
             <td>{{ r.total_str }}</td>
             <td>{{ r.updated }}</td>
-            <td>{{ _pill(r.badge_label, r.badge_bg, r.badge_fg) }}</td>
+            <td>{{ pill(r.badge_label, r.badge_bg, r.badge_fg) }}</td>
           </tr>
+          <tr class="det-row"><td colspan="7" id="det-{{ r.id }}"></td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <script>
+    // Click toggles the inline detail panel open/closed instead of always
+    // re-fetching — htmx's `click[expr]` trigger filter runs this before
+    // deciding whether to issue the GET.
+    function toggleDetail(pid) {
+      const el = document.getElementById('det-' + pid);
+      if (el && el.innerHTML.trim()) { el.innerHTML = ''; return false; }
+      return true;
+    }
+  </script>
 {% else %}
   <div class="card"><p class="dtable-empty">No hay cotizaciones para este filtro.</p></div>
 {% endif %}
