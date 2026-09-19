@@ -1943,13 +1943,16 @@ def step7_costs() -> dict | None:
         try:
             from database.equipment_db import list_service_defaults
             meta = st.session_state.get("wizard_meta", {})
-            is_off_grid = meta.get("system_type") == "off_grid"
+            system_type = meta.get("system_type")
             for svc in list_service_defaults():
                 if not svc.get("enabled", True):
                     continue
-                if is_off_grid and svc["item"] == "Permiso de Interconexión":
-                    # A true Off-Grid system has no utility connection to interconnect —
-                    # this line only applies to grid-tied types (Grid Zero, Hybrid).
+                svc_types = svc.get("system_types")
+                if svc_types and system_type not in svc_types:
+                    # None means "applies to every system type" (e.g. most services);
+                    # a real list restricts it — e.g. the interconnection permit is
+                    # excluded from a true Off-Grid system, which has no utility
+                    # connection to interconnect. Set from Admin → Servicios.
                     continue
                 line_items.append({
                     "item": svc["item"], "item_en": svc.get("item_en", svc["item"]),

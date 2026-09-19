@@ -1,19 +1,28 @@
-"""Ajustes: company + bank info forms (pages/05_admin.py's
-_settings_company_form / _settings_bank_form). Logo/signature upload
-(_settings_assets_section) isn't ported — it depends on wizard.state
-functions (get_asset_b64/save_asset) that don't exist yet in this
-snapshot; see the note in the template.
-"""
+"""Ajustes: company + bank info forms, and logo/signature asset upload
+(pages/05_admin.py's _settings_company_form / _settings_bank_form /
+_settings_assets_section)."""
 from __future__ import annotations
 
-from flask import redirect, render_template, request, url_for
+from flask import abort, redirect, render_template, request, url_for
+
+ASSET_KINDS = [
+    ("logo",            "Logo"),
+    ("signature",       "Firma (fondo claro)"),
+    ("signature_white", "Firma (fondo oscuro)"),
+    ("isotipo_white",   "Isotipo (fondo oscuro)"),
+]
 
 
 def render_settings_panel():
-    from wizard.state import get_bank_info, get_company_info
+    from wizard.state import get_asset_b64, get_bank_info, get_company_info
 
+    assets = [
+        {"kind": kind, "label": label, "preview_b64": get_asset_b64(kind)}
+        for kind, label in ASSET_KINDS
+    ]
     return render_template(
-        "admin/_ajustes.html", company=get_company_info(), bank=get_bank_info(), error=None,
+        "admin/_ajustes.html", company=get_company_info(), bank=get_bank_info(),
+        assets=assets, error=None,
     )
 
 
@@ -48,4 +57,16 @@ def register(bp):
             "bank_local_lines_en": _lines("bank_local_lines_en"),
             "bank_intl_lines_en": _lines("bank_intl_lines_en"),
         })
+        return redirect(url_for("admin.index", section="ajustes"))
+
+    @bp.route("/ajustes/assets/<kind>/save", methods=["POST"])
+    def settings_asset_save(kind):
+        from wizard.state import save_asset
+
+        if kind not in dict(ASSET_KINDS):
+            abort(404)
+
+        uploaded = request.files.get("file")
+        if uploaded and uploaded.filename:
+            save_asset(kind, uploaded.read())
         return redirect(url_for("admin.index", section="ajustes"))

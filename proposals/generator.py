@@ -14,8 +14,6 @@ from datetime import date as dt
 import weasyprint
 from jinja2 import Environment, FileSystemLoader
 
-from proposals.assets.assets import get_logo_b64, get_signature_b64, get_signature_white_b64, get_isotipo_white_b64
-
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
@@ -274,6 +272,8 @@ HYBRID_DATA: dict = {
 
 def _build_context(data: dict, language: str) -> dict:
     """Flatten and format wizard data dict into Jinja2 template context."""
+    from wizard.state import get_asset_b64
+
     es = (language == "es")
     b = data["billing_avg"]
     ben = data["benefits"]
@@ -290,10 +290,10 @@ def _build_context(data: dict, language: str) -> dict:
         })
 
     return {
-        "logo_b64":            get_logo_b64(),
-        "signature_b64":       get_signature_b64(),
-        "signature_white_b64": get_signature_white_b64(),
-        "isotipo_white_b64":   get_isotipo_white_b64(),
+        "logo_b64":            get_asset_b64("logo"),
+        "signature_b64":       get_asset_b64("signature"),
+        "signature_white_b64": get_asset_b64("signature_white"),
+        "isotipo_white_b64":   get_asset_b64("isotipo_white"),
         "date":           data["date"],
         "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],
@@ -355,6 +355,8 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
     system with no — or, for Hybrid, only partial — grid dependency) —
     replaced by battery/discharge/autonomy technical fields instead.
     """
+    from wizard.state import get_asset_b64
+
     es = (language == "es")
     tech = data["technical"]
     co = data["company"]
@@ -370,10 +372,10 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
         })
 
     return {
-        "logo_b64":            get_logo_b64(),
-        "signature_b64":       get_signature_b64(),
-        "signature_white_b64": get_signature_white_b64(),
-        "isotipo_white_b64":   get_isotipo_white_b64(),
+        "logo_b64":            get_asset_b64("logo"),
+        "signature_b64":       get_asset_b64("signature"),
+        "signature_white_b64": get_asset_b64("signature_white"),
+        "isotipo_white_b64":   get_asset_b64("isotipo_white"),
         "date":           data["date"],
         "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],

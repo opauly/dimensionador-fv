@@ -194,7 +194,7 @@ def list_service_defaults() -> list[dict]:
     result = (
         get_client()
         .table("service_defaults")
-        .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order")
+        .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order, system_types")
         .order("sort_order")
         .execute()
     )
@@ -202,8 +202,18 @@ def list_service_defaults() -> list[dict]:
 
 
 def upsert_service_default(data: dict) -> dict:
-    """Insert or update a service default. Include 'id' to update an existing row."""
-    row = {k: v for k, v in data.items() if k != "id" and v is not None}
+    """Insert or update a service default. Include 'id' to update an existing row.
+
+    `system_types` is exempt from the "drop None values" filter below — for every
+    other field None means "not provided, leave it alone," but for `system_types`
+    None is a real, meaningful value ("applies to every system type") that must
+    actually reach the UPDATE, or clearing a restriction back to "all types" would
+    silently leave the old restricted array in place.
+    """
+    row = {
+        k: v for k, v in data.items()
+        if k != "id" and (v is not None or k == "system_types")
+    }
     if data.get("id"):
         result = get_client().table("service_defaults").update(row).eq("id", data["id"]).execute()
     else:

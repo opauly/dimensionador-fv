@@ -309,6 +309,11 @@ _CR_LOOKUP: dict[str, tuple[float, float]] = {
     "pérez zeledón": (9.3651, -83.6548),
     "perez zeledon": (9.3651, -83.6548),
     "san isidro": (9.3651, -83.6548),
+    # Province-qualified so a "San Isidro" outside Pérez Zeledón doesn't fall through to
+    # the bare "san isidro" key above and land ~150km away. There are at least 3 real
+    # "San Isidro"s in Costa Rica; this is the one confirmed live for hacienda-zurqui
+    # (Phase 10, PHASES.md) — same coordinates already in monitoring.sites for that site.
+    "san isidro, heredia": (10.01447, -84.054432),
     "golfito": (8.6519, -83.1832),
     "nosara": (9.9792, -85.6534),
     "tamarindo": (10.2998, -85.8373),

@@ -3,9 +3,7 @@ sites and settings. Full CRUD parity with pages/05_admin.py, split across
 one module per section (admin_equipment.py, admin_services.py, etc.) —
 this file owns routing/dispatch, the modules own each section's logic.
 
-Not ported: equipment/AI datasheet extraction ("Extraer de datasheet"),
-and Ajustes' logo/signature upload (depends on wizard.state functions —
-get_asset_b64/save_asset — that don't exist yet in this snapshot).
+Not ported: equipment/AI datasheet extraction ("Extraer de datasheet").
 """
 from __future__ import annotations
 

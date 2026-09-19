@@ -48,8 +48,26 @@
   </form>
 </div>
 
-<div class="stub-note">
-  Logo y firma (subida de imágenes para el PDF) aún no se ha migrado — depende de funciones
-  (<code>get_asset_b64</code>/<code>save_asset</code>) que todavía no existen en esta rama.
-  Use la versión Streamlit (puerto 8501) para esta sección por ahora.
+<div class="card">
+  <p class="card-note" style="margin:0 0 4px;"><b>Logo y firma</b></p>
+  <p class="card-note-sm" style="margin:0 0 12px;">Reemplazan las imágenes por defecto en el PDF de la propuesta. Sin un archivo subido, se usa la imagen incluida en el proyecto.</p>
+  {% for asset in assets %}
+  <div style="display:flex; align-items:center; gap:16px; padding:12px 0; {% if not loop.last %}border-bottom:1px solid var(--border);{% endif %}">
+    <div style="width:120px; flex-shrink:0;">
+      {% if asset.preview_b64 %}
+      <img src="{{ asset.preview_b64 }}" alt="{{ asset.label }}" style="max-width:120px; max-height:60px;">
+      {% else %}
+      <span class="card-note-sm">(sin vista previa)</span>
+      {% endif %}
+    </div>
+    <form hx-post="{{ url_for('admin.settings_asset_save', kind=asset.kind) }}" hx-target="#subpanel" hx-swap="innerHTML"
+          hx-encoding="multipart/form-data" style="display:flex; align-items:center; gap:8px; flex:1;">
+      <div style="flex:1;">
+        <label class="flabel">{{ asset.label }}</label>
+        <input class="finput" type="file" name="file" accept=".png">
+      </div>
+      <button class="btn" type="submit">Subir {{ asset.label|lower }}</button>
+    </form>
+  </div>
+  {% endfor %}
 </div>

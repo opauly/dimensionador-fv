@@ -162,8 +162,14 @@ def get_company_info() -> dict:
     return _DEFAULT_COMPANY
 
 
-def _read_company_info_raw() -> dict:
-    """Raw app_settings.company_info blob (unmerged with defaults), or {}."""
+def get_bank_info() -> dict:
+    """Return bank lines from app_settings, falling back to defaults."""
+    defaults = {
+        "bank_local_lines": _DEFAULT_BANK_LOCAL_ES,
+        "bank_intl_lines": _DEFAULT_BANK_INTL_ES,
+        "bank_local_lines_en": _DEFAULT_BANK_LOCAL_EN,
+        "bank_intl_lines_en": _DEFAULT_BANK_INTL_EN,
+    }
     try:
         from database.supabase_client import get_client
         result = (
@@ -179,45 +185,93 @@ def _read_company_info_raw() -> dict:
             if isinstance(stored, str):
                 import json
                 stored = json.loads(stored)
-            return stored
+            merged = dict(defaults)
+            for k in defaults:
+                v = stored.get(k)
+                if isinstance(v, list) and v:
+                    merged[k] = v
+            return merged
     except Exception:
         pass
-    return {}
+    return defaults
 
 
-def get_bank_info() -> dict:
-    """Return bank lines from app_settings, falling back to defaults.
+def save_company_info(data: dict) -> None:
+    """Merge `data` into app_settings.company_info — never blanks a field not passed in.
 
-    Shares the same app_settings.company_info blob as get_company_info()
-    (Admin's Ajustes tab saves both company and bank fields together via
-    save_company_info()) rather than a separate row, so one read/write
-    path covers both."""
-    stored = _read_company_info_raw()
-    defaults = {
-        "bank_local_lines": _DEFAULT_BANK_LOCAL_ES,
-        "bank_intl_lines": _DEFAULT_BANK_INTL_ES,
-        "bank_local_lines_en": _DEFAULT_BANK_LOCAL_EN,
-        "bank_intl_lines_en": _DEFAULT_BANK_INTL_EN,
-    }
-    merged = dict(defaults)
-    for k in defaults:
-        v = stored.get(k)
-        if v:
-            merged[k] = v
-    return merged
-
-
-def save_company_info(patch: dict) -> None:
-    """Merge `patch` into app_settings.company_info (creates the row if it
-    doesn't exist yet). Used by Admin's Ajustes tab for both the company
-    form and the bank form — same underlying blob, see get_bank_info()."""
+    Merges into the raw stored row (not the defaults-filled `get_company_info()` result),
+    so fields this call doesn't know about — e.g. an asset path set by a previous
+    `save_asset()` call — are preserved rather than dropped.
+    """
     from database.supabase_client import get_client
 
-    current = _read_company_info_raw()
-    merged = {**current, **patch}
-    get_client().table("app_settings").upsert(
-        {"key": "company_info", "value": merged}, on_conflict="key"
-    ).execute()
+    client = get_client()
+    result = client.table("app_settings").select("value").eq("key", "company_info").single().execute()
+    current = (result.data or {}).get("value") or {}
+    if isinstance(current, str):
+        import json
+        current = json.loads(current)
+
+    for k, v in data.items():
+        if v is not None and v != "" and v != []:
+            current[k] = v
+
+    client.table("app_settings").update({"value": current}).eq("key", "company_info").execute()
+
+
+_ASSET_FILENAMES = {
+    "logo": "logo.png",
+    "signature": "signature.png",
+    "signature_white": "signature_white.png",
+    "isotipo_white": "isotipo_white.png",
+}
+
+
+def get_asset_b64(kind: str) -> str:
+    """Return a base64 data URI for `kind` (logo/signature/signature_white/isotipo_white),
+    preferring an app_settings-configured override in the `assets` Storage bucket and
+    falling back to the bundled static PNG on any missing override or fetch failure."""
+    from proposals.assets import assets as _static
+
+    fallback_fn = {
+        "logo": _static.get_logo_b64,
+        "signature": _static.get_signature_b64,
+        "signature_white": _static.get_signature_white_b64,
+        "isotipo_white": _static.get_isotipo_white_b64,
+    }[kind]
+
+    try:
+        from database.supabase_client import get_client
+        result = (
+            get_client()
+            .table("app_settings")
+            .select("value")
+            .eq("key", "company_info")
+            .single()
+            .execute()
+        )
+        path = (result.data or {}).get("value", {}).get(f"{kind}_asset_path")
+        if path:
+            raw = get_client().storage.from_("assets").download(path)
+            if raw:
+                import base64
+                return f"data:image/png;base64,{base64.b64encode(raw).decode()}"
+    except Exception:
+        pass
+    return fallback_fn()
+
+
+def save_asset(kind: str, file_bytes: bytes) -> None:
+    """Upload `file_bytes` to the `assets` bucket for `kind` and record its path."""
+    from database.supabase_client import get_client
+
+    filename = _ASSET_FILENAMES[kind]
+    get_client().storage.from_("assets").upload(
+        path=filename,
+        file=file_bytes,
+        file_options={"content-type": "image/png", "upsert": "true"},
+    )
+    save_company_info({f"{kind}_asset_path": filename})
 
 
 # ── Downloaded-PDF filename convention ──────────────────────────────────────

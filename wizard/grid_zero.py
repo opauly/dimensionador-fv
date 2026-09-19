@@ -1332,12 +1332,18 @@ _FALLBACK_SERVICES: list[dict] = [
 
 
 def _load_service_defaults() -> list[dict]:
-    """Return enabled service defaults from DB; fall back to _FALLBACK_SERVICES."""
+    """Return enabled, Grid-Zero-applicable service defaults from DB; fall back to
+    _FALLBACK_SERVICES. `system_types` is None (applies to every type) for most
+    services — only a real restriction set from Admin -> Servicios excludes one."""
     try:
         from database.equipment_db import list_service_defaults
         rows = list_service_defaults()
         if rows:
-            return [r for r in rows if r.get("enabled", True)]
+            return [
+                r for r in rows
+                if r.get("enabled", True)
+                and (not r.get("system_types") or "grid_zero" in r["system_types"])
+            ]
     except Exception:
         pass
     return _FALLBACK_SERVICES
