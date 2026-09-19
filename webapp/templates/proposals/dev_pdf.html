@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Generar PDF de prueba — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<p class="section-title">Generar PDF de prueba</p>
+<p class="section-sub">
+  Genera un PDF de muestra directamente desde los datos de referencia
+  (María José Castro / Jorge Ramírez / Híbrido), sin pasar por el asistente —
+  el smoke test más rápido del motor de PDF.
+</p>
+{% include "proposals/_dev_pdf.html" %}
+{% endblock %}

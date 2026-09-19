@@ -19,8 +19,8 @@ PHASES = [
 
 # Nav entries not yet ported to this branch — each renders a stub page so the
 # sidebar shape matches the target app while pages migrate one at a time.
+# "proposals" is ported (webapp/blueprints/proposals.py) and no longer listed here.
 STUBS = {
-    "proposals": "Cotizaciones",
     "projects": "Proyectos",
     "maintenance": "Mantenimiento",
 }

@@ -1,0 +1,47 @@
+{% macro _pill(label, bg, fg) -%}
+<span class="pill" style="background:{{ bg }};color:{{ fg }};">{{ label }}</span>
+{%- endmacro %}
+
+<style>
+.status-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.pill {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 9px;
+  border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+</style>
+
+{% if error %}
+  {# page.html already shows the error banner; nothing to render here. #}
+{% elif rows %}
+  <p class="card-note-sm" style="margin:0 0 8px;">{{ rows|length }} cotización(es)</p>
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead>
+        <tr>
+          <td></td>
+          <td>Cotización</td>
+          <td>Cliente</td>
+          <td>Sistema</td>
+          <td>Total</td>
+          <td>Fecha</td>
+          <td>Estado</td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><span class="status-dot" style="background:{{ r.dot_color }};"></span></td>
+            <td>{{ r.quote_str }}</td>
+            <td>{{ r.client_name }}</td>
+            <td>{{ r.sys_label }}</td>
+            <td>{{ r.total_str }}</td>
+            <td>{{ r.updated }}</td>
+            <td>{{ _pill(r.badge_label, r.badge_bg, r.badge_fg) }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <div class="card"><p class="dtable-empty">No hay cotizaciones para este filtro.</p></div>
+{% endif %}

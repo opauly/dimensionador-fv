@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Cotizaciones — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.plist-filters { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.plist-filters .finput { max-width: 320px; }
+.filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-pill { position: relative; }
+.filter-pill input { position: absolute; opacity: 0; width: 0; height: 0; }
+.filter-pill span {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 12px;
+  border-radius: 20px; border: 1px solid var(--border); color: var(--muted-2);
+  font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none;
+}
+.filter-pill input:checked + span { background: var(--navy); border-color: var(--navy); color: #fff; }
+</style>
+
+<p class="section-title">Cotizaciones</p>
+
+<form id="pfilters" class="plist-filters">
+  <input class="finput" type="text" name="q" value="{{ q }}" placeholder="🔍  Cliente, número de cotización…"
+         autocomplete="off"
+         hx-get="{{ url_for('proposals.filtrar') }}" hx-target="#plist" hx-swap="innerHTML"
+         hx-trigger="keyup changed delay:300ms" hx-include="#pfilters">
+  <div class="filter-pills">
+    {% for opt in filter_options %}
+      <label class="filter-pill">
+        <input type="radio" name="estado" value="{{ opt }}" {{ 'checked' if opt == estado else '' }}
+               hx-get="{{ url_for('proposals.filtrar') }}" hx-target="#plist" hx-swap="innerHTML"
+               hx-trigger="change" hx-include="#pfilters">
+        <span>{{ opt }}</span>
+      </label>
+    {% endfor %}
+  </div>
+</form>
+
+{% if error %}
+  <div class="card"><p style="color:#B84345;">Error cargando cotizaciones: {{ error }}</p></div>
+{% endif %}
+
+<div id="plist">
+  {% include "proposals/_list.html" %}
+</div>
+
+<hr>
+{% include "proposals/_dev_pdf.html" %}
+{% endblock %}

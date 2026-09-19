@@ -10,9 +10,11 @@ def create_app() -> Flask:
 
     from webapp.blueprints.admin import bp as admin_bp
     from webapp.blueprints.dashboard import bp as dashboard_bp
+    from webapp.blueprints.proposals import bp as proposals_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(proposals_bp)
 
     @app.context_processor
     def inject_db_status():

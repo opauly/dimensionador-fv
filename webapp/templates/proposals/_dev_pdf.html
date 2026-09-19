@@ -1,0 +1,24 @@
+{# Dev/test panel — port of pages/01_proposals.py:_render_test_pdf_panel().
+   Generates a sample PDF straight from the fixture data (MARIA_JOSE_DATA /
+   JORGE_RAMIREZ_DATA / HYBRID_DATA), bypassing the wizard entirely — the
+   fastest smoke test for the PDF engine. #}
+<details class="card" style="margin-top:8px;">
+  <summary style="cursor:pointer;font-weight:700;color:var(--navy);">Generar PDF de prueba</summary>
+  <form method="get" action="{{ url_for('proposals.dev_pdf_generar') }}" style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <div>
+      <label class="flabel">Tipo de sistema</label>
+      <select name="tipo" class="finput">
+        {% for value, label in sample_types.items() %}
+          <option value="{{ value }}" {{ 'selected' if value == tipo else '' }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit" name="lang" value="es">Generar — Español</button>
+    <button class="btn" type="submit" name="lang" value="en">Generate — English</button>
+  </form>
+</details>
+
+<style>
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.finput { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+</style>
