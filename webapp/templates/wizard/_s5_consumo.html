@@ -1,0 +1,53 @@
+{# Everything driven by the currently-applied 12-month history — the
+   source-specific block, the badge, the editable table and the metrics/
+   chart. Every Step 5 action (source switch, bill extract/apply, tablero
+   extract, loads table edit/add/remove/apply, table recompute) swaps this
+   WHOLE region from a fresh gz_s5_consumption.build_context() call (PLAN
+   §1.3) so the badge/table/metrics/chart can never show inconsistent data
+   from two different requests. Root id must stay "s5-consumo". #}
+<div id="s5-consumo">
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  {% if source == "bill" %}
+    {% include "wizard/_s5_bill.html" %}
+  {% elif source == "loads" %}
+    {% include "wizard/_s5_loads.html" %}
+  {% endif %}
+
+  <hr>
+  <p class="card-note-sm" style="margin:0 0 6px;">Historial mensual — ajusta los valores si es necesario.</p>
+  {% if source_meta and source_meta.label %}
+    <p style="margin:0 0 8px;">
+      <span style="background:#f0f7f0;border:1px solid #4BAE6A;border-radius:4px;padding:2px 8px;font-size:0.75rem;color:#2d7a4f;">
+        📊 Fuente: {{ source_meta.label }}
+      </span>
+    </p>
+  {% endif %}
+
+  <div id="s5-tabla-rows"
+       hx-post="{{ url_for('wizard.paso5_tabla', vid=vid) }}" hx-trigger="change delay:400ms"
+       hx-include="#s5-tabla-rows input" hx-target="#s5-consumo" hx-swap="outerHTML">
+    <div class="dtable-wrap">
+      <table class="dtable">
+        <thead><tr><td>Mes</td><td>kWh</td><td>Factura (₡)</td></tr></thead>
+        <tbody>
+          {% for row in months %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td><input class="finput" type="number" min="0" step="1" name="m-{{ loop.index0 }}-kwh" value="{{ row.kwh }}"></td>
+            <td><input class="finput" type="number" min="0" step="1" name="m-{{ loop.index0 }}-bill_crc" value="{{ row.bill_crc }}"></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if avg_kwh > 0 %}
+    <div class="cards" style="grid-template-columns:repeat(2,1fr);margin-top:12px;">
+      <div class="card-green"><b>Consumo promedio</b><br><span class="card-value">{{ '{:,.0f}'.format(avg_kwh) }} kWh/mes</span></div>
+      <div class="card-green"><b>Factura promedio</b><br><span class="card-value">₡{{ '{:,.0f}'.format(avg_bill) }}/mes</span></div>
+    </div>
+    {% if chart_html %}<div style="margin-top:12px;">{{ chart_html | safe }}</div>{% endif %}
+  {% endif %}
+</div>

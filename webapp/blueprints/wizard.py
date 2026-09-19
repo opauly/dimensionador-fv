@@ -1,4 +1,4 @@
-"""New-proposal wizard (Phase 20 Step 3 — see PLAN_PHASE20_PROPOSALS_JINJA.md
+"""New-proposal wizard (Phase 20 Steps 3-4 — see PLAN_PHASE20_PROPOSALS_JINJA.md
 §1.2/§1.3). Blueprint owns routing/dispatch; webapp/wizard_steps/*.py own
 each step's build_context()/persistence logic — same split as
 webapp/blueprints/admin.py + admin_*.py.
@@ -14,9 +14,13 @@ via create_prospect()/upsert_client() + create_proposal(). There is no
 `flask.session` carry — every step from 1 onward operates on a real `vid`.
 Step 2's POST just patches `meta` into that same row.
 
-Only Steps 1-3 are built here (Cliente / Tipo e idioma / Sitio e
-irradiancia). Steps 4-8 (Distribuidora, Consumo, Equipos, Costos, Revisión)
-are later phase-20 steps and are not wired into STEP_MODULES yet — requesting
+Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
+three system types. Steps 4-5 are wired for Grid Zero only so far
+(gz_s4_utility.py / gz_s5_consumption.py, Phase 20 Step 4 of the plan) —
+STEP_MODULES/STEP_TEMPLATES are keyed by `{n: {system_type: module}}` with a
+"*" fallback for the shared steps, exactly mirroring PLAN §1.2's "single
+dispatch table keyed on meta.system_type". Off-Grid/Hybrid steps 4+ and Grid
+Zero steps 6-8 are later phase-20 steps and are not wired in yet — requesting
 one renders a plain "not built yet" placeholder rather than erroring, so
 manual exploration during review doesn't 500.
 """
@@ -26,12 +30,24 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from wizard import draft
 from webapp.wizard_steps import common as step_common
-from webapp.wizard_steps import s1_client, s2_type, s3_site
+from webapp.wizard_steps import gz_s4_utility, gz_s5_consumption, s1_client, s2_type, s3_site
 
 bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
 
-STEP_MODULES = {1: s1_client, 2: s2_type, 3: s3_site}
-STEP_TEMPLATES = {1: "wizard/s1_client.html", 2: "wizard/s2_type.html", 3: "wizard/s3_site.html"}
+STEP_MODULES = {
+    1: {"*": s1_client},
+    2: {"*": s2_type},
+    3: {"*": s3_site},
+    4: {"grid_zero": gz_s4_utility},
+    5: {"grid_zero": gz_s5_consumption},
+}
+STEP_TEMPLATES = {
+    1: {"*": "wizard/s1_client.html"},
+    2: {"*": "wizard/s2_type.html"},
+    3: {"*": "wizard/s3_site.html"},
+    4: {"grid_zero": "wizard/gz_s4_utility.html"},
+    5: {"grid_zero": "wizard/gz_s5_consumption.html"},
+}
 
 
 # ── shared helpers ───────────────────────────────────────────────────────
@@ -72,6 +88,24 @@ def shell_ctx(vid: str | None, n: int, blob: dict, **extra) -> dict:
     }
 
 
+def _system_type(blob: dict) -> str:
+    return (blob.get("meta") or {}).get("system_type") or step_common.DEFAULT_SYSTEM_TYPE
+
+
+def _step_module(n: int, blob: dict):
+    modules = STEP_MODULES.get(n)
+    if not modules:
+        return None
+    return modules.get(_system_type(blob)) or modules.get("*")
+
+
+def _step_template(n: int, blob: dict) -> str | None:
+    templates = STEP_TEMPLATES.get(n)
+    if not templates:
+        return None
+    return templates.get(_system_type(blob)) or templates.get("*")
+
+
 def _guard(vid: str, n: int):
     """Locked-version + step-ahead guards, shared by every GET/POST/action
     route below (PLAN §1.2). Returns a redirect Response to short-circuit
@@ -90,7 +124,7 @@ def _guard(vid: str, n: int):
 
 
 def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
-    module = STEP_MODULES.get(n)
+    module = _step_module(n, blob)
     if module is None:
         return render_template(
             "wizard/not_built.html",
@@ -100,7 +134,7 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
     ctx.setdefault("error", None)
     if error is not None:
         ctx["error"] = error
-    return render_template(STEP_TEMPLATES[n], **shell_ctx(vid, n, blob), **ctx)
+    return render_template(_step_template(n, blob), **shell_ctx(vid, n, blob), **ctx)
 
 
 # ── Step 1: /nueva (no row yet) ─────────────────────────────────────────
@@ -252,6 +286,18 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
+    elif n == 4 and _step_module(n, blob) is gz_s4_utility:
+        blob = draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
+        ctx = gz_s4_utility.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
+    elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
+        blob = draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
+        ctx = gz_s5_consumption.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
     else:
         return _render_step(vid, n, blob)
 
@@ -271,6 +317,10 @@ def paso_atras(vid, n):
         draft.patch(vid, "meta", values)
     elif n == 3:
         draft.patch(vid, "site", s3_site.save_step(request.form))
+    elif n == 4 and _step_module(n, blob) is gz_s4_utility:
+        draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
+    elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
+        draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
 
     return redirect(url_for("wizard.paso", vid=vid, n=n - 1), code=303)
 
@@ -290,3 +340,138 @@ def paso_action(vid, n, action):
         return render_template("wizard/_s3_irradiancia.html", vid=vid, n=n, **ctx)
 
     abort(404)
+
+
+# ── Step 4 (Grid Zero): distributor -> tariff hx-get ────────────────────
+# Mirrors clientes_seleccionar()'s shape (a GET that mutates the draft the
+# instant a selection is made — PLAN §1.1 "every mutation is a save"), not
+# the POST-only /<n>/<action> dispatcher above, since this fragment lives
+# nested a level deeper (paso/4/distribuidor, not a bare action name).
+
+
+@bp.route("/<vid>/paso/4/distribuidor")
+def paso4_distribuidor(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    distributor_id = request.args.get("distributor_id") or None
+    blob = draft.patch(vid, "utility", gz_s4_utility.select_distributor(distributor_id))
+    ctx = gz_s4_utility.build_context(blob)
+    return render_template("wizard/_s4_tarifa.html", vid=vid, n=4, **ctx)
+
+
+# ── Step 5 (Grid Zero) actions — source switch, bill upload, tablero
+# upload, loads table, 12-month table recompute. Every one of these patches
+# blob["scratch"]["s5"] and re-renders wizard/_s5_consumo.html from a fresh
+# gz_s5_consumption.build_context(blob) call (PLAN §1.3) — never a
+# hand-built fragment — so the badge/table/metrics/chart can't drift apart.
+
+
+def _s5_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = gz_s5_consumption.build_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s5_consumo.html", vid=vid, n=5, **ctx)
+
+
+def _s5_patch(vid: str, new_s5: dict) -> dict:
+    return draft.patch(vid, "scratch", {"s5": new_s5})
+
+
+@bp.route("/<vid>/paso/5/fuente", methods=["POST"])
+def paso5_fuente(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    current_s5 = (blob.get("scratch") or {}).get("s5") or {}
+    new_s5 = {**current_s5, **gz_s5_consumption.select_source(request.form.get("source", ""))}
+    blob = _s5_patch(vid, new_s5)
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/factura/extraer", methods=["POST"])
+def paso5_factura_extraer(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    files = request.files.getlist("files")
+    blob = _s5_patch(vid, gz_s5_consumption.extract_bills(blob, files))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/factura/aplicar", methods=["POST"])
+def paso5_factura_aplicar(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.apply_bill_history(blob))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/tablero/extraer", methods=["POST"])
+def paso5_tablero_extraer(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return _s5_render(vid, blob, error="Selecciona una imagen o PDF del tablero.")
+    try:
+        new_s5 = gz_s5_consumption.extract_tablero(blob, uploaded.read(), uploaded.mimetype)
+    except Exception as exc:
+        return _s5_render(vid, blob, error=f"Error al analizar el tablero: {exc}")
+    blob = _s5_patch(vid, new_s5)
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/cargas/tabla", methods=["POST"])
+def paso5_cargas_tabla(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.update_loads_table(blob, request.form))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/cargas/fila", methods=["POST"])
+def paso5_cargas_fila(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.add_loads_row(blob, request.form))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/cargas/fila/quitar", methods=["POST"])
+def paso5_cargas_fila_quitar(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.remove_loads_row(blob, request.form))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/cargas/aplicar", methods=["POST"])
+def paso5_cargas_aplicar(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.apply_loads(blob))
+    return _s5_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/tabla", methods=["POST"])
+def paso5_tabla(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.recompute_table(blob, request.form))
+    return _s5_render(vid, blob)

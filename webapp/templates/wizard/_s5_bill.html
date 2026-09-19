@@ -1,0 +1,50 @@
+{# Bill-upload block — port of wizard/grid_zero.py:_render_bill_section().
+   Lives inside #s5-consumo (see that template's docstring on why every
+   action re-renders the whole region, not just this block). #}
+<div class="card" style="margin:12px 0;">
+  <p style="margin:0 0 4px;"><b>Subir factura eléctrica (ICE, CNFL, JASEC…)</b></p>
+  <p class="card-note-sm" style="margin:0 0 10px;">Sube una o más facturas en PDF. La IA extrae el historial de consumo automáticamente.</p>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <input id="s5-bill-file" class="finput" type="file" name="files" accept="application/pdf" multiple style="max-width:340px;">
+    <button class="btn" type="button"
+            hx-post="{{ url_for('wizard.paso5_factura_extraer', vid=vid) }}"
+            hx-include="#s5-bill-file" hx-encoding="multipart/form-data"
+            hx-target="#s5-consumo" hx-swap="outerHTML"
+            hx-indicator="#s5-bill-spin" hx-disabled-elt="this">
+      Extraer historial de consumo
+    </button>
+    <span id="s5-bill-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Analizando facturas…</span>
+  </div>
+
+  {% for err in bill_errors %}<p class="wiz-error">⚠ {{ err }}</p>{% endfor %}
+
+  {% if bill_history %}
+    <p class="card-note-sm" style="margin-top:10px;">
+      Distribuidora: <b>{{ bill_meta.distributor or '—' }}</b> · NISE: <b>{{ bill_meta.nise or '—' }}</b> ·
+      {{ bill_history|length }} meses extraídos
+    </p>
+    <div class="dtable-wrap" style="max-height:240px;overflow:auto;">
+      <table class="dtable">
+        <thead><tr><td>Mes</td><td>Año</td><td>kWh</td><td>Factura (₡)</td></tr></thead>
+        <tbody>
+          {% for h in bill_history %}
+          <tr>
+            <td>{{ h.month }}</td>
+            <td>{{ h.year }}</td>
+            <td>{{ h.kwh }}</td>
+            <td>{{ '{:,.0f}'.format(h.bill_crc) if h.bill_crc else '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if bill_overwrite_note %}<p class="wiz-error" style="margin-top:8px;">⚠ {{ bill_overwrite_note }}</p>{% endif %}
+    <button class="btn" type="button" style="margin-top:8px;"
+            hx-post="{{ url_for('wizard.paso5_factura_aplicar', vid=vid) }}"
+            hx-target="#s5-consumo" hx-swap="outerHTML"
+            hx-indicator="#s5-bill-apply-spin" hx-disabled-elt="this">
+      Aplicar al historial de 12 meses
+    </button>
+    <span id="s5-bill-apply-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Estimando meses faltantes con IA…</span>
+  {% endif %}
+</div>

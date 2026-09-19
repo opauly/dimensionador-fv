@@ -101,6 +101,32 @@ def monthly_coverage_fig(
     return fig
 
 
+def consumption_monthly_fig(kwh_values: list[float]):
+    """Grid Zero Step 5's 12-month consumption bar chart. Extracted verbatim
+    from wizard/grid_zero.py:step5_consumption() (L469-487) so the on-screen
+    chart matches the Streamlit wizard's for the same 12-month history."""
+    import plotly.graph_objects as go
+
+    from calculations.sizing_grid_zero import MONTHS_ES
+    from config import BRAND_GREEN
+
+    fig = go.Figure(go.Bar(
+        x=MONTHS_ES,
+        y=kwh_values,
+        marker_color=BRAND_GREEN,
+        text=[f"{v:.0f}" if v else "" for v in kwh_values],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        title="Consumo mensual (kWh)",
+        # Same explicit-headroom reasoning as irradiance_monthly_fig().
+        yaxis=dict(title="kWh", range=[0, max(v or 0 for v in kwh_values) * 1.18]),
+        height=240,
+        margin=dict(t=40, b=10, l=10, r=10),
+    )
+    return fig
+
+
 def fig_to_fragment(fig) -> str:
     """Shared to_html() call so every route renders charts with the exact
     same config (no mode bar, no per-fragment plotly.js copy) — see module

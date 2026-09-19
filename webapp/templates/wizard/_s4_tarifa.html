@@ -1,0 +1,22 @@
+{# Tariff-type <select> + fixed-charge caption — swapped by the distributor
+   <select>'s hx-get (wizard.paso4_distribuidor) and rendered inline in the
+   full-page GET alike, always from gz_s4_utility.build_context(). Root id
+   must stay "s4-tarifa" for the outerHTML swap. #}
+<div id="s4-tarifa" style="margin-top:12px;">
+  {% if selected_tariff %}
+    <div style="max-width:50%;">
+      <label class="flabel">Tipo de tarifa *</label>
+      <select class="finput" name="tariff_type_id">
+        {% for t in tariff_types %}
+          <option value="{{ t.id }}" {{ 'selected' if t.id == selected_tariff_id else '' }}>{{ t.code }} — {{ t.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <p class="card-note-sm" style="margin-top:8px;">
+      Cargo fijo: ₡{{ '{:,.0f}'.format(selected_tariff.access_charge_crc or 0) }}/mes
+      ({{ fixed_charge_disclaimer }})
+    </p>
+  {% else %}
+    <p class="wiz-note">No hay tarifas registradas para esta distribuidora.</p>
+  {% endif %}
+</div>

@@ -1,0 +1,71 @@
+{# Loads block — port of wizard/grid_zero.py:_render_loads_section().
+   Lives inside #s5-consumo (see that template's docstring). Row inputs use
+   `row-<i>-<field>` names for webapp/wizard_steps/common.py:parse_rows(). #}
+<div class="card" style="margin:12px 0;">
+  <details style="margin-bottom:14px;">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Importar desde tablero eléctrico</summary>
+    <p class="card-note-sm" style="margin:8px 0;">Sube una imagen o PDF del tablero eléctrico. La IA extrae los circuitos y estima horas de uso.</p>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <input id="s5-tablero-file" class="finput" type="file" name="file" accept="image/jpeg,image/png,application/pdf" style="max-width:340px;">
+      <button class="btn" type="button"
+              hx-post="{{ url_for('wizard.paso5_tablero_extraer', vid=vid) }}"
+              hx-include="#s5-tablero-file" hx-encoding="multipart/form-data"
+              hx-target="#s5-consumo" hx-swap="outerHTML"
+              hx-indicator="#s5-tablero-spin" hx-disabled-elt="this">
+        Extraer cargas del tablero
+      </button>
+      <span id="s5-tablero-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Analizando tablero con IA…</span>
+    </div>
+  </details>
+
+  <p style="margin:0 0 4px;"><b>Cargas eléctricas instaladas</b></p>
+  <p class="card-note-sm" style="margin:0 0 10px;">Edita los equipos instalados. El consumo estimado se aplica a los 12 meses.</p>
+
+  <div id="s5-loads-rows"
+       hx-post="{{ url_for('wizard.paso5_cargas_tabla', vid=vid) }}" hx-trigger="change delay:400ms"
+       hx-include="#s5-loads-rows input" hx-target="#s5-consumo" hx-swap="outerHTML">
+    <div class="dtable-wrap">
+      <table class="dtable">
+        <thead><tr><td>Descripción</td><td>Potencia (W)</td><td>Cantidad</td><td>Horas/día</td><td>Días/mes</td><td></td></tr></thead>
+        <tbody>
+          {% for row in loads_data %}
+          <tr>
+            <td><input class="finput" type="text" name="row-{{ loop.index0 }}-desc" value="{{ row['Descripción'] }}"></td>
+            <td><input class="finput" type="number" min="0" name="row-{{ loop.index0 }}-w" value="{{ row['W'] }}"></td>
+            <td><input class="finput" type="number" min="1" step="1" name="row-{{ loop.index0 }}-und" value="{{ row['Und'] }}"></td>
+            <td><input class="finput" type="number" min="0" max="24" step="0.5" name="row-{{ loop.index0 }}-hd" value="{{ row['h/día'] }}"></td>
+            <td><input class="finput" type="number" min="0" max="31" step="1" name="row-{{ loop.index0 }}-dm" value="{{ row['días/mes'] }}"></td>
+            <td>
+              <button class="btn btn-outline" type="button" title="Quitar fila"
+                      hx-post="{{ url_for('wizard.paso5_cargas_fila_quitar', vid=vid) }}"
+                      hx-include="#s5-loads-rows input" hx-vals='{"_row": "{{ loop.index0 }}"}'
+                      hx-target="#s5-consumo" hx-swap="outerHTML">✕</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <button class="btn btn-outline" type="button" style="margin-top:8px;"
+          hx-post="{{ url_for('wizard.paso5_cargas_fila', vid=vid) }}"
+          hx-include="#s5-loads-rows input"
+          hx-target="#s5-consumo" hx-swap="outerHTML">+ Fila</button>
+
+  {% if loads_overwrite_note %}<p class="wiz-error" style="margin-top:10px;">⚠ {{ loads_overwrite_note }}</p>{% endif %}
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:10px;">
+    <div><b>Consumo nominal:</b> {{ '{:,.0f}'.format(loads_total_kwh) }} kWh/mes</div>
+    {% if loads_total_kwh > 0 %}
+    <div>
+      <button class="btn" type="button"
+              hx-post="{{ url_for('wizard.paso5_cargas_aplicar', vid=vid) }}"
+              hx-target="#s5-consumo" hx-swap="outerHTML"
+              hx-indicator="#s5-cargas-apply-spin" hx-disabled-elt="this">
+        Aplicar a 12 meses →
+      </button>
+      <span id="s5-cargas-apply-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Estimando variación estacional con IA…</span>
+    </div>
+    {% endif %}
+  </div>
+</div>

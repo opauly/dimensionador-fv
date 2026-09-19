@@ -63,3 +63,39 @@ def to_float(value, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def parse_rows(form, prefix: str, fields: list[str]) -> list[dict]:
+    """PLAN §1.5's `st.data_editor` replacement — the inverse of the
+    `<prefix>-<i>-<field>` naming convention every editable-table fragment
+    uses for its `<input>`/`<select>` names (e.g. `m-3-kwh`, `row-0-W`).
+
+    Scans `form` for every `<prefix>-<i>-<field>` key, groups them by row
+    index `i`, and returns `list[dict]` ordered by index — one dict per row
+    actually present in the submission, so "+ Fila"/"✕" (which just add or
+    drop indices between renders) round-trip for free.
+
+    Blanks coerce to `None`, not `0` or `""` — callers decide their own
+    "blank means what" rule (e.g. `_row_subtotal()`'s "qty is None => treat
+    as 1") rather than this helper silently picking one.
+    """
+    marker = f"{prefix}-"
+    indices: set[int] = set()
+    for key in form.keys():
+        if not key.startswith(marker):
+            continue
+        rest = key[len(marker):]
+        idx_str, sep, field = rest.partition("-")
+        if sep and idx_str.isdigit() and field in fields:
+            indices.add(int(idx_str))
+
+    rows = []
+    for i in sorted(indices):
+        row = {}
+        for field in fields:
+            value = form.get(f"{prefix}-{i}-{field}")
+            if value is not None:
+                value = value.strip()
+            row[field] = value if value else None
+        rows.append(row)
+    return rows

@@ -1,0 +1,30 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=4) }}" id="s4-form">
+  <div class="fgrid">
+    <div>
+      <label class="flabel">Distribuidora *</label>
+      <select class="finput" name="distributor_id"
+              hx-get="{{ url_for('wizard.paso4_distribuidor', vid=vid) }}"
+              hx-trigger="change" hx-target="#s4-tarifa" hx-swap="outerHTML">
+        {% for d in distributors %}
+          <option value="{{ d.id }}" {{ 'selected' if d.id == selected_dist_id else '' }}>{{ d.abbreviation }} — {{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="flabel">NISE (número de cliente)</label>
+      <input class="finput" type="text" name="nise" value="{{ nise }}">
+    </div>
+  </div>
+
+  {% include "wizard/_s4_tarifa.html" %}
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=4) }}">← Atrás</button>
+    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+  </div>
+</form>
+{% endblock %}
