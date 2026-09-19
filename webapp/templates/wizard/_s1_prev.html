@@ -1,0 +1,16 @@
+{# Previous-proposals selector — port of step2_client()'s
+   list_proposals_by_client() dropdown. Picking one navigates straight into
+   that draft's wizard at whatever step it left off (wizard.abrir). #}
+<div id="s1-prev">
+  {% if prev_options %}
+    <div style="margin-top:12px;">
+      <label class="flabel">Cotizaciones anteriores (opcional)</label>
+      <select class="finput" onchange="if(this.value){window.location=this.value;}">
+        <option value="">— Nueva cotización —</option>
+        {% for opt in prev_options %}
+          <option value="{{ url_for('wizard.abrir', vid=opt.version_id) }}">{{ opt.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  {% endif %}
+</div>

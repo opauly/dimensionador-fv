@@ -1,0 +1,32 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=2) }}">
+  <div class="fgrid">
+    <div>
+      <label class="flabel">Tipo de sistema</label>
+      {% for value, label in system_type_options %}
+        <label style="display:block;font-size:13px;padding:5px 0;">
+          <input type="radio" name="system_type" value="{{ value }}" {{ 'checked' if value == system_type else '' }}>
+          {{ label }}
+        </label>
+      {% endfor %}
+    </div>
+    <div>
+      <label class="flabel">Idioma de la cotización</label>
+      {% for value, label in language_options %}
+        <label style="display:block;font-size:13px;padding:5px 0;">
+          <input type="radio" name="language" value="{{ value }}" {{ 'checked' if value == language else '' }}>
+          {{ label }}
+        </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=2) }}">← Atrás</button>
+    <button class="btn" type="submit">Siguiente →</button>
+  </div>
+</form>
+{% endblock %}

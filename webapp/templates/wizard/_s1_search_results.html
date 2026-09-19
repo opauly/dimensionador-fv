@@ -1,0 +1,19 @@
+{# Live client-search results — port of step2_client()'s search_clients()
+   dropdown. Each result hx-gets the fields fragment pre-filled; clicking
+   outside a match (or clearing the box) just leaves "Nuevo cliente" implied
+   by not selecting anything. #}
+{% if q and q|length >= 2 %}
+  {% if matches %}
+    <div class="dtable-wrap">
+      {% for m in matches %}
+        <div style="padding:8px 12px;{{ 'border-top:1px solid var(--row-border);' if not loop.first else '' }}cursor:pointer;font-size:13px;"
+             hx-get="{{ url_for('wizard.clientes_seleccionar', id=m.id, vid=vid or '') }}"
+             hx-target="#s1-fields" hx-swap="outerHTML">
+          <b>{{ m.name }}</b>{% if m.sub %} <span style="color:var(--muted);font-size:12px;">— {{ m.sub }}</span>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="card-note-sm">No se encontraron clientes con ese nombre.</p>
+  {% endif %}
+{% endif %}

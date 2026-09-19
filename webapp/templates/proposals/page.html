@@ -15,7 +15,14 @@
 .filter-pill input:checked + span { background: var(--navy); border-color: var(--navy); color: #fff; }
 </style>
 
-<p class="section-title">Cotizaciones</p>
+<div style="display:flex;justify-content:space-between;align-items:baseline;">
+  <p class="section-title">Cotizaciones</p>
+  <a class="btn" href="{{ url_for('wizard.nueva') }}">Nueva cotización</a>
+</div>
+
+{% if request.args.get('aviso') == 'bloqueada' %}
+  <div class="card" style="margin-bottom:12px;"><p class="card-note" style="margin:0;">Esa versión está bloqueada — use "Nueva versión" para editarla.</p></div>
+{% endif %}
 
 <form id="pfilters" class="plist-filters">
   <input class="finput" type="text" name="q" value="{{ q }}" placeholder="🔍  Cliente, número de cotización…"

@@ -1,0 +1,16 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<div>
+  <label class="flabel">Buscar cliente existente</label>
+  <input class="finput" type="text" name="q" placeholder="Escribe el nombre para buscar…" autocomplete="off"
+         hx-get="{{ url_for('wizard.clientes_buscar') }}" hx-target="#s1-results" hx-swap="innerHTML"
+         hx-trigger="keyup changed delay:300ms" hx-vals='{"vid": "{{ vid or "" }}"}'>
+  <div id="s1-results" style="margin-top:6px;"></div>
+</div>
+
+<hr style="margin:16px 0;">
+
+<div id="s1-fields">
+  {% include "wizard/_s1_fields.html" %}
+</div>
+{% endblock %}

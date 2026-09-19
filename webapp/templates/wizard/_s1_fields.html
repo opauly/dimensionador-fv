@@ -1,0 +1,33 @@
+{# The six client fields + previous-proposals selector + nav — port of
+   step2_client()'s field block. Rendered by the full Step 1 page, by
+   POST /nueva or /<vid>/paso/1 on a validation error, and by the
+   search/select fragment (clientes_seleccionar) — always through
+   s1_client.build_context(), per PLAN §1.3. #}
+{% set action_url = url_for('wizard.nueva') if not vid else url_for('wizard.paso_post', vid=vid, n=1) %}
+<form id="s1-fields" method="post" action="{{ action_url }}">
+  {% if client.client_id %}<input type="hidden" name="client_id" value="{{ client.client_id }}">{% endif %}
+  <div class="fgrid">
+    <div>
+      <label class="flabel">Nombre completo *</label>
+      <input class="finput" type="text" name="name" value="{{ client.name }}"
+             hx-get="{{ url_for('wizard.clientes_previas') }}" hx-target="#s1-prev" hx-swap="outerHTML"
+             hx-trigger="keyup changed delay:400ms" hx-include="[name='client_id']"
+             hx-vals='{"vid": "{{ vid or "" }}"}'>
+    </div>
+    <div><label class="flabel">Empresa (opcional)</label><input class="finput" type="text" name="empresa" value="{{ client.empresa }}"></div>
+    <div><label class="flabel">Teléfono</label><input class="finput" type="text" name="phone" value="{{ client.phone }}"></div>
+    <div><label class="flabel">Correo electrónico</label><input class="finput" type="text" name="email" value="{{ client.email }}"></div>
+    <div><label class="flabel">Ubicación (ciudad, provincia)</label><input class="finput" type="text" name="location" value="{{ client.location }}" placeholder="Ej: Atenas, Alajuela"></div>
+    <div><label class="flabel">NISE (número de cliente en distribuidora)</label><input class="finput" type="text" name="nise" value="{{ client.nise }}"></div>
+  </div>
+
+  {% include "wizard/_s1_prev.html" %}
+
+  {% if not client.name %}<p class="wiz-note">* El nombre del cliente es requerido.</p>{% endif %}
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <a class="wiz-back" href="{{ url_for('proposals.index') }}">← Cotizaciones</a>
+    <button class="btn" type="submit">Siguiente →</button>
+  </div>
+</form>

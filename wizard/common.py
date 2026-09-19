@@ -404,50 +404,19 @@ def monthly_coverage_chart(
     flag_shortfall: bool = True,
 ):
     """
-    Interactive Plotly twin of proposals/charts.py's monthly_coverage_svg() —
-    same monthly data, same color family (imported from there so the two
-    never drift apart), hoverable — for live review in the wizard (Step 6).
+    Interactive Plotly twin of proposals/charts.py's monthly_coverage_svg().
     The PDF keeps the static SVG version since WeasyPrint can't render
     Plotly; this is only for on-screen use.
 
-    Generación gets its own bar per month; Consumo (+ Recarga de batería,
-    stacked on top, when given) gets a second bar alongside it — same
-    grouped-then-stacked layout as the PDF chart, built with Plotly's
-    offsetgroup mechanism (bars sharing an offsetgroup stack; different
-    offsetgroups sit side by side).
+    Moved (Phase 20 Step 3) to webapp/figures.py:monthly_coverage_fig() so the
+    Flask wizard can reuse the exact same implementation with zero drift risk
+    — this is now a thin re-export, kept under the original name so every
+    existing call site in wizard/grid_zero.py / wizard/off_grid.py is
+    unchanged. See webapp/figures.py for the real docstring/implementation.
     """
-    import plotly.graph_objects as go
-    from calculations.sizing_grid_zero import MONTHS_ES
-    from proposals.charts import GREEN, MINT, AMBER, NAVY
+    from webapp.figures import monthly_coverage_fig
 
-    gen_colors = [
-        AMBER if (flag_shortfall and g < c) else GREEN
-        for g, c in zip(generation_kwh, consumption_kwh)
-    ]
-
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=MONTHS_ES, y=generation_kwh, name="Generación", marker_color=gen_colors,
-        offsetgroup=0, hovertemplate="%{x}<br>Generación: %{y:,.0f} kWh<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=MONTHS_ES, y=consumption_kwh, name="Consumo", marker_color=MINT,
-        offsetgroup=1, hovertemplate="%{x}<br>Consumo: %{y:,.0f} kWh<extra></extra>",
-    ))
-    if recharge_kwh:
-        fig.add_trace(go.Bar(
-            x=MONTHS_ES, y=recharge_kwh, name="Recarga de batería", marker_color=NAVY,
-            offsetgroup=1, base=consumption_kwh,
-            hovertemplate="%{x}<br>Recarga de batería: %{y:,.0f} kWh<extra></extra>",
-        ))
-    fig.update_layout(
-        barmode="group",
-        yaxis_title="kWh/mes",
-        height=280,
-        margin=dict(t=10, b=10, l=10, r=10),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-    )
-    return fig
+    return monthly_coverage_fig(generation_kwh, consumption_kwh, recharge_kwh, flag_shortfall)
 
 
 def inject_step6_heading_css() -> None:

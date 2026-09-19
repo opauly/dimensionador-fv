@@ -1,0 +1,36 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=3) }}" id="s3-form">
+  <div class="fgrid">
+    <div><label class="flabel">Ciudad</label><input class="finput" type="text" name="city" value="{{ city }}"></div>
+    <div><label class="flabel">Provincia</label><input class="finput" type="text" name="province" value="{{ province }}"></div>
+  </div>
+
+  <details style="margin-top:12px;">
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Coordenadas manuales (opcional)</summary>
+    <div class="fgrid" style="margin-top:8px;">
+      <div><label class="flabel">Latitud</label><input class="finput" type="number" step="0.00001" name="lat_manual" value="{{ lat_manual }}"></div>
+      <div><label class="flabel">Longitud</label><input class="finput" type="number" step="0.00001" name="lon_manual" value="{{ lon_manual }}"></div>
+    </div>
+  </details>
+
+  <div style="margin:16px 0;">
+    <button type="button" class="btn"
+            hx-post="{{ url_for('wizard.paso_action', vid=vid, n=3, action='pvgis') }}"
+            hx-include="#s3-form" hx-target="#s3-irradiancia" hx-swap="outerHTML"
+            hx-indicator="#s3-spin" hx-disabled-elt="this">
+      Obtener irradiancia solar (PVGIS)
+    </button>
+    <span id="s3-spin" class="htmx-indicator" style="margin-left:8px;color:var(--muted);font-size:13px;">Consultando…</span>
+  </div>
+
+  {% include "wizard/_s3_irradiancia.html" %}
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=3) }}">← Atrás</button>
+    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+  </div>
+</form>
+{% endblock %}

@@ -6,6 +6,7 @@
 <title>{% block title %}Pauly&amp;Co Solar Tool{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
+<script src="{{ url_for('static', filename='vendor/plotly-basic.min.js') }}" defer></script>
 </head>
 <body>
   <div class="shell">
@@ -19,7 +20,7 @@
       </div>
       <nav class="nav">
         <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.endpoint == 'dashboard.index' else '' }}">Panel de Control</a>
-        <a href="{{ url_for('proposals.index') }}" class="{{ 'active' if request.blueprint == 'proposals' else '' }}">Cotizaciones</a>
+        <a href="{{ url_for('proposals.index') }}" class="{{ 'active' if request.blueprint in ('proposals', 'wizard') else '' }}">Cotizaciones</a>
         <a href="{{ url_for('dashboard.stub', section='projects') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'projects' else '' }}">Proyectos</a>
         <a href="{{ url_for('admin.index', section='equipos') }}" class="{{ 'active' if request.blueprint == 'admin' else '' }}">Admin</a>
         <a href="{{ url_for('dashboard.stub', section='maintenance') }}" class="{{ 'active' if request.view_args and request.view_args.get('section') == 'maintenance' else '' }}">Mantenimiento</a>

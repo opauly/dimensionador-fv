@@ -145,10 +145,24 @@ proposal_versions.data = {
 
 **Hard constraint — blob compatibility.** `main`'s Streamlit app reads and writes the same rows.
 `wizard/state.py:load_draft()` copies only the seven known keys and `build_from_wizard_blob()`
-reads only those, so **adding `scratch` is additive and safe in both directions**. The port must
-not change the meaning, key names or units of any of the seven sections. A draft created in Flask
-must open cleanly in Streamlit and vice versa — that is a Step 3 validation gate, not an
+reads only those, so **adding `scratch` is additive and safe for reads in both directions**. The
+port must not change the meaning, key names or units of any of the seven sections. A draft created
+in Flask must open cleanly in Streamlit and vice versa — that is a Step 3 validation gate, not an
 aspiration.
+
+**Confirmed asymmetry (Step 3, empirically verified, not just reasoned about):** the "additive and
+safe" guarantee holds for *reads* in both directions, but **not for a Streamlit-side write**.
+`autosave()` rebuilds `data` from `session_state`'s seven known keys and `upsert_version()` does a
+full-column replace, not a JSON merge — so if a draft with `scratch` data is opened in Streamlit
+and Streamlit saves it again (any step advance, any field edit), `scratch` is silently dropped.
+**Accepted, not fixed**: `wizard/draft.py:load()` always re-defaults a missing `scratch` to `{}`,
+so this never crashes or corrupts the seven durable sections — it just means an in-progress step's
+scratch data (an applied bill extraction, a computed scenario) needs recomputing if the same draft
+was touched by Streamlit in between. Full details and rationale in `wizard/draft.py`'s module
+docstring. **Operational implication for Steps 4 onward**: once a step starts writing real
+`scratch` data (Step 4's bill parsing, Step 5's MPPT scenarios, etc.), avoid opening an
+in-progress Flask draft in the Streamlit app — there is no technical guard against it, only this
+documented caution.
 
 **New module `wizard/draft.py`** (Streamlit-free, sits beside `wizard/state.py`, does not replace
 it):
@@ -569,8 +583,9 @@ Each step is a vertical slice ending in something runnable plus a validation you
 **Build**
 - `wizard/draft.py` per §1.1, with a header comment carrying the blob-compatibility constraint and
   the last-write-wins note.
-- `SECRET_KEY` in `create_app()` from `FLASK_SECRET_KEY` (§0.3 Q6); `MAX_CONTENT_LENGTH = 25 MB`
-  and a 413 handler.
+- `MAX_CONTENT_LENGTH = 25 MB` and a 413 handler. (`SECRET_KEY`/`flask.session` is **not** needed
+  for this step — §0.3 Q6's only planned use, the pre-row steps 1–2 carry, was removed when Q3
+  moved row creation to step 1's own POST. Skip it unless a later step introduces a real need.)
 - `webapp/blueprints/wizard.py` + `webapp/templates/wizard/shell.html`: breadcrumb (✓ / current /
   greyed, labels switching on `system_type` exactly as `STEP_LABELS_GRID_ZERO` /
   `STEP_LABELS_OFF_GRID` do), header title logic, step guard, locked-version guard.
@@ -578,8 +593,13 @@ Each step is a vertical slice ending in something runnable plus a validation you
   results as a `<select>`/list that fills the form fields), previous-proposals selector
   (`list_proposals_by_client` → picking one loads that draft and 303s straight into its wizard),
   the six fields, NISE default `"N/A"`, and the prospect-vs-client rule from
-  `pages/02_new_proposal.py` L141–166.
-- **Step 2 Tipo e idioma** — three system types × two languages; its POST creates the row (§1.2).
+  `pages/02_new_proposal.py` L141–166. **Its POST creates the proposal row and burns the quote
+  number immediately** (§0.3 Q3, revised from the original Streamlit-matching plan — this is a
+  deliberate simplification Oscar signed off on, not a bug): `create_prospect()`/`upsert_client()`
+  + `create_proposal()` run here, writing `client` and a default `meta` (system type/language not
+  yet chosen) into a fresh blob, then 303s to `paso/2`. No `flask.session` carry.
+- **Step 2 Tipo e idioma** — three system types × two languages; its POST patches `meta` (system
+  type + language) into the row step 1 already created.
 - **Step 3 Sitio e irradiancia** — city/province prefilled from the client's `location`, the manual
   lat/lon override, `POST …/paso/3/pvgis` running `geocode_cr()` → `fetch_irradiance()` → and
   `fetch_daily_series()` **only for off_grid/hybrid** (`wizard/common.py` L297–298 — Grid Zero
@@ -591,10 +611,15 @@ Each step is a vertical slice ending in something runnable plus a validation you
 **Validate**
 - **Blob round-trip, both directions** (the gate for §1.1): create a draft through Flask steps 1–3,
   open it in the Streamlit app on `main` → client, meta and site all populate correctly and the
-  wizard resumes at step 3. Then advance it one step in Streamlit, reopen in Flask → still correct.
-  `scratch` is ignored by Streamlit and survives untouched.
-- An abandoned `/nueva` (never reaching step 2's POST) creates **no** proposal row and burns **no**
-  quote number.
+  wizard resumes at step 3. Then advance it one step in Streamlit, reopen in Flask → the seven
+  durable sections are still correct. **Confirmed empirically: `scratch` does NOT survive this
+  round-trip** — Streamlit's `autosave()` full-replaces the blob and drops it. See §1.1's
+  "Confirmed asymmetry" note. Not a Step 3 defect (nothing writes `scratch` yet); a real
+  consideration for Step 4 onward.
+- Loading `GET /nueva` and abandoning it without submitting the form creates **no** proposal row.
+  Submitting step 1's form **does** create the row and burn a quote number immediately, even if the
+  wizard is then abandoned before step 2 completes — this is the accepted trade-off from §0.3 Q3,
+  not a bug to fix.
 - PVGIS: first fetch hits the network, second fetch for the same lat/lon returns from the
   `app_settings` cache; the monthly chart renders inside an htmx-swapped fragment (§1.6 gotcha a);
   Bar renders under `plotly-basic` (gotcha b).

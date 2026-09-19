@@ -1,0 +1,25 @@
+{# Metric cards + irradiance chart — port of step3_site()'s post-fetch
+   block. Returned both inline (full page GET) and standalone as the
+   htmx-swap target of the "Obtener irradiancia solar" action. Root id
+   must stay "s3-irradiancia" for the outerHTML swap. #}
+<div id="s3-irradiancia">
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+  {% if pvgis_data %}
+    <div class="cards" style="grid-template-columns: repeat(2, 1fr); margin-top:12px;">
+      <div class="card-green">
+        <b>Irradiancia promedio</b><br>
+        <span class="card-value">{{ avg_monthly }} kWh/kWp/mes</span>
+      </div>
+      <div class="card-green">
+        <b>Irradiancia anual</b><br>
+        <span class="card-value">{{ '%.0f'|format(yearly) if yearly is not none else '—' }} kWh/kWp</span>
+      </div>
+    </div>
+    {% if chart_html %}
+      <div style="margin-top:12px;">{{ chart_html | safe }}</div>
+    {% endif %}
+  {% else %}
+    <p class="wiz-note">Haz clic en "Obtener irradiancia solar" para cargar datos de PVGIS.</p>
+  {% endif %}
+  {% if not can_continue %}<p class="wiz-note">{{ blocked_note }}</p>{% endif %}
+</div>

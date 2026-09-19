@@ -148,6 +148,51 @@ def update_proposal_status(proposal_id: str, status: str) -> dict:
     return result.data[0]
 
 
+def update_proposal_system_type(proposal_id: str, system_type: str) -> dict:
+    """Phase 20 (Flask wizard) addition: unlike the Streamlit wizard, the
+    Flask port creates the proposal row on Step 1 (Cliente) — before the
+    system type is known — with a placeholder `system_type`, so Step 2
+    (Tipo e idioma) must correct the `proposals.system_type` column itself
+    once the real choice is made (the JSONB `data.meta.system_type` blob
+    field is patched separately, via wizard/draft.py). Not used by the
+    Streamlit app, which always knows system_type at proposal-creation time."""
+    result = (
+        get_client()
+        .table("proposals")
+        .update({"system_type": system_type, "updated_at": _now()})
+        .eq("id", proposal_id)
+        .execute()
+    )
+    return result.data[0]
+
+
+def update_proposal_client(
+    proposal_id: str,
+    client_name: str,
+    client_id: str | None = None,
+    prospect_id: str | None = None,
+) -> dict:
+    """Phase 20 (Flask wizard) addition: the proposals list/detail panel
+    read `client_name` (and the `client_id`/`prospect_id` foreign keys) off
+    the `proposals` row directly, not off the JSONB blob — so re-editing the
+    client on Step 1 of an already-created draft (e.g. via the wizard
+    breadcrumb, or "Nueva versión" landing back on Step 1) must update this
+    row too, not just `data.client` in the blob."""
+    payload: dict = {"client_name": client_name, "updated_at": _now()}
+    if client_id:
+        payload["client_id"] = client_id
+    if prospect_id:
+        payload["prospect_id"] = prospect_id
+    result = (
+        get_client()
+        .table("proposals")
+        .update(payload)
+        .eq("id", proposal_id)
+        .execute()
+    )
+    return result.data[0]
+
+
 def create_version(proposal_id: str, data: dict, version_note: str = "") -> dict:
     """Create a new version by inheriting data from the latest locked version."""
     db = get_client()
