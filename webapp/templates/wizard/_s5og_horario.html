@@ -1,0 +1,22 @@
+{# Off-Grid Step 5 — illustrative hourly-load stack, gated behind its own
+   button so it never fires on page load ("not shown by default", PLAN's
+   own build step). Swapped INDEPENDENTLY of the surrounding table/inputs
+   (its own hx-target, narrower than #s5og-demanda) so an in-progress, not
+   yet Recalculado Horas/día or Factor demanda edit is never lost by
+   clicking this button — mirrors Streamlit's data_editor, which keeps its
+   own live edited state across an unrelated widget interaction in the same
+   rerun. Root id must stay "s5og-horario". #}
+<div id="s5og-horario">
+  {% if show_hourly_chart and total_kwh_day > 0 %}
+  <h5 style="font-size:13px;margin:14px 0 2px;">Perfil horario ilustrativo (IA)</h5>
+  <p class="card-note-sm">⚠️ Ilustrativo únicamente — generado por IA para ayudar a visualizar cuándo cada tipo de carga tiende a consumir durante el día. No se usa para el dimensionamiento del sistema (ese cálculo sigue siendo determinístico, por categoría, en kWh/día).</p>
+  <button class="btn btn-outline" type="button"
+          hx-post="{{ url_for('wizard.paso5og_horario', vid=vid) }}"
+          hx-target="#s5og-horario" hx-swap="outerHTML"
+          hx-indicator="#s5og-horario-spin" hx-disabled-elt="this">
+    Generar perfil horario ilustrativo
+  </button>
+  <span id="s5og-horario-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Generando perfil horario con IA…</span>
+  {% if hourly_chart_html %}<div style="margin-top:10px;">{{ hourly_chart_html | safe }}</div>{% endif %}
+  {% endif %}
+</div>

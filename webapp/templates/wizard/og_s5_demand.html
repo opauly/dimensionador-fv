@@ -1,0 +1,12 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=5) }}" id="s5og-form">
+  {% include "wizard/_s5og_demanda.html" %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=5) }}">← Atrás</button>
+    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+  </div>
+  {% if not can_continue %}<p class="wiz-note">Calcula el perfil de consumo para continuar.</p>{% endif %}
+</form>
+{% endblock %}

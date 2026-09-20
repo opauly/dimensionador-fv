@@ -15,16 +15,17 @@ via create_prospect()/upsert_client() + create_proposal(). There is no
 Step 2's POST just patches `meta` into that same row.
 
 Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
-three system types. Steps 4-8 are wired for Grid Zero only so far
-(gz_s4_utility.py / gz_s5_consumption.py / gz_s6_equipment.py /
-gz_s7_costs.py / gz_s8_review.py — Phase 20 Steps 4-6 of the plan; Grid
-Zero's wizard is now complete end to end) — STEP_MODULES/STEP_TEMPLATES are
-keyed by `{n: {system_type: module}}` with a "*" fallback for the shared
-steps, exactly mirroring PLAN §1.2's "single dispatch table keyed on
-meta.system_type". Off-Grid/Hybrid steps 4+ are later phase-20 steps and are
-not wired in yet — requesting one renders a plain "not built yet"
-placeholder rather than erroring, so manual exploration during review
-doesn't 500.
+three system types. Grid Zero's wizard is wired end to end (gz_s4_utility.py
+/ gz_s5_consumption.py / gz_s6_equipment.py / gz_s7_costs.py /
+gz_s8_review.py — Phase 20 Steps 4-6). Off-Grid's Steps 4-5 (Cargas /
+Demanda) are wired too (og_s4_loads.py / og_s5_demand.py — Phase 20 Step 7);
+its Steps 6-8 (Equipos, Costos, Revisión) and all of Hybrid are later
+phase-20 steps and are not wired in yet — requesting one renders a plain
+"not built yet" placeholder rather than erroring, so manual exploration
+during review doesn't 500. STEP_MODULES/STEP_TEMPLATES are keyed by
+`{n: {system_type: module}}` with a "*" fallback for the shared steps,
+exactly mirroring PLAN §1.2's "single dispatch table keyed on
+meta.system_type".
 
 Step 8's PDF routes deliberately import from webapp.blueprints.proposals
 (`_generate_pdf_bytes()`, `_signed_url()`) rather than re-implementing PDF
@@ -43,6 +44,7 @@ from wizard import draft
 from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
+    og_s4_loads, og_s5_demand,
     s1_client, s2_type, s3_site,
 )
 
@@ -52,8 +54,8 @@ STEP_MODULES = {
     1: {"*": s1_client},
     2: {"*": s2_type},
     3: {"*": s3_site},
-    4: {"grid_zero": gz_s4_utility},
-    5: {"grid_zero": gz_s5_consumption},
+    4: {"grid_zero": gz_s4_utility, "off_grid": og_s4_loads},
+    5: {"grid_zero": gz_s5_consumption, "off_grid": og_s5_demand},
     6: {"grid_zero": gz_s6_equipment},
     7: {"grid_zero": gz_s7_costs},
     8: {"grid_zero": gz_s8_review},
@@ -62,8 +64,8 @@ STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
     2: {"*": "wizard/s2_type.html"},
     3: {"*": "wizard/s3_site.html"},
-    4: {"grid_zero": "wizard/gz_s4_utility.html"},
-    5: {"grid_zero": "wizard/gz_s5_consumption.html"},
+    4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html"},
+    5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html"},
     6: {"grid_zero": "wizard/gz_s6_equipment.html"},
     7: {"grid_zero": "wizard/gz_s7_costs.html"},
     8: {"grid_zero": "wizard/gz_s8_review.html"},
@@ -319,9 +321,21 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
+    elif n == 4 and _step_module(n, blob) is og_s4_loads:
+        blob = draft.patch(vid, "consumption", og_s4_loads.save_step(request.form))
+        ctx = og_s4_loads.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
     elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
         blob = draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
         ctx = gz_s5_consumption.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
+    elif n == 5 and _step_module(n, blob) is og_s5_demand:
+        blob = draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
+        ctx = og_s5_demand.build_context(blob)
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
@@ -366,8 +380,12 @@ def paso_atras(vid, n):
         draft.patch(vid, "site", s3_site.save_step(request.form))
     elif n == 4 and _step_module(n, blob) is gz_s4_utility:
         draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
+    elif n == 4 and _step_module(n, blob) is og_s4_loads:
+        draft.patch(vid, "consumption", og_s4_loads.save_step(request.form))
     elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
         draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
+    elif n == 5 and _step_module(n, blob) is og_s5_demand:
+        draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
     elif n == 7 and _step_module(n, blob) is gz_s7_costs:
         draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
     elif n == 8 and _step_module(n, blob) is gz_s8_review:
@@ -413,6 +431,162 @@ def paso4_distribuidor(vid):
     blob = draft.patch(vid, "utility", gz_s4_utility.select_distributor(distributor_id))
     ctx = gz_s4_utility.build_context(blob)
     return render_template("wizard/_s4_tarifa.html", vid=vid, n=4, **ctx)
+
+
+# ── Step 4 (Off-Grid) actions — catálogo, tablero/texto import (§1.7's
+# exact routes), loads-table live sync, +Fila, quitar fila. Every one of
+# these patches blob["scratch"][og_s4_loads.DEFAULT_SCRATCH_KEY] and
+# re-renders wizard/_s4og_cargas.html from a fresh
+# og_s4_loads.build_context(blob) call (PLAN §1.3) — same "one fragment,
+# always the same build_context()" discipline as Grid Zero's Step 5 loads
+# block, so a table edit and an import can never leave the page showing two
+# different sources of truth.
+
+
+def _s4og_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = og_s4_loads.build_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s4og_cargas.html", vid=vid, n=4, **ctx)
+
+
+def _s4og_patch(vid: str, scratch_key: str, new_sub: dict) -> dict:
+    return draft.patch(vid, "scratch", {scratch_key: new_sub})
+
+
+@bp.route("/<vid>/paso/4/cargas/catalogo", methods=["POST"])
+def paso4og_catalogo(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    picks = request.form.getlist("picks")
+    blob = _s4og_patch(vid, scratch_key, og_s4_loads.add_catalog_rows(blob, scratch_key, picks))
+    return _s4og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/tablero/extraer", methods=["POST"])
+def paso4og_tablero_extraer(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return _s4og_render(vid, blob, error="Selecciona una imagen o PDF del tablero.")
+    try:
+        new_sub = og_s4_loads.extract_tablero(blob, scratch_key, uploaded.read(), uploaded.mimetype)
+    except Exception as exc:
+        return _s4og_render(vid, blob, error=f"Error al analizar el tablero: {exc}")
+    blob = _s4og_patch(vid, scratch_key, new_sub)
+    return _s4og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/texto/extraer", methods=["POST"])
+def paso4og_texto_extraer(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    text = request.form.get("pasted_text", "")
+    if not text.strip():
+        return _s4og_render(vid, blob, error="Pega el texto de la tabla de cargas antes de extraer.")
+    try:
+        new_sub = og_s4_loads.extract_text(blob, scratch_key, text)
+    except Exception as exc:
+        return _s4og_render(vid, blob, error=f"Error al analizar el texto: {exc}")
+    blob = _s4og_patch(vid, scratch_key, new_sub)
+    return _s4og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/cargas/tabla", methods=["POST"])
+def paso4og_cargas_tabla(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    blob = _s4og_patch(vid, scratch_key, og_s4_loads.update_table(blob, scratch_key, request.form))
+    return _s4og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/cargas/fila", methods=["POST"])
+def paso4og_cargas_fila(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    blob = _s4og_patch(vid, scratch_key, og_s4_loads.add_row(blob, scratch_key, request.form))
+    return _s4og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/cargas/fila/quitar", methods=["POST"])
+def paso4og_cargas_fila_quitar(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s4_loads.DEFAULT_SCRATCH_KEY
+    blob = _s4og_patch(vid, scratch_key, og_s4_loads.remove_row(blob, scratch_key, request.form))
+    return _s4og_render(vid, blob)
+
+
+# ── Step 5 (Off-Grid) actions — calcular, recalcular (the user_confirmed
+# override rule, PLAN §1.10 item 1), illustrative hourly shape (§1.7's exact
+# route). Calcular/Recalcular re-render the WHOLE wizard/_s5og_demanda.html
+# fragment from a fresh og_s5_demand.build_context() call (PLAN §1.3); the
+# hourly-shape button targets ONLY the nested wizard/_s5og_horario.html
+# fragment instead, deliberately narrower — see that template's own comment
+# for why (an in-progress, not-yet-Recalculado Horas/día edit must survive
+# a click on the hourly-shape button, the same way Streamlit's data_editor
+# keeps its live edited state across an unrelated widget interaction).
+
+
+def _s5og_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = og_s5_demand.build_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s5og_demanda.html", vid=vid, n=5, **ctx)
+
+
+def _s5og_patch(vid: str, scratch_key: str, new_sub: dict) -> dict:
+    return draft.patch(vid, "scratch", {scratch_key: new_sub})
+
+
+@bp.route("/<vid>/paso/5/calcular", methods=["POST"])
+def paso5og_calcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s5_demand.DEFAULT_SCRATCH_KEY
+    blob = _s5og_patch(vid, scratch_key, og_s5_demand.calculate(blob, scratch_key))
+    return _s5og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/recalcular", methods=["POST"])
+def paso5og_recalcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s5_demand.DEFAULT_SCRATCH_KEY
+    blob = _s5og_patch(vid, scratch_key, og_s5_demand.recalculate(blob, scratch_key, request.form))
+    return _s5og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/perfil/horario", methods=["POST"])
+def paso5og_horario(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = og_s5_demand.DEFAULT_SCRATCH_KEY
+    blob = _s5og_patch(vid, scratch_key, og_s5_demand.generate_hourly_shape(blob, scratch_key))
+    ctx = og_s5_demand.build_context(blob)
+    return render_template("wizard/_s5og_horario.html", vid=vid, n=5, **ctx)
 
 
 # ── Step 5 (Grid Zero) actions — source switch, bill upload, tablero

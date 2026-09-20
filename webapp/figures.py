@@ -258,6 +258,89 @@ def cashflow_fig(total_usd: float, savings_year1_usd: float, escalation: float =
     return fig
 
 
+def og_category_donut_fig(cat_totals: dict):
+    """Off-Grid Step 5's "Consumo por categoría" donut — extracted verbatim
+    from wizard/off_grid.py:_render_demand_profile_block() (L514-538).
+    `cat_totals`: {category_key: summed_kwh_day, ...}, ascending by value
+    (the caller's `_cat_totals()` already sorts this way, matching
+    Streamlit's own `.sort_values()`)."""
+    import plotly.graph_objects as go
+
+    from calculations.load_profile_off_grid import CATEGORY_LABELS_ES
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    colors = {
+        "fixed_cycling": BRAND_GREEN,
+        "behavior_driven": BRAND_NAVY,
+        "climate_driven": "#1d4ed8",
+        "discretionary": "#b45309",
+        "ignition_only": "#6b7280",
+        "appliance": "#7c3aed",
+    }
+
+    fig = go.Figure(go.Pie(
+        labels=[CATEGORY_LABELS_ES.get(k, k) for k in cat_totals],
+        values=list(cat_totals.values()),
+        hole=0.55,
+        marker=dict(colors=[colors.get(k, "#9ca3af") for k in cat_totals]),
+        texttemplate="%{value:.2f} kWh/día",
+        textposition="outside",
+    ))
+    fig.update_layout(
+        height=340,
+        margin=dict(t=40, b=70, l=40, r=40),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+    )
+    return fig
+
+
+def og_hourly_stack_fig(cat_totals: dict, shapes: dict):
+    """Off-Grid Step 5's "Perfil horario ilustrativo (IA)" stacked-area
+    chart — extracted verbatim from wizard/off_grid.py:
+    _render_demand_profile_block() (L556-579). `shapes`:
+    {category_key: [24 relative-intensity floats]} from
+    estimate_hourly_shape_illustrative(). A category present in
+    `cat_totals` but missing from `shapes` is skipped (same as the
+    Streamlit source's `if not weights: continue`)."""
+    import plotly.graph_objects as go
+
+    from calculations.load_profile_off_grid import CATEGORY_LABELS_ES
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    colors = {
+        "fixed_cycling": BRAND_GREEN,
+        "behavior_driven": BRAND_NAVY,
+        "climate_driven": "#1d4ed8",
+        "discretionary": "#b45309",
+        "ignition_only": "#6b7280",
+        "appliance": "#7c3aed",
+    }
+
+    hours = list(range(24))
+    fig = go.Figure()
+    for cat, kwh_day in cat_totals.items():
+        weights = shapes.get(cat)
+        if not weights:
+            continue
+        total_w = sum(weights) or 1
+        values = [kwh_day * w / total_w for w in weights]
+        fig.add_trace(go.Scatter(
+            x=hours, y=values, mode="lines", stackgroup="one",
+            name=CATEGORY_LABELS_ES.get(cat, cat),
+            line=dict(width=0.5, color=colors.get(cat, "#9ca3af")),
+            fillcolor=colors.get(cat, "#9ca3af"),
+        ))
+    fig.update_layout(
+        xaxis=dict(title="Hora del día", tickmode="linear", tick0=0, dtick=2),
+        yaxis_title="kWh (ilustrativo)",
+        height=280,
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
 def fig_to_fragment(fig) -> str:
     """Shared to_html() call so every route renders charts with the exact
     same config (no mode bar, no per-fragment plotly.js copy) — see module
