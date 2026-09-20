@@ -1,0 +1,16 @@
+{# Hybrid Step 4 — main-panel "bill" mode: avg kWh/mes + the estimated
+   current bill caption (simpler than a full loads table — just two
+   numeric-ish fields, per wizard/hybrid.py's own
+   `_render_main_panel_bill_block()`, minus its optional bill-PDF-upload
+   shortcut — an explicit, disclosed scope simplification, not silently
+   dropped; see hy_s4_loads.py's module docstring). Root id "s4hmp-bill". #}
+<div id="s4hmp-bill">
+  <label class="flabel">Consumo promedio mensual del tablero principal (kWh) *</label>
+  <input class="finput" type="number" min="0" step="10" name="mp_avg_kwh_month" style="max-width:220px;"
+         value="{{ mp_bill.avg_kwh_month }}"
+         hx-post="{{ url_for('wizard.paso4h_mp_bill', vid=vid) }}" hx-trigger="change delay:400ms"
+         hx-target="#s4hmp-bill" hx-swap="outerHTML">
+  {% if mp_bill.current_bill_crc is not none %}
+    <p class="card-note-sm">Factura estimada actual (sin solar): ₡{{ '{:,.0f}'.format(mp_bill.current_bill_crc) }}/mes</p>
+  {% endif %}
+</div>

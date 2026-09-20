@@ -615,6 +615,22 @@ def build_from_wizard_blob(
     battery_warranty = (equipment.get("battery") or {}).get("warranty_yr", 10)
     sys_labels   = {"grid_zero": "Grid Zero", "off_grid": "Off-Grid", "hybrid": "Híbrido"}
 
+    # Hybrid's AC-coupling disclosure (PLAN §1.10 item 19), verbatim from
+    # wizard/hybrid.py:step8_review(), which appends this to
+    # session_state["wizard_proposal_text"] on every Step 8 render (even an
+    # empty intro) before Streamlit's list page generates a PDF from it.
+    # webapp/blueprints/wizard.py's paso8_intro_generar only appends it when
+    # "Generar con IA" is clicked -- this mirrors it here too so a Hybrid PDF
+    # carries the note even from a manually-typed or never-regenerated intro,
+    # matching Streamlit's "every render" behavior for the artifact that
+    # actually matters. Same idempotency rule: never duplicate.
+    _proposal_text = blob.get("proposal_text", "") or ""
+    if system_type == "hybrid":
+        from wizard.hybrid import _AC_COUPLING_NOTE_ES, _AC_COUPLING_NOTE_EN
+        _note = _AC_COUPLING_NOTE_ES if language == "es" else _AC_COUPLING_NOTE_EN
+        if _note not in _proposal_text:
+            _proposal_text = (_proposal_text + "\n\n" + _note).strip()
+
     return {
         "date":              version_date or _dt.today().strftime("%d/%m/%Y"),
         "quote_number":      quote_str,
@@ -632,7 +648,7 @@ def build_from_wizard_blob(
             "nise":     client_data.get("nise") or "N/A",
         },
         "system_type_label": sys_labels.get(proposal.get("system_type", "grid_zero"), "Grid Zero"),
-        "intro_lines":       [blob.get("proposal_text", "")] if blob.get("proposal_text") else [],
+        "intro_lines":       [_proposal_text] if _proposal_text else [],
         "billing_avg":       billing_avg,
         "benefits":          benefits,
         "benefits_notes_es": "No se considera la entrega de excedentes de energía a la red eléctrica.",

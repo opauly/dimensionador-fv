@@ -304,7 +304,18 @@ def _compute(blob: dict, vid: str | None = None) -> dict:
     s6 = _s6og(blob)
     consumption = blob.get("consumption") or {}
     site = blob.get("site") or {}
-    utility = blob.get("utility") or {}
+    # Hybrid fix (Phase 20 Step 9): the real Streamlit source
+    # (wizard/off_grid.py:step6_equipment() L907/L926, shared by Hybrid via
+    # wizard/hybrid.py's step6_equipment() = off_grid.step6_equipment())
+    # reads `consumption["utility"]` for the hybrid-savings tariff — Hybrid's
+    # own Step 4 (hy_s4_loads.py) nests the distributor/tariff dict INSIDE
+    # `consumption.utility`, never in the durable top-level `utility` section
+    # (that section stays Grid-Zero-owned/empty for every Off-Grid/Hybrid
+    # draft — see wizard/state.py:autosave()). Reading `blob["utility"]`
+    # here would always see `{}` for a real Hybrid draft, silently disabling
+    # every hybrid_savings_enabled branch below. Off-Grid drafts never set
+    # consumption.utility either way, so this is a no-op there.
+    utility = consumption.get("utility") or blob.get("utility") or {}
     profile = consumption.get("profile") or {}
 
     eq = _resolve_equipment(blob)
@@ -334,6 +345,28 @@ def _compute(blob: dict, vid: str | None = None) -> dict:
         else:
             whole_home_avg_kwh_month = daily_kwh * 30.4
         hybrid_savings_enabled = whole_home_avg_kwh_month > 0
+
+    if hybrid_savings_enabled:
+        # Hybrid fix (Phase 20 Step 9): the real Streamlit source's own
+        # `_render_utility_block()` (wizard/hybrid.py) embeds
+        # `"tiers": get_tariff_tiers(...)` directly into the dict it stores
+        # at `consumption["utility"]` — but this port's hy_s4_loads.py
+        # deliberately follows gz_s4_utility.py's own convention instead
+        # (never cache tiers in a persisted `utility` dict; fetch them fresh
+        # wherever a bill actually needs computing — see
+        # gz_s5_consumption.py's own `_tariff_info()`, reused verbatim here).
+        # Without this, `estimate_bill_crc()` inside
+        # `estimate_hybrid_savings_pct()` below silently sees an empty tiers
+        # list and returns just the access charge as "the whole bill" —
+        # confirmed empirically (₡1,745 instead of a real ~₡88,000 bill on a
+        # 900 kWh/month test draft) before this fix.
+        from webapp.wizard_steps.gz_s5_consumption import _tariff_info
+
+        tariff_info = _tariff_info(utility)
+        if tariff_info:
+            utility = {**utility, **tariff_info}
+        else:
+            hybrid_savings_enabled = False
 
     pvgis_daily_series, pvgis_daily_blob = _resolve_pvgis_daily(blob, vid)
     if pvgis_daily_blob:

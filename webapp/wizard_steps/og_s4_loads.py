@@ -170,26 +170,32 @@ def extract_text(blob: dict, scratch_key: str, text: str) -> dict:
 # synced to scratch would otherwise be silently overwritten by that swap.
 
 
-def update_table(blob: dict, scratch_key: str, form) -> dict:
+def update_table(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict:
+    """`row_prefix` (default "row", unchanged for Off-Grid's own caller)
+    lets Hybrid's Step 9 render this same table a second time on one page
+    (its main-panel instance, `scratch_key="mp"`) under a distinct
+    `<prefix>-N-*` form-field namespace ("mprow") — otherwise both tables'
+    row inputs would share the literal name "row-0-desc" etc. and collide
+    the moment Step 4's one Siguiente <form> submits both at once."""
     from webapp.wizard_steps.common import parse_rows
 
-    rows = parse_rows(form, "row", _ROW_FIELDS)
+    rows = parse_rows(form, row_prefix, _ROW_FIELDS)
     return {"loads_data": _rows_to_display(rows)}
 
 
-def add_row(blob: dict, scratch_key: str, form) -> dict:
+def add_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict:
     from webapp.wizard_steps.common import parse_rows
 
-    rows = parse_rows(form, "row", _ROW_FIELDS)
+    rows = parse_rows(form, row_prefix, _ROW_FIELDS)
     loads = _rows_to_display(rows)
     loads.append({"Descripción": "", "Cantidad": 1, "Potencia (kW)": 0.0, "Categoría": _CATEGORY_AUTO_LABEL})
     return {"loads_data": loads}
 
 
-def remove_row(blob: dict, scratch_key: str, form) -> dict:
+def remove_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict:
     from webapp.wizard_steps.common import parse_rows
 
-    rows = parse_rows(form, "row", _ROW_FIELDS)
+    rows = parse_rows(form, row_prefix, _ROW_FIELDS)
     loads = _rows_to_display(rows)
     idx = int(form.get("_row", -1) or -1)
     if 0 <= idx < len(loads):

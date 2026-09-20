@@ -1,0 +1,96 @@
+{# Hybrid Step 4 — main-panel loads block. Independent second instance of
+   og_s4_loads.py's cargas block (scratch_key "mp"), structurally identical
+   to _s4og_cargas.html but with distinct ids/routes and "mp_row-N-*" field
+   names (never "row-N-*") so this table's inputs never collide with the
+   critical-loads table's own when Step 4's one Siguiente <form> submits
+   both at once — see hy_s4_loads.py's module docstring. Root id must stay
+   "s4hmp-cargas". #}
+<div id="s4hmp-cargas">
+  {% if mp.error %}<p class="wiz-error">{{ mp.error }}</p>{% endif %}
+
+  <h5 style="font-size:13px;margin:10px 0 4px;">Cargas comunes</h5>
+  <p class="card-note-sm">Agrega cargas típicas desde el catálogo — potencia y categoría ya vienen precargadas, ambas editables después en la tabla final.</p>
+  <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+    <select class="finput" name="picks" multiple size="6" style="max-width:420px;" id="s4hmp-catalog-pick">
+      {% for label in mp.catalog_options %}<option value="{{ label }}">{{ label }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="button"
+            hx-post="{{ url_for('wizard.paso4h_mp_catalogo', vid=vid) }}"
+            hx-include="#s4hmp-catalog-pick"
+            hx-target="#s4hmp-cargas" hx-swap="outerHTML">+ Agregar</button>
+  </div>
+
+  <hr>
+  <h5 style="font-size:13px;margin:10px 0 4px;">Importar desde tablero eléctrico</h5>
+  <details>
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Imagen o PDF del tablero</summary>
+    <p class="card-note-sm">Sube una imagen o PDF del tablero eléctrico. La IA extrae nombre, cantidad y potencia nominal, y clasifica cada carga en una de las 5 categorías (editable abajo) — no estima horas de uso.</p>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <input id="s4hmp-tablero-file" class="finput" type="file" name="file" accept="image/jpeg,image/png,application/pdf" style="max-width:340px;">
+      <button class="btn" type="button"
+              hx-post="{{ url_for('wizard.paso4h_mp_tablero_extraer', vid=vid) }}"
+              hx-include="#s4hmp-tablero-file" hx-encoding="multipart/form-data"
+              hx-target="#s4hmp-cargas" hx-swap="outerHTML"
+              hx-indicator="#s4hmp-tablero-spin" hx-disabled-elt="this">
+        Extraer cargas del tablero
+      </button>
+      <span id="s4hmp-tablero-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Analizando tablero con IA…</span>
+    </div>
+  </details>
+
+  <hr>
+  <h5 style="font-size:13px;margin:10px 0 4px;">Pegar tabla de cargas (texto)</h5>
+  <details>
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Texto copiado de Excel/Word/diseño existente</summary>
+    <p class="card-note-sm">Pega una tabla copiada de Excel, Word o un diseño eléctrico existente. Cualquier columna de "factor de demanda" presente en el texto se ignora — este dimensionador calcula sus propios factores de demanda por categoría en el Paso 5.</p>
+    <textarea id="s4hmp-paste-text" class="finput" name="pasted_text" rows="6" style="font-family:monospace;font-size:12px;"
+              placeholder="Circuito&#9;Descripción&#9;Potencia de diseño (W)&#9;Factor de demanda&#9;..."></textarea>
+    <button class="btn" type="button" style="margin-top:8px;"
+            hx-post="{{ url_for('wizard.paso4h_mp_texto_extraer', vid=vid) }}"
+            hx-include="#s4hmp-paste-text"
+            hx-target="#s4hmp-cargas" hx-swap="outerHTML"
+            hx-indicator="#s4hmp-texto-spin" hx-disabled-elt="this">
+      Extraer cargas del texto
+    </button>
+    <span id="s4hmp-texto-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Analizando texto con IA…</span>
+  </details>
+
+  <hr>
+  <h5 style="font-size:13px;margin:10px 0 4px;">Lista de cargas</h5>
+  <p class="card-note-sm">Ingresa, revisa o ajusta cada carga — nombre, cantidad, potencia nominal y categoría. El sistema estima horas de uso y factor de demanda según el tipo de carga; ambos son editables en el Paso 5.</p>
+  <div id="s4hmp-loads-rows"
+       hx-post="{{ url_for('wizard.paso4h_mp_cargas_tabla', vid=vid) }}" hx-trigger="change delay:400ms"
+       hx-include="#s4hmp-loads-rows input, #s4hmp-loads-rows select" hx-target="#s4hmp-cargas" hx-swap="outerHTML">
+    <div class="dtable-wrap">
+      <table class="dtable">
+        <thead><tr><td>Descripción</td><td>Cantidad</td><td>Potencia (kW)</td><td>Categoría</td><td></td></tr></thead>
+        <tbody>
+          {% for row in mp.loads_data %}
+          <tr>
+            <td><input class="finput" type="text" name="mp_row-{{ loop.index0 }}-desc" value="{{ row['Descripción'] }}"></td>
+            <td><input class="finput" type="number" min="1" step="1" name="mp_row-{{ loop.index0 }}-qty" value="{{ row['Cantidad'] }}"></td>
+            <td><input class="finput" type="number" min="0" step="0.01" name="mp_row-{{ loop.index0 }}-kw" value="{{ row['Potencia (kW)'] }}"></td>
+            <td>
+              <select class="finput" name="mp_row-{{ loop.index0 }}-cat">
+                {% for key, label in mp.category_options %}
+                <option value="{{ key }}" {{ 'selected' if row['Categoría'] == label else '' }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>
+              <button class="btn btn-outline" type="button" title="Quitar fila"
+                      hx-post="{{ url_for('wizard.paso4h_mp_cargas_fila_quitar', vid=vid) }}"
+                      hx-include="#s4hmp-loads-rows input, #s4hmp-loads-rows select" hx-vals='{"_row": "{{ loop.index0 }}"}'
+                      hx-target="#s4hmp-cargas" hx-swap="outerHTML">✕</button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <button class="btn btn-outline" type="button" style="margin-top:8px;"
+          hx-post="{{ url_for('wizard.paso4h_mp_cargas_fila', vid=vid) }}"
+          hx-include="#s4hmp-loads-rows input, #s4hmp-loads-rows select"
+          hx-target="#s4hmp-cargas" hx-swap="outerHTML">+ Fila</button>
+</div>

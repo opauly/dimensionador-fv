@@ -1,0 +1,66 @@
+{# Hybrid Step 4 — everything below the grid_connected checkbox: utility
+   block (if connected), critical loads (og_s4_loads.py's own block,
+   reused verbatim), panel-scope radio + main-panel block (if connected and
+   secondary). Re-rendered wholesale on grid_connected/panel_scope/mp_mode
+   changes (PLAN §1.3 — a fresh hy_s4_loads.build_context() call every
+   time), mirroring _s6_equipos.html's own "swap one fragment for every
+   action" precedent. Root id must stay "s4h-body". #}
+<div id="s4h-body">
+  {% if grid_connected %}
+  <hr>
+  <h4 class="section-title" style="font-size:15px;">Distribuidora y tarifa</h4>
+  <p class="card-note-sm">Necesaria para estimar la factura eléctrica y la reducción esperada (Paso 6).</p>
+  {% include "wizard/_s4h_utility.html" %}
+  {% endif %}
+
+  <hr>
+  <h4 class="section-title" style="font-size:15px;">Cargas críticas (respaldo)</h4>
+  <p class="card-note-sm">Las cargas que este sistema debe mantener energizadas durante un corte — dimensionan la batería y el arreglo para autonomía real, simulada día por día (Paso 6).</p>
+  {% include "wizard/_s4og_cargas.html" %}
+
+  {% if grid_connected %}
+  <hr>
+  <h4 class="section-title" style="font-size:15px;">Alcance de las cargas ingresadas</h4>
+  <p class="card-note-sm">¿Las cargas críticas de arriba representan todo el consumo del sitio, o son solo un subconjunto respaldado por batería, con un tablero principal aparte que también consume de la red?</p>
+  <div>
+    {% for key, label in panel_scope_labels.items() %}
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:6px;">
+      <input type="radio" name="panel_scope" value="{{ key }}" {{ 'checked' if panel_scope == key else '' }}
+             hx-post="{{ url_for('wizard.paso4h_scope', vid=vid) }}" hx-trigger="change"
+             hx-target="#s4h-body" hx-swap="outerHTML">
+      {{ label }}
+    </label>
+    {% endfor %}
+  </div>
+
+  {% if show_main_panel %}
+  <div class="card" style="border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:10px;">
+    <p class="card-note-sm">
+      <b>Consumo del tablero principal</b> — independiente de las cargas críticas de arriba. El
+      excedente solar (después de cubrir las cargas críticas y recargar la batería) se acopla en
+      AC hacia este tablero; esto estima cuánto de esa energía realmente reduce la factura.
+    </p>
+
+    <label class="flabel">¿Cómo quieres ingresar el consumo del tablero principal?</label>
+    <div style="display:flex;gap:16px;margin:6px 0 12px;">
+      {% for key, label in mp_mode_labels.items() %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+        <input type="radio" name="mp_mode" value="{{ key }}" {{ 'checked' if mp_mode == key else '' }}
+               hx-post="{{ url_for('wizard.paso4h_mp_modo', vid=vid) }}" hx-trigger="change"
+               hx-target="#s4h-body" hx-swap="outerHTML">
+        {{ label }}
+      </label>
+      {% endfor %}
+    </div>
+
+    {% if mp_mode == 'loads' %}
+      <h5 style="font-size:13px;margin:10px 0 4px;">Cargas del tablero principal</h5>
+      <p class="card-note-sm">Mismo método que las cargas críticas de arriba, pero para un tablero distinto — útil cuando el sitio aún no tiene factura (p. ej. una casa no construida, solo con planos eléctricos).</p>
+      {% include "wizard/_s4h_mp_cargas.html" %}
+    {% else %}
+      {% include "wizard/_s4h_mp_bill.html" %}
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>

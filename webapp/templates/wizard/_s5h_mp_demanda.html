@@ -1,0 +1,86 @@
+{# Hybrid Step 5 — main-panel demand profile block. Independent second
+   instance of og_s5_demand.py's block (scratch key "mp"), category chart
+   ON / hourly chart OFF (PLAN §1.10 item 19) — so, unlike
+   _s5og_demanda.html, this fragment has no hourly-shape button/include at
+   all. Root id must stay "s5hmp-demanda".
+
+   Row inputs reuse the literal "line-N-hd"/"line-N-fd" names
+   og_s5_demand.py's own recalculate() hard-codes (NOT a distinct
+   "mp_line" prefix, unlike Step 4's loads tables) — safe here because
+   Recalcular's hx-include is scoped to #s5hmp-tabla-rows only and fires
+   its own isolated POST, never combined with the critical table's own
+   "line-N-*" inputs in one submission (Step 5's Siguiente reads from
+   `blob` scratch, not from a page-wide form, so there is no combined
+   submit to collide in the first place — unlike Step 4's one Siguiente
+   <form> covering both loads tables at once). #}
+<div id="s5hmp-demanda">
+  {% if mp.error %}<p class="wiz-error">{{ mp.error }}</p>{% endif %}
+
+  <button class="btn" type="button"
+          hx-post="{{ url_for('wizard.paso5h_mp_calcular', vid=vid) }}"
+          hx-target="#s5hmp-demanda" hx-swap="outerHTML"
+          hx-indicator="#s5hmp-calc-spin" hx-disabled-elt="this">
+    Calcular perfil de consumo
+  </button>
+  <span id="s5hmp-calc-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Clasificando cargas y calculando consumo diario…</span>
+
+  {% if not mp.profile %}
+    <p class="card-note-sm" style="margin-top:10px;">Haz clic en "Calcular perfil de consumo" para continuar.</p>
+  {% else %}
+    <div id="s5hmp-tabla-rows" style="margin-top:14px;">
+      <div class="dtable-wrap">
+        <table class="dtable">
+          <thead><tr>
+            <td>Carga</td><td>Categoría</td><td>Cant.</td><td>Horas/día</td><td>kWh/día</td>
+            <td>Factor demanda (%)</td><td>Energía (kWh/día)</td><td>Fuente</td><td>Detalle</td>
+          </tr></thead>
+          <tbody>
+            {% for row in mp.rows %}
+            <tr>
+              <td>{{ row.load_name }}</td>
+              <td>{{ row.category_label }}</td>
+              <td>{{ row.quantity }}</td>
+              <td>
+                <input class="finput" type="number" min="0" max="24" step="0.1" name="line-{{ loop.index0 }}-hd" value="{{ row.duty_hours_day }}"
+                       title="Cuando no se ajusta, muestra las horas equivalentes implícitas en el estimado de esa categoría — edítalo y usa 'Recalcular con cambios' para forzar kWh/día = potencia × horas × cantidad.">
+              </td>
+              <td>{{ row.kwh_day }}</td>
+              <td>
+                <input class="finput" type="number" min="0" max="150" step="1" name="line-{{ loop.index0 }}-fd" value="{{ row.factor_pct }}"
+                       title="Fracción de la potencia instalada de esta línea que se considera simultánea — usa 'Recalcular con cambios' para aplicarlo.">
+              </td>
+              <td title="kWh/día × Factor demanda — la energía diversificada de esta línea.">{{ row.energy_kwh_day }}</td>
+              <td><span style="color:{{ row.badge_color }};">{{ row.badge }}</span></td>
+              <td style="font-size:12px;color:var(--muted-2);">{{ row.detail }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <button class="btn btn-outline" type="button" style="margin-top:8px;"
+            hx-post="{{ url_for('wizard.paso5h_mp_recalcular', vid=vid) }}"
+            hx-include="#s5hmp-tabla-rows input" hx-target="#s5hmp-demanda" hx-swap="outerHTML"
+            hx-indicator="#s5hmp-recalc-spin" hx-disabled-elt="this">
+      Recalcular con cambios
+    </button>
+    <span id="s5hmp-recalc-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Recalculando…</span>
+
+    {% if mp.default_count %}
+      <p class="wiz-error" style="margin-top:10px;">⚠️ {{ mp.default_count }} línea(s) usan un estimado genérico — revísalas antes de continuar.</p>
+    {% endif %}
+
+    <div class="cards" style="grid-template-columns:1fr;margin-top:14px;max-width:460px;">
+      <div class="card-green">
+        <b>Consumo diario total estimado (tablero principal)</b><br>
+        <span class="card-value">{{ '{:,.2f}'.format(mp.total_kwh_day) }} kWh/día</span><br>
+        <span class="card-note-sm">Diversificado (× factor demanda): {{ '{:,.2f}'.format(mp.total_kwh_day_diversified) }} kWh/día.</span>
+      </div>
+    </div>
+
+    {% if mp.chart_html %}
+      <h5 style="font-size:13px;margin:14px 0 2px;">Consumo por categoría (tablero principal)</h5>
+      {{ mp.chart_html | safe }}
+    {% endif %}
+  {% endif %}
+</div>

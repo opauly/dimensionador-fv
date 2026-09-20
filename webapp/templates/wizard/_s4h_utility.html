@@ -1,0 +1,21 @@
+{# Hybrid Step 4 — distributor/tariff block. Distributor <select> here,
+   tariff <select> + fixed-charge caption delegated to Grid Zero's own
+   _s4_tarifa.html fragment (renamed vars via {% with %} so it needs no
+   changes) — same content wizard/hybrid.py's own `_render_utility_block()`
+   collects, minus NISE (Hybrid never carries one). #}
+<div>
+  <label class="flabel">Distribuidora *</label>
+  <select class="finput" name="distributor_id"
+          hx-get="{{ url_for('wizard.paso4h_distribuidor', vid=vid) }}"
+          hx-trigger="change" hx-target="#s4-tarifa" hx-swap="outerHTML">
+    {% for d in utility.distributors %}
+      <option value="{{ d.id }}" {{ 'selected' if d.id == utility.selected_dist_id else '' }}>{{ d.abbreviation }} — {{ d.name }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+{% with distributors=utility.distributors, selected_dist_id=utility.selected_dist_id,
+        tariff_types=utility.tariff_types, selected_tariff=utility.selected_tariff,
+        selected_tariff_id=utility.selected_tariff_id, fixed_charge_disclaimer=utility.fixed_charge_disclaimer %}
+{% include "wizard/_s4_tarifa.html" %}
+{% endwith %}

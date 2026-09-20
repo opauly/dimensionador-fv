@@ -1,0 +1,46 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=4) }}" id="s4h-form">
+  <p class="card-note-sm">Sistema Híbrido: conserva conexión a la red eléctrica además del banco de baterías.</p>
+
+  <div class="fgrid">
+    <div>
+      <label class="flabel">Días de autonomía: <span id="s4h-autonomy-val">{{ autonomy_days }}</span> días</label>
+      <input type="range" min="0.5" max="7" step="0.5" name="autonomy_days" value="{{ autonomy_days }}"
+             style="width:100%;"
+             oninput="document.getElementById('s4h-autonomy-val').textContent=this.value"
+             title="Días que el banco de baterías debe cubrir sin generación solar. Acepta medios días (p. ej. 0.5 para una cabaña de uso ocasional).">
+    </div>
+    <div>
+      <label class="flabel">Voltaje de salida requerido</label>
+      <div style="display:flex;gap:14px;margin-top:6px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <input type="radio" name="voltage" value="120" {{ 'checked' if voltage_v != 240 else '' }}> 120V
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <input type="radio" name="voltage" value="240" {{ 'checked' if voltage_v == 240 else '' }}> 120/240V (split-phase)
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <hr>
+  <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;">
+    <input type="checkbox" name="grid_connected" {{ 'checked' if grid_connected else '' }}
+           hx-post="{{ url_for('wizard.paso4h_grid', vid=vid) }}" hx-trigger="change"
+           hx-target="#s4h-body" hx-swap="outerHTML"
+           title="Desmarcar solo si, a pesar de ser híbrido, no habrá conexión activa a la red en este momento.">
+    Conexión a la red en el panel principal
+  </label>
+
+  {% include "wizard/_s4h_body.html" %}
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=4) }}">← Atrás</button>
+    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+  </div>
+  {% if not can_continue %}<p class="wiz-note">Agrega al menos una carga crítica para continuar.</p>{% endif %}
+</form>
+{% endblock %}

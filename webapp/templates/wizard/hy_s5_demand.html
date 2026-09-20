@@ -1,0 +1,31 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=5) }}" id="s5h-form">
+  <h5 style="font-size:13px;margin:4px 0 4px;">Cargas críticas (respaldo)</h5>
+  {% with error=critical.error, profile=critical.profile, rows=critical.rows, total_kwh_day=critical.total_kwh_day,
+          total_kwh_day_diversified=critical.total_kwh_day_diversified,
+          diversified_used_downstream=critical.diversified_used_downstream,
+          default_count=critical.default_count, chart_html=critical.chart_html,
+          show_category_chart=critical.show_category_chart, show_hourly_chart=critical.show_hourly_chart,
+          hourly_chart_html=critical.hourly_chart_html,
+          calc_url=url_for('wizard.paso5h_calcular', vid=vid), recalc_url=url_for('wizard.paso5h_recalcular', vid=vid) %}
+    {% include "wizard/_s5og_demanda.html" %}
+  {% endwith %}
+
+  {% if mp_loads_mode %}
+  <hr>
+  <h5 style="font-size:13px;margin:14px 0 4px;">Tablero principal</h5>
+  {% include "wizard/_s5h_mp_demanda.html" %}
+  {% endif %}
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=5) }}">← Atrás</button>
+    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+  </div>
+  {% if not can_continue %}
+    <p class="wiz-note">Calcula el perfil de consumo{{ ' (crítico y del tablero principal)' if mp_loads_mode else '' }} para continuar.</p>
+  {% endif %}
+</form>
+{% endblock %}

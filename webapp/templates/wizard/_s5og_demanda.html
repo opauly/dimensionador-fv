@@ -4,12 +4,20 @@
    fragment, so the table/badges/metric/donut can't drift apart. Root id
    must stay "s5og-demanda". Parameterized (build_context's own
    scratch_key/diversified_used_downstream/show_*_chart args) so Hybrid's
-   Step 9 can render the same block twice with different settings. #}
+   Step 9 can render the same block twice with different settings.
+
+   `calc_url`/`recalc_url` (optional, default to Off-Grid's own routes below)
+   let Hybrid's critical-loads instance point these two buttons at its own
+   routes (paso5h_calcular/paso5h_recalcular) instead — those call
+   og_s5_demand.build_context(..., diversified_used_downstream=True), which
+   this fragment has no way to bake into a hardcoded url_for() call. The
+   hourly-shape button (_s5og_horario.html) needs no such override — it's
+   scratch-key-scoped only, indifferent to diversified_used_downstream. #}
 <div id="s5og-demanda">
   {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
 
   <button class="btn" type="button"
-          hx-post="{{ url_for('wizard.paso5og_calcular', vid=vid) }}"
+          hx-post="{{ calc_url or url_for('wizard.paso5og_calcular', vid=vid) }}"
           hx-target="#s5og-demanda" hx-swap="outerHTML"
           hx-indicator="#s5og-calc-spin" hx-disabled-elt="this">
     Calcular perfil de consumo
@@ -53,7 +61,7 @@
       </div>
     </div>
     <button class="btn btn-outline" type="button" style="margin-top:8px;"
-            hx-post="{{ url_for('wizard.paso5og_recalcular', vid=vid) }}"
+            hx-post="{{ recalc_url or url_for('wizard.paso5og_recalcular', vid=vid) }}"
             hx-include="#s5og-tabla-rows input" hx-target="#s5og-demanda" hx-swap="outerHTML"
             hx-indicator="#s5og-recalc-spin" hx-disabled-elt="this">
       Recalcular con cambios

@@ -17,12 +17,13 @@ Step 2's POST just patches `meta` into that same row.
 Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
 three system types. Grid Zero's wizard is wired end to end (gz_s4_utility.py
 / gz_s5_consumption.py / gz_s6_equipment.py / gz_s7_costs.py /
-gz_s8_review.py — Phase 20 Steps 4-6). Off-Grid's wizard is now also wired
-end to end (og_s4_loads.py / og_s5_demand.py — Phase 20 Step 7;
-og_s6_equipment.py — Phase 20 Step 8a; og_s7_costs.py / og_s8_review.py —
-Phase 20 Step 8b, this build). Hybrid is a later phase-20 step and is not
-wired in yet — requesting one renders a plain "not built yet" placeholder
-rather than erroring, so manual exploration during review doesn't 500.
+gz_s8_review.py — Phase 20 Steps 4-6). Off-Grid's wizard is wired end to end
+(og_s4_loads.py / og_s5_demand.py — Phase 20 Step 7; og_s6_equipment.py —
+Phase 20 Step 8a; og_s7_costs.py / og_s8_review.py — Phase 20 Step 8b).
+Hybrid's own Steps 4-5 (hy_s4_loads.py / hy_s5_demand.py) are wired for
+Phase 20 Step 9; its Steps 6-8 delegate to the exact same Off-Grid module
+instances (og_s6_equipment.py / og_s7_costs.py / og_s8_review.py — not
+copies), matching wizard/hybrid.py L382-397's own delegation.
 STEP_MODULES/STEP_TEMPLATES are keyed by `{n: {system_type: module}}` with a
 "*" fallback for the shared steps, exactly mirroring PLAN §1.2's "single
 dispatch table keyed on meta.system_type".
@@ -44,6 +45,7 @@ from wizard import draft
 from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
+    hy_s4_loads, hy_s5_demand,
     og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review,
     s1_client, s2_type, s3_site,
 )
@@ -54,21 +56,25 @@ STEP_MODULES = {
     1: {"*": s1_client},
     2: {"*": s2_type},
     3: {"*": s3_site},
-    4: {"grid_zero": gz_s4_utility, "off_grid": og_s4_loads},
-    5: {"grid_zero": gz_s5_consumption, "off_grid": og_s5_demand},
-    6: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment},
-    7: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs},
-    8: {"grid_zero": gz_s8_review, "off_grid": og_s8_review},
+    4: {"grid_zero": gz_s4_utility, "off_grid": og_s4_loads, "hybrid": hy_s4_loads},
+    5: {"grid_zero": gz_s5_consumption, "off_grid": og_s5_demand, "hybrid": hy_s5_demand},
+    # Hybrid delegates steps 6-8 to the exact same Off-Grid module instances
+    # (not copies) — PLAN's own wording, wizard/hybrid.py L382-397's
+    # `step6_equipment()`/`step7_costs()` = `off_grid.step6_equipment()`/
+    # `off_grid.step7_costs()` verbatim.
+    6: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment, "hybrid": og_s6_equipment},
+    7: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs, "hybrid": og_s7_costs},
+    8: {"grid_zero": gz_s8_review, "off_grid": og_s8_review, "hybrid": og_s8_review},
 }
 STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
     2: {"*": "wizard/s2_type.html"},
     3: {"*": "wizard/s3_site.html"},
-    4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html"},
-    5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html"},
-    6: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html"},
-    7: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html"},
-    8: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html"},
+    4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html", "hybrid": "wizard/hy_s4_loads.html"},
+    5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html", "hybrid": "wizard/hy_s5_demand.html"},
+    6: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html", "hybrid": "wizard/og_s6_equipment.html"},
+    7: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html", "hybrid": "wizard/og_s7_costs.html"},
+    8: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html", "hybrid": "wizard/og_s8_review.html"},
 }
 
 
@@ -329,6 +335,12 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
+    elif n == 4 and _step_module(n, blob) is hy_s4_loads:
+        blob = draft.patch(vid, "consumption", hy_s4_loads.save_step(request.form))
+        ctx = hy_s4_loads.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
     elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
         blob = draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
         ctx = gz_s5_consumption.build_context(blob)
@@ -338,6 +350,12 @@ def paso_post(vid, n):
     elif n == 5 and _step_module(n, blob) is og_s5_demand:
         blob = draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
         ctx = og_s5_demand.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
+    elif n == 5 and _step_module(n, blob) is hy_s5_demand:
+        blob = draft.patch(vid, "consumption", hy_s5_demand.save_step(blob))
+        ctx = hy_s5_demand.build_context(blob)
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
@@ -402,10 +420,14 @@ def paso_atras(vid, n):
         draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
     elif n == 4 and _step_module(n, blob) is og_s4_loads:
         draft.patch(vid, "consumption", og_s4_loads.save_step(request.form))
+    elif n == 4 and _step_module(n, blob) is hy_s4_loads:
+        draft.patch(vid, "consumption", hy_s4_loads.save_step(request.form))
     elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
         draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
     elif n == 5 and _step_module(n, blob) is og_s5_demand:
         draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
+    elif n == 5 and _step_module(n, blob) is hy_s5_demand:
+        draft.patch(vid, "consumption", hy_s5_demand.save_step(blob))
     elif n == 7 and _step_module(n, blob) is gz_s7_costs:
         draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
     elif n == 7 and _step_module(n, blob) is og_s7_costs:
@@ -556,6 +578,173 @@ def paso4og_cargas_fila_quitar(vid):
     return _s4og_render(vid, blob)
 
 
+# ── Step 4 (Hybrid) actions — grid_connected toggle, distributor->tariff
+# hx-get, panel_scope toggle, main-panel mode toggle/bill field, and the
+# main-panel's own independent loads-table actions (scratch_key "mp",
+# "mp_row-N-*" field prefix — see hy_s4_loads.py's module docstring for why
+# a distinct prefix is required, not just a distinct scratch_key). The
+# critical (backup) loads table itself needs NO new routes here — it's
+# Off-Grid's own "s4og"-scratch block, reused verbatim via the paso4og_*
+# routes above, agnostic of system_type.
+
+
+def _s4h_body_render(vid: str, blob: dict):
+    ctx = hy_s4_loads.build_context(blob)
+    return render_template("wizard/_s4h_body.html", vid=vid, n=4, **ctx)
+
+
+@bp.route("/<vid>/paso/4/hy/red", methods=["POST"])
+def paso4h_grid(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    grid_connected = request.form.get("grid_connected") == "on"
+    blob = draft.patch(vid, "consumption", {"grid_connected": grid_connected})
+    return _s4h_body_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/distribuidor")
+def paso4h_distribuidor(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    distributor_id = request.args.get("distributor_id") or None
+    blob = draft.load(vid)
+    new_utility = hy_s4_loads.select_distributor(distributor_id)
+    blob = draft.patch(vid, "consumption", {"utility": new_utility})
+    ctx = hy_s4_loads.utility_context(blob)
+    return render_template("wizard/_s4_tarifa.html", vid=vid, n=4, **ctx)
+
+
+@bp.route("/<vid>/paso/4/hy/alcance", methods=["POST"])
+def paso4h_scope(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scope = request.form.get("panel_scope") or "primary"
+    if scope not in hy_s4_loads._PANEL_SCOPE_LABELS:
+        scope = "primary"
+    blob = draft.patch(vid, "consumption", {"panel_scope": scope})
+    return _s4h_body_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/modo", methods=["POST"])
+def paso4h_mp_modo(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    consumption = blob.get("consumption") or {}
+    main_panel = consumption.get("main_panel") or {}
+    mode = request.form.get("mp_mode") or "bill"
+    if mode not in hy_s4_loads._MAIN_PANEL_MODE_LABELS:
+        mode = "bill"
+    blob = draft.patch(vid, "consumption", {"main_panel": {**main_panel, "mode": mode}})
+    return _s4h_body_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/factura", methods=["POST"])
+def paso4h_mp_bill(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    consumption = blob.get("consumption") or {}
+    main_panel = consumption.get("main_panel") or {}
+    avg_kwh_month = step_common.to_float(request.form.get("mp_avg_kwh_month"), 0.0) or 0.0
+    new_main_panel = {**main_panel, "mode": "bill", "avg_kwh_month": float(avg_kwh_month)}
+    blob = draft.patch(vid, "consumption", {"main_panel": new_main_panel})
+    ctx = hy_s4_loads.mp_bill_context(blob)
+    return render_template("wizard/_s4h_mp_bill.html", vid=vid, n=4, mp_bill=ctx)
+
+
+def _s4hmp_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = hy_s4_loads.mp_loads_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s4h_mp_cargas.html", vid=vid, n=4, mp=ctx)
+
+
+def _s4hmp_patch(vid: str, new_sub: dict) -> dict:
+    return draft.patch(vid, "scratch", {hy_s4_loads.MP_SCRATCH_KEY: new_sub})
+
+
+@bp.route("/<vid>/paso/4/hy/mp/cargas/catalogo", methods=["POST"])
+def paso4h_mp_catalogo(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    picks = request.form.getlist("picks")
+    blob = _s4hmp_patch(vid, hy_s4_loads.mp_add_catalog_rows(blob, picks))
+    return _s4hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/tablero/extraer", methods=["POST"])
+def paso4h_mp_tablero_extraer(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return _s4hmp_render(vid, blob, error="Selecciona una imagen o PDF del tablero.")
+    try:
+        new_sub = hy_s4_loads.mp_extract_tablero(blob, uploaded.read(), uploaded.mimetype)
+    except Exception as exc:
+        return _s4hmp_render(vid, blob, error=f"Error al analizar el tablero: {exc}")
+    blob = _s4hmp_patch(vid, new_sub)
+    return _s4hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/texto/extraer", methods=["POST"])
+def paso4h_mp_texto_extraer(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    text = request.form.get("pasted_text", "")
+    if not text.strip():
+        return _s4hmp_render(vid, blob, error="Pega el texto de la tabla de cargas antes de extraer.")
+    try:
+        new_sub = hy_s4_loads.mp_extract_text(blob, text)
+    except Exception as exc:
+        return _s4hmp_render(vid, blob, error=f"Error al analizar el texto: {exc}")
+    blob = _s4hmp_patch(vid, new_sub)
+    return _s4hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/cargas/tabla", methods=["POST"])
+def paso4h_mp_cargas_tabla(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s4hmp_patch(vid, hy_s4_loads.mp_update_table(blob, request.form))
+    return _s4hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/cargas/fila", methods=["POST"])
+def paso4h_mp_cargas_fila(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s4hmp_patch(vid, hy_s4_loads.mp_add_row(blob, request.form))
+    return _s4hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/4/hy/mp/cargas/fila/quitar", methods=["POST"])
+def paso4h_mp_cargas_fila_quitar(vid):
+    guard = _guard(vid, 4)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s4hmp_patch(vid, hy_s4_loads.mp_remove_row(blob, request.form))
+    return _s4hmp_render(vid, blob)
+
+
 # ── Step 5 (Off-Grid) actions — calcular, recalcular (the user_confirmed
 # override rule, PLAN §1.10 item 1), illustrative hourly shape (§1.7's exact
 # route). Calcular/Recalcular re-render the WHOLE wizard/_s5og_demanda.html
@@ -609,6 +798,78 @@ def paso5og_horario(vid):
     blob = _s5og_patch(vid, scratch_key, og_s5_demand.generate_hourly_shape(blob, scratch_key))
     ctx = og_s5_demand.build_context(blob)
     return render_template("wizard/_s5og_horario.html", vid=vid, n=5, **ctx)
+
+
+# ── Step 5 (Hybrid) actions — critical-loads profile (og_s5_demand.py's own
+# scratch key "s5og", diversified_used_downstream=True — needs its own
+# routes distinct from paso5og_calcular/recalcular above because THOSE call
+# og_s5_demand.build_context(blob) with the default
+# diversified_used_downstream=False, and there is no way to bake a different
+# default into a hardcoded url_for() call inside a shared fragment; the
+# hourly-shape button, unaffected by that flag, stays on the shared
+# paso5og_horario route above unchanged) + the main-panel's own independent
+# profile block (scratch key "mp", category chart on / hourly chart off).
+
+
+def _s5h_critical_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = hy_s5_demand.critical_context(blob)
+    ctx["error"] = error
+    return render_template(
+        "wizard/_s5og_demanda.html", vid=vid, n=5,
+        calc_url=url_for("wizard.paso5h_calcular", vid=vid),
+        recalc_url=url_for("wizard.paso5h_recalcular", vid=vid),
+        **ctx,
+    )
+
+
+@bp.route("/<vid>/paso/5/hy/calcular", methods=["POST"])
+def paso5h_calcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = hy_s5_demand.CRITICAL_SCRATCH_KEY
+    blob = draft.patch(vid, "scratch", {scratch_key: og_s5_demand.calculate(blob, scratch_key)})
+    return _s5h_critical_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/hy/recalcular", methods=["POST"])
+def paso5h_recalcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    scratch_key = hy_s5_demand.CRITICAL_SCRATCH_KEY
+    blob = draft.patch(vid, "scratch", {scratch_key: og_s5_demand.recalculate(blob, scratch_key, request.form)})
+    return _s5h_critical_render(vid, blob)
+
+
+def _s5hmp_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = hy_s5_demand.mp_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s5h_mp_demanda.html", vid=vid, n=5, mp=ctx)
+
+
+@bp.route("/<vid>/paso/5/hy/mp/calcular", methods=["POST"])
+def paso5h_mp_calcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    new_sub = hy_s5_demand.mp_calculate(blob)
+    blob = draft.patch(vid, "scratch", {hy_s5_demand.MP_SCRATCH_KEY: new_sub})
+    return _s5hmp_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/5/hy/mp/recalcular", methods=["POST"])
+def paso5h_mp_recalcular(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    new_sub = hy_s5_demand.mp_recalculate(blob, request.form)
+    blob = draft.patch(vid, "scratch", {hy_s5_demand.MP_SCRATCH_KEY: new_sub})
+    return _s5hmp_render(vid, blob)
 
 
 # ── Step 5 (Grid Zero) actions — source switch, bill upload, tablero
@@ -987,6 +1248,36 @@ def paso7og_refrescar(vid):
 # generic (proposal_text/pdf_error/pdf_ready/locked/sent/pid/lock_error —
 # no Grid-Zero-specific field), so they render identically for either type.
 
+# Hybrid's AC-coupling disclosure (PLAN §1.10 item 19) — verbatim from
+# wizard/hybrid.py:step8_review()'s own `_AC_COUPLING_NOTE_ES`/`_EN` and its
+# exact idempotency rule (`if note not in current_text`). Lives here, not in
+# og_s8_review.py, because it's genuinely Hybrid-only and this route is the
+# one place Step 8 mutates `proposal_text` on Off-Grid/Grid Zero's behalf
+# too — see this route's own comment for why one dispatch table already
+# covers both system types.
+_AC_COUPLING_NOTE_ES = (
+    "Este sistema es híbrido: mantiene conexión a la red eléctrica además del banco de "
+    "baterías. El excedente solar no consumido en sitio ni almacenado en batería se "
+    "acopla en corriente alterna (AC) hacia la red — sin crédito por excedentes "
+    "(no hay medición neta)."
+)
+_AC_COUPLING_NOTE_EN = (
+    "This system is hybrid: it keeps a grid connection in addition to the battery "
+    "bank. Solar excess not consumed on-site or stored in the battery is AC-coupled "
+    "to the grid — no export credit (no net metering)."
+)
+
+
+def _with_ac_coupling_note(text: str, language: str) -> str:
+    """Idempotent append — calling this twice on the same text (e.g. the
+    intro is regenerated, or the PDF is generated a second time) must never
+    duplicate the note. PLAN's own explicit validation gate."""
+    note = _AC_COUPLING_NOTE_ES if language == "es" else _AC_COUPLING_NOTE_EN
+    text = text or ""
+    if note in text:
+        return text
+    return (text + "\n\n" + note).strip()
+
 
 @bp.route("/<vid>/paso/8/intro/generar", methods=["POST"])
 def paso8_intro_generar(vid):
@@ -996,6 +1287,9 @@ def paso8_intro_generar(vid):
     blob = draft.load(vid)
     module = _step_module(8, blob)
     text = module.generate_intro_text(blob, vid)
+    meta = blob.get("meta") or {}
+    if meta.get("system_type") == "hybrid":
+        text = _with_ac_coupling_note(text, meta.get("language", "es"))
     blob = draft.patch(vid, "proposal_text", text)
     ctx = module.build_context(blob, vid)
     return render_template("wizard/_s8_intro.html", vid=vid, n=8, **ctx)
