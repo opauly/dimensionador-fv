@@ -732,8 +732,14 @@ def upload_pdf(pdf_bytes: bytes, proposal_id: str, version_number: int, client_n
     Returns the storage path string.
     """
     from database.supabase_client import get_client
+    import unicodedata
     today = dt.today().strftime("%Y-%m-%d")
-    safe_name = client_name.replace(" ", "_")
+    # Storage keys must be ASCII-safe. Strip diacritics (á/é/í/ó/ú/ñ -> a/e/i/o/u/n
+    # via Unicode decomposition) before replacing spaces, or any client name with
+    # an accent -- most Costa Rican names, including "María José" -- produces an
+    # invalid key and the upload fails with a 400.
+    ascii_name = unicodedata.normalize("NFKD", client_name).encode("ascii", "ignore").decode("ascii")
+    safe_name = ascii_name.replace(" ", "_")
     path = f"proposals/{proposal_id}/v{version_number}_{today}_{safe_name}.pdf"
 
     client = get_client()
