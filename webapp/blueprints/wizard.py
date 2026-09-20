@@ -15,14 +15,15 @@ via create_prospect()/upsert_client() + create_proposal(). There is no
 Step 2's POST just patches `meta` into that same row.
 
 Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
-three system types. Steps 4-5 are wired for Grid Zero only so far
-(gz_s4_utility.py / gz_s5_consumption.py, Phase 20 Step 4 of the plan) —
-STEP_MODULES/STEP_TEMPLATES are keyed by `{n: {system_type: module}}` with a
-"*" fallback for the shared steps, exactly mirroring PLAN §1.2's "single
-dispatch table keyed on meta.system_type". Off-Grid/Hybrid steps 4+ and Grid
-Zero steps 6-8 are later phase-20 steps and are not wired in yet — requesting
-one renders a plain "not built yet" placeholder rather than erroring, so
-manual exploration during review doesn't 500.
+three system types. Steps 4-6 are wired for Grid Zero only so far
+(gz_s4_utility.py / gz_s5_consumption.py / gz_s6_equipment.py, Phase 20
+Steps 4-5 of the plan) — STEP_MODULES/STEP_TEMPLATES are keyed by
+`{n: {system_type: module}}` with a "*" fallback for the shared steps,
+exactly mirroring PLAN §1.2's "single dispatch table keyed on
+meta.system_type". Off-Grid/Hybrid steps 4+ and Grid Zero steps 7-8 are
+later phase-20 steps and are not wired in yet — requesting one renders a
+plain "not built yet" placeholder rather than erroring, so manual
+exploration during review doesn't 500.
 """
 from __future__ import annotations
 
@@ -30,7 +31,9 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from wizard import draft
 from webapp.wizard_steps import common as step_common
-from webapp.wizard_steps import gz_s4_utility, gz_s5_consumption, s1_client, s2_type, s3_site
+from webapp.wizard_steps import (
+    gz_s4_utility, gz_s5_consumption, gz_s6_equipment, s1_client, s2_type, s3_site,
+)
 
 bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
 
@@ -40,6 +43,7 @@ STEP_MODULES = {
     3: {"*": s3_site},
     4: {"grid_zero": gz_s4_utility},
     5: {"grid_zero": gz_s5_consumption},
+    6: {"grid_zero": gz_s6_equipment},
 }
 STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
@@ -47,6 +51,7 @@ STEP_TEMPLATES = {
     3: {"*": "wizard/s3_site.html"},
     4: {"grid_zero": "wizard/gz_s4_utility.html"},
     5: {"grid_zero": "wizard/gz_s5_consumption.html"},
+    6: {"grid_zero": "wizard/gz_s6_equipment.html"},
 }
 
 
@@ -298,6 +303,20 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
+    elif n == 6 and _step_module(n, blob) is gz_s6_equipment:
+        # Do-not-drop item 15's server-side half: save_step() returns None
+        # when neither a valid auto scenario nor a valid manual design
+        # exists, and that rejection is enforced here regardless of what the
+        # (client-side-disabled) Siguiente button in the browser looked like
+        # — a raw POST cannot bypass it.
+        result = gz_s6_equipment.save_step(blob)
+        if result is None:
+            return _render_step(
+                vid, n, blob,
+                error="Calcula los escenarios MPPT o configura un diseño manual válido para continuar.",
+            )
+        blob = draft.patch(vid, "equipment", result)
+
     else:
         return _render_step(vid, n, blob)
 
@@ -475,3 +494,71 @@ def paso5_tabla(vid):
     blob = draft.load(vid)
     blob = _s5_patch(vid, gz_s5_consumption.recompute_table(blob, request.form))
     return _s5_render(vid, blob)
+
+
+# ── Step 6 (Grid Zero) actions — equipment select, MPPT calc, scenario
+# select, manual mode select/live-validate. Every one of these patches
+# blob["scratch"]["s6"] and re-renders wizard/_s6_equipos.html from a fresh
+# gz_s6_equipment.build_context(blob) call (PLAN §1.3) — see that module's
+# own docstring for why this step in particular swaps ONE fragment for
+# every action rather than several narrower ones.
+
+
+def _s6_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = gz_s6_equipment.build_context(blob)
+    ctx["error"] = error
+    return render_template("wizard/_s6_equipos.html", vid=vid, n=6, **ctx)
+
+
+def _s6_patch(vid: str, new_s6: dict) -> dict:
+    return draft.patch(vid, "scratch", {"s6": new_s6})
+
+
+@bp.route("/<vid>/paso/6/equipo", methods=["POST"])
+def paso6_equipo(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6_patch(vid, gz_s6_equipment.select_equipment(blob, request.form))
+    return _s6_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/mppt/calcular", methods=["POST"])
+def paso6_mppt_calcular(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6_patch(vid, gz_s6_equipment.calc_mppt(blob))
+    return _s6_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/escenario/<label>", methods=["POST"])
+def paso6_escenario(vid, label):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6_patch(vid, gz_s6_equipment.select_scenario(blob, label))
+    return _s6_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/manual", methods=["POST"])
+def paso6_manual(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6_patch(vid, gz_s6_equipment.select_manual(blob))
+    return _s6_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/manual/validar", methods=["POST"])
+def paso6_manual_validar(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6_patch(vid, gz_s6_equipment.validate_manual(blob, request.form))
+    return _s6_render(vid, blob)

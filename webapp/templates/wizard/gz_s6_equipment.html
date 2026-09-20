@@ -1,0 +1,6 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=6) }}" id="s6-form">
+  {% include "wizard/_s6_equipos.html" %}
+</form>
+{% endblock %}

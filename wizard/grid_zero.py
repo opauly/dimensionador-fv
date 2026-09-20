@@ -546,45 +546,12 @@ def _mppt_param_row(label: str, value: str, ok: bool, limit_str: str) -> None:
     )
 
 
-def _estimate_daytime_fraction_ai(loads: list[dict], location: str) -> tuple[float, str]:
-    """
-    Call Claude Haiku to estimate the fraction of daily consumption that
-    occurs during solar-production hours (roughly 7 am – 5 pm).
-
-    Returns (daytime_fraction, explanatory_note).
-    Falls back to 0.45 if the AI call fails.
-    """
-    import os, json
-    try:
-        import anthropic
-        loads_text = json.dumps(loads, ensure_ascii=False) if loads else "No hay datos de cargas disponibles."
-        prompt = (
-            "Eres un ingeniero solar en Costa Rica. Analiza el perfil de cargas eléctricas de este proyecto "
-            f"y estima qué fracción del consumo total ocurre durante las horas de producción solar (7:00–17:00).\n\n"
-            f"Ubicación: {location}\n"
-            f"Cargas instaladas (JSON):\n{loads_text}\n\n"
-            "Considera: uso diurno de electrodomésticos, AC, bombas de agua, iluminación, etc. "
-            "Considera que la noche, la madrugada y días nublados también consumen energía de la red.\n\n"
-            "Responde SOLO con JSON (sin markdown):\n"
-            '{"daytime_fraction": 0.48, "note": "El perfil tiene uso significativo de AC y bomba de agua durante el día..."}'
-        )
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=256,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = resp.content[0].text.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            text = parts[1].lstrip("json").strip() if len(parts) > 1 else text
-        data = json.loads(text)
-        fraction = float(data.get("daytime_fraction") or 0.45)
-        fraction = max(0.1, min(0.9, fraction))
-        note = str(data.get("note") or "")
-        return fraction, note
-    except Exception:
-        return 0.45, ""
+# Moved verbatim to ai/daytime_fraction.py (Phase 20 Step 5, PLAN §1.7/§1.9) —
+# a Flask blueprint must not hold a prompt directly, and this was the one
+# prompt still living outside ai/. Re-imported here under its old private
+# name so every call site below (`_estimate_daytime_fraction_ai(...)`) is
+# unchanged and `main`'s behaviour is identical.
+from ai.daytime_fraction import estimate_daytime_fraction_ai as _estimate_daytime_fraction_ai
 
 
 def _scenario_projection(

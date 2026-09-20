@@ -1,0 +1,339 @@
+{# Grid Zero Step 6 — the whole "Equipos" screen in one swappable region.
+   Every action route (equipment select, MPPT calc, scenario select, manual
+   select/validate) re-renders this ENTIRE fragment from a fresh
+   gz_s6_equipment.build_context() call — see that module's docstring for
+   why a step this dense swaps one region instead of several narrower ones.
+   Root id must stay "s6-equipos". #}
+<div id="s6-equipos">
+{% if no_catalog %}
+  <p class="wiz-error">No hay equipos en el catálogo. Contacta al administrador.</p>
+{% else %}
+<style>
+.s6-spec { background:{{ '#E8F5EE' }}; border-radius:6px; padding:0.6rem 1rem; font-size:0.85rem; line-height:1.8; margin-top:8px; }
+.s6-sel-btn { display:block; width:100%; text-align:left; background:#fff; border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:0.82rem; font-weight:600; color:var(--navy); cursor:pointer; margin-bottom:6px; }
+.s6-sel-btn:hover { background:var(--header-bg); }
+.s6-invalid-note { font-size:0.8rem; color:#9ca3af; padding:0.3rem 0; margin-bottom:6px; }
+.s6-card { border:2px solid #d1d5db; border-radius:8px; padding:0.65rem 0.8rem; background:#f9fafb; font-size:0.82rem; line-height:1.9; }
+.s6-card.sel { border-color:#4BAE6A; background:#E8F5EE; }
+.s6-card.manual-sel { border-color:#6366f1; background:#f5f3ff; }
+.s6-card-title { font-weight:700; font-size:0.88rem; color:#1E2D54; margin-bottom:0.2rem; }
+.s6-card-desc { font-size:0.72rem; color:#6b7280; margin-bottom:0.4rem; }
+.s6-chips { display:flex; gap:0.5rem; flex-wrap:wrap; margin:0.4rem 0 0.7rem; }
+.s6-chip { background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; padding:2px 9px; font-size:0.8rem; }
+.s6-param-row { display:grid; grid-template-columns:44% 28% 28%; align-items:center; border-radius:4px; padding:3px 10px; margin-bottom:3px; font-size:0.83rem; }
+.s6-param-row.ok { background:#f0fdf4; border:1px solid #86efac; color:#166534; }
+.s6-param-row.bad { background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; }
+.s6-param-row span:nth-child(2) { text-align:center; }
+.s6-param-row span:nth-child(3) { color:#6b7280; font-size:0.75rem; text-align:right; }
+.s6-banner { border-radius:6px; padding:0.6rem 0.9rem; margin-bottom:0.6rem; font-weight:700; color:#1E2D54; }
+.s6-banner.ok { background:#f0fdf4; border-left:4px solid #16a34a; }
+.s6-banner.bad { background:#fef2f2; border-left:4px solid #dc2626; }
+.s6-metric { border:1px solid #e5e7eb; border-radius:8px; padding:0.7rem 0.9rem; margin-bottom:0.5rem; min-height:5.5rem; }
+.s6-metric-label { font-size:0.78rem; color:#6b7280; }
+.s6-metric-value { font-size:1.4rem; font-weight:700; color:#1E2D54; margin-top:1pt; }
+</style>
+
+{% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+<h4 class="section-title" style="font-size:15px;margin-top:0;">Selección de equipos</h4>
+<div class="fgrid">
+  <div>
+    <label class="flabel">Panel solar *</label>
+    <select class="finput" name="panel_id" hx-include="#s6-form"
+            hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
+            hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
+      {% for p in panels %}
+        <option value="{{ p.id }}" {{ 'selected' if p.id == selected_panel.id else '' }}>{{ p.brand }} {{ p.model }} — {{ p.wp }}W</option>
+      {% endfor %}
+    </select>
+    <div class="s6-spec">
+      <b>{{ selected_panel.brand }} {{ selected_panel.model }}</b><br>
+      Voc: {{ selected_panel.voc }} V<br>
+      Vmp: {{ selected_panel.vmp }} V<br>
+      Isc: {{ selected_panel.isc }} A<br>
+      Imp: {{ selected_panel.imp }} A<br>
+      Área: {{ '%.2f'|format(area_panel) }} m²<br>
+      Garantía producto: {{ selected_panel.warranty_product_yr or '—' }} años<br>
+      Garantía potencia: {{ selected_panel.warranty_power_yr or '—' }} años
+    </div>
+  </div>
+  <div>
+    <label class="flabel">Inversor *</label>
+    <select class="finput" name="inverter_id" hx-include="#s6-form"
+            hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
+            hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
+      {% for inv in inverters %}
+        <option value="{{ inv.id }}" {{ 'selected' if inv.id == selected_inverter.id else '' }}>{{ inv.brand }} {{ inv.model }} — {{ inv.kw }} kW</option>
+      {% endfor %}
+    </select>
+    <div class="s6-spec">
+      <b>{{ selected_inverter.brand }} {{ selected_inverter.model }}</b><br>
+      Vmax: {{ selected_inverter.vmax or '—' }} V<br>
+      MPPT: {{ selected_inverter.vmin_mppt or '—' }}–{{ selected_inverter.vmax_mppt or '—' }} V<br>
+      Imax MPPT: {{ selected_inverter.imax_mppt or '—' }} A<br>
+      Canales MPPT: {{ selected_inverter.mppt_channels or '—' }}<br>
+      Garantía: {{ selected_inverter.warranty_yr or '—' }} años
+    </div>
+  </div>
+</div>
+
+<div style="max-width:340px;margin-top:12px;">
+  <label class="flabel">Sistema de monitoreo (opcional)</label>
+  <select class="finput" name="monitoring_id" hx-include="#s6-form"
+          hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
+          hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
+    <option value="" {{ 'selected' if not selected_monitoring else '' }}>— Sin monitoreo —</option>
+    {% for m in monitoring_devices %}
+      <option value="{{ m.id }}" {{ 'selected' if selected_monitoring and m.id == selected_monitoring.id else '' }}>{{ m.brand }} {{ m.model }}</option>
+    {% endfor %}
+  </select>
+  {% if selected_monitoring %}
+  <div class="s6-spec">
+    <b>{{ selected_monitoring.brand }} {{ selected_monitoring.model }}</b><br>
+    Compatible con: {{ selected_monitoring.compatible_with or '—' }}
+  </div>
+  {% endif %}
+</div>
+
+<hr>
+<h4 class="section-title" style="font-size:15px;">Opción 1 — Configuración automática</h4>
+<p class="card-note-sm">El sistema calcula y propone tres configuraciones MPPT basadas en tu consumo y equipo seleccionado.</p>
+<button class="btn" type="button"
+        hx-post="{{ url_for('wizard.paso6_mppt_calcular', vid=vid) }}"
+        hx-target="#s6-equipos" hx-swap="outerHTML"
+        hx-indicator="#s6-calc-spin" hx-disabled-elt="this">
+  Calcular configuración MPPT
+</button>
+<span id="s6-calc-spin" class="htmx-indicator" style="margin-left:8px;color:var(--muted);font-size:13px;">Estimando autoconsumo con IA…</span>
+
+{% if scenarios %}
+  <div class="dtable-wrap" style="margin-top:14px;">
+    <table class="dtable">
+      <thead><tr>
+        <td>Escenario</td><td>Paneles/string</td><td>Strings</td><td>Total paneles</td>
+        <td>Sistema (kW)</td><td>Área (m²)</td><td>Voc total (V)</td><td>Vmp total (V)</td>
+        <td>Aprov. solar</td><td>Estado</td><td>Notas</td>
+      </tr></thead>
+      <tbody>
+        {% for row in scenario_rows %}
+        <tr>
+          <td>Escenario {{ row.escenario }}</td>
+          <td>{{ row.panels_per_string }}</td>
+          <td>{{ row.strings }}</td>
+          <td>{{ row.total_panels }}</td>
+          <td>{{ row.system_kw }}</td>
+          <td>{{ row.area_m2 }}</td>
+          <td>{{ row.voc_total }}</td>
+          <td>{{ row.vmp_total }}</td>
+          <td>{{ row.self_consumption_pct }}%</td>
+          <td>{{ '✅' if row.within_limits else '⚠️' }}</td>
+          <td>{{ row.notes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if valid_scenarios_count == 0 %}
+    <p class="wiz-error" style="margin-top:10px;">Ningún escenario es válido con este par panel/inversor.</p>
+  {% else %}
+    <div style="display:grid;grid-template-columns:repeat({{ scenario_cards|length }},1fr);gap:12px;margin-top:14px;">
+      {% for c in scenario_cards %}
+      <div>
+        {% if c.is_valid %}
+          <button type="button" class="s6-sel-btn"
+                  hx-post="{{ url_for('wizard.paso6_escenario', vid=vid, label=c.scenario.scenario) }}"
+                  hx-target="#s6-equipos" hx-swap="outerHTML">
+            {{ '●' if c.is_selected else '○' }} Escenario {{ c.scenario.scenario }} — {{ c.scenario.total_panels }} paneles ({{ c.scenario.system_kw }} kW)
+          </button>
+        {% else %}
+          <div class="s6-invalid-note">⚠️ Escenario {{ c.scenario.scenario }} — fuera de límites</div>
+        {% endif %}
+        <div class="s6-card {{ 'sel' if c.is_selected else '' }}">
+          <div class="s6-card-title">Escenario {{ c.scenario.scenario }} · {{ c.scenario.system_kw }} kW</div>
+          <div class="s6-card-desc">{{ '✅' if c.is_valid else '⚠️' }} {{ c.scenario.description }}</div>
+          🔆 Generación: <b>{{ '{:,}'.format(c.proj.gen) }} kWh/mes</b><br>
+          📊 Cobertura: <b>{{ c.proj.coverage }}%</b><br>
+          🌙 Red (noches+nublados): <b>{{ '{:,}'.format(c.proj.grid_kwh) }} kWh/mes</b><br>
+          {% if c.proj.curtailed > 0 %}
+            <span style="color:#92400e;">✂ Recorte solar: <b>{{ '{:,}'.format(c.proj.curtailed) }} kWh/mes</b></span><br>
+          {% else %}
+            <span style="color:#166534;font-size:0.75rem;">✓ Sin recorte solar</span><br>
+          {% endif %}
+          {% if c.proj.new_bill is not none %}💳 Factura est.: <b>₡{{ '{:,}'.format(c.proj.new_bill) }}/mes</b><br>{% endif %}
+          {% if c.proj.savings is not none %}<span style="color:#166534;">💰 Ahorro/mes: <b>₡{{ '{:,}'.format(c.proj.savings) }}</b></span><br>{% endif %}
+          <span style="color:#1d4ed8;">⚡ Autoconsumo: <b>{{ c.proj.self_consumption_pct }}%</b></span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if all_saturated %}
+      <p class="wiz-error" style="margin-top:10px;">
+        ⚠️ Los tres escenarios generan más que el consumo diurno estimado ({{ '{:,}'.format(daytime_kwh|round|int) }} kWh/mes),
+        por lo que la factura estimada es igual en todos. Tamaño óptimo sin recorte para este perfil de cargas:
+        <b>≈ {{ optimal_kw if optimal_kw is not none else '—' }} kW</b>. Recalcula MPPT para ver escenarios ajustados.
+      </p>
+    {% endif %}
+    <p style="margin-top:8px;">
+      {% for part in note_parts %}
+        <span style="font-size:0.73rem;color:#6b7280;">{{ part }}</span>{% if not loop.last %} &nbsp;·&nbsp; {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+{% else %}
+  <p class="card-note-sm" style="margin-top:10px;">Haz clic en "Calcular configuración MPPT" para ver los escenarios.</p>
+{% endif %}
+
+<hr>
+<h4 class="section-title" style="font-size:15px;">Opción 2 — Configuración manual</h4>
+<p class="card-note-sm">Ajusta los parámetros libremente y verifica los límites del inversor en tiempo real.</p>
+<div class="fgrid">
+  <div>
+    <label class="flabel">Paneles en serie (por string)</label>
+    <input class="finput" type="number" min="1" max="50" step="1" name="m_series" value="{{ manual.series }}"
+           hx-include="#s6-form" hx-post="{{ url_for('wizard.paso6_manual_validar', vid=vid) }}"
+           hx-trigger="change delay:400ms" hx-target="#s6-equipos" hx-swap="outerHTML">
+    <label class="flabel" style="margin-top:8px;">Strings en paralelo (total)</label>
+    <input class="finput" type="number" min="1" max="50" step="1" name="m_parallel" value="{{ manual.parallel }}"
+           hx-include="#s6-form" hx-post="{{ url_for('wizard.paso6_manual_validar', vid=vid) }}"
+           hx-trigger="change delay:400ms" hx-target="#s6-equipos" hx-swap="outerHTML">
+
+    <div class="s6-chips">
+      <span class="s6-chip">🔢 <b>{{ manual.design.total_panels }}</b> paneles</span>
+      <span class="s6-chip">⚡ <b>{{ manual.design.system_kw }} kW</b></span>
+      <span class="s6-chip">📐 <b>{{ manual.area_m2 }} m²</b></span>
+      <span class="s6-chip">🔀 <b>{{ manual.design.strings_per_mppt }}</b> str/MPPT</span>
+      <span class="s6-chip">Voc <b>{{ manual.design.voc_total }} V</b></span>
+      <span class="s6-chip">Vmp <b>{{ manual.design.vmp_total }} V</b></span>
+    </div>
+
+    <div class="s6-param-row {{ 'ok' if manual.design.voc_total <= manual.vmax else 'bad' }}">
+      <span>{{ '✓' if manual.design.voc_total <= manual.vmax else '✗' }}&nbsp;Voc total</span>
+      <span>{{ manual.design.voc_total }} V</span>
+      <span>≤ {{ '%.0f'|format(manual.vmax) }} V</span>
+    </div>
+    <div class="s6-param-row {{ 'ok' if (manual.vmin_mppt <= manual.design.vmp_total <= manual.vmax_mppt) else 'bad' }}">
+      <span>{{ '✓' if (manual.vmin_mppt <= manual.design.vmp_total <= manual.vmax_mppt) else '✗' }}&nbsp;Vmp total</span>
+      <span>{{ manual.design.vmp_total }} V</span>
+      <span>{{ '%.0f'|format(manual.vmin_mppt) }}–{{ '%.0f'|format(manual.vmax_mppt) }} V</span>
+    </div>
+    <div class="s6-param-row {{ 'ok' if manual.design.imp_per_mppt <= manual.imax_mppt else 'bad' }}">
+      <span>{{ '✓' if manual.design.imp_per_mppt <= manual.imax_mppt else '✗' }}&nbsp;Corriente por MPPT</span>
+      <span>{{ manual.design.imp_per_mppt }} A</span>
+      <span>≤ {{ '%.0f'|format(manual.imax_mppt) }} A</span>
+    </div>
+  </div>
+
+  <div>
+    {% if manual.can_select %}
+      <button type="button" class="s6-sel-btn"
+              hx-post="{{ url_for('wizard.paso6_manual', vid=vid) }}"
+              hx-target="#s6-equipos" hx-swap="outerHTML">
+        {{ '●' if using_manual else '○' }} Usar configuración manual — {{ manual.design.total_panels }} paneles ({{ manual.design.system_kw }} kW)
+      </button>
+    {% else %}
+      <div class="s6-invalid-note">⚠️ Configuración manual — corrige los errores en rojo para poder seleccionarla</div>
+    {% endif %}
+
+    {% if manual.proj %}
+      <div class="s6-card {{ 'manual-sel' if using_manual else '' }}">
+        <div class="s6-card-title">Proyección · {{ manual.design.system_kw }} kW</div>
+        🔆 Generación: <b>{{ '{:,}'.format(manual.proj.gen) }} kWh/mes</b><br>
+        📊 Cobertura: <b>{{ manual.proj.coverage }}%</b><br>
+        🌙 Red (noches+nublados): <b>{{ '{:,}'.format(manual.proj.grid_kwh) }} kWh/mes</b><br>
+        {% if manual.proj.curtailed > 0 %}
+          <span style="color:#92400e;">✂ Recorte solar: <b>{{ '{:,}'.format(manual.proj.curtailed) }} kWh/mes</b></span><br>
+        {% else %}
+          <span style="color:#166534;font-size:0.75rem;">✓ Sin recorte solar</span><br>
+        {% endif %}
+        {% if manual.proj.new_bill is not none %}💳 Factura est.: <b>₡{{ '{:,}'.format(manual.proj.new_bill) }}/mes</b><br>{% endif %}
+        {% if manual.proj.savings is not none %}<span style="color:#166534;">💰 Ahorro/mes: <b>₡{{ '{:,}'.format(manual.proj.savings) }}</b></span><br>{% endif %}
+        <span style="color:#1d4ed8;">⚡ Autoconsumo: <b>{{ manual.proj.self_consumption_pct }}%</b></span>
+        {% if manual.proj.self_consumption_pct < 50 %}
+          <div style="margin-top:0.4rem;font-size:0.72rem;color:#92400e;">⚠️ Solo el {{ manual.proj.self_consumption_pct }}% de la generación se usa — sistema sobredimensionado.</div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<hr>
+
+{% if chosen %}
+  <h4 class="section-title" style="font-size:15px;">Validación del diseño</h4>
+  <div class="s6-banner {{ 'ok' if chosen.is_valid else 'bad' }}">
+    {{ '✅ Configuración válida' if chosen.is_valid else '❌ Configuración inválida' }}
+  </div>
+  <div class="s6-param-row {{ 'ok' if chosen.voc_ok else 'bad' }}">
+    <span>{{ '✓' if chosen.voc_ok else '✗' }}&nbsp;Voc total</span>
+    <span>{{ chosen.voc_total }} V</span>
+    <span>≤ {{ '%.0f'|format(chosen.vmax) }} V</span>
+  </div>
+  <div class="s6-param-row {{ 'ok' if chosen.vmp_ok else 'bad' }}">
+    <span>{{ '✓' if chosen.vmp_ok else '✗' }}&nbsp;Vmp total</span>
+    <span>{{ chosen.vmp_total }} V</span>
+    <span>{{ '%.0f'|format(chosen.vmin_mppt) }}–{{ '%.0f'|format(chosen.vmax_mppt) }} V</span>
+  </div>
+  <div class="s6-param-row {{ 'ok' if chosen.imp_ok else 'bad' }}">
+    <span>{{ '✓' if chosen.imp_ok else '✗' }}&nbsp;Corriente por MPPT</span>
+    <span>{{ chosen.imp_per_mppt }} A</span>
+    <span>≤ {{ '%.0f'|format(chosen.imax_mppt) }} A</span>
+  </div>
+  {% if not chosen.is_valid and chosen.notes %}<p class="card-note-sm">{{ chosen.notes }}</p>{% endif %}
+
+  <h5 style="font-size:13px;margin:14px 0 2px;">Margen de diseño</h5>
+  <p class="card-note-sm">Qué tan cerca está el diseño de los límites eléctricos del inversor (Voc, corriente por MPPT).</p>
+  {{ chosen.margin_chart_html | safe }}
+  <p class="card-note-sm">Verde: margen cómodo (&lt;80% del límite). Ámbar: 80–95%. Rojo: &gt;95%, revisar diseño.</p>
+
+  <hr>
+  <h4 class="section-title" style="font-size:15px;">Dimensionamiento calculado</h4>
+  <p class="card-note-sm">Configuración activa: {{ chosen.scenario_note }}</p>
+  <div class="s6-chips">
+    <span class="s6-chip">🔢 <b>{{ chosen.total_panels }}</b> paneles</span>
+    <span class="s6-chip">🔀 <b>{{ chosen.panels_per_string }}</b> en serie × <b>{{ chosen.strings }}</b> en paralelo</span>
+    <span class="s6-chip">⚡ <b>{{ chosen.system_kw }} kW</b></span>
+    <span class="s6-chip">📐 <b>{{ chosen.area_m2 }} m²</b></span>
+  </div>
+  <div class="cards" style="grid-template-columns:repeat(2,1fr);">
+    <div class="s6-metric"><div class="s6-metric-label">Generación mensual</div><div class="s6-metric-value">{{ '{:,}'.format(chosen.proj.gen) }} kWh/mes</div></div>
+    <div class="s6-metric"><div class="s6-metric-label">Cobertura</div><div class="s6-metric-value">{{ chosen.proj.coverage }}%</div></div>
+  </div>
+
+  {% if chosen.gen_chart_html %}
+    <h5 style="font-size:13px;margin:10px 0 2px;">Generación vs. consumo</h5>
+    <p class="card-note-sm">Balance de energía mensual: lo que genera el sistema frente a lo que consume el sitio.</p>
+    {{ chosen.gen_chart_html | safe }}
+  {% endif %}
+  <hr>
+{% endif %}
+
+{% if stats %}
+  <h4 class="section-title" style="font-size:15px;">Estadísticas</h4>
+  {% if stats.coverage_chart_html %}
+    <h5 style="font-size:13px;margin:6px 0 2px;">Cobertura mensual estimada</h5>
+    <p class="card-note-sm">Generación mensual real (PVGIS) frente al consumo mensual real facturado, para la configuración seleccionada arriba.</p>
+    {{ stats.coverage_chart_html | safe }}
+  {% endif %}
+
+  <h5 style="font-size:13px;margin:14px 0 2px;">Aprovechamiento de generación solar</h5>
+  <p class="card-note-sm">
+    Modelo sin exportación: solo la generación que coincide con consumo diurno se aprovecha; el resto se
+    recorta porque el sistema no exporta excedentes a la red. Estimado con IA sobre qué fracción del consumo
+    ocurre en horas de sol{% if stats.ai_note %} — {{ stats.ai_note }}{% endif %}.
+  </p>
+  {{ stats.utilization_chart_html | safe }}
+  {% if stats.oversized %}
+    <p class="wiz-error">⚠️ Solo el {{ stats.self_consumption_pct }}% de la generación mensual se aprovecha — el sistema está sobredimensionado frente al consumo diurno de este cliente.</p>
+  {% endif %}
+{% endif %}
+
+<div class="wiz-nav">
+  <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=6) }}">← Atrás</button>
+  <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+</div>
+{% if not can_continue %}<p class="wiz-note">Calcula los escenarios MPPT o configura un diseño manual válido para continuar.</p>{% endif %}
+
+{% endif %}
+</div>
