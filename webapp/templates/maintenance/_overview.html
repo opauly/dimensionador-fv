@@ -1,0 +1,67 @@
+{% from "maintenance/_macros.html" import pill, badge %}
+
+<style>
+.mkpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.2rem; }
+.mkpi-card { border-left: 4px solid; background: var(--header-bg); border-radius: 6px; padding: 0.7rem 1rem; }
+.mkpi-label { font-size: 0.78rem; color: var(--muted); }
+.mkpi-value { font-size: 1.5rem; font-weight: 700; }
+.pill {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 9px;
+  border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.mrow-name { font-weight: 600; color: var(--navy); }
+.mrow-location { font-size: 0.72rem; color: var(--muted); }
+</style>
+
+{% if not rows %}
+  <div class="card">
+    <p class="dtable-empty">
+      No hay propiedades configuradas todavía. Usa la pestaña
+      <a href="{{ url_for('maintenance.configurar') }}" style="color:var(--navy);text-decoration:underline;">"Configurar propiedades"</a>
+      para crear la primera.
+    </p>
+  </div>
+{% else %}
+  <div class="mkpi-grid">
+    {% for label, value, color in kpis %}
+      <div class="mkpi-card" style="border-left-color:{{ color }};">
+        <div class="mkpi-label">{{ label }}</div>
+        <div class="mkpi-value" style="color:{{ color }};">{{ value }}</div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead>
+        <tr>
+          <td>Propiedad</td>
+          <td>Estado</td>
+          <td>Próxima visita</td>
+          <td>Sitios</td>
+          <td>Visitado este año</td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>
+              <div class="mrow-name">{{ r.name }}</div>
+              {% if r.location %}<div class="mrow-location">{{ r.location }}</div>{% endif %}
+            </td>
+            <td>{{ badge(r.badge_label, r.badge_bg, r.badge_fg) }}</td>
+            <td>{{ r.due_label }}</td>
+            <td>{{ r.site_count }}</td>
+            <td>
+              {% if r.visited_this_year %}
+                {{ pill('Sí', '#dcfce7', '#16a34a') }}
+              {% else %}
+                {{ pill('No', '#f1f5f9', '#6b7280') }}
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}

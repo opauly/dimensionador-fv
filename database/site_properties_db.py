@@ -285,6 +285,28 @@ def list_visits(property_id: str) -> list[dict]:
     return result.data or []
 
 
+def list_visits_for_properties(property_ids: list[str]) -> dict[str, list[dict]]:
+    """Batched list_visits() for the register overview — one query instead of N
+    (Flask webapp's maintenance_common.property_rows(), Phase 21). Additive:
+    list_visits() is unchanged and stays the single-property entry point
+    pages/07_maintenance.py and get_property_bundle() use. Returns
+    {property_id: [visits, newest first]}."""
+    if not property_ids:
+        return {}
+    result = (
+        get_client()
+        .table("maintenance_visits")
+        .select("*")
+        .in_("property_id", property_ids)
+        .order("visit_date", desc=True)
+        .execute()
+    )
+    grouped: dict[str, list[dict]] = {}
+    for v in result.data or []:
+        grouped.setdefault(v["property_id"], []).append(v)
+    return grouped
+
+
 def get_credentials(site_id: str, schema_name: str) -> dict | None:
     result = (
         get_client()

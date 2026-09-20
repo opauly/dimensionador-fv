@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Mantenimiento — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+  <p class="section-title">Mantenimiento</p>
+
+  <div class="tabs">
+    {% for s in sections %}
+      <a href="{{ url_for(section_meta[s].endpoint) }}"
+         class="{{ 'active' if s == active_section else '' }}"
+         hx-get="{{ url_for(section_meta[s].endpoint) }}"
+         hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true"
+         hx-on::after-request="document.querySelectorAll('.tabs a').forEach(a=>a.classList.remove('active')); this.classList.add('active')">
+        {{ section_meta[s].label }}
+      </a>
+    {% endfor %}
+  </div>
+
+  <div id="subpanel">{{ panel_html|safe }}</div>
+{% endblock %}

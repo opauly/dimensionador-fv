@@ -1,0 +1,11 @@
+{# Shared Jinja macros for the Mantenimiento section — same trick as
+   proposals/_macros.html: named `pill`/`badge` (not `_pill`/`_badge`, even
+   though pages/07_maintenance.py's Python helpers are), since Jinja's
+   {% from %} refuses to import names starting with an underscore. #}
+{% macro pill(label, bg, fg) -%}
+<span class="pill" style="background:{{ bg }};color:{{ fg }};">{{ label }}</span>
+{%- endmacro %}
+
+{% macro badge(label, bg, fg) -%}
+{{ pill(label, bg, fg) }}
+{%- endmacro %}
