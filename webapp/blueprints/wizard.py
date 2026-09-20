@@ -17,15 +17,15 @@ Step 2's POST just patches `meta` into that same row.
 Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
 three system types. Grid Zero's wizard is wired end to end (gz_s4_utility.py
 / gz_s5_consumption.py / gz_s6_equipment.py / gz_s7_costs.py /
-gz_s8_review.py — Phase 20 Steps 4-6). Off-Grid's Steps 4-5 (Cargas /
-Demanda) are wired too (og_s4_loads.py / og_s5_demand.py — Phase 20 Step 7);
-its Steps 6-8 (Equipos, Costos, Revisión) and all of Hybrid are later
-phase-20 steps and are not wired in yet — requesting one renders a plain
-"not built yet" placeholder rather than erroring, so manual exploration
-during review doesn't 500. STEP_MODULES/STEP_TEMPLATES are keyed by
-`{n: {system_type: module}}` with a "*" fallback for the shared steps,
-exactly mirroring PLAN §1.2's "single dispatch table keyed on
-meta.system_type".
+gz_s8_review.py — Phase 20 Steps 4-6). Off-Grid's wizard is now also wired
+end to end (og_s4_loads.py / og_s5_demand.py — Phase 20 Step 7;
+og_s6_equipment.py — Phase 20 Step 8a; og_s7_costs.py / og_s8_review.py —
+Phase 20 Step 8b, this build). Hybrid is a later phase-20 step and is not
+wired in yet — requesting one renders a plain "not built yet" placeholder
+rather than erroring, so manual exploration during review doesn't 500.
+STEP_MODULES/STEP_TEMPLATES are keyed by `{n: {system_type: module}}` with a
+"*" fallback for the shared steps, exactly mirroring PLAN §1.2's "single
+dispatch table keyed on meta.system_type".
 
 Step 8's PDF routes deliberately import from webapp.blueprints.proposals
 (`_generate_pdf_bytes()`, `_signed_url()`) rather than re-implementing PDF
@@ -44,7 +44,7 @@ from wizard import draft
 from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
-    og_s4_loads, og_s5_demand, og_s6_equipment,
+    og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review,
     s1_client, s2_type, s3_site,
 )
 
@@ -57,8 +57,8 @@ STEP_MODULES = {
     4: {"grid_zero": gz_s4_utility, "off_grid": og_s4_loads},
     5: {"grid_zero": gz_s5_consumption, "off_grid": og_s5_demand},
     6: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment},
-    7: {"grid_zero": gz_s7_costs},
-    8: {"grid_zero": gz_s8_review},
+    7: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs},
+    8: {"grid_zero": gz_s8_review, "off_grid": og_s8_review},
 }
 STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
@@ -67,8 +67,8 @@ STEP_TEMPLATES = {
     4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html"},
     5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html"},
     6: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html"},
-    7: {"grid_zero": "wizard/gz_s7_costs.html"},
-    8: {"grid_zero": "wizard/gz_s8_review.html"},
+    7: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html"},
+    8: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html"},
 }
 
 
@@ -152,13 +152,13 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
             "wizard/not_built.html",
             **shell_ctx(vid, n, blob),
         )
-    # gz_s8_review.build_context() and og_s6_equipment.build_context() both
-    # take `vid` in addition to `blob` — see each module's own docstring for
-    # why (gz_s8_review: lock/quote-number/pdf_path live on the
-    # proposal_versions ROW; og_s6_equipment: the lazy daily-PVGIS-series
-    # backfill needs `vid` to persist what it fetches). Every other step's
-    # build_context() is blob-only.
-    if module in (gz_s8_review, og_s6_equipment):
+    # gz_s8_review.build_context(), og_s6_equipment.build_context() and
+    # og_s8_review.build_context() all take `vid` in addition to `blob` — see
+    # each module's own docstring for why (the two Step 8 modules: lock/
+    # quote-number/pdf_path live on the proposal_versions ROW; og_s6_equipment:
+    # the lazy daily-PVGIS-series backfill needs `vid` to persist what it
+    # fetches). Every other step's build_context() is blob-only.
+    if module in (gz_s8_review, og_s6_equipment, og_s8_review):
         ctx = module.build_context(blob, vid)
     else:
         ctx = module.build_context(blob)
@@ -373,6 +373,12 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
+    elif n == 7 and _step_module(n, blob) is og_s7_costs:
+        blob = draft.patch(vid, "costs", og_s7_costs.save_step(blob, request.form))
+        ctx = og_s7_costs.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
     else:
         return _render_step(vid, n, blob)
 
@@ -402,7 +408,9 @@ def paso_atras(vid, n):
         draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
     elif n == 7 and _step_module(n, blob) is gz_s7_costs:
         draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
-    elif n == 8 and _step_module(n, blob) is gz_s8_review:
+    elif n == 7 and _step_module(n, blob) is og_s7_costs:
+        draft.patch(vid, "costs", og_s7_costs.save_step(blob, request.form))
+    elif n == 8 and _step_module(n, blob) in (gz_s8_review, og_s8_review):
         # Step 8 has no scenario/table to persist — only the intro textarea,
         # which lives in the same wrapping <form> as this Atrás submit.
         intro_text = request.form.get("intro_text")
@@ -904,11 +912,80 @@ def paso7_refrescar(vid):
     return _s7_render(vid, blob, refresh_message=message)
 
 
-# ── Step 8 (Grid Zero) actions — intro-paragraph AI generation, PDF
-# generate/download (PLAN §1.8), lock (do-not-drop item 21). Post-lock
+# ── Step 7 (Off-Grid) actions — row edit, +Fila, quitar fila, Refrescar
+# precios. Structural copy of the Grid Zero block above (see
+# og_s7_costs.py's module docstring) — battery bank/charge-controller/
+# mounting-structure/off_grid-filtered-services item set instead. Distinct
+# "/og/" URL segment (not a shared "/paso/7/tabla" dispatching on blob
+# system_type) — same convention Step 6's og_* action routes already
+# established (paso6og_equipo vs. paso6_equipo).
+
+
+def _s7og_render(vid: str, blob: dict, *, refresh_message: str | None = None):
+    ctx = og_s7_costs.build_context(blob)
+    ctx["refresh_message"] = refresh_message
+    return render_template("wizard/_s7og_costos.html", vid=vid, n=7, **ctx)
+
+
+@bp.route("/<vid>/paso/7/og/tabla", methods=["POST"])
+def paso7og_tabla(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", og_s7_costs.recompute_table(blob, request.form))
+    return _s7og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/og/fila", methods=["POST"])
+def paso7og_fila(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", og_s7_costs.add_line_row(blob, request.form))
+    return _s7og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/og/fila/quitar", methods=["POST"])
+def paso7og_fila_quitar(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", og_s7_costs.remove_line_row(blob, request.form))
+    return _s7og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/og/refrescar", methods=["POST"])
+def paso7og_refrescar(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    new_costs, n_changed = og_s7_costs.refresh_prices(blob)
+    blob = draft.patch(vid, "costs", new_costs)
+    message = f"✅ {n_changed} precio(s) actualizado(s)." if n_changed else "Los precios ya están al día."
+    return _s7og_render(vid, blob, refresh_message=message)
+
+
+# ── Step 8 (Grid Zero + Off-Grid) actions — intro-paragraph AI generation,
+# PDF generate/download (PLAN §1.8), lock (do-not-drop item 21). Post-lock
 # actions (Nueva versión / Marcar como enviada / Ir a cotizaciones) reuse
 # the existing webapp.blueprints.proposals routes directly from the
 # template — see wizard/_s8_lock.html — rather than duplicating them here.
+#
+# One shared set of routes/fragment templates for BOTH system types (unlike
+# Steps 6/7's distinct "/og/"-segment routes): every byte of what these
+# routes DO (build_from_wizard_blob() -> generate_pdf()/upload_pdf(),
+# lock_version(), generate_intro()) is already system-type-agnostic — the
+# actual gz_s8_review.py/og_s8_review.py split is only in which
+# build_context()/generate_intro_text() computes the fragment's numbers, so
+# `_step_module(8, blob)` decides that one thing per request rather than a
+# second copy of every route existing only to make that same one-line
+# choice. _s8_intro.html/_s8_pdf.html/_s8_lock.html are themselves fully
+# generic (proposal_text/pdf_error/pdf_ready/locked/sent/pid/lock_error —
+# no Grid-Zero-specific field), so they render identically for either type.
 
 
 @bp.route("/<vid>/paso/8/intro/generar", methods=["POST"])
@@ -917,9 +994,10 @@ def paso8_intro_generar(vid):
     if guard:
         return guard
     blob = draft.load(vid)
-    text = gz_s8_review.generate_intro_text(blob, vid)
+    module = _step_module(8, blob)
+    text = module.generate_intro_text(blob, vid)
     blob = draft.patch(vid, "proposal_text", text)
-    ctx = gz_s8_review.build_context(blob, vid)
+    ctx = module.build_context(blob, vid)
     return render_template("wizard/_s8_intro.html", vid=vid, n=8, **ctx)
 
 
@@ -956,7 +1034,7 @@ def paso8_pdf(vid):
     except Exception as exc:
         error = f"Error generando PDF: {exc}"
 
-    ctx = gz_s8_review.build_context(blob, vid)
+    ctx = _step_module(8, blob).build_context(blob, vid)
     ctx["pdf_error"] = error
     ctx["pdf_ready"] = error is None
     ctx["pdf_lang_label"] = lang_label
@@ -1028,6 +1106,6 @@ def paso8_bloquear(vid):
     except Exception as exc:
         error = f"Error bloqueando versión: {exc}"
 
-    ctx = gz_s8_review.build_context(blob, vid)
+    ctx = _step_module(8, blob).build_context(blob, vid)
     ctx["lock_error"] = error
     return render_template("wizard/_s8_lock.html", vid=vid, n=8, **ctx)

@@ -518,15 +518,32 @@ def build_from_wizard_blob(
         "avg_monthly_savings_usd": 0.0, "pct_savings": 0.0,
     }
     # Grid Zero's monthly-coverage chart data — real 12-month billed
-    # consumption vs. PVGIS-driven per-month generation for the sized
-    # array. Off-Grid/Hybrid's own version (real day-by-day battery-SoC
-    # simulation via wizard/off_grid.py:_og_monthly_coverage_and_sim(), not
-    # this monthly-average approximation) is not yet ported here — that
-    # helper is Off-Grid-specific and belongs to this phase's Off-Grid step
-    # (PLAN §2 "Step 8"); left empty (not populated) for is_off_grid so the
-    # PDF simply renders no coverage-chart section for those, matching
-    # today's actual (unfixed) behaviour rather than guessing at one.
+    # consumption vs. PVGIS-driven per-month generation for the sized array.
     monthly_coverage: dict = {}
+    # Off-Grid/Hybrid field-diff fix (PLAN §1.8's Off-Grid Step 8 task): the
+    # wizard's own inline Off-Grid Step 8 dict (wizard/off_grid.py:
+    # step8_review()) has always carried `monthly_coverage` AND a
+    # sim-preferred `technical.utilization_pct`, both from
+    # `_og_monthly_coverage_and_sim()` (now `calculations/og_coverage.py:
+    # og_monthly_coverage_and_sim()` — a pure move, same implementation);
+    # build_from_wizard_blob() never called it, so any Off-Grid/Hybrid PDF
+    # generated from the Cotizaciones list rendered no "Cobertura mensual"
+    # chart at all, and fell back to the (numerically-equal in practice, but
+    # not the do-not-drop-item-3-mandated code path) reliability-scenario
+    # bank's own `utilization_pct`. Closed here, additively, off the exact
+    # same shared helper Off-Grid's Step 6/Step 8 wizard screens use, so both
+    # callers inherit the fix and there is still exactly one implementation.
+    og_sim: dict | None = None
+    if is_off_grid:
+        try:
+            from calculations.og_coverage import og_monthly_coverage_and_sim
+
+            battery = equipment.get("battery", {}) or {}
+            monthly_coverage, og_sim = og_monthly_coverage_and_sim(
+                array, battery, battery_bank, consumption, site,
+            )
+        except Exception:
+            pass
     try:
         from calculations.sizing_grid_zero import size_system, compute_avg_billing
         from calculations.financials import calculate_irr, calculate_roi, calculate_25yr_savings
@@ -635,9 +652,14 @@ def build_from_wizard_blob(
             "daily_generation_kwh": float(array.get("daily_generation_kwh") or 0),
             "battery_kwh":          float(battery_bank.get("total_kwh_installed") or 0),
             "discharge_pct":        float(battery_bank.get("discharge_pct") or 0),
-            # None (not 0) when never simulated, so the template renders "—"
-            # rather than claiming a real 0% utilization.
-            "utilization_pct":      battery_bank.get("utilization_pct"),
+            # Prefer the fresh og_monthly_coverage_and_sim() simulation
+            # (do-not-drop item 3); fall back to the persisted reliability-
+            # scenario bank's own utilization_pct — numerically the same real
+            # simulation in practice, just the value already on the blob —
+            # for a draft with no cached daily PVGIS series to re-simulate
+            # against. None (not 0) only when neither is available, so the
+            # template renders "—" rather than claiming a real 0% utilization.
+            "utilization_pct":      (og_sim["utilization_pct"] if og_sim else battery_bank.get("utilization_pct")),
             # Grid Zero's solar-utilization figure, stored by the Step 6
             # projection. None (not 0) when a draft never ran "Calcular MPPT",
             # so the template renders "—" instead of a fake 0%.
@@ -746,6 +768,9 @@ def upload_pdf(pdf_bytes: bytes, proposal_id: str, version_number: int, client_n
     client.storage.from_("solar-tool").upload(
         path=path,
         file=pdf_bytes,
-        file_options={"content-type": "application/pdf"},
+        # upsert: true -- without it, regenerating a PDF for the same version
+        # on the same day (an entirely normal "tweak and re-download" flow)
+        # hits the same storage key twice and Supabase returns a 409 Duplicate.
+        file_options={"content-type": "application/pdf", "upsert": "true"},
     )
     return path

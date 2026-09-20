@@ -1,0 +1,25 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+{# Off-Grid Step 8 — Revisión y generación de propuesta. Structural copy of
+   gz_s8_review.html: same terminal-step shape (no "Siguiente", every action
+   is a type="button" hx-post that hx-includes this form so the intro text
+   always rides along — PLAN §1.4 pattern 1). Different section set in the
+   summary panel (_s8og_resumen.html: Técnico / Generación y autonomía /
+   Costos — no Facturación estimada/Proyección financiera, and therefore no
+   _s8_cashflow.html include — off_grid has no utility bill or cash-flow
+   model). Intro/PDF/lock fragments are the exact same generic templates
+   gz_s8_review.html uses (see webapp/blueprints/wizard.py's Step 8 action
+   routes' own comment for why they're shared, not duplicated). #}
+<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=8) }}" id="s8-form">
+  {% include "wizard/_s8og_resumen.html" %}
+  {% if split_phase_warning %}<p class="wiz-error">⚠️ {{ split_phase_warning }}</p>{% endif %}
+  {% include "wizard/_s8_intro.html" %}
+  {% include "wizard/_s8_pdf.html" %}
+  {% include "wizard/_s8_lock.html" %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit">← Atrás</button>
+    <span></span>
+  </div>
+</form>
+{% endblock %}
