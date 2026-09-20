@@ -341,6 +341,158 @@ def og_hourly_stack_fig(cat_totals: dict, shapes: dict):
     return fig
 
 
+def og_generation_vs_consumption_fig(daily_generation_kwh: float, daily_kwh: float, margin_kwh: float):
+    """Off-Grid Step 6's "Generación vs. consumo" 3-bar snapshot for the
+    currently chosen config — extracted verbatim from
+    wizard/off_grid.py:step6_equipment() (L1593-1608). Unlike Grid Zero's
+    2-bar gz_generation_vs_consumption_fig() (no battery), this adds a third
+    "Recarga de batería" bar for the daily surplus, and the units are
+    kWh/día (Off-Grid sizes off a DAILY figure), not kWh/mes."""
+    import plotly.graph_objects as go
+
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    fig = go.Figure(go.Bar(
+        x=[daily_generation_kwh, daily_kwh, margin_kwh],
+        y=["Generación diaria", "Consumo diario", "Recarga de batería"],
+        orientation="h",
+        marker_color=[BRAND_GREEN, BRAND_NAVY, "#86efac"],
+        text=[f"{daily_generation_kwh:.2f} kWh/día", f"{daily_kwh:.2f} kWh/día", f"{margin_kwh:.2f} kWh/día"],
+        textposition="outside",
+    ))
+    fig.update_layout(
+        xaxis=dict(title="kWh/día", range=[0, max(daily_generation_kwh, daily_kwh, margin_kwh) * 1.3]),
+        height=220,
+        margin=dict(t=10, b=10, l=10, r=10),
+    )
+    return fig
+
+
+def og_solar_utilization_fig(used_kwh: float, curtailed_kwh: float, utilization_pct: float, is_hybrid_grid: bool = False):
+    """Off-Grid Step 6's "Aprovechamiento de generación solar" stacked bar —
+    do-not-drop item 3 (PLAN §1.10): the real-simulation-driven counterpart
+    to Grid Zero's AI-daytime-fraction-driven gz_solar_utilization_fig() —
+    never conflate the two. Extracted verbatim from
+    wizard/off_grid.py:step6_equipment() (L1684-1702), including the
+    hybrid-aware trace labels ("Batería/cargas críticas" / "Acoplado a red
+    (ahorro)" instead of "Autoconsumido" / "Curtailed") — a low
+    battery-side percentage on a grid-connected system isn't waste, it
+    AC-couples back to the main panel."""
+    import plotly.graph_objects as go
+
+    from config import BRAND_GREEN
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=["Generación anual"], x=[used_kwh],
+        name="Batería/cargas críticas" if is_hybrid_grid else "Aprovechado",
+        orientation="h", marker_color=BRAND_GREEN,
+        text=[f"{utilization_pct:.0f}% · {used_kwh:,.0f} kWh"], textposition="inside",
+    ))
+    fig.add_trace(go.Bar(
+        y=["Generación anual"], x=[curtailed_kwh],
+        name="Acoplado a red (ahorro)" if is_hybrid_grid else "Curtailed (no aprovechado)",
+        orientation="h", marker_color="#d1d5db",
+        text=[f"{100 - utilization_pct:.0f}% · {curtailed_kwh:,.0f} kWh"], textposition="inside",
+    ))
+    fig.update_layout(
+        barmode="stack", height=130, margin=dict(t=10, b=10, l=10, r=10),
+        xaxis_title="kWh/año", showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
+def og_seasonal_coverage_fig(months_es: list[str], monthly_gen_kwh_day: list[float], daily_kwh: float, worst_idx: int):
+    """Off-Grid Step 6's "Cobertura estacional" line chart — gross monthly
+    generation (real PVGIS seasonal variation) against the flat daily-
+    consumption reference, with the weakest month flagged when it falls
+    short. Extracted verbatim from wizard/off_grid.py:step6_equipment()
+    (L1739-1760)."""
+    import plotly.graph_objects as go
+
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=months_es, y=monthly_gen_kwh_day, mode="lines+markers", name="Generación",
+        line=dict(color=BRAND_GREEN, width=3), marker=dict(size=7),
+        fill="tozeroy", fillcolor="rgba(75,174,106,0.12)",
+    ))
+    fig.add_hline(
+        y=daily_kwh, line_dash="dash", line_color=BRAND_NAVY,
+        annotation_text="Consumo diario", annotation_position="top left",
+    )
+    if monthly_gen_kwh_day[worst_idx] < daily_kwh:
+        fig.add_trace(go.Scatter(
+            x=[months_es[worst_idx]], y=[monthly_gen_kwh_day[worst_idx]], mode="markers",
+            marker=dict(size=14, color="#dc2626", symbol="x", line=dict(width=3)),
+            name="Mes más débil",
+        ))
+    fig.update_layout(
+        yaxis_title="kWh/día", height=260,
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
+def og_energy_flow_sankey_fig(
+    display_array_kw: float, avg_peak_sun_hours: float, display_daily_generation: float,
+    daily_kwh: float, cat_kwh: dict, category_labels: dict, category_colors: dict,
+):
+    """Off-Grid Step 6's "Flujo de energía" Sankey — gross generation ->
+    system losses / useful energy -> load categories (+ any surplus above
+    the load, which recharges the battery bank). Extracted verbatim from
+    wizard/off_grid.py:step6_equipment() (L1789-1824) — `gross_kwh` is
+    recomputed from `display_array_kw * avg_peak_sun_hours` (no derating),
+    NOT back-derived from `display_daily_generation` by dividing out the 20%
+    derating factor, to avoid a second rounding pass on top of
+    `display_daily_generation`'s own `round(..., 2)`. `cat_kwh`: already
+    rescaled to the (possibly manually edited) daily_kwh total, ascending or
+    any order — this function re-sorts descending by value itself, matching
+    the Streamlit source's `sorted(cat_kwh.items(), key=lambda x: -x[1])`."""
+    import plotly.graph_objects as go
+
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    gross_kwh = round(display_array_kw * avg_peak_sun_hours, 2)
+    losses_kwh = round(max(0, gross_kwh - display_daily_generation), 2)
+    margin_kwh = round(max(0, display_daily_generation - daily_kwh), 2)
+
+    labels = ["Generación bruta", "Pérdidas del sistema", "Energía útil"]
+    node_colors = [BRAND_GREEN, "#9ca3af", BRAND_NAVY]
+    sources = [0, 0]
+    targets = [1, 2]
+    values = [losses_kwh, display_daily_generation]
+    link_colors = ["rgba(156,163,175,0.45)", "rgba(75,174,106,0.4)"]
+    for cat, kwh in sorted(cat_kwh.items(), key=lambda x: -x[1]):
+        if kwh <= 0:
+            continue
+        labels.append(category_labels.get(cat, cat))
+        node_colors.append(category_colors.get(cat, "#9ca3af"))
+        sources.append(2)
+        targets.append(len(labels) - 1)
+        values.append(kwh)
+        link_colors.append("rgba(30,45,84,0.3)")
+    if margin_kwh > 0.01:
+        labels.append("Margen / recarga batería")
+        node_colors.append("#86efac")
+        sources.append(2)
+        targets.append(len(labels) - 1)
+        values.append(margin_kwh)
+        link_colors.append("rgba(75,174,106,0.25)")
+
+    fig = go.Figure(go.Sankey(
+        node=dict(label=labels, color=node_colors, pad=20, thickness=16,
+                  line=dict(color="white", width=0.5)),
+        link=dict(source=sources, target=targets, value=values, color=link_colors),
+        textfont=dict(color=BRAND_NAVY, size=13, family="Arial, sans-serif"),
+    ))
+    fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10))
+    return fig
+
+
 def fig_to_fragment(fig) -> str:
     """Shared to_html() call so every route renders charts with the exact
     same config (no mode bar, no per-fragment plotly.js copy) — see module

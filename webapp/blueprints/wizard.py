@@ -44,7 +44,7 @@ from wizard import draft
 from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
-    og_s4_loads, og_s5_demand,
+    og_s4_loads, og_s5_demand, og_s6_equipment,
     s1_client, s2_type, s3_site,
 )
 
@@ -56,7 +56,7 @@ STEP_MODULES = {
     3: {"*": s3_site},
     4: {"grid_zero": gz_s4_utility, "off_grid": og_s4_loads},
     5: {"grid_zero": gz_s5_consumption, "off_grid": og_s5_demand},
-    6: {"grid_zero": gz_s6_equipment},
+    6: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment},
     7: {"grid_zero": gz_s7_costs},
     8: {"grid_zero": gz_s8_review},
 }
@@ -66,7 +66,7 @@ STEP_TEMPLATES = {
     3: {"*": "wizard/s3_site.html"},
     4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html"},
     5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html"},
-    6: {"grid_zero": "wizard/gz_s6_equipment.html"},
+    6: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html"},
     7: {"grid_zero": "wizard/gz_s7_costs.html"},
     8: {"grid_zero": "wizard/gz_s8_review.html"},
 }
@@ -152,11 +152,13 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
             "wizard/not_built.html",
             **shell_ctx(vid, n, blob),
         )
-    # gz_s8_review.build_context() takes `vid` in addition to `blob` — see
-    # that module's own docstring for why (lock/quote-number/pdf_path live
-    # on the proposal_versions ROW, not in the JSONB blob). Every other
-    # step's build_context() is blob-only.
-    if module is gz_s8_review:
+    # gz_s8_review.build_context() and og_s6_equipment.build_context() both
+    # take `vid` in addition to `blob` — see each module's own docstring for
+    # why (gz_s8_review: lock/quote-number/pdf_path live on the
+    # proposal_versions ROW; og_s6_equipment: the lazy daily-PVGIS-series
+    # backfill needs `vid` to persist what it fetches). Every other step's
+    # build_context() is blob-only.
+    if module in (gz_s8_review, og_s6_equipment):
         ctx = module.build_context(blob, vid)
     else:
         ctx = module.build_context(blob)
@@ -350,6 +352,18 @@ def paso_post(vid, n):
             return _render_step(
                 vid, n, blob,
                 error="Calcula los escenarios MPPT o configura un diseño manual válido para continuar.",
+            )
+        blob = draft.patch(vid, "equipment", result)
+
+    elif n == 6 and _step_module(n, blob) is og_s6_equipment:
+        # Same server-side rejection as Grid Zero's Step 6, Off-Grid's own
+        # do-not-drop item 15 analogue (§1.10 item 15's "Siguiente disabled
+        # unless a valid auto scenario or a valid manual design exists").
+        result = og_s6_equipment.save_step(blob, vid)
+        if result is None:
+            return _render_step(
+                vid, n, blob,
+                error="Selecciona un escenario automático válido o configura un diseño manual válido para continuar.",
             )
         blob = draft.patch(vid, "equipment", result)
 
@@ -772,6 +786,67 @@ def paso6_manual_validar(vid):
     blob = draft.load(vid)
     blob = _s6_patch(vid, gz_s6_equipment.validate_manual(blob, request.form))
     return _s6_render(vid, blob)
+
+
+# ── Step 6 (Off-Grid) actions — equipment select, scenario select, manual
+# mode select/live-validate. Every one of these patches
+# blob["scratch"]["s6og"] and re-renders wizard/_s6og_equipos.html from a
+# fresh og_s6_equipment.build_context(blob, vid) call (PLAN §1.3) — see that
+# module's docstring for why there is deliberately NO
+# "reliability/calcular" action route (unlike Grid Zero's MPPT calc, the
+# reliability scenarios recompute automatically on every render, exactly
+# matching wizard/off_grid.py's own step6_equipment(), which has no
+# "Calcular" button either).
+
+
+def _s6og_render(vid: str, blob: dict, *, error: str | None = None):
+    ctx = og_s6_equipment.build_context(blob, vid)
+    ctx["error"] = error
+    return render_template("wizard/_s6og_equipos.html", vid=vid, n=6, **ctx)
+
+
+def _s6og_patch(vid: str, new_s6: dict) -> dict:
+    return draft.patch(vid, "scratch", {og_s6_equipment.DEFAULT_SCRATCH_KEY: new_s6})
+
+
+@bp.route("/<vid>/paso/6/og/equipo", methods=["POST"])
+def paso6og_equipo(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6og_patch(vid, og_s6_equipment.select_equipment(blob, request.form))
+    return _s6og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/og/escenario/<label>", methods=["POST"])
+def paso6og_escenario(vid, label):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6og_patch(vid, og_s6_equipment.select_scenario(blob, label))
+    return _s6og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/og/manual", methods=["POST"])
+def paso6og_manual(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6og_patch(vid, og_s6_equipment.select_manual(blob))
+    return _s6og_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/6/og/manual/validar", methods=["POST"])
+def paso6og_manual_validar(vid):
+    guard = _guard(vid, 6)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s6og_patch(vid, og_s6_equipment.validate_manual(blob, request.form))
+    return _s6og_render(vid, blob)
 
 
 # ── Step 7 (Grid Zero) actions — row edit, +Fila, quitar fila, Refrescar

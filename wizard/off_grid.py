@@ -2049,65 +2049,13 @@ def step7_costs() -> dict | None:
     return None
 
 
-def _og_monthly_coverage_and_sim(
-    array: dict, battery: dict, battery_bank: dict, consumption: dict, site: dict,
-) -> tuple[dict, dict | None]:
-    """
-    Real day-by-day simulation (calculations/sizing_off_grid.py:
-    simulate_battery_soc()) against the site's real PVGIS reference year —
-    shared by the PDF's "Cobertura mensual" chart, Step 8's "Aprovechamiento
-    solar" summary, and Step 6's live preview of the same chart (called with
-    that step's currently-selected scenario/manual array and battery_bank,
-    not the final persisted equipment). One implementation so all three stay
-    numerically identical instead of drifting into separate approximations.
-
-    Falls back to a coarse monthly-average approximation (no `recharge` key,
-    no utilization sim) when the draft has no cached daily series — e.g. an
-    older draft from before fetch_daily_series() existed.
-
-    Returns (monthly_coverage_dict_for_pdf, sim_dict_or_None).
-    """
-    import calendar as _cal
-
-    kw = array.get("array_kw", 0)
-    daily = consumption.get("daily_kwh", 0)
-    pvgis_daily_blob = site.get("pvgis_daily") or {}
-    pvgis_daily = pvgis_daily_blob.get("daily_kwh_kwp", [])
-    pvgis_daily_year = pvgis_daily_blob.get("year")
-    monthly_coverage: dict = {}
-    sim = None
-
-    if pvgis_daily and pvgis_daily_year and len(pvgis_daily) >= 300:
-        from calculations.sizing_off_grid import simulate_battery_soc
-
-        daily_gen = [v * kw * 0.80 for v in pvgis_daily]
-        capacity_kwh = battery_bank.get("total_kwh_installed", 0)
-        dod_pct = battery.get("dod_pct", 80)
-        sim = (
-            simulate_battery_soc(daily_gen, daily, capacity_kwh, dod_pct, 100 - dod_pct)
-            if capacity_kwh > 0 else None
-        )
-        if sim:
-            days_in_month = [_cal.monthrange(pvgis_daily_year, m)[1] for m in range(1, 13)]
-            gen_m, cons_m, rec_m, idx = [], [], [], 0
-            for d in days_in_month:
-                gen_m.append(round(sum(daily_gen[idx:idx + d]), 1))
-                cons_m.append(round(daily * d, 1))
-                rec_m.append(round(sum(sim["daily_charge_in_kwh"][idx:idx + d]), 1))
-                idx += d
-            monthly_coverage = {"generation": gen_m, "consumption": cons_m, "recharge": rec_m}
-
-    if not monthly_coverage:
-        pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])
-        if pvgis_monthly and len(pvgis_monthly) == 12:
-            from datetime import date as _dt
-            days = [_cal.monthrange(_dt.today().year, m)[1] for m in range(1, 13)]
-            monthly_coverage = {
-                "generation": [round(v * kw * 0.80, 1) for v in pvgis_monthly],
-                "consumption": [round(daily * d, 1) for d in days],
-            }
-
-    return monthly_coverage, sim
+# Moved to calculations/og_coverage.py (Phase 20 Step 8, PLAN_PHASE20_
+# PROPOSALS_JINJA.md) so the Flask wizard's Step 6 and a future PDF/Step 8
+# code path can share this EXACT implementation without importing Streamlit
+# transitively — see that module's docstring. Re-imported here under the old
+# private name so every existing call site below (and in wizard/hybrid.py, if
+# any) is unchanged; this is a pure move, not a rewrite.
+from calculations.og_coverage import og_monthly_coverage_and_sim as _og_monthly_coverage_and_sim
 
 
 # ── Step 8 — Revisión + Generar PDF ──────────────────────────────────────────
