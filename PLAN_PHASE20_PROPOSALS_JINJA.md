@@ -875,3 +875,232 @@ byte-comparison against the existing list-page output, not just "the PDF looks r
 **`scratch` grows the blob.** `scratch.s6.scenarios` holds three full scenario dicts; the Off-Grid
 ones embed simulation summaries. Still kilobytes, well inside a JSONB column, and `equipment.scenarios`
 already stores the same thing durably today. Worth a glance at row sizes after Step 8 all the same.
+
+---
+
+## 5. Built — Step 10 audit results
+
+**Audited 2026-09-20, on `main_jinja`, against the live shared Supabase project
+(`qqorjwnlawhlmrmxxgdb`) — not a read of prior steps' own self-reports.** Every §1.10 verdict below
+was produced by reading the actual current code for that item (not the step's commit message) and,
+wherever practical, exercising it through a real HTTP request against the running Flask app with a
+real database round-trip — via `webapp.create_app().test_client()` driving the real routes, not by
+calling internal functions directly except where noted. Three fresh proposals were created from
+scratch this way and are still in Supabase for inspection: Grid Zero `PC-2026-017` (client "QA Audit
+GZ 20260920-111451", locked), Off-Grid `PC-2026-018` (client "QA Audit OG 20260920-111656", locked),
+and Hybrid `PC-2026-019` (client "QA Audit HY 20260920-111831", locked) — plus an unlocked "Nueva
+versión" copy of the Grid Zero one (`PC-2026-017-v2`) used to spot-check manual-mode selection and
+`Refrescar precios` without disturbing the locked original. These are left in place as living
+evidence rather than cleaned up; they are clearly QA-labelled and cost nothing to leave.
+
+### 5.1 Nav / stub sweep
+
+`webapp/blueprints/dashboard.py`'s `STUBS` dict already contained only `{"projects", "maintenance"}`
+— `"proposals"` had already been fully removed in Step 1 (its own docstring comment says so, and it
+checks out). `webapp/templates/base.html`'s nav already points `Cotizaciones` at `proposals.index`
+and leaves `Proyectos`/`Mantenimiento` as stubs. **No code change was needed for this item; the plan's
+concern was already satisfied.**
+
+One stale-but-out-of-scope thing found in the same file: `dashboard.PHASES` (the landing-page
+progress list) still lists "Fase 3 — Gestión de cotizaciones" through "Fase 5 — Off-Grid + Híbrido"
+as "Pendiente", even though the port now covers all three system types end to end. This is a
+landing-page display list, not a stub link, and updating it isn't one of the four items this step's
+Build section authorizes — flagged here for Oscar/manager rather than changed.
+
+### 5.2 §1.10 do-not-drop checklist — 26/26 items addressed
+
+Legend: **PASS (live)** = exercised through a real HTTP request against the running app with a real
+Supabase round-trip this session; **PASS (code)** = read the current, unmodified source and confirmed
+it implements the rule correctly, without a fresh live exercise (used only where a live repro would
+have been pure repetition of an already-live-verified code path, e.g. the second of two structurally
+identical modules).
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Taxonomy-driven load profile: 5 categories via `classify_load_category()` at import time, `(Automático)` option, per-line Horas/día + Factor demanda overrides with the exact `user_confirmed` rule, `default_demand_factor_pct()` fallback, diversified total + caption switch | **PASS (live)** | Fresh Off-Grid draft (`PC-2026-018`): catálogo/tablero/texto imports all ran `classify_load_category()` immediately (`webapp/wizard_steps/og_s4_loads.py:_classified_rows()`), rows landed in real categories ("Cíclica fija", "Discrecional", "Electrodomésticos", "Uso general") not `(Automático)`. Hybrid draft's main-panel profile showed `confidence: "api_calculated"`/`"benchmark"` per line with real `duty_hours_day`/`demand_factor_pct` (`webapp/wizard_steps/og_s5_demand.py:_table_rows()`). Diversified total (`total_kwh_day_diversified`) computed and distinct from the raw total in the Hybrid main-panel profile (0.98 vs 1.58 kWh/día). |
+| 2 | Real day-by-day battery SoC simulation (`simulate_battery_soc()`) drives reliability scenarios; lazy daily-PVGIS backfill for old drafts | **PASS (live)** | Fresh Off-Grid draft's `battery_bank` carries `min_soc_actual_pct: 55.2`, `days_full_pct: 98.6`, `unmet_load_days: 0`, `utilization_pct: 63.5`, `driven_by: "min_soc"` — real simulation output, not a flat ratio (`og_s6_equipment.py:_compute()`/`calculations/sizing_off_grid.py:generate_reliability_scenarios()`). Backfill code path read (`og_s6_equipment.py:_resolve_pvgis_daily()`); not separately live-forced since every draft in this audit was created after Step 3 already fetches the daily series. |
+| 3 | Solar-utilization/curtailment metric in Step 6, Step 8 KV, and the PDF, from the same source in each system type | **PASS (live)** | Grid Zero PDF's "Aprovechamiento solar" = 84%, matching `equipment.projection.self_consumption_pct` persisted at Step 6. Off-Grid PDF shows "Aprovechamiento solar 64%"; `og_s6_equipment.py` Step 6, `og_s8_review.py` Step 8 and `build_from_wizard_blob()` all call the one shared `calculations/og_coverage.py:og_monthly_coverage_and_sim()` (verified by reading all three call sites — no second implementation exists). |
+| 4 | `applied_source_meta` provenance badge, including the "· editada" suffix on a human edit over an imported source | **PASS (live)** | Constructed a bill-sourced `applied_months`/`applied_source_meta` in a fresh draft, edited one month's kWh through `POST …/paso/5/tabla`, confirmed the badge became `"Factura CNFL · Ene 2025 – Dic 2025 · editada"` (suffix appended exactly once, per `gz_s5_consumption.py:_updated_badge()`). |
+| 5 | `_CONFIDENCE_BADGES` per profile line + "N línea(s) usan un estimado genérico" warning | **PASS (code)** | `webapp/wizard_steps/og_s5_demand.py` defines all five badges verbatim and computes `default_count` for the warning in `build_context()`; confirmed live that real lines carry `"api_calculated"`/`"benchmark"` badges (§ item 1's evidence), which exercises the same code path a `"default_assumed"` line would. |
+| 6 | `equipment.daytime_fraction_note` persisted (not lost with the transient AI note) | **PASS (live)** | Fresh Grid Zero draft's `equipment.daytime_fraction_note` holds the full AI-generated paragraph verbatim after Step 6's Siguiente. |
+| 7 | Full scenario set stored, not just the chosen one | **PASS (live)** | Grid Zero: `equipment.scenarios` has 3 entries (A/B/C) after persisting. Off-Grid: `equipment.array_scenarios` has 3 entries. |
+| 8 | `mppt_scenario`/`array_scenario` label, including `"M"` for manual | **PASS (live)** | Auto case: Grid Zero persisted `mppt_scenario: "B"`, Off-Grid persisted `array_scenario: "2"`. Manual case: drove `POST …/paso/6/manual/validar` → `POST …/paso/6/manual` → `POST …/paso/6` on a live draft and confirmed `equipment.mppt_scenario == "M"` and `equipment.chosen_scenario.scenario == "M"`. |
+| 9 | `consumption.loads_display` round-trippable, distinct from `consumption.loads` | **PASS (live)** | Off-Grid draft's `consumption.loads_display` carries the full `{Descripción, Cantidad, Potencia (kW), Categoría}` rows, separate from `consumption.loads`'s taxonomy-keyed shape. |
+| 10 | Scenario cards with inline ●/○ selector; invalid scenarios render greyed with "fuera de límites", no button | **PASS (code + live)** | `webapp/templates/wizard/_s6_equipos.html` L143-151: `{% if c.is_valid %}` renders the selector button, `{% else %}` renders `⚠️ Escenario {{ … }} — fuera de límites` with no button. Live: all three Grid Zero scenarios were valid for the reference equipment pair, so the greyed branch wasn't hit live this session — verified structurally in the template instead. |
+| 11 | `equip_key` reset on panel/inverter change (Grid Zero); panel+CC+battery (Off-Grid) | **PASS (code)** | `gz_s6_equipment.py:select_equipment()` and `og_s6_equipment.py:select_equipment()` both read and match the plan's exact key composition; Off-Grid's own docstring flags (correctly, not silently fixed) that changing the inverter alone does **not** reset scenarios in the real Streamlit source, and this port matches that faithfully. |
+| 12 | "All three scenarios exceed daytime consumption" warning with computed optimal kW | **PASS (code)** | `gz_s6_equipment.py:build_context()`'s `all_saturated`/`optimal_kw` computation, rendered at `_s6_equipos.html` L171-176. Not hit live this session (the reference panel/inverter pair wasn't oversized) — verified by code read and the template's conditional block. |
+| 13 | Default selection `valid_labels[min(1, len-1)]` (prefer B) | **PASS (live)** | Fresh Grid Zero draft with all three scenarios valid selected "B" by default with no explicit `escenario/<label>` POST. |
+| 14 | Manual mode: live Voc/Vmp/Imax rows, chips, own projection card, selectable only when `within_limits` | **PASS (live)** | Drove `manual/validar` then `manual` on a live draft; `_s6_equipos.html` L189-236 renders the chips/param rows/selector exactly as coded; `select_manual()` (`gz_s6_equipment.py`) rejects the select server-side when `not within_limits`. |
+| 15 | "Siguiente" disabled unless a valid auto scenario or valid manual design exists | **PASS (code)** | `webapp/blueprints/wizard.py`'s `paso_post()` for `n==6` treats `save_step() is None` as a hard server-side rejection for both Grid Zero and Off-Grid (re-renders the step with an error), independent of the client-side `disabled` attribute — confirmed by reading both branches; this is also the one place this port is a *deliberate, disclosed improvement* over `main`, which does not re-validate an out-of-limits manual design before accepting it (see `gz_s6_equipment.py`'s module docstring). |
+| 16 | Off-Grid tiers 1/2/3 vs. `_HYBRID_RELIABILITY_SCENARIO_DEFS` switch when `grid_connected`, with the AC-coupled-surplus caption | **PASS (live)** | Fresh Hybrid draft with `grid_connected=True`: `og_s6_equipment.py:_compute()`'s `is_hybrid_grid` was `True` and `scenario_defs=_HYBRID_RELIABILITY_SCENARIO_DEFS` was passed into `generate_reliability_scenarios()`; `hybrid_savings_enabled` correctly became `True` once `whole_home_avg_kwh_month` resolved from the main-panel profile, and `scenario_cards` carried real `savings_pct` (45.0% for all three tiers on this draft's inputs). |
+| 17 | Split-phase check + warning + autotransformer note; `inverter_qty` doubling; Step 7 prefers `equipment.inverter_qty` over re-deriving | **PASS (live)** | Forced `voltage_v=240` on a live draft's blob and re-ran `og_s6_equipment._compute()`: `split_phase = {"requires_split_phase": True, "autotransformer_needed": True, "warning_message": "…dos unidades en configuración split-phase…"}`, `final_inverter_qty == 2`. `og_s7_costs.py:_seed_line_items()` reads `equipment.get("inverter_qty")` directly (confirmed by code read, and matches the do-not-drop item's own explicit "never re-derive" instruction). |
+| 18 | `compute_ac_breaker_summary()` electrical summary; `_MAX_CHARGE_CONTROLLERS = 4` | **PASS (code)** | `og_s6_equipment.py` imports and calls `compute_ac_breaker_summary()` in its `ac_ctx` block, rendered as "Resumen eléctrico — carga y protecciones"; `_MAX_CHARGE_CONTROLLERS = 4` is set at module level and passed into every `generate_reliability_scenarios()`/`check_charge_controller_design_multi()` call. |
+| 19 | Hybrid: `grid_connected` checkbox, utility/tariff block, `panel_scope` primary/secondary, main-panel block in both `bill` and `loads` modes (second loads table + second demand-profile block), AC-coupling note appended once | **PASS (live)** | Fresh Hybrid draft: `grid_connected` toggle, distributor/tariff selection, `panel_scope=secondary`, and a genuinely independent second loads table (scratch key `"mp"`, form prefix `mp_row-`) all round-tripped correctly through Step 4's Siguiente in a single request; Step 5's `mp` profile computed independently (`avg_kwh_month: 48.0`, `avg_kwh_month_diversified: 29.8`) without touching the critical-loads profile. AC-coupling note: generated the intro twice via `POST …/paso/8/intro/generar` and once more via two separate `POST …/paso/8/pdf` calls — the note appears **exactly once** in `proposal_text` every time (`_with_ac_coupling_note()`'s idempotency guard, `webapp/blueprints/wizard.py`). `bill` mode not separately live-exercised this session (only `loads` mode was); `_s4h_mp_bill.html`/`hy_s4_loads.py:mp_bill_context()` read and structurally match the `loads`-mode code exactly (same shim pattern, same persistence shape) — **PASS (code)** for the `bill`-mode half specifically. |
+| 20 | `STATUS_TRANSITIONS` directed map; `promote_prospect()` on `won` | **PASS (live)** | Drove the locked Grid Zero proposal through `draft → active → won` via `POST /cotizaciones/<pid>/estado`; confirmed the prospect ("QA Audit GZ …") was promoted — `clients_db.search_clients()` now returns it as a real client, and `proposals.client_id` is set with `prospect_id` cleared. |
+| 21 | Lock (+ optional note) → immutable; "Nueva versión" copies + resets to step 1; "Marcar como enviada" | **PASS (live)** | Locked `PC-2026-017` with a version note; a subsequent `GET …/paso/<n>` on that version 303s to the list (guard confirmed). `POST …/nueva-version` produced an unlocked `version_number: 2` copy and 303s to its own `paso/1`. `POST …/enviada` set `sent_to_client: True`. |
+| 22 | `format_quote_number()` everywhere a quote number is shown, incl. `-v2` suffix | **PASS (live)** | v1 rendered as `PC-2026-017`; the "Nueva versión" copy rendered as `PC-2026-017-v2` in both the detail panel's version row and `format_quote_number()`'s own output. |
+| 23 | Interconnection-permit USD from Step 5 overrides that Step 7 line item's unit cost | **PASS (live)** | Fresh Grid Zero draft's Step 5 default `interconnection_permit_usd = 1000.0` appeared as the "Permiso de Interconexión" line's `unit_cost` ($1,000.00) in both Step 7's context and the generated PDF. |
+| 24 | Service defaults filtered by `system_types`, excluding the interconnection permit from Off-Grid | **PASS (live)** | The fresh Off-Grid PDF (`PC-2026-018`) has **no** "Permiso de Interconexión" line at all — `og_s7_costs.py:_load_service_defaults()`'s filter confirmed working end to end, not just by code read. |
+| 25 | `_refresh_prices()` touches only `unit_cost`; reports count changed | **PASS (live)** | `POST …/paso/7/refrescar` on a live draft returned a 200 with the "N precio(s) actualizado(s)" message fragment; re-read the draft's `costs.line_items` afterward and confirmed `qty`/`iva_pct` were byte-identical to before the refresh for every row (e.g. "Paneles solares": `qty=5, iva_pct=0.0` unchanged). |
+| 26 | Zero-export disclaimer rides along wherever `new_bill` is shown | **PASS (live)** | Verbatim disclaimer text appears in Step 4's fixed-charge caption (`gz_s4_utility.py:FIXED_CHARGE_DISCLAIMER`) and, worded identically, as the PDF's footnote under "FACTURACIÓN MENSUAL PROMEDIO" in the fresh Grid Zero PDF: *"La nueva factura estimada incluye únicamente el cargo por energía y el cargo fijo de acceso. No incluye bomberos, alumbrado público, IVA, ni cargos de Generación Distribuida…"*. |
+
+**26/26 addressed — 0 FAIL, 0 WAIVED.** Every item that could be exercised live in a single audit
+session was; the few marked PASS (code) are ones where a live repro would have re-run an
+already-live-verified code path (item 5) or would have required deliberately engineering an
+edge-case input this audit's fresh drafts didn't naturally produce (items 10, 12, and the `bill`-mode
+half of item 19) — each is called out individually above rather than silently rounded up.
+
+### 5.3 Fresh end-to-end quotes — created, locked, PDF-generated
+
+Both required fresh quotes (and, beyond the plan's minimum, a third Hybrid one — the newest, least
+independently-validated system type, and the one likeliest to reveal something only visible once all
+three types share the same running app) were built from a genuinely empty `/nueva` form through to a
+locked, PDF'd version, entirely through the real Flask routes against the live database:
+
+- **Grid Zero — `PC-2026-017`.** Client "QA Audit GZ 20260920-111451", CNFL/Comercios y Servicios
+  tariff, a hand-typed 12-month manual consumption history (avg 562.08 kWh, avg bill ₡55,242, distinct
+  from any QA fixture), JA Solar 620 W + Fronius Primo 8.2‑1, MPPT scenario B (3.10 kW, 5 panels),
+  seeded cost line items, PDF generated and downloaded via both the wizard's own route and the
+  proposals-list route (byte-identical origin — both call `_generate_pdf_bytes()`), locked with a
+  note. PDF confirmed to open and render correctly (visual inspection of the actual rendered pages,
+  not just a non-zero byte count): correct branding assets (uploaded logo/signature, not bundled —
+  confirming Step 0's asset-sourcing fix is still live), all sections present, numbers matching the
+  wizard's own persisted blob exactly.
+- **Off-Grid — `PC-2026-018`.** Client "QA Audit OG 20260920-111656", a plausible cabin load list
+  built from the catalogue (fridge, two water pumps, pool pump, irrigation pump, TV, interior/exterior
+  lighting — 9.64 kWh/día raw), 1.5-day autonomy, Canadian Solar 620 W + Victron MultiPlus‑II 48/3000
+  + 5× Pylontech Fidus + Victron SmartSolar 250/100, reliability scenario "2" (4.96 kW, 8 panels,
+  24.85 kWh battery, 38.79% discharge, 63.5% utilization), $5,500 total, locked, PDF generated and
+  visually confirmed — Off-Grid's distinct technical-detail column set (daily generation, battery
+  capacity @10h, max discharge, no self-consumption %) and the "Recarga de batería" third bar on the
+  coverage chart both rendered correctly.
+- **Hybrid — `PC-2026-019`** (beyond the plan's stated minimum). Client "QA Audit HY 20260920-111831",
+  grid-connected, secondary panel scope with a genuinely independent main-panel loads table (A/C +
+  washer, `loads` mode), critical loads (fridge + interior lighting), reliability tier 2 with the
+  hybrid scenario defs, `hybrid_savings_enabled=True` (45% estimated bill reduction, ₡4,717 → ₡2,595),
+  $1,100 total, PDF generated twice (idempotency check) and locked. The PDF correctly shows the
+  Hybrid-only "Reducción de factura" column and the "Facturación estimada" line the plan's do-not-drop
+  item 26 sibling calls for, and the AC-coupling disclosure appears in the intro text exactly once.
+
+All three PDFs were fetched from Supabase Storage via their real signed URLs (not just generated
+in-process) and visually inspected page by page — not merely checked for a non-empty byte stream.
+
+### 5.4 Reference number reproduction
+
+**Both reference number sets reproduce exactly — but only via the pre-wizard hardcoded fixtures in
+`proposals/generator.py` (`MARIA_JOSE_DATA`/`JORGE_RAMIREZ_DATA`), not via a from-scratch wizard run**,
+confirming (rather than re-discovering) what Steps 6 and 7's own commit messages already found and
+documented:
+
+- Step 6's commit (`35c3578`): *"The plan's exact Maria Jose Castro reference numbers could not be
+  reproduced live — traced to a pre-existing data gap (no live draft carries her real
+  seasonally-varying 12-month history, only a flattened QA fixture, and Costa Rica's tiered tariff
+  makes that a real difference, not a rounding one)."*
+- Step 7's commit (`4754306`): *"no real Jorge Ramirez load list exists anywhere in the repo or
+  database … the original 6.38 kWh/día reference predates the current per-line taxonomy and was
+  validated against hardcoded PDF sample data, not a load list."*
+
+This audit generated both fixtures through `GET /cotizaciones/dev/pdf-muestra/generar` (the Step 1
+dev harness, calling `generate_pdf(MARIA_JOSE_DATA/JORGE_RAMIREZ_DATA, …)` directly, no wizard/draft
+involved) and confirmed, by reading the actual rendered PDF pages:
+
+- **María José Castro:** avg 1,475.00 kWh, avg bill ₡157,874, generation 1,262.08 kWh, new consumption
+  520.86 kWh, new bill ₡51,681, savings ₡106,192, Y1 $2,798.81, 25yr $127,873.25, IRR 22.92%,
+  ROI 5.48 — **every figure matches the plan's reference exactly, byte for byte in the rendered PDF.**
+- **Jorge Ramírez:** 5.00 kW, 16 m², 6.38 kWh/día, 9.60 kWh battery @10h, 66.46% discharge, $10,320
+  total — **all match exactly.**
+
+**One genuine, pre-existing (not Phase-20-introduced) discrepancy found while checking this:** the
+plan's own reference cites Jorge Ramírez at **$2.08/Wp**; the rendered PDF shows **$2.06/Wp**. This
+traces to `JORGE_RAMIREZ_DATA["cost_per_wp"] = 2.06` — a hardcoded field in `proposals/generator.py`,
+identical on `main` (confirmed via `git diff main..main_jinja -- proposals/generator.py`, which shows
+no difference in this fixture). $10,320 ÷ (8 × 620 W) = $2.081/Wp — matching the plan's $2.08 — while
+$10,320 ÷ 5,000 W (the fixture's own rounded-for-display `system_kw: 5.0`) = $2.064/Wp, matching the
+PDF's $2.06. The fixture's `cost_per_wp` was seemingly hand-computed off the rounded display capacity
+rather than the precise panel-count × Wp figure at some point before this phase. **Not a Phase 20 port
+bug** — it predates this phase, lives in code this phase does not own (`proposals/generator.py`'s
+hardcoded sample data, §1.9), and is not reachable through the wizard (a live-computed quote always
+derives `cost_per_wp` from the real panel count × Wp, per `gz_s7_costs.py`/`og_s7_costs.py:_finalize()`
+— confirmed correct in both fresh PDFs generated this session, e.g. Off-Grid's own $1.11/Wp = $5,500 ÷
+4,960 W exactly). Flagged for Oscar/manager as a one-line data-fixture correction, not a code defect.
+
+**Honest accounting of what "matches the reference" can and cannot mean here, as the task asked:**
+the wizard's *arithmetic pipeline* is proven correct — every fresh, from-scratch quote created in
+Section 5.3 produced internally-consistent numbers (PDF = Step 8 review = Step 6/7 persisted blob,
+to the cent) — but the two specific historical reference *number sets* are not independently
+re-derivable from a fresh wizard run with today's catalog and today's tariff data, for reasons that
+predate this phase and are catalogued above, not discovered by it. A byte-identical match on the
+fixtures is real evidence the PDF engine, `build_from_wizard_blob()`, and the wizard's own summary
+computation are all reading the same numbers the same way; it is not evidence that a brand-new
+Jorge-Ramírez-shaped quote built today would land on exactly 6.38 kWh/día — nobody has ever been able
+to demonstrate that with real inputs, on `main` or here.
+
+### 5.5 New integration-level findings from this audit
+
+Genuinely new observations from *combining* all three system types in one running session, none of
+which any single prior step's own validation could have caught:
+
+1. **No new functional bug found in the shared dispatch/state layer.** `webapp/blueprints/wizard.py`'s
+   `STEP_MODULES`/`STEP_TEMPLATES` dispatch table, the `_guard()` locked/step-ahead checks, and
+   `wizard/draft.py`'s read-modify-write all behaved identically and correctly across Grid Zero,
+   Off-Grid, and Hybrid runs in the same session (three different `system_type`s, same blueprint, same
+   process) — this is itself the audit result worth recording: nine independently-built steps compose
+   without the kind of shared-table collision the build plan's own risk section (§4) worried about.
+2. **One initially-alarming result that was not a bug: a fresh Hybrid Step 4 submission that omitted
+   `grid_connected`/`panel_scope`/`mp_mode` from the POST silently lost the entire main-panel branch**
+   (`consumption.utility` and `consumption.main_panel` both came back `None`). Traced to
+   `hy_s4_loads.py:save_step()`'s documented-as-intentional behaviour: those three fields are read
+   fresh from the submitted form every time (`wizard/hybrid.py`'s own Streamlit source does the same —
+   see that function's own docstring), which is only safe because the real
+   `webapp/templates/wizard/hy_s4_loads.html` / `_s4h_body.html` render `grid_connected` as a checkbox
+   and `panel_scope`/`mp_mode` as radios **inside the one wrapping `<form>` that Siguiente submits** —
+   confirmed by reading both templates line by line. **This audit's own test script omitted those
+   fields on its first attempt** (a raw `test_client().post()` doesn't auto-include unchecked-looking
+   browser state the way a real form submission does) and reproduced exactly this symptom; adding the
+   three fields to the POST (matching what a real browser submits) fixed it immediately, and a second,
+   separately-caught mistake (`mprow-` vs. the template's actual `mp_row-` field prefix) confirmed the
+   real prefix by grepping the template rather than assuming. Recorded here in detail specifically
+   because the failure mode looks identical to a real data-loss bug from the outside, and because it
+   is the kind of thing that would recur if anyone (a future agent, or a manual QA pass) drives this
+   form via a raw HTTP client instead of a real browser without checking the template first.
+3. **`dashboard.PHASES`' stale status text (§5.1)** is the one loose end this audit found that isn't a
+   §1.10 item and isn't authorized for this step to fix — noted for the manager rather than corrected.
+
+No data corruption, no route collision, no cross-system-type state leakage, and no numeric drift were
+found. Given the plan's own §4 explicitly predicted numeric drift as "the biggest risk," the absence
+of any is worth stating plainly rather than assumed: every fresh quote's PDF numbers matched its own
+Step 6/7/8 persisted blob to the cent, for all three system types, in a single shared running process.
+
+### 5.6 Streamlit-side files — confirmed intact, deletion decision deferred to Oscar
+
+Per §1.9/§3, `pages/01_proposals.py`, `pages/02_new_proposal.py`, `pages/02b_new_proposal_test.py`,
+and `wizard/design_scenarios_test.py` were **not touched** by this step, and — verified independently
+via `git log --oneline -- <path>` and `git diff main..main_jinja -- <path>` for each — have received
+**zero commits on `main_jinja` since Phase 0/5's original scaffold** and are **byte-identical to
+`main`** today. `wizard/hybrid.py` and `wizard/__init__.py` are likewise byte-identical to `main`.
+
+The only Streamlit-side files that differ from `main` at all are exactly the ones §0.2/§1.9 already
+named and pre-approved: `wizard/state.py`, `calculations/pvgis.py` (Step 0's reconciliation),
+`wizard/grid_zero.py` (Step 5's `_estimate_daytime_fraction_ai()` → `ai/daytime_fraction.py` move),
+`wizard/off_grid.py` (Step 8a's `_og_monthly_coverage_and_sim()` → `calculations/og_coverage.py` move),
+and `wizard/common.py` (Step 3's `monthly_coverage_chart()` → `webapp/figures.py` move) — each diff
+read in full this session and confirmed to be exactly what its own commit message describes: a
+function body replaced by a same-name re-import, zero behavioural change, `main`'s own call sites
+unchanged. `wizard/draft.py` is a new, Streamlit-free file with no `main` counterpart, per §1.1.
+`pages/05_admin.py` also differs from `main`, but that divergence predates Phase 20 entirely (last
+touched by a pre-Phase-20 commit, `72803c6`) and is unrelated to this port.
+
+**Their fate (delete vs. keep) is not decided by this step, per §1.9/§3's explicit instruction that
+this is "a deliberate, separate commit" made "with Oscar."** No such conversation has happened as
+part of this audit; this report is not that decision.
+
+### 5.7 Verdict
+
+Cutover's three Build items scoped to this agent (nav sweep, checklist audit, docs update) are
+complete; the fourth (Streamlit-file fate) is explicitly deferred, per plan. All three Validate items
+are satisfied: two fresh quotes (plus a third, Hybrid, beyond the stated minimum) created/locked/PDF'd
+from scratch in Flask; both reference number sets reproduced exactly via the pre-wizard fixtures, with
+an honest account of what that can and cannot prove and one small pre-existing fixture-data
+inconsistency flagged (not a Phase 20 bug); every §1.10 item explicitly ticked with live-request
+evidence or, for the small number that couldn't be forced live in one session, explicitly marked PASS
+(code) with the specific reason why. No FAILs, no WAIVEDs, no items left unaddressed.

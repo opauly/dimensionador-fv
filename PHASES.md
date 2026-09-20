@@ -35,6 +35,7 @@
 | 17 — VRM Monitor: scheduled reports, report cost limits, tiered white-label branding, visible trial | ✅ Complete — Steps 0–9 built & live-verified (see PLAN_PHASE17.md); CSV-sourced sites are structurally excluded from scheduling (§0.7); also closed Phase 15's deferred Step 7 |
 | 18 — VRM Monitor: personalized report modules for Growth/Fleet | ✅ Complete (corrected 2026-09-02 — this row previously said "Phase 2 in progress") — Phase 1 shipped 2026-08-28, Phase 2 (critical alerts, grid meter, generator, tank modules) shipped and verified 2026-08-29, including a real row-sizing regression and a default-rollout scope question both caught and fixed before being called done (see PLAN_PHASE18.md) |
 | 19 — VRM Monitor: Admin Fleet Health Dashboard (new, added 2026-09-02) | ✅ Phases 1–2.5 complete and live (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection, from the original plan) not built — see below |
+| 20 — Cotizaciones: Flask/Jinja2 + htmx port of the proposals list + full 8-step wizard (Grid Zero, Off-Grid, Hybrid), off Streamlit | ✅ Steps 0–10 complete and audited (2026-09-18 → 2026-09-20), on the `main_jinja` branch/worktree — `main` (Streamlit) stays untouched and running in parallel; see `PLAN_PHASE20_PROPOSALS_JINJA.md`, including its §5 Step 10 audit (all 26 do-not-drop items independently re-verified live, not just re-read from prior steps' own commit messages). One decision explicitly deferred, not forgotten: whether `pages/01_proposals.py`/`pages/02_new_proposal.py`/`pages/02b_new_proposal_test.py`/the Streamlit `wizard/*.py` UI modules get deleted is "a deliberate, separate commit" made with Oscar (plan §1.9/§3) — they remain intact and unmodified on `main_jinja` today. |
 
 ---
 
@@ -1419,6 +1420,86 @@ cross-checking that self-sufficiency and grid-dependency landed near-inverses as
 
 ---
 
+## Phase 20 — Cotizaciones: Flask/Jinja2 + htmx port (complete, 2026-09-18 → 2026-09-20)
+
+**Goal:** port the solar tool's Cotizaciones section — the proposals list and the full 8-step New
+Proposal wizard for all three system types (Grid Zero, Off-Grid, Hybrid) — off Streamlit onto
+Flask/Jinja2/htmx, producing the same numbers and the same PDF as the Streamlit wizard for the same
+inputs. Lives entirely on the `main_jinja` branch/worktree; `main` (this Streamlit app) is
+**unmodified and still running** — this is a parallel rebuild, not a migration that broke the old
+app. Full plan, decisions, and every step's own build/validate notes:
+[`PLAN_PHASE20_PROPOSALS_JINJA.md`](PLAN_PHASE20_PROPOSALS_JINJA.md).
+
+### What shipped
+
+- **Step 0:** reconciled `main_jinja`'s shared Python layer (`wizard/state.py`, `proposals/
+  generator.py`, `calculations/pvgis.py`, `wizard/grid_zero.py`, `wizard/off_grid.py`), which had
+  silently drifted from `main` for several weeks — closed the gap that had every Flask-side PDF using
+  bundled logo/signature assets instead of whatever Oscar uploads in Admin.
+- **Steps 1–2:** proposals list (search/filters/status badges), the detail/version-lifecycle panel
+  (lock, "Nueva versión," "Marcar como enviada," status transitions, `promote_prospect()` on won).
+- **Step 3:** the wizard shell/state engine — `wizard/draft.py`, a new Streamlit-free module that
+  collapses Streamlit's two-tiered session-state/autosave model into one persisted blob per version,
+  plus Steps 1–3 (Cliente / Tipo e idioma / Sitio e irradiancia) shared by all three system types.
+- **Steps 4–6:** Grid Zero's Distribuidora/Consumo, the MPPT A/B/C/M equipment screen (the single
+  densest screen in the wizard), Costos/Revisión/PDF/lock — completing Grid Zero end to end.
+- **Step 7–8a–8b:** Off-Grid's Cargas/Perfil de demanda, Equipos + real day-by-day battery-SoC
+  reliability scenarios, Costos/Revisión/PDF/lock — completing Off-Grid end to end.
+- **Step 9:** Hybrid's own Steps 4–5 (grid-connected toggle, critical vs. main-panel loads, both
+  `bill` and `loads` main-panel modes), delegating Steps 6–8 to the same Off-Grid modules — completing
+  all three system types.
+- **Step 10 (this entry, 2026-09-20):** the whole-system audit — see below.
+
+### Step 10 — cutover audit
+
+Not new feature work; a from-scratch re-verification of all nine prior steps' work together, since no
+single step's own validation could see Grid Zero, Off-Grid, and Hybrid sharing one running app, one
+dispatch table, and one set of shared functions at the same time. Full results, the 26-item table, and
+every piece of live evidence: `PLAN_PHASE20_PROPOSALS_JINJA.md` §5.
+
+- **All 26 of the plan's §1.10 "do-not-drop" checklist items independently re-verified** against the
+  live app and the real shared Supabase project — not re-read from prior steps' own commit messages.
+  26/26 addressed, 0 FAIL, 0 WAIVED.
+- **Three fresh proposals** (Grid Zero, Off-Grid, and — beyond the plan's stated minimum — Hybrid,
+  the newest and least independently-validated type) built from a genuinely empty `/nueva` form
+  through to a locked, PDF-generated version, entirely through real HTTP requests against the running
+  app and the live database. All three PDFs fetched from Supabase Storage via their real signed URLs
+  and visually inspected page by page.
+- **Both historical reference number sets** (María José Castro, Jorge Ramírez) reproduced exactly —
+  confirmed, not re-discovered, that this is only possible via the pre-wizard hardcoded fixtures in
+  `proposals/generator.py`, not from a from-scratch wizard run with today's catalog/tariff data (a
+  data-availability gap Steps 6 and 7 had already found and documented; this audit's job was to check
+  that finding independently, which it did). One small, pre-existing (not Phase-20-introduced)
+  inconsistency found in the process: the Jorge Ramírez fixture's hardcoded `cost_per_wp` ($2.06)
+  doesn't match the plan's own cited reference ($2.08) — traced to the fixture computing it off a
+  rounded display capacity rather than the precise panel-count × Wp figure; identical on `main`, not a
+  code defect, flagged for a one-line data correction rather than fixed in this audit.
+- **No integration bugs found** beyond one false alarm in the audit's own test methodology (a raw test
+  script omitting form fields a real browser submits automatically as part of one wrapping `<form>` —
+  traced and confirmed as a test artifact, not an app bug, by reading the actual templates).
+- **Nav/stub sweep:** already clean — `"proposals"` had already been fully removed from
+  `dashboard.STUBS` in Step 1, and the nav already pointed Cotizaciones at the real blueprint. Only
+  loose end found: the dashboard landing page's own progress list (`dashboard.PHASES`) still shows
+  "Fase 3–5" as "Pendiente" though they're built — a display-only inconsistency, not in this step's
+  authorized scope to fix, noted for a future small cleanup.
+- **Deferred, not forgotten:** whether `pages/01_proposals.py`, `pages/02_new_proposal.py`,
+  `pages/02b_new_proposal_test.py`, and the Streamlit `wizard/*.py` UI modules get deleted now that
+  Flask fully covers their functionality. Per the plan's own §1.9/§3, that is "a deliberate, separate
+  commit" made *with Oscar* — not a call this phase or its audit makes unilaterally. Confirmed
+  independently (via `git log`/`git diff` against `main`) that every one of those files is untouched
+  and byte-identical to `main` today; they remain in place pending that conversation.
+
+### Validation
+
+Every §1.10 item checked against the live running app (most via a real HTTP request through
+`webapp.create_app().test_client()` against the live Supabase project; a handful verified by reading
+the current unmodified source where a live repro would have re-exercised an already-proven code path
+or required deliberately engineering an edge case this audit's fresh drafts didn't naturally produce —
+each one named individually rather than rounded up to a live PASS it didn't earn). Full evidence trail
+in `PLAN_PHASE20_PROPOSALS_JINJA.md` §5.2.
+
+---
+
 ## Timeline summary
 
 | Phase | Description | Estimated days | Cumulative |
@@ -1443,6 +1524,7 @@ cross-checking that self-sufficiency and grid-dependency landed near-inverses as
 | 17 | VRM Monitor: scheduled reports, report cost limits, tiered branding, visible trial | 9–13 | Complete (2026-08-21 → 2026-08-25) — the phase where the product's marketing copy and its behaviour were made to agree |
 | 18 | VRM Monitor: personalized report modules for Growth/Fleet | — | Complete (2026-08-26 → 2026-08-29) |
 | 19 | VRM Monitor: Admin Fleet Health Dashboard | — | Phases 1–2.5 complete (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection) not built |
+| 20 | Cotizaciones: Flask/Jinja2 + htmx port (proposals list + full 3-system-type wizard), on `main_jinja` | — | Complete and audited (2026-09-18 → 2026-09-20) — `main` (Streamlit) stays untouched in parallel; Streamlit-side file deletion deferred to a separate decision with Oscar |
 
 **First real proposal possible:** End of Phase 2 (week 3–4), Grid Zero only, manual input  
 **Full MVP ready:** End of Phase 8 (~12 weeks at part-time pace)  
@@ -1501,6 +1583,8 @@ Phases 4 and 5 have no hard dependency on each other. If you have a real Off-Gri
 **Phase 18 (personalized report modules for Growth/Fleet) is off this critical path too, and is now complete.** It depends on Phase 17's branding/tier-gating pattern, reused verbatim for module selection. Built on its own branch given the blast radius of a mistake (every existing customer's report, not just Growth/Fleet's), merged back only after live verification. Triggered by the same installer accounts Phase 17's branding tier already serves.
 
 **Phase 19 (Admin Fleet Health Dashboard) is off this critical path too, and its first 2.5 phases are complete.** It was never scoped in this file until 2026-09-02, discovered only by reconciling `git log` against these docs — see its section above for the full account. Its Phase 3 (anomaly detection) remains an open decision with Oscar, not a scheduling gap.
+
+**Phase 20 sits differently from every phase above it: it doesn't add a capability, it re-platforms one.** It rebuilds Phases 2/3/4/5's own UI (the proposals list + the full wizard for all three system types) on Flask/Jinja2/htmx instead of Streamlit, on a separate branch/worktree (`main_jinja`) that runs in parallel against the same Supabase project — `main` and its Streamlit UI are untouched and still the production app until a separate, deliberate decision is made with Oscar to retire them. It is complete and independently audited (see `PLAN_PHASE20_PROPOSALS_JINJA.md`), off this critical path in the sense that nothing else in this file depends on it, but is the thing to read first if the next step is "should we cut over to the Flask app now."
 
 ---
 

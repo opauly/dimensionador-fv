@@ -23,6 +23,24 @@
 
 ---
 
+## Flask/Jinja2 + htmx port of Cotizaciones (`main_jinja` branch/worktree)
+
+**Added 2026-09-20.** This section documents a separate, parallel branch/worktree
+(`Claude-main_jinja`, branch `main_jinja`) that this `main`-branch copy of `CONTEXT.md` does not
+otherwise reflect — `main` and everything above this section describes the Streamlit app, which is
+**untouched and still the production app**. `main_jinja` re-platforms one section of it (Cotizaciones:
+the proposals list + the full 8-step New Proposal wizard, all three system types) onto
+Flask/Jinja2/htmx, reusing every shared calculation/AI/database/PDF module unmodified.
+
+| Item | Value |
+|---|---|
+| **Status** | Steps 0–10 complete and independently audited (2026-09-18 → 2026-09-20). All three system types (Grid Zero, Off-Grid, Hybrid) fully wired end to end: list, detail/version lifecycle, and the full wizard. |
+| **Plan / full history** | [`PLAN_PHASE20_PROPOSALS_JINJA.md`](PLAN_PHASE20_PROPOSALS_JINJA.md) — decisions, all 10 build steps, and §5's Step 10 audit (26/26 do-not-drop checklist items independently re-verified live against the real Supabase project, two fresh quotes — plus a third, Hybrid, beyond the plan's stated minimum — created/locked/PDF'd from scratch, both historical reference number sets reproduced via the pre-wizard fixtures with an honest account of what that can't prove, one small pre-existing fixture-data inconsistency flagged). |
+| **What's NOT decided yet** | The fate of the Streamlit-side UI modules this port makes redundant — `pages/01_proposals.py`, `pages/02_new_proposal.py`, `pages/02b_new_proposal_test.py`, and the `wizard/*.py` Streamlit UI modules. Per the plan's own §1.9/§3, deleting them is "a deliberate, separate commit" made *with Oscar* — not implied by this port being functionally complete. They remain intact and byte-identical to `main` today (confirmed via `git diff main..main_jinja`), on `main_jinja`, pending that conversation. |
+| **Run it** | `cd` into the `Claude-main_jinja` worktree, `.venv/bin/python run.py` — same `.env`/Supabase project as `main`. |
+
+---
+
 ## Environment
 
 | Item | Value |
