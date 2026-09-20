@@ -1,0 +1,10 @@
+{% if cashflow_chart_html %}
+<hr>
+<h4 class="section-title" style="font-size:15px;">Flujo de caja acumulado (25 años)</h4>
+<p class="card-note-sm">Proyección de ahorro acumulado a lo largo de 25 años, con el punto de equilibrio marcado.</p>
+{{ cashflow_chart_html | safe }}
+<p class="card-note-sm">
+  Supone escalamiento anual de tarifa del {{ escalation_pct }}% sobre el ahorro año 1
+  (${{ '{:,.0f}'.format(savings_year1_usd) }}). Inversión inicial: ${{ '{:,.0f}'.format(total_usd) }}.
+</p>
+{% endif %}

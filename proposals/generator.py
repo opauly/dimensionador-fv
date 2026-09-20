@@ -517,6 +517,16 @@ def build_from_wizard_blob(
         "irr_pct": 0.0, "roi_years": 0.0,
         "avg_monthly_savings_usd": 0.0, "pct_savings": 0.0,
     }
+    # Grid Zero's monthly-coverage chart data — real 12-month billed
+    # consumption vs. PVGIS-driven per-month generation for the sized
+    # array. Off-Grid/Hybrid's own version (real day-by-day battery-SoC
+    # simulation via wizard/off_grid.py:_og_monthly_coverage_and_sim(), not
+    # this monthly-average approximation) is not yet ported here — that
+    # helper is Off-Grid-specific and belongs to this phase's Off-Grid step
+    # (PLAN §2 "Step 8"); left empty (not populated) for is_off_grid so the
+    # PDF simply renders no coverage-chart section for those, matching
+    # today's actual (unfixed) behaviour rather than guessing at one.
+    monthly_coverage: dict = {}
     try:
         from calculations.sizing_grid_zero import size_system, compute_avg_billing
         from calculations.financials import calculate_irr, calculate_roi, calculate_25yr_savings
@@ -557,17 +567,41 @@ def build_from_wizard_blob(
                 "avg_monthly_savings_usd": round(yr1_usd / 12, 2),
                 "pct_savings":           float(avg_b.get("pct_savings") or 0),
             }
+
+            # Field-diff fix (PLAN §1.8's Step 6 task): the wizard's own inline
+            # Step 8 dict has always carried this (wizard/grid_zero.py
+            # "monthly_coverage": built from sizing["monthly_generation"]);
+            # build_from_wizard_blob() never did, so every Grid Zero PDF
+            # generated from the Cotizaciones list rendered no coverage chart
+            # at all. Fixed here, additively, so both callers inherit it.
+            if not is_off_grid:
+                gen_12 = sizing.get("monthly_generation") or []
+                if len(gen_12) == 12 and len(monthly_kwh) == 12:
+                    monthly_coverage = {
+                        "generation": [round(v, 1) for v in gen_12],
+                        "consumption": [round(v, 1) for v in monthly_kwh],
+                    }
     except Exception:
         pass
 
     company = get_company_info()
     bank    = get_bank_info()
     inv_warranty = inverter.get("warranty_yr", 5)
+    # Off-Grid/Hybrid only — absent (and unused) on a Grid Zero blob, which
+    # has no `equipment.battery`. Another field-diff fix (PLAN §1.8): the
+    # wizard's own inline Off-Grid/Hybrid Step 8 dict has always carried
+    # this (wizard/off_grid.py: battery_warranty = equipment["battery"].
+    # get("warranty_yr", 10)); build_from_wizard_blob() never did, so any
+    # Off-Grid/Hybrid PDF generated from the Cotizaciones list always showed
+    # the template's hardcoded "10 años" default regardless of the actual
+    # battery's warranty.
+    battery_warranty = (equipment.get("battery") or {}).get("warranty_yr", 10)
     sys_labels   = {"grid_zero": "Grid Zero", "off_grid": "Off-Grid", "hybrid": "Híbrido"}
 
     return {
         "date":              version_date or _dt.today().strftime("%d/%m/%Y"),
         "quote_number":      quote_str,
+        "monthly_coverage":  monthly_coverage,
         "client": {
             "name":     client_data.get("name") or proposal.get("client_name", ""),
             # site never carries an "address" key — wizard/common.py's site step
@@ -615,6 +649,8 @@ def build_from_wizard_blob(
         "cost_per_wp":               cost_per_wp,
         "warranty_inverter_years":   f"{inv_warranty} años",
         "warranty_inverter_years_en": f"{inv_warranty} years",
+        "warranty_battery_years":    f"{battery_warranty} años",
+        "warranty_battery_years_en": f"{battery_warranty} years",
         "payment_notes_es": [
             "Solicitamos un pago inicial del 70% por adelantado y el 30% restante contra entrega del proyecto",
             "Duración estimada: 21 días después del pago inicial",

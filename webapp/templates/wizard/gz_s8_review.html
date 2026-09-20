@@ -1,0 +1,22 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+{# Step 8 is terminal — there is no "Siguiente". The wrapping form's only
+   native submit button is "<- Atras" (persists the intro textarea before
+   leaving, same idiom as every other step per PLAN §1.4 pattern 1); every
+   other action (Generar con IA, Generar PDF, Bloquear) is a type="button"
+   hx-post that includes this form's fields via hx-include="#s8-form", so
+   the intro text on screen always rides along regardless of which action
+   fires. #}
+<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=8) }}" id="s8-form">
+  {% include "wizard/_s8_resumen.html" %}
+  {% include "wizard/_s8_cashflow.html" %}
+  {% include "wizard/_s8_intro.html" %}
+  {% include "wizard/_s8_pdf.html" %}
+  {% include "wizard/_s8_lock.html" %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit">← Atrás</button>
+    <span></span>
+  </div>
+</form>
+{% endblock %}

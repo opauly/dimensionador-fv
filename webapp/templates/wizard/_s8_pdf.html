@@ -1,0 +1,21 @@
+{# Generar PDF / Descargar — PLAN §1.8's two-step flow (htmx cannot swap a
+   file response, so the download itself is a plain <a href download>, not
+   an hx-post). Root id must stay "s8-pdf". Swapped standalone by
+   POST .../paso/8/pdf. #}
+<div id="s8-pdf">
+<hr>
+<h4 class="section-title" style="font-size:15px;">Generar propuesta en PDF</h4>
+<button class="btn" type="button"
+        hx-post="{{ url_for('wizard.paso8_pdf', vid=vid) }}"
+        hx-include="#s8-form" hx-target="#s8-pdf" hx-swap="outerHTML"
+        hx-indicator="#s8-pdf-spin" hx-disabled-elt="this">
+  Generar PDF
+</button>
+<span id="s8-pdf-spin" class="htmx-indicator" style="margin-left:8px;color:var(--muted);font-size:13px;">Generando PDF…</span>
+{% if pdf_error %}<p class="wiz-error">{{ pdf_error }}</p>{% endif %}
+{% if pdf_ready %}
+  <p style="margin-top:8px;">
+    <a class="btn btn-outline" href="{{ url_for('wizard.paso8_pdf_descargar', vid=vid) }}" download>⬇ Descargar PDF ({{ pdf_lang_label }})</a>
+  </p>
+{% endif %}
+</div>

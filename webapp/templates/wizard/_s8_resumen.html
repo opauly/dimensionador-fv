@@ -1,0 +1,68 @@
+{# Sectioned summary panel — Técnico / Costos del proyecto / Facturación
+   estimada / Proyección financiera. Numbers come straight off
+   build_from_wizard_blob()'s own return value (see gz_s8_review.py's module
+   docstring for why) — this panel and the generated PDF are the same
+   computation, not two copies of it. Static per full-page render; no
+   step-8 action changes these numbers (only Step 7 does), so this fragment
+   is never independently swapped. #}
+<style>
+.s8-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:20px 24px; }
+.s8-sec { font-size:0.68rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.07em; margin-bottom:10px; }
+.s8-hr { border-top:1px solid #e5e7eb; margin:14px 0; }
+.s8-row { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-start; }
+.s8-kv { min-width:100px; }
+.s8-kv-label { font-size:0.68rem; color:#9ca3af; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:3px; }
+.s8-kv-value { font-size:0.95rem; font-weight:600; color:#1e293b; }
+.s8-kv-value.accent { color:#0d9488; }
+.s8-kv-sub { font-size:0.7rem; color:#9ca3af; margin-top:2px; white-space:normal; overflow-wrap:anywhere; line-height:1.35; max-width:190px; }
+.s8-highlight { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:10px 16px; display:flex; gap:28px; flex-wrap:wrap; }
+</style>
+
+<div class="s8-card">
+  <div class="s8-sec">Técnico</div>
+  <div class="s8-row">
+    <div class="s8-kv"><div class="s8-kv-label">Sistema</div><div class="s8-kv-value">{{ '%.2f'|format(system_kw) }} kW</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Paneles</div><div class="s8-kv-value">{{ panel_count }}</div>{% if panel_sub %}<div class="s8-kv-sub">{{ panel_sub }}</div>{% endif %}</div>
+    <div class="s8-kv"><div class="s8-kv-label">Inversores</div><div class="s8-kv-value">{{ inv_qty }}</div>{% if inverter_sub %}<div class="s8-kv-sub">{{ inverter_sub }}</div>{% endif %}</div>
+    <div class="s8-kv"><div class="s8-kv-label">Área</div><div class="s8-kv-value">{{ area_m2 }} m²</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Aprovechamiento solar</div><div class="s8-kv-value">{{ '%d'|format(self_consumption_pct) ~ '%' if self_consumption_pct is not none else '—' }}</div></div>
+  </div>
+
+  <div class="s8-hr"></div>
+  <div class="s8-sec">Costos del proyecto</div>
+  <div class="s8-row">
+    <div class="s8-kv"><div class="s8-kv-label">$/Wp</div><div class="s8-kv-value">${{ '%.2f'|format(cost_per_wp) }}</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Subtotal</div><div class="s8-kv-value">${{ '{:,.2f}'.format(subtotal_usd) }}</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">IVA</div><div class="s8-kv-value">${{ '{:,.2f}'.format(iva_usd) }}</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Total</div><div class="s8-kv-value accent">${{ '{:,.2f}'.format(total_usd) }}</div></div>
+  </div>
+
+  {% if has_billing %}
+  <div class="s8-hr"></div>
+  <div class="s8-sec">Facturación estimada · promedio mensual</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;">
+    <div class="s8-row">
+      <div class="s8-kv"><div class="s8-kv-label">Consumo actual</div><div class="s8-kv-value">{{ '{:,.0f}'.format(billing_avg.consumption_kwh) }} kWh</div></div>
+      <div class="s8-kv"><div class="s8-kv-label">Factura actual</div><div class="s8-kv-value">₡{{ '{:,.0f}'.format(billing_avg.bill_crc) }}</div></div>
+    </div>
+    <div class="s8-highlight">
+      <div class="s8-kv"><div class="s8-kv-label">Generación solar</div><div class="s8-kv-value accent">{{ '{:,.0f}'.format(billing_avg.generation_kwh) }} kWh</div></div>
+      <div class="s8-kv"><div class="s8-kv-label">Nueva factura</div><div class="s8-kv-value accent">₡{{ '{:,.0f}'.format(billing_avg.new_bill_crc) }}</div></div>
+      <div class="s8-kv"><div class="s8-kv-label">Ahorro mensual</div><div class="s8-kv-value accent">₡{{ '{:,.0f}'.format(billing_avg.savings_crc) }}</div></div>
+      <div class="s8-kv"><div class="s8-kv-label">Reducción</div><div class="s8-kv-value accent">{{ '%.1f'|format(pct_savings) }}%</div></div>
+    </div>
+  </div>
+  <p class="card-note-sm" style="margin-top:8px;">La nueva factura considera solo cargo por energía y cargo fijo — no incluye bomberos, alumbrado público, IVA ni Generación Distribuida.</p>
+  {% endif %}
+
+  {% if has_financials %}
+  <div class="s8-hr"></div>
+  <div class="s8-sec">Proyección financiera</div>
+  <div class="s8-row">
+    <div class="s8-kv"><div class="s8-kv-label">Ahorro año 1</div><div class="s8-kv-value">${{ '{:,.0f}'.format(savings_year1_usd) }}</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Ahorro 25 años</div><div class="s8-kv-value">${{ '{:,.0f}'.format(savings_25yr_usd) }}</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">TIR</div><div class="s8-kv-value">{{ '%.2f'|format(irr_pct) }}%</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Payback</div><div class="s8-kv-value">{{ '%.1f'|format(roi_years) }} años</div></div>
+  </div>
+  {% endif %}
+</div>

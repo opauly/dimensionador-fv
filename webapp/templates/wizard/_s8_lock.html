@@ -1,0 +1,37 @@
+{# Lock block (pre-lock) / post-lock actions — do-not-drop items 20-22.
+   Root id must stay "s8-lock". Swapped standalone by POST .../paso/8/bloquear.
+   Once locked, the wizard shell's own guard (webapp/blueprints/wizard.py:
+   _guard(), built in Step 3) makes GET .../paso/<n> on this version
+   unreachable from here on — this fragment's "locked" branch is only ever
+   seen right after the lock action itself, before any page reload. #}
+<div id="s8-lock">
+<hr>
+{% if locked %}
+  <p style="color:#166534;font-weight:600;font-size:0.9rem;">✅ Versión bloqueada. Esta copia es inmutable.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    <form method="post" action="{{ url_for('proposals.nueva_version', pid=pid, vid=vid) }}">
+      <button class="btn btn-outline" type="submit">Nueva versión</button>
+    </form>
+    {% if not sent %}
+    <form method="post" action="{{ url_for('proposals.enviada', pid=pid, vid=vid) }}">
+      <button class="btn btn-outline" type="submit">Marcar como enviada</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-outline" href="{{ url_for('proposals.index') }}">Ir a cotizaciones</a>
+  </div>
+{% else %}
+  <h4 class="section-title" style="font-size:15px;">Bloquear versión</h4>
+  <p class="card-note-sm">Bloquear crea una copia inmutable. Cambios futuros requerirán crear una versión nueva.</p>
+  <input class="finput" type="text" name="version_note" style="max-width:420px;"
+         placeholder="Nota de versión (opcional) — ej: Precio reducido, cliente pidió 2 paneles menos">
+  <div style="margin-top:8px;">
+    <button class="btn" type="button"
+            hx-post="{{ url_for('wizard.paso8_bloquear', vid=vid) }}"
+            hx-include="#s8-form" hx-target="#s8-lock" hx-swap="outerHTML"
+            hx-confirm="¿Bloquear esta versión? No podrás editarla después.">
+      Bloquear versión
+    </button>
+  </div>
+  {% if lock_error %}<p class="wiz-error">{{ lock_error }}</p>{% endif %}
+{% endif %}
+</div>

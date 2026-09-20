@@ -1,0 +1,22 @@
+{# Intro-paragraph textarea + "Generar con IA" — swapped standalone by
+   POST .../paso/8/intro/generar. Root id must stay "s8-intro". The
+   textarea's `name="intro_text"` is what every other Step 8 action
+   (Generar PDF, Bloquear) picks up via hx-include="#s8-form", so whatever
+   is on screen — typed by hand or AI-generated — always rides along. #}
+<div id="s8-intro">
+<hr>
+<h4 class="section-title" style="font-size:15px;">Párrafo introductorio</h4>
+<p class="card-note-sm">
+  Este texto abre la propuesta en el PDF. Puedes escribirlo a mano o generarlo con IA — la IA
+  solo puede usar las cifras ya calculadas arriba (potencia, paneles, ahorro, payback); no
+  inventa precios, plazos ni garantías. Revísalo siempre antes de enviar.
+</p>
+<button class="btn btn-outline" type="button"
+        hx-post="{{ url_for('wizard.paso8_intro_generar', vid=vid) }}"
+        hx-target="#s8-intro" hx-swap="outerHTML"
+        hx-indicator="#s8-intro-spin" hx-disabled-elt="this">
+  Generar con IA
+</button>
+<span id="s8-intro-spin" class="htmx-indicator" style="margin-left:8px;color:var(--muted);font-size:13px;">Redactando párrafo introductorio…</span>
+<textarea class="finput" name="intro_text" rows="5" style="margin-top:8px;">{{ proposal_text }}</textarea>
+</div>

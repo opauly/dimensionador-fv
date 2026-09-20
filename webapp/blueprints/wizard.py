@@ -15,24 +15,35 @@ via create_prospect()/upsert_client() + create_proposal(). There is no
 Step 2's POST just patches `meta` into that same row.
 
 Steps 1-3 (Cliente / Tipo e idioma / Sitio e irradiancia) are shared by all
-three system types. Steps 4-6 are wired for Grid Zero only so far
-(gz_s4_utility.py / gz_s5_consumption.py / gz_s6_equipment.py, Phase 20
-Steps 4-5 of the plan) — STEP_MODULES/STEP_TEMPLATES are keyed by
-`{n: {system_type: module}}` with a "*" fallback for the shared steps,
-exactly mirroring PLAN §1.2's "single dispatch table keyed on
-meta.system_type". Off-Grid/Hybrid steps 4+ and Grid Zero steps 7-8 are
-later phase-20 steps and are not wired in yet — requesting one renders a
-plain "not built yet" placeholder rather than erroring, so manual
-exploration during review doesn't 500.
+three system types. Steps 4-8 are wired for Grid Zero only so far
+(gz_s4_utility.py / gz_s5_consumption.py / gz_s6_equipment.py /
+gz_s7_costs.py / gz_s8_review.py — Phase 20 Steps 4-6 of the plan; Grid
+Zero's wizard is now complete end to end) — STEP_MODULES/STEP_TEMPLATES are
+keyed by `{n: {system_type: module}}` with a "*" fallback for the shared
+steps, exactly mirroring PLAN §1.2's "single dispatch table keyed on
+meta.system_type". Off-Grid/Hybrid steps 4+ are later phase-20 steps and are
+not wired in yet — requesting one renders a plain "not built yet"
+placeholder rather than erroring, so manual exploration during review
+doesn't 500.
+
+Step 8's PDF routes deliberately import from webapp.blueprints.proposals
+(`_generate_pdf_bytes()`, `_signed_url()`) rather than re-implementing PDF
+generation here — PLAN §1.8's whole point is that the wizard and the
+proposals list share exactly one `build_from_wizard_blob()`-based code path,
+so a PDF generated from either place for the same saved version is
+byte-identical by construction.
 """
 from __future__ import annotations
 
-from flask import Blueprint, abort, redirect, render_template, request, url_for
+from io import BytesIO
+
+from flask import Blueprint, abort, redirect, render_template, request, send_file, url_for
 
 from wizard import draft
 from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
-    gz_s4_utility, gz_s5_consumption, gz_s6_equipment, s1_client, s2_type, s3_site,
+    gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
+    s1_client, s2_type, s3_site,
 )
 
 bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
@@ -44,6 +55,8 @@ STEP_MODULES = {
     4: {"grid_zero": gz_s4_utility},
     5: {"grid_zero": gz_s5_consumption},
     6: {"grid_zero": gz_s6_equipment},
+    7: {"grid_zero": gz_s7_costs},
+    8: {"grid_zero": gz_s8_review},
 }
 STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
@@ -52,6 +65,8 @@ STEP_TEMPLATES = {
     4: {"grid_zero": "wizard/gz_s4_utility.html"},
     5: {"grid_zero": "wizard/gz_s5_consumption.html"},
     6: {"grid_zero": "wizard/gz_s6_equipment.html"},
+    7: {"grid_zero": "wizard/gz_s7_costs.html"},
+    8: {"grid_zero": "wizard/gz_s8_review.html"},
 }
 
 
@@ -135,7 +150,14 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
             "wizard/not_built.html",
             **shell_ctx(vid, n, blob),
         )
-    ctx = module.build_context(blob)
+    # gz_s8_review.build_context() takes `vid` in addition to `blob` — see
+    # that module's own docstring for why (lock/quote-number/pdf_path live
+    # on the proposal_versions ROW, not in the JSONB blob). Every other
+    # step's build_context() is blob-only.
+    if module is gz_s8_review:
+        ctx = module.build_context(blob, vid)
+    else:
+        ctx = module.build_context(blob)
     ctx.setdefault("error", None)
     if error is not None:
         ctx["error"] = error
@@ -317,6 +339,12 @@ def paso_post(vid, n):
             )
         blob = draft.patch(vid, "equipment", result)
 
+    elif n == 7 and _step_module(n, blob) is gz_s7_costs:
+        blob = draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
+        ctx = gz_s7_costs.build_context(blob)
+        if not ctx["can_continue"]:
+            return _render_step(vid, n, blob)
+
     else:
         return _render_step(vid, n, blob)
 
@@ -340,6 +368,14 @@ def paso_atras(vid, n):
         draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
     elif n == 5 and _step_module(n, blob) is gz_s5_consumption:
         draft.patch(vid, "consumption", gz_s5_consumption.save_step(request.form))
+    elif n == 7 and _step_module(n, blob) is gz_s7_costs:
+        draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
+    elif n == 8 and _step_module(n, blob) is gz_s8_review:
+        # Step 8 has no scenario/table to persist — only the intro textarea,
+        # which lives in the same wrapping <form> as this Atrás submit.
+        intro_text = request.form.get("intro_text")
+        if intro_text is not None:
+            draft.patch(vid, "proposal_text", intro_text)
 
     return redirect(url_for("wizard.paso", vid=vid, n=n - 1), code=303)
 
@@ -562,3 +598,187 @@ def paso6_manual_validar(vid):
     blob = draft.load(vid)
     blob = _s6_patch(vid, gz_s6_equipment.validate_manual(blob, request.form))
     return _s6_render(vid, blob)
+
+
+# ── Step 7 (Grid Zero) actions — row edit, +Fila, quitar fila, Refrescar
+# precios. Every one of these patches blob["costs"] directly (this step has
+# no scratch namespace of its own — see gz_s7_costs.py's module docstring)
+# and re-renders wizard/_s7_costos.html from a fresh
+# gz_s7_costs.build_context() call (PLAN §1.3).
+
+
+def _s7_render(vid: str, blob: dict, *, refresh_message: str | None = None):
+    ctx = gz_s7_costs.build_context(blob)
+    ctx["refresh_message"] = refresh_message
+    return render_template("wizard/_s7_costos.html", vid=vid, n=7, **ctx)
+
+
+@bp.route("/<vid>/paso/7/tabla", methods=["POST"])
+def paso7_tabla(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", gz_s7_costs.recompute_table(blob, request.form))
+    return _s7_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/fila", methods=["POST"])
+def paso7_fila(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", gz_s7_costs.add_line_row(blob, request.form))
+    return _s7_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/fila/quitar", methods=["POST"])
+def paso7_fila_quitar(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "costs", gz_s7_costs.remove_line_row(blob, request.form))
+    return _s7_render(vid, blob)
+
+
+@bp.route("/<vid>/paso/7/refrescar", methods=["POST"])
+def paso7_refrescar(vid):
+    guard = _guard(vid, 7)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    new_costs, n_changed = gz_s7_costs.refresh_prices(blob)
+    blob = draft.patch(vid, "costs", new_costs)
+    message = f"✅ {n_changed} precio(s) actualizado(s)." if n_changed else "Los precios ya están al día."
+    return _s7_render(vid, blob, refresh_message=message)
+
+
+# ── Step 8 (Grid Zero) actions — intro-paragraph AI generation, PDF
+# generate/download (PLAN §1.8), lock (do-not-drop item 21). Post-lock
+# actions (Nueva versión / Marcar como enviada / Ir a cotizaciones) reuse
+# the existing webapp.blueprints.proposals routes directly from the
+# template — see wizard/_s8_lock.html — rather than duplicating them here.
+
+
+@bp.route("/<vid>/paso/8/intro/generar", methods=["POST"])
+def paso8_intro_generar(vid):
+    guard = _guard(vid, 8)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    text = gz_s8_review.generate_intro_text(blob, vid)
+    blob = draft.patch(vid, "proposal_text", text)
+    ctx = gz_s8_review.build_context(blob, vid)
+    return render_template("wizard/_s8_intro.html", vid=vid, n=8, **ctx)
+
+
+@bp.route("/<vid>/paso/8/pdf", methods=["POST"])
+def paso8_pdf(vid):
+    """PLAN §1.8 step 1 — build_from_wizard_blob() -> generate_pdf() ->
+    upload_pdf() + save_pdf_path(), via the exact same
+    webapp.blueprints.proposals._generate_pdf_bytes() helper Step 2's
+    list-page "Generar PDF" route uses, so the two are byte-identical by
+    construction rather than by two implementations happening to agree."""
+    guard = _guard(vid, 8)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    intro_text = request.form.get("intro_text")
+    if intro_text is not None:
+        blob = draft.patch(vid, "proposal_text", intro_text)
+
+    from database.proposals_db import format_quote_number, get_proposal, get_version, save_pdf_path
+    from proposals.generator import upload_pdf
+    from webapp.blueprints.proposals import _generate_pdf_bytes
+
+    version = get_version(vid)
+    proposal = get_proposal(version["proposal_id"])
+    vquote = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), version["version_number"])
+    language = (blob.get("meta") or {}).get("language", "es")
+    lang_label = "ES" if language == "es" else "EN"
+
+    error = None
+    try:
+        pdf_bytes = _generate_pdf_bytes(vid, proposal, vquote)
+        path = upload_pdf(pdf_bytes, proposal["id"], version["version_number"], proposal.get("client_name") or "cliente")
+        save_pdf_path(vid, path)
+    except Exception as exc:
+        error = f"Error generando PDF: {exc}"
+
+    ctx = gz_s8_review.build_context(blob, vid)
+    ctx["pdf_error"] = error
+    ctx["pdf_ready"] = error is None
+    ctx["pdf_lang_label"] = lang_label
+    return render_template("wizard/_s8_pdf.html", vid=vid, n=8, **ctx)
+
+
+@bp.route("/<vid>/paso/8/pdf/descargar", methods=["GET"])
+def paso8_pdf_descargar(vid):
+    """PLAN §1.8 step 2 — signed URL when a pdf_path already exists
+    (reusing webapp.blueprints.proposals._signed_url(), same bucket/TTL as
+    the list page), otherwise regenerate + send_file(). Guarded like every
+    other paso/8 route: unreachable once locked, which is fine — the
+    post-lock UI never links here (it links to the list page's own PDF
+    affordance instead, built in Step 2)."""
+    guard = _guard(vid, 8)
+    if guard:
+        return guard
+
+    from database.proposals_db import format_quote_number, get_proposal, get_version
+    from wizard.state import pdf_filename
+    from webapp.blueprints.proposals import _generate_pdf_bytes, _signed_url
+
+    version = get_version(vid)
+    if not version:
+        abort(404)
+    proposal = get_proposal(version["proposal_id"])
+    if not proposal:
+        abort(404)
+
+    pdf_path = version.get("pdf_path")
+    if pdf_path:
+        url = _signed_url(pdf_path)
+        if url:
+            return redirect(url, code=302)
+
+    blob = draft.load(vid)
+    language = (blob.get("meta") or {}).get("language", "es")
+    lang_label = "ES" if language == "es" else "EN"
+    vquote = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), version["version_number"])
+    pdf_bytes = _generate_pdf_bytes(vid, proposal, vquote)
+    name = pdf_filename(vquote, proposal.get("client_name") or blob.get("client", {}).get("name", ""), lang_label)
+    return send_file(BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True, download_name=name)
+
+
+@bp.route("/<vid>/paso/8/bloquear", methods=["POST"])
+def paso8_bloquear(vid):
+    """do-not-drop item 21 — locks the version via
+    database.proposals_db.lock_version() (the actual Streamlit-side
+    mechanism, wizard/grid_zero.py:step8_review()'s "Bloquear versión"
+    button). The wizard shell's own _guard() above already makes any GET
+    .../paso/<n> on this version unreachable from the next request
+    onward (redirect to the list) — this route only needs to perform the
+    lock itself and hand back the post-lock fragment for the current
+    (still-live) page."""
+    guard = _guard(vid, 8)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    intro_text = request.form.get("intro_text")
+    if intro_text is not None:
+        blob = draft.patch(vid, "proposal_text", intro_text)
+
+    from database.proposals_db import lock_version
+
+    note = (request.form.get("version_note") or "").strip() or None
+    error = None
+    try:
+        lock_version(vid, note)
+    except Exception as exc:
+        error = f"Error bloqueando versión: {exc}"
+
+    ctx = gz_s8_review.build_context(blob, vid)
+    ctx["lock_error"] = error
+    return render_template("wizard/_s8_lock.html", vid=vid, n=8, **ctx)

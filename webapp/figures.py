@@ -217,6 +217,47 @@ def gz_solar_utilization_fig(used_kwh: float, curtailed_kwh: float, self_consump
     return fig
 
 
+def cashflow_fig(total_usd: float, savings_year1_usd: float, escalation: float = 0.05):
+    """Step 8's "Flujo de caja acumulado (25 años)" chart with a break-even
+    marker — extracted verbatim from wizard/grid_zero.py:step8_review()
+    (L1769-1806). `escalation` is the assumed annual tariff-escalation rate
+    applied to year-1 savings; kept as a parameter (default 0.05, matching
+    the Streamlit source) rather than hardcoded twice."""
+    import plotly.graph_objects as go
+
+    from config import BRAND_GREEN, BRAND_NAVY
+
+    years = list(range(0, 26))
+    cashflow = [-total_usd] + [savings_year1_usd * ((1 + escalation) ** y) for y in range(25)]
+    cumulative = []
+    running = 0.0
+    for cf in cashflow:
+        running += cf
+        cumulative.append(round(running, 2))
+    breakeven_year = next((y for y, c in zip(years, cumulative) if c >= 0), None)
+    point_colors = [BRAND_GREEN if c >= 0 else "#dc2626" for c in cumulative]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=years, y=cumulative, mode="lines", line=dict(color=BRAND_NAVY, width=2),
+        fill="tozeroy", fillcolor="rgba(30,45,84,0.08)", name="Flujo acumulado",
+    ))
+    fig.add_trace(go.Scatter(
+        x=years, y=cumulative, mode="markers", marker=dict(size=5, color=point_colors), showlegend=False,
+    ))
+    fig.add_hline(y=0, line_color="#9ca3af", line_width=1)
+    if breakeven_year is not None:
+        fig.add_vline(
+            x=breakeven_year, line_dash="dash", line_color=BRAND_GREEN,
+            annotation_text=f"Punto de equilibrio: año {breakeven_year}", annotation_position="top",
+        )
+    fig.update_layout(
+        xaxis_title="Año", yaxis_title="Flujo acumulado (USD)",
+        height=300, margin=dict(t=30, b=10, l=10, r=10),
+    )
+    return fig
+
+
 def fig_to_fragment(fig) -> str:
     """Shared to_html() call so every route renders charts with the exact
     same config (no mode bar, no per-fragment plotly.js copy) — see module
