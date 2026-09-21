@@ -118,7 +118,58 @@ erDiagram
     ENERGY_DAILY ||--|| DAILY_HEALTH : "auto-computes (trigger)"
 ```
 
-`public` (Solar Design Tool) and `monitoring` (Victron Monitor) are otherwise fully isolated — the **only** cross-schema link is `monitoring.sites.client_id → public.clients.id`, and it's read/written through a narrow `SECURITY DEFINER` function (`get_report_email`), not a direct grant on `clients` to the `anon` key. Full table list per schema in [database/schema.sql](database/schema.sql) (`public`, this repo) and `victron-monitor/sql/schema.sql` (`monitoring`, now in [vrm-monitor](https://github.com/opauly/vrm-monitor)).
+`public` (Solar Design Tool) and `monitoring` (Victron Monitor) share two cross-schema links, not
+one: `monitoring.sites.client_id → public.clients.id`, read/written through a narrow
+`SECURITY DEFINER` function (`get_report_email`), not a direct grant on `clients` to the `anon` key —
+and the `site_properties.property_id` coupling documented in §2.1 below, which also reaches into the
+`vrm` schema. Full table list per schema in [database/schema.sql](database/schema.sql) (`public`,
+this repo) and `victron-monitor/sql/schema.sql` (`monitoring`, now in
+[vrm-monitor](https://github.com/opauly/vrm-monitor)).
+
+### 2.1 The maintenance register's cross-schema coupling (Phase 10, migrations 045/046/047)
+
+**`public.site_properties`** (the maintenance register's "one physical site, one visit schedule"
+grouping — see `PHASES.md`'s Phase 10 entry and `PLAN_PHASE21_MAINTENANCE_JINJA.md`) is written from
+**both** `monitoring.sites` (this repo's own Victron/Node-RED fleet) and **`vrm.sites`** — a table
+that belongs to VRM Monitor, the product [split into its own repo](https://github.com/opauly/vrm-monitor)
+on 2026-09-16. This repo still owns the coupling on both sides:
+
+```mermaid
+flowchart LR
+    MonSites["monitoring.sites<br/>(this repo's fleet)"]
+    VrmSites["vrm.sites<br/>(vrm-monitor repo's fleet —<br/>same Supabase project)"]
+    Trigger["public.auto_create_site_property()<br/>BEFORE INSERT trigger (047)<br/>installed on BOTH tables"]
+    Props["public.site_properties<br/>(maintenance register)"]
+
+    MonSites -- "property_id (045)" --> Props
+    VrmSites -- "property_id (045)" --> Props
+    Trigger -. "fires on INSERT into either table,<br/>auto-creates a property row" .-> Props
+```
+
+- **Migration 045** adds a `property_id uuid` column to *both* `monitoring.sites` and `vrm.sites`
+  (no FK constraint on either — deliberate, so each schema stays independently dumpable/portable).
+  Both this repo's own admin UI and the Flask Mantenimiento port (`main_jinja`,
+  `database/site_properties_db.py:link_site_to_property()`) write that column directly on `vrm.sites`
+  — a table this repo does not otherwise own the schema of.
+- **Migration 047** installs the *same* `public.auto_create_site_property()` trigger function as a
+  `BEFORE INSERT` trigger on **both** `monitoring.sites` and `vrm.sites` — every new row in either
+  table gets an auto-created `site_properties` row if it doesn't already carry a `property_id`. The
+  trigger function itself lives in `public` (this repo's schema); the trigger *registrations* on
+  `vrm.sites` are this repo reaching into another product's table.
+- **This is fine today because it's still one Supabase project** — same instance, same transaction
+  boundary, no network hop. It stops being fine, silently, the moment `vrm`'s tables are ever moved
+  to a separate Supabase project or a separate database: `vrm.sites.property_id` writes would start
+  failing (cross-database FK-shaped writes don't work), the 047 trigger on `vrm.sites` would need to
+  be re-created there manually (nothing would warn anyone it's missing), and the ~9 real properties
+  in the maintenance register that are anchored only in `vrm.sites` today would silently stop
+  appearing — `seed_properties_from_unlinked_sites()` and the register's site counts would just start
+  being wrong, with no error. Neither this repo nor `vrm-monitor` currently has anything that would
+  flag that split happening.
+- **Not fixed by design.** Decoupling from `vrm.sites`, or deciding who should own this trigger if the
+  databases ever do split, is an explicit non-goal of the Mantenimiento port
+  (`PLAN_PHASE21_MAINTENANCE_JINJA.md` §0.2/§3) — a cross-product decision, not a UI port. Recorded
+  here so it's visible to whoever eventually plans that split, rather than only in that phase's own
+  planning doc.
 
 ---
 

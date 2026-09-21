@@ -41,6 +41,25 @@ Flask/Jinja2/htmx, reusing every shared calculation/AI/database/PDF module unmod
 
 ---
 
+## Flask/Jinja2 + htmx port of Mantenimiento (`main_jinja` branch/worktree)
+
+**Added 2026-09-21.** Same worktree/branch as the Cotizaciones port above. `main_jinja` re-platforms
+the site register & preventive-maintenance scheduler (Resumen tab, Calendario anual, Configurar
+propiedades, property detail) onto Flask/Jinja2/htmx, reusing `calculations/maintenance.py` and
+`database/site_properties_db.py` unmodified (one additive batching helper,
+`list_visits_for_properties()`, aside). `pages/07_maintenance.py` (Streamlit) is untouched and stays
+the production app for this feature until further notice — see `PHASES.md`'s corrected Phase 10 entry
+for what the feature actually is versus its original spec.
+
+| Item | Value |
+|---|---|
+| **Status** | Steps 1–4 complete and independently audited (2026-09-20 → 2026-09-21). All three tabs plus the property detail page (site linking, on-demand credentials, visit logging incl. bundled multi-property visits, calendar due-date overrides, property merge/delete/seed) fully wired end to end against the live Supabase register (16 properties, 28 sites across `monitoring`/`vrm` schemas). |
+| **Plan / full history** | [`PLAN_PHASE21_MAINTENANCE_JINJA.md`](PLAN_PHASE21_MAINTENANCE_JINJA.md) — decisions (§0.4), all 4 build steps, and the Step 4 cutover audit (19/19 do-not-drop checklist items independently re-verified, most live against the real Supabase project via a full QA-property create → link → force-overdue → log-visit → re-bucket → clean-up cycle, plus a duplicate-property-name merge/move test proving the id-keyed fix over Streamlit's own name-keyed pickers). |
+| **What's NOT decided yet** | The fate of `pages/07_maintenance.py` (plan §0.4 Q6) — deferred to a separate conversation with Oscar, same precedent as Phase 20's own Streamlit-file deferral. Also unresolved (flagged, not fixed, by design — plan §0.2/§3): the cross-schema coupling where this repo's migrations (`045`/`047`) write `property_id` onto and trigger off of `vrm.sites`, a table that belongs to the now-separately-repo'd VRM Monitor product — see `ARCHITECTURE.md`'s Supabase schema map section. |
+| **Run it** | Same app/process as Cotizaciones above — `/mantenimiento` once the Flask app is running. |
+
+---
+
 ## Environment
 
 | Item | Value |

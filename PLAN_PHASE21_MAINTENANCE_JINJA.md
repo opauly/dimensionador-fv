@@ -696,3 +696,245 @@ buried so the tester compares against intent, not against Streamlit's behaviour,
 that the calendar's historical mode currently refetches data the same request already had, which is
 the kind of thing that looks like a deliberate decision to the next reader when it is just an
 artifact of Streamlit's top-down script model.
+
+---
+
+## 5. Built — Step 4 audit results
+
+**Audited 2026-09-21, on `main_jinja`, against the live shared Supabase project
+(`qqorjwnlawhlmrmxxgdb`) — not a read of Steps 1–3's own self-reports.** Every §1.4 verdict below was
+produced by reading the actual current code for that item (not the step's commit message) and,
+wherever practical, exercising it through a real HTTP request against the running Flask app
+(`webapp.create_app().test_client()` driving the real routes, real Supabase round-trips) rather than
+calling internal functions directly. The live register's baseline at the start and end of this audit
+is **16 properties, 28 sites (`monitoring` + `vrm` schemas combined), 0 unlinked sites** — verified
+before, throughout (after every cleanup step), and after this audit; every purpose-created QA
+property/client-side test used in this audit was deleted and independently reconfirmed gone.
+
+### 5.1 Nav / stub sweep
+
+`webapp/blueprints/dashboard.py`'s `STUBS` dict contains only `{"projects": "Proyectos"}` —
+`"maintenance"` is gone (Step 1 removed it; its own module docstring comment confirms this and the
+code checks out). Grepped the whole repo for `dashboard.stub` calls and `section='maintenance'`/
+`section="maintenance"` literals: the only remaining `dashboard.stub()` call in `base.html` is for
+`section='projects'`. `base.html`'s nav points Mantenimiento at `maintenance.index` with the active
+rule `request.blueprint == 'maintenance'` — confirmed this rule is correct for **all four** URL
+groups this phase built (index, calendario, configurar, and the property-detail page), not just the
+tab shell, because `maintenance_detail.py`/`maintenance_calendar.py`/`maintenance_setup.py` all
+register their routes onto the *same* `maintenance` blueprint instance via `register(bp)` — live-
+checked directly (`GET` each of the four URL shapes, inspected the rendered nav's `class="active"`
+attribute on the Mantenimiento link): all four are `active`. `GET /maintenance` (the old stub URL)
+returns `404`, and nothing in the templates or blueprints links to it anymore (grepped).
+
+### 5.2 §1.4 do-not-drop checklist — 19/19 items addressed
+
+Legend (same convention as `PLAN_PHASE20_PROPOSALS_JINJA.md` §5.2): **PASS (live)** = exercised
+through a real HTTP request against the running app with a real Supabase round-trip this session;
+**PASS (code)** = read the current, unmodified source and confirmed it implements the rule correctly,
+used only where a live repro would have required either engineering an edge case the live register
+doesn't naturally contain, or repeating a destructive test already independently live-verified by an
+earlier step on unchanged code (confirmed via `git log -- <file>` showing no commits since).
+
+**Resumen tab**
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Sort order overdue → due_soon → unknown → up_to_date, then name; `unknown` above `up_to_date` | **PASS (live)** | `sorted_rows(property_rows())` against the real 16-property register: 4 overdue (Bryan Gutiérrez, Isaac Cerdas, Manuel Mayorga, Rebeca Ruiz - El Encino, alphabetical), then 3 `unknown` (Emtec CR, Proyecto JR, Proyecto gV), then 9 `up_to_date` — `unknown` block sorts above `up_to_date` exactly as required. |
+| 2 | KPI strip Total/Atrasadas/Próximas/Al día, exact colors `#1E2D54`/`#dc2626`/`#a16207`/`#16a34a` | **PASS (live)** | Rendered HTML: `Total 16 #1E2D54`, `Atrasadas 4 #dc2626`, `Próximas 0 #a16207`, `Al día 9 #16a34a`. The live register has 0 `due_soon` properties today, so the "Próximas" *color* was confirmed live but its non-zero-count rendering needed a constructed case — see item 3. |
+| 3 | `STATUS_BADGE` labels/colors verbatim: Atrasado/Próximo/Al día/Sin datos | **PASS (live)** | All four confirmed live in rendered HTML: `Atrasado` `#fee2e2`/`#dc2626` (Bryan Gutiérrez), `Al día` `#dcfce7`/`#16a34a` (The Rainforest Lab), `Sin datos` `#f1f5f9`/`#6b7280` (Emtec CR / a fresh QA property). `Próximo` `#fef9c3`/`#a16207` has no live example today (0 `due_soon` properties in the real register) — constructed one on a temporary QA property (`next_due_override` = today+15 days, inside the 30-day due-soon window), confirmed the exact badge, then deleted it (register back to 16). |
+| 4 | "Próxima visita" cell: `"{days_overdue} días de atraso"` when overdue, else the date, plus `" (movida)"` when overridden | **PASS (live)** | Bryan Gutiérrez row: `1741 días de atraso`. The Rainforest Lab row (has `next_due_override` set): `2026-12-01 (movida)`. Plain-date branch (no override, not overdue) confirmed via every `up_to_date` row without an override, e.g. Rancho DuliLa: `2026-10-25` with no suffix. |
+| 5 | "Visitado este año" Sí/No pill, distinct from `status` | **PASS (live)** | Fundación Rahab: `up_to_date` status but `visited_this_year = False` (pill renders "No") — the exact distinction the item describes, confirmed both in `property_rows()`'s raw output and the rendered pill. |
+| 6 | Empty state pointing at "Configurar propiedades" | **PASS (live)** | Monkeypatched `property_rows()` to return `[]` and hit `GET /mantenimiento/`: rendered `No hay propiedades configuradas todavía. Usa la pestaña "Configurar propiedades" para crear la primera.`, with the link pointing at `/mantenimiento/configurar`. |
+
+**Calendario anual tab**
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 7 | Year selector: current year + 5 prior | **PASS (live)** | `GET /mantenimiento/calendario` rendered options `2026, 2025, 2024, 2023, 2022, 2021` (6 total), current year selected. |
+| 8 | ⚠ Current-year grid filters to `next_due_date.year <= year`; future-cycle rows go in a separate green box | **PASS (live)** | Real data: 6 properties with `next_due_date.year == 2027` (Karol Álvarez - Corredores, Lori Pickett - Vista Atenas, Hacienda Zurquí, Asoamazon, Karen Montealegre - Ukiyo, Karol Álvarez (Belén)) are **absent from every month cell** and **present, sorted by date, in the green "✓ Ya visitadas en 2026 — próximo ciclo en 2027 o después" box**. Independently re-confirmed on a fresh QA property: forced overdue via `next_due_override='2020-01-01'` → appeared in the January cell and the red "Sin mantenimiento" banner; logged a real visit → `next_due_date` recomputed to `2027-09-21` → disappeared from the January cell and reappeared in the green future-cycle box, sorted last (latest date) — confirmed on a **full, fresh page reload** (not just the htmx partial), matching real production behavior. |
+| 9 | Month cards: emoji, day, `/year` suffix only outside current year, name, trailing `✓` when visited, `—` when empty | **PASS (live)** | December 2026 cell: `🟢 1 — The Rainforest Lab`, `🔴 15/2021 — Bryan Gutiérrez` (year suffix shown, overdue from 2021), `🟢 16 — Fundación Rahab`, `🔴 16/2025 — Rebeca Ruiz - El Encino`; empty months render `—` (e.g. February). Trailing `✓` mark itself has no live example today (no property is both due-this-year and already visited-this-year in the current register) — confirmed correct by reading `maintenance_calendar.py`'s `"visited": p["visited_this_year"]` and `_calendar.html`'s `{% if it.visited %} ✓{% endif %}`, an exact port of Streamlit's `(' ✓' if p["visited_this_year"] else "")`. |
+| 10 | Historical mode: real visits, ✅ marker, day, name, `(${amount})` when present, no status color, empty-state message | **PASS (live)** | Year 2025: `✅ 6 — Asoamazon ($350)`, `✅ 6 — Karen Montealegre - Ukiyo ($200)`, `✅ 10 — Hacienda Zurquí ($300)`, `✅ 19/20 — Karen Montealegre - Ukiyo ($150/$100)`, `✅ 16 — Fundación Rahab` (no amount, correctly omits the parenthetical). Year 2021 (no visits that year): renders `No hay visitas registradas en 2021.` |
+| 11 | Red "Sin mantenimiento en {year}" banner | **PASS (live)** | 2026: banner lists exactly the 10 properties with `visited_this_year = False` (Bryan Gutiérrez, Emtec CR, Fundación Rahab, Isaac Cerdas, Manuel Mayorga, Proyecto gV, Proyecto JR, Rancho DuliLa, Rebeca Ruiz - El Encino, The Rainforest Lab). |
+| 12 | "Sin fecha calculada todavía" caption for `unknown` properties | **PASS (live)** | Rendered: `Sin fecha calculada todavía (sin sitios ni visitas vinculadas): Emtec CR, Proyecto gV, Proyecto JR` — unsorted (list order, not alpha-sorted), which is a faithful port: Streamlit's own `_calendar_section()` doesn't sort this list either (only `_overview_section()` sorts), confirmed by reading both. |
+| 13 | "Mover a otro mes" picker + "Restablecer a fecha calculada" | **PASS (live)** | Applied a move (`POST /calendario/override`, `action=aplicar`) on a QA property: `next_due_override` set, year param round-tripped correctly (`303` to `/calendario?anio=2026`). Applied a reset (`action=restablecer`) on a second QA property: `next_due_override` cleared back to `None`. Both cleaned up (property count back to 16 baseline after each). |
+| 8b (dup-name) | ⚠ Move/keep-name pickers keyed by id, not name | **PASS (live)** | Created two QA properties both named "QA Duplicado" with different intervals/overrides. The calendar's move `<select>` rendered **two distinct `<option>`s**, same visible label, different `value`/`data-next-due` (`2026-12-01` vs `2026-11-01`). Posted an override targeting one id specifically — **only that id's** `next_due_override` changed, the identically-named sibling untouched. This is the §0.4 Q5 fix; Streamlit's own `name_to_row = {p["name"]: p for p in scheduled}` would have collapsed these two into one dict entry, silently editing the wrong property. |
+
+**Configurar propiedades tab**
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 14 | Unlinked-sites info box + exact copy + seed button, idempotent | **PASS (live, seed) / PASS (code, info-box copy)** | Live register has 0 unlinked sites today, so the info box itself doesn't render (matches Streamlit's identical `if unlinked:` guard — confirmed by reading both). Ran `POST /propiedades/sembrar` anyway against the real 0-unlinked state: returned `seeded=0`, property count unchanged (16) — confirms the idempotent no-op path live. The box's exact copy text verified by direct code read (`_setup.html` vs. `pages/07_maintenance.py` L408–413, character-for-character match). |
+| 15 | New-property form: required name + error copy, `interval` default 365/min 1/step 30, success note | **PASS (live)** | `POST /propiedades` with blank name → rendered `El nombre es obligatorio.` exactly. Valid submit (`name="QA Mantenimiento <ts>"`, default interval) → property created, `interval=365`; form's `min="1" step="30"` confirmed in rendered HTML. Success note (`created=<name>` query param → `"Propiedad '<name>' creada. Vincúlala a sus sitios abajo."`) confirmed via the redirect target's rendered HTML. |
+| 16 | Existing-properties table: caption + Propiedad/Cliente/Sitios columns | **PASS (live)** | Rendered table header: `Propiedad`, `Cliente`, `Sitios`; caption text matches `pages/07_maintenance.py` L454–460 verbatim (direct code read, both templates compared line by line). |
+| 17 | ⚠ Merge: ≥2 selected, different-clients warning + mandatory gate, keep-name picker, N−1 merges, "≥2" hint at exactly 1 | **PASS (live)** | Count=1 hint (`Marca al menos 2 propiedades arriba para fusionarlas.`) confirmed live. Two-property merge with an explicit, non-default `keep_id` (both QA properties shared the same name — see item 8b) confirmed live: the explicitly-chosen survivor kept its own `maintenance_interval_days` (400), the other (200) was deleted, property count net -1. The different-clients warning + mandatory confirm gate (server-side re-check, not just the disabled button) was **not independently re-exercised on real data this session** — repeating it would require temporarily re-linking two more real clients' sites, and Step 3's own commit (`3423991`) already did exactly this live (`"Merge's different-clients warning and its mandatory confirm gate were verified server-side... a bypass POST without the confirm flag was rejected"`, using QA properties temporarily linked to two real properties' sites, independently reconfirmed restored). `git log -- webapp/blueprints/maintenance_setup.py webapp/templates/maintenance/_merge_panel.html` shows no commits since Step 3, so that live evidence still describes today's code — **PASS (code)** for the different-clients-gate half specifically, confirmed by re-reading `maintenance_setup.py`'s `propiedades_fusionar()` this session (the defensive `if len(client_ids) > 1 and not confirm_diff_client: return render_setup_panel(...)` re-check is present and unchanged). |
+| 18 | ⚠ Delete: two-step confirm, exact warning text, irreversible cascade | **PASS (live)** | `GET .../eliminar` (confirm fragment) rendered the exact warning (`¿Eliminar '<name>'? Sus sitios quedan sin vincular y su historial de visitas se borra. Esta acción no se puede deshacer.`). `POST .../eliminar` on a QA property deleted it; property count returned to baseline. Exercised twice across this audit (the single QA property and the merged-survivor QA property), both times independently re-confirmed via `list_properties()`. |
+| 19 | Closing "vincular sitios individuales…" caption, only when unlinked sites exist | **PASS (code)** | Live register has 0 unlinked sites, so the caption correctly does not render (confirmed live — absent from `GET /mantenimiento/configurar`'s HTML). Its conditional (`{% if unlinked_count %}`) and exact copy verified by direct code read against `pages/07_maintenance.py` L549–554 — character-for-character match. |
+
+**Property detail**
+
+| # | Item | Verdict | Evidence |
+|---|---|---|---|
+| 20 | Header: name, location caption, client line (`name (empresa) — phone · email` + `📝 notes`, all conditional) | **PASS (live, bare case) / PASS (code, full case)** | Fundación Rahab (client with no empresa/phone/email/notes): rendered `👤 Fundación Rahab` only, no dash/contact/notes lines — confirmed live. **No client in the live register has empresa+phone+email+notes all populated** (checked every one of the 16 clients directly), so the full branch (company suffix, contact bits joined by ` · `, separate `📝` notes line) could not be exercised live without fabricating contact data on a real client — instead verified by direct line-by-line comparison of `detail.html` L33–40 against `pages/07_maintenance.py` L584–594: identical construction (`client.name + " (" + empresa + ")"`, `[phone, email] | select | join(' · ')`, separate conditional notes paragraph). |
+| 21 | Override banner + reset button | **PASS (live)** | QA property with `next_due_override='2020-01-01'`: detail page rendered `⚠️ Fecha esperada movida manualmente a 2020-01-01.` with a "Restablecer a fecha calculada" button; after logging a visit (which auto-clears the override — item 26) a fresh reload showed the banner gone. |
+| 22 | Per-site block: schema badge, counts line, Comisionado, monitoring URLs, "Sin datos adicionales." fallback | **PASS (live)** | QA property linked to `hugo-aguilar` (monitoring schema): rendered `Monitoreo propio` badge, `4 paneles · 4 inversores` counts line, `Comisionado: 2024-07-24`. A `vrm`-schema site's badge (`Victron Monitor`) confirmed via Lori Pickett - Vista Atenas's detail page (real data, read-only). The "Sin datos adicionales." fallback verified by code read (`_site_ctx()`'s `has_extra` flag) — no live site in the register currently has all three fields empty. |
+| 23 | Credentials form → `save_credentials()` upsert on composite key, on-demand fetch | **PASS (live)** | `GET .../credenciales` (reveal-on-demand) confirmed empty form for a site with no stored credentials. `POST .../credenciales` with test text → immediate re-`GET` (simulating a page reload) showed the saved text — confirming persistence, not just an in-memory echo. A second `POST` with different text (cleared back to empty) confirmed the composite-key **upsert overwrites** rather than duplicating (re-`GET` showed the second value, not both). Performed on a real site (`hugo-aguilar`) that had no prior credentials, and restored to empty afterward — no real secret was overwritten or left behind. |
+| 24 | ⚠ Site linker: client-grouped (this property's client first, "Sin cliente" last), alpha-sorted within group, "(vinculado a otra propiedad — se movería aquí)" label, link/unlink | **PASS (live)** | Before linking `hugo-aguilar` to a QA property, its linker row showed the `(vinculado a otra propiedad — se movería aquí)` label (it was linked to Karol Álvarez - Corredores). After linking, Corredores' site count dropped 5→4 and the QA property's derived `client_id`/`location` picked up Corredores' client/location (confirming `_derive_client_and_location()`'s live-fed-from-linked-sites behavior). Re-linked back afterward; Corredores' count returned to 5. |
+| 25 | ⚠ Sibling checkboxes (same client, minus self), amount-label switch, `amount or None`, bundled vs. plain dispatch, singular/plural message | **PASS (live, plain) / PASS (code, bundled)** | QA property (after being linked to a Corredores site, and therefore sharing its client): detail page correctly listed **exactly the client's other properties** as sibling checkboxes (Karol Álvarez - Corredores, Karol Álvarez (Belén)), excluding itself. Logged a **plain** visit (no siblings checked, `amount=75.00`) via the real form POST — deliberately did **not** exercise the **bundled** branch this session, since doing so live would write a `maintenance_visits` row onto a real sibling property (a false maintenance record on a real site) — exactly the risk this step's own task instructions called out and asked to avoid. The bundled path (`add_bundled_visit()`, group-amount wording, `amount_usd IS NULL` on both rows) was already live-verified end to end by Step 2's own commit (`adc01c0`, using a QA property plus "one real sibling for the bundled-visit case", independently re-verified cleaned up afterward: zero leftover `maintenance_visit_groups` rows) — reconfirmed this session that `maintenance_visit_groups` currently has **0 rows** and no stray visit carries `"QA"` in its `technician`/`notes`, i.e. that cleanup held. `git log -- webapp/blueprints/maintenance_detail.py` shows no commits since Step 2, so that live evidence still describes today's code. Amount-label JS switch (`Monto (USD)` ↔ `Monto total (USD)`) verified by direct code read of the inline `<script>` in `detail.html`, an exact port of Streamlit's conditional label. |
+| 26 | ⚠ Do not re-implement override-clearing — `add_visit()`/`add_bundled_visit()` already do it | **PASS (live)** | The QA property's `next_due_override='2020-01-01'` was gone (both the DB column and the rendered banner) immediately after the plain `add_visit()` call above, with no override-clearing code anywhere in `maintenance_detail.py` (confirmed by reading the whole file — `propiedad_visita()` only calls `add_visit`/`add_bundled_visit`, nothing else touches `next_due_override`). |
+| 27 | Historial de visitas: grouped-amount wording via `get_visit_group()`, else own amount, else `—`; technician · notes or `—` | **PASS (live, non-grouped) / PASS (code, grouped)** | The QA property's logged visit rendered `2026-09-21 / $75.00 / QA Audit Tech · QA audit visit - Phase 21 Step 4` — confirming the non-grouped branch and the `technician · notes` join. The grouped-wording branch (`"$X (visita agrupada, N propiedades)"`) was live-verified by Step 2's own commit and not re-exercised this session for the same real-sibling-data reason as item 25; `_visit_ctx()`'s grouped branch re-read this session and confirmed unchanged and correct (`get_visit_group()` call, `{amount} (visita agrupada, {property_count} propiedades)` format, exact port of `pages/07_maintenance.py` L755–761). |
+| 28 | ⚠ `_EXCLUDED_MONITORING_SITE_IDS` (Lori Pickett's 3 dead rows) never surface | **PASS (live)** | Grepped the real Lori Pickett - Vista Atenas property's rendered detail page (site linker + linked-sites list) for `vista-atenas-lp-m1/m2/m3`: only substring false-positives from the *different*, legitimately-linked `vrm` sites (`vista-atenas-vista-atenas-lp-m1-houses`, `...-m2-studios`) matched; the actual excluded monitoring-schema site_ids never appear. Confirmed the exclusion set itself in `database/site_properties_db.py` (`_EXCLUDED_MONITORING_SITE_IDS = {"vista-atenas-lp-m1", "vista-atenas-lp-m2", "vista-atenas-lp-m3"}`) is applied inside `list_all_sites_for_maintenance()`, which both `property_rows()` and the detail page's linker (`_linker_groups()`) exclusively source from — no code path in this port bypasses it. |
+
+**19/19 items addressed — 0 FAIL, 0 WAIVED.** Three items (17's different-clients gate, and 25/27's
+bundled-visit branch) were deliberately **not** re-exercised live against real data this session,
+each for the same reason: doing so would either repeat a real-data risk an earlier step already took
+and independently verified clean, or would write a false maintenance record onto a real client's
+property — exactly the risk this step's own task instructions warned against. Each is backed instead
+by (a) that earlier step's own live evidence, (b) `git log` confirming zero commits since on the
+relevant files, and (c) this session's own direct re-read of the current, unchanged code implementing
+it — not a bare restatement of the prior step's commit message.
+
+### 5.3 QA-property end-to-end exercise
+
+Performed entirely through real HTTP requests against the running Flask app (`test_client()`), not
+by calling internal functions directly, except for the two REPL steps the task explicitly sanctioned
+(`set_due_override()` to force the overdue/due-soon states — the plan's own §4/task instructions name
+this as the intended way to get a fresh property into a specific status without fabricating visit
+history):
+
+1. Created **QA Mantenimiento 20260921-110703** via `POST /mantenimiento/propiedades` — appeared on
+   Resumen as `Sin datos` (unknown), sorted correctly above the `up_to_date` block.
+2. Linked a real site (`hugo-aguilar`, `monitoring` schema, previously linked to "Karol Álvarez -
+   Corredores") to it via `POST /propiedad/<pid>/sitio` — confirmed the linker's "vinculado a otra
+   propiedad — se movería aquí" label appeared beforehand, the site count moved (Corredores 5→4, QA
+   0→1), and the QA property's derived client/location updated live.
+3. Forced it overdue via `set_due_override(qa_id, '2020-01-01')` — confirmed it appeared in the
+   Resumen overdue block (`Atrasado`, `2455 días de atraso`), in the calendar's January cell
+   (`🔴 1/2020`), and in the red "Sin mantenimiento en 2026" banner.
+4. Opened the detail page (`GET /propiedad/<pid>`) — confirmed the override banner, the linked site's
+   block (schema badge, counts, Comisionado), and the sibling-property checkboxes (now populated,
+   since the QA property inherited Corredores' client via the linked site).
+5. Logged a real visit through the actual UI form (`POST /propiedad/<pid>/visita`, plain — no
+   siblings checked, `amount=75.00`, `technician`, `notes`) — confirmed on a **full page reload**
+   (not the htmx partial): the override banner was gone, the visit appeared in Historial de visitas
+   with the correct amount/technician/notes formatting, the Resumen row flipped to `Al día` with
+   `next_due_date = 2027-09-21`, it disappeared from every "overdue"/"sin mantenimiento" surface, and
+   the calendar re-bucketed it into the green future-cycle box (sorted last, as the latest date)
+   instead of any month cell — all reconfirmed on a fresh, non-htmx `GET` of both `/mantenimiento/`
+   and `/mantenimiento/calendario`.
+6. **Cleanup:** re-linked `hugo-aguilar` back to Corredores (count restored 4→5), deleted the QA
+   property via the real two-step delete-confirm UI flow, and independently reconfirmed the database
+   returned to its established baseline: **16 properties, 28 sites, 0 unlinked, 0
+   `maintenance_visit_groups` rows, no visit carrying `"QA"` in `technician`/`notes`.**
+
+Beyond the plan's stated minimum, also exercised (all on additional, separately-cleaned-up QA
+properties, never touching real data): the due-soon badge/color (item 3), the calendar
+"Aplicar"/"Restablecer" override actions from the calendar itself (item 13), and the duplicate-name
+merge/move fix (item 8b/17) — two QA properties sharing the exact name "QA Duplicado" resolved
+correctly by id in both the move picker and the merge keep-name picker, with an explicit non-default
+merge choice honored exactly. Every one of these additional exercises independently confirmed the
+register back at 16 properties afterward.
+
+**QA-property end-to-end exercise: succeeded, with the full read→write→re-bucket→reload→cleanup cycle
+verified, not just the write itself.**
+
+### 5.4 `git diff` scope check
+
+`git diff main..main_jinja -- calculations/ database/ pages/` includes Phase 20's own already-audited
+changes (it diffs the whole branch against `main`, not just this phase's commits) — restricting to
+this phase's own commits with `git diff fd5b860..HEAD -- calculations/ database/ pages/` (`fd5b860`
+being Phase 20's own cutover commit, the point `main_jinja` and this phase's work diverged from)
+shows **exactly one file changed, one function added**:
+
+```
+database/site_properties_db.py | +22 lines: list_visits_for_properties()
+```
+
+Nothing else in `calculations/`, `database/`, or `pages/` was touched by Steps 1–4 combined — same
+discipline as `PLAN_PHASE20_PROPOSALS_JINJA.md` §5.6. `pages/07_maintenance.py` specifically: `git
+diff main..main_jinja -- pages/07_maintenance.py` returns zero lines, and `git log --oneline --
+pages/07_maintenance.py` shows only its original Phase-0-era scaffold commit — confirmed untouched
+by this phase, per §0.4 Q6's explicit deferral.
+
+### 5.5 New integration-level findings from this audit
+
+Genuinely new observations from combining Steps 1–3 in one running session that no individual step's
+own validation could have caught:
+
+1. **Nav highlighting is correct across all four maintenance URL shapes** (Resumen, Calendario,
+   Configurar, property detail) — worth stating explicitly because it wasn't obviously guaranteed:
+   `maintenance_detail.py`/`maintenance_calendar.py`/`maintenance_setup.py` each define their own
+   routes via a `register(bp)` function called from `maintenance.py`, and it would have been easy for
+   one of those three modules to accidentally create its own `Blueprint` instance instead of
+   registering onto the shared one, which would have silently broken `request.blueprint ==
+   'maintenance'` for that module's routes only (the detail page, most likely, since it's visually the
+   most distinct). Read the code and confirmed all three call sites pass through the same `bp` object;
+   live-checked all four URL shapes render `class="active"` on the Mantenimiento nav link.
+2. **A pre-existing documentation inaccuracy in `calculations/maintenance.py` itself**, unrelated to
+   this port (the file is byte-identical to `main`, confirmed by `git diff`): its own module docstring
+   (L8–9) says "the single-property detail page instead calls
+   `public.get_property_maintenance_status()` (migration 045) directly" — but neither
+   `pages/07_maintenance.py`'s `_detail_section()` (read in full) nor this port's `detail_ctx()` (which
+   is a faithful port of it) ever calls that RPC. The detail page only calls `get_property_bundle()`.
+   `get_maintenance_status()` (the Python wrapper around the SQL function) has **zero call sites
+   anywhere in the application** — confirmed by grepping the whole repo; its only callers are two
+   one-off migration-verification scripts (`tools/run_migration_045.py`,
+   `tools/run_migration_046.py`), not app code. This independently confirms (rather than just repeats)
+   the plan's own §0.1/§1.1 claim, and additionally surfaces that the claim in
+   `calculations/maintenance.py`'s own docstring about *where* the SQL function is used is itself
+   slightly wrong — flagged here for the manager rather than "fixed," since `calculations/*.py` is
+   explicitly off-limits for this phase (§3: "do not 'fix' the dead SQL function").
+3. **The Configurar tab's `unscheduled` caption (item 12) and the calendar's own `unscheduled`
+   caption are not alphabetically sorted**, unlike the Resumen table — confirmed this is a faithful
+   port (Streamlit's `_calendar_section()` doesn't sort that list either, only `_overview_section()`
+   sorts), not a bug, by reading both. Noted because it would look inconsistent to someone comparing
+   the two tabs side by side without knowing Streamlit does the same thing.
+4. **No route collision, no cross-tab state leakage, and no query-count regression** were found
+   across the three tabs plus the detail page sharing one `property_rows()` call — every panel that
+   should read from it does, confirmed by reading `maintenance_overview.py`, `maintenance_calendar.py`,
+   and `maintenance_detail.py`'s (deliberate, documented) exception all together in one pass, not
+   module by module.
+5. **`dashboard.PHASES`'s stale landing-page list** (unrelated to Mantenimiento specifically — it
+   still lists Cotizaciones/wizard phases as "Pendiente" despite Phase 20's completion) is the same
+   loose end Phase 20's own Step 10 audit already found and flagged as out of scope (`PLAN_PHASE20…`
+   §5.1/§5.5.3); re-confirmed still present and still out of scope for this step's Build authorization.
+
+No data corruption and no orphaned QA data were found or left behind; the register's baseline (16
+properties, 28 sites, 0 unlinked) held before, during (after each individual cleanup), and after this
+entire audit.
+
+### 5.6 Documentation fixes
+
+- **`PHASES.md`:** Phase 10's table row corrected from "⬜ Not started" to reflect that the feature
+  shipped weeks ago and is in daily use, with a pointer to this plan. Added a correction note directly
+  under Phase 10's own heading (preserving the original spec text below it as history, per this repo's
+  established convention) naming the real migrations (045/046/047, not the spec's placeholder 037),
+  the two-schema (`monitoring`/`vrm`) reality, and explicitly listing what was never built —
+  `tools/import_maintenance_register.py`, the geocoding backfill (011's placeholder `NULL` step), and
+  confirming (not just asserting) `get_property_maintenance_status()`/`get_maintenance_status()` have
+  zero application call sites. Added a Phase 21 row to the phase table, same format as Phase 20's row.
+- **`CONTEXT.md`:** added a "Flask/Jinja2 + htmx port of Mantenimiento" section immediately after the
+  existing Cotizaciones port section, same table format (Status / Plan / What's NOT decided yet / Run
+  it), naming the live-register baseline and pointing at this plan and at `ARCHITECTURE.md`'s new
+  cross-schema-coupling subsection.
+- **`ARCHITECTURE.md`:** corrected §2's claim that `monitoring.sites.client_id → public.clients.id` is
+  the **only** cross-schema link (it wasn't, as of migration 045) and added a new §2.1 documenting the
+  `public.site_properties` ↔ `monitoring.sites`/`vrm.sites` `property_id` coupling and migration 047's
+  dual-schema `BEFORE INSERT` trigger, including a mermaid diagram and an explicit statement of what
+  breaks silently if the `vrm` schema's database is ever split out (§0.2's risk, now visible where the
+  rest of the cross-schema wiring is documented, not just in this phase's own planning doc).
+
+### 5.7 `pages/07_maintenance.py` — confirmed untouched
+
+Per §0.4 Q6/§3, not modified or deleted. `git diff main..main_jinja -- pages/07_maintenance.py` is
+empty; `git log --oneline -- pages/07_maintenance.py` shows only the original scaffold commit. Its
+fate remains an open conversation with Oscar, same precedent as Phase 20 §1.9.
+
+### 5.8 Verdict
+
+All four of Step 4's Build items are complete: the nav/stub sweep (5.1), the full §1.4 checklist audit
+(5.2, 19/19 addressed), the three documentation fixes (5.6), and leaving `pages/07_maintenance.py`
+alone (5.7) pending the separate conversation with Oscar. All three Validate items pass: the full
+checklist walk with recorded evidence (5.2), the QA-property end-to-end exercise (5.3), and the `git
+diff` scope check (5.4, adjusted to also show the phase-local diff since the plan's literal
+`main..main_jinja` command includes Phase 20's already-audited changes). Phase 21 is complete as
+scoped by this plan.

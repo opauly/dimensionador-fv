@@ -25,7 +25,7 @@
 | 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅ — now with a demand/energy-field split guard, see below — tariff manager UI ✅, Clientes/Prospectos ✅, tariff formula simplified and corrected against real invoices ✅; cost templates, settings page still pending) |
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
-| 10 — Site Register & Preventive Maintenance Scheduler | ⬜ Not started (spans both products, no dependency on 0–9) |
+| 10 — Site Register & Preventive Maintenance Scheduler | ✅ Built and in daily use (corrected 2026-09-21 — this row previously said "Not started" while the feature had shipped weeks earlier; see the note under Phase 10's own heading below for what actually shipped vs. the original spec) — Flask/Jinja2 port complete as of Phase 21, see `PLAN_PHASE21_MAINTENANCE_JINJA.md` |
 | 11 — Design Calibration from Fleet Data | ⬜ Not started (gated by data availability, not sequence) |
 | 12 — Victron Monitor: Retire Apps Script Scheduling/Email/Archiving | ⬜ Not started (separate product, no dependency on 0–11) |
 | 13 — VRM Monitor Customer Portal (Streamlit) | 🔶 Superseded by Phase 14 — Step 1 built & validated (migration 021, login, role resolution) |
@@ -36,6 +36,7 @@
 | 18 — VRM Monitor: personalized report modules for Growth/Fleet | ✅ Complete (corrected 2026-09-02 — this row previously said "Phase 2 in progress") — Phase 1 shipped 2026-08-28, Phase 2 (critical alerts, grid meter, generator, tank modules) shipped and verified 2026-08-29, including a real row-sizing regression and a default-rollout scope question both caught and fixed before being called done (see PLAN_PHASE18.md) |
 | 19 — VRM Monitor: Admin Fleet Health Dashboard (new, added 2026-09-02) | ✅ Phases 1–2.5 complete and live (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection, from the original plan) not built — see below |
 | 20 — Cotizaciones: Flask/Jinja2 + htmx port of the proposals list + full 8-step wizard (Grid Zero, Off-Grid, Hybrid), off Streamlit | ✅ Steps 0–10 complete and audited (2026-09-18 → 2026-09-20), on the `main_jinja` branch/worktree — `main` (Streamlit) stays untouched and running in parallel; see `PLAN_PHASE20_PROPOSALS_JINJA.md`, including its §5 Step 10 audit (all 26 do-not-drop items independently re-verified live, not just re-read from prior steps' own commit messages). One decision explicitly deferred, not forgotten: whether `pages/01_proposals.py`/`pages/02_new_proposal.py`/`pages/02b_new_proposal_test.py`/the Streamlit `wizard/*.py` UI modules get deleted is "a deliberate, separate commit" made with Oscar (plan §1.9/§3) — they remain intact and unmodified on `main_jinja` today. |
+| 21 — Mantenimiento: Flask/Jinja2 + htmx port of the site register & preventive-maintenance scheduler (Resumen, Calendario anual, Configurar propiedades, property detail), off Streamlit | ✅ Steps 1–4 complete and audited (2026-09-20 → 2026-09-21), on the `main_jinja` branch/worktree — `main` (Streamlit, `pages/07_maintenance.py`) stays untouched and running in parallel; see `PLAN_PHASE21_MAINTENANCE_JINJA.md`, including its Step 4 cutover audit (all 19 do-not-drop checklist items independently re-verified, most live against the real Supabase project, including a full create-link-overdue-visit-cleanup cycle on a purpose-created QA property). Two decisions explicitly deferred, not forgotten: the fate of `pages/07_maintenance.py` (plan §0.4 Q6, same precedent as Phase 20 §1.9), and the cross-schema `vrm.sites`/`monitoring.sites` ↔ `public.site_properties` coupling this phase documented but did not change (plan §0.2, now also in `ARCHITECTURE.md`). |
 
 ---
 
@@ -511,6 +512,49 @@ As of v3.4, every site in `monitoring.sites` is reachable by **one shared Supaba
 ---
 
 ## Phase 10 — Site Register & Preventive Maintenance Scheduler (4–6 days, spans both products)
+
+> **Corrected 2026-09-21** — this section's table row said "Not started" while the feature had
+> actually shipped weeks earlier and was in daily use. Everything below this note is the *original
+> spec*, kept as history — **read it as history, not as a description of what's actually in the
+> repo.** What really shipped, in full, with every place it drifted from the plan below:
+>
+> - **Migrations:** `045_site_maintenance_register.sql`, `046_maintenance_bundling_and_overrides.sql`,
+>   `047_auto_create_site_property.sql` — **not** the `037_site_maintenance_register.sql` this spec
+>   names below (`037` was a placeholder number chosen before the real migration was written; `011`
+>   below is correct and did ship as described). `046` and `047` were never in the original plan at
+>   all: `046` adds bundled multi-property visits (`maintenance_visit_groups`) and manual due-date
+>   overrides (`next_due_override`); `047` installs a trigger that auto-creates a `site_properties`
+>   row whenever a new row lands in **either** `monitoring.sites` **or** `vrm.sites` — see
+>   `ARCHITECTURE.md`'s Supabase schema map section for the cross-schema coupling this creates and
+>   why it matters if VRM Monitor's database is ever split out.
+> - **Two schemas, not one.** The register spans `monitoring.sites` (Oscar's own fleet, as this spec
+>   assumed) **and** `vrm.sites` (VRM Monitor customers' sites) — 9 of the register's real properties
+>   live only in `vrm.sites`. Every `database/site_properties_db.py` function is schema-blind by
+>   design, not by oversight.
+> - **Never built, and still not built:** `tools/import_maintenance_register.py` (the openpyxl xlsx
+>   importer described below) — `011_import_maintenance_sites.sql` hand-imported the 22 original
+>   sites and 11 clients instead, and visit history / credentials from the old spreadsheet were never
+>   imported. The geocoding backfill this spec calls for was also never done — migration 011's
+>   geocoding step is a placeholder that sets every `latitude`/`longitude` to `NULL`; the
+>   `geocode_cr()` San Isidro/Pérez Zeledón collision this spec flags may still be live, since nothing
+>   here ever exercised it. Neither blocks the register — the maintenance UI never reads coordinates.
+> - **`get_property_maintenance_status()` shipped exactly as specced (extended by `046`) but has zero
+>   call sites** — confirmed by grepping the whole repo (`tools/run_migration_045.py` and
+>   `tools/run_migration_046.py`, one-off migration-verification scripts, are the only callers; no
+>   application code calls it). Every status the UI shows comes from
+>   `calculations/maintenance.py:compute_status()` (pure Python, no database import) instead — a
+>   deliberate two-implementations arrangement (SQL as a documented cross-check, Python as the real
+>   dependency), not a leftover to clean up.
+> - **UI ended up top-level, not nested under Projects** as this spec's "Where this sits" section
+>   below assumes — `pages/07_maintenance.py` (Streamlit) got its own top-level nav slot, and its
+>   Flask/Jinja2 port (`main_jinja` branch, Phase 21, see `PLAN_PHASE21_MAINTENANCE_JINJA.md`) kept
+>   that placement.
+> - **Beyond this spec entirely:** bundled multi-property visits, manual due-date overrides, and full
+>   property merge/delete/seed tooling for grouping sites under one maintenance schedule — none of
+>   which the plan below anticipated.
+>
+> Full account, including a Step 4 cutover audit of all 19 of the shipped feature's own do-not-drop
+> behaviors: `PLAN_PHASE21_MAINTENANCE_JINJA.md`.
 
 **Goal:** Every installed system — Victron-monitored or not — has one durable record, and the tool tells you who's overdue for a maintenance visit. Replaces the manual `Registro de mantenimientos FV.xlsx` Google Sheet (analyzed 2026-07-18: 23 real installations across 12 clients, a rolling 365-days-from-last-visit due date computed per row, and a hand-built month-by-month "who's due when" dashboard on Google Sheets-only array formulas).
 
