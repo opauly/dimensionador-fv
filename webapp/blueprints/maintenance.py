@@ -6,18 +6,23 @@ Step 1 scope (see PLAN_PHASE21_MAINTENANCE_JINJA.md, "Step 1 — Blueprint
 shell + Resumen tab"): the blueprint, tab dispatch and a fully working,
 read-only Resumen tab (webapp/blueprints/maintenance_overview.py). Calendario
 anual and Configurar propiedades render "en construcción" placeholders until
-Step 3. The property detail view (credentials, visit logging, site linking)
-is Step 2 and does not exist yet — there is deliberately no
-/propiedad/<pid> route in this file.
+Step 3.
 
-This file owns routing + tab dispatch only, mirroring admin.py: one module
-per tab owns that tab's logic.
+Step 2 scope ("Property detail (all the write paths)"): the property detail
+page and its write routes — visit logging, due-date override reset, site
+linking and on-demand credentials — live in
+webapp/blueprints/maintenance_detail.py, registered onto this blueprint the
+same way admin.py registers admin_sites.register(bp) etc.
+
+This file owns tab routing + dispatch only, mirroring admin.py: one module
+per tab/section owns that section's logic.
 """
 from flask import Blueprint, abort, render_template, request
 
-from webapp.blueprints import maintenance_overview
+from webapp.blueprints import maintenance_detail, maintenance_overview
 
 bp = Blueprint("maintenance", __name__, url_prefix="/mantenimiento")
+maintenance_detail.register(bp)
 
 SECTIONS = {
     "resumen": {"label": "Resumen", "endpoint": "maintenance.index"},

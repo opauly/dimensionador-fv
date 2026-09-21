@@ -11,6 +11,7 @@
 }
 .mrow-name { font-weight: 600; color: var(--navy); }
 .mrow-location { font-size: 0.72rem; color: var(--muted); }
+.link-btn { color: var(--navy); font-weight: 700; font-size: 1rem; }
 </style>
 
 {% if not rows %}
@@ -40,6 +41,7 @@
           <td>Próxima visita</td>
           <td>Sitios</td>
           <td>Visitado este año</td>
+          <td></td>
         </tr>
       </thead>
       <tbody>
@@ -59,6 +61,7 @@
                 {{ pill('No', '#f1f5f9', '#6b7280') }}
               {% endif %}
             </td>
+            <td><a class="link-btn" href="{{ url_for('maintenance.propiedad', pid=r.id) }}">&rsaquo;</a></td>
           </tr>
         {% endfor %}
       </tbody>

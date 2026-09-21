@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}{{ prop.name if prop else 'Propiedad' }} — Mantenimiento — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.wiz-back { color: var(--muted-2); font-size: 13px; font-weight: 600; display: inline-block; margin-bottom: 10px; }
+.override-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: #FBF0DF; border: 1px solid #f5d9a8; border-radius: 8px;
+  padding: 10px 14px; margin: 10px 0 16px; font-size: 13px; color: #a15c1b;
+}
+.override-banner form { margin: 0; }
+.site-block {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 10px;
+}
+.site-block summary { cursor: pointer; font-weight: 600; color: var(--navy); font-size: 13.5px; display: flex; align-items: center; gap: 8px; }
+.site-body { margin-top: 10px; }
+.site-sub-title { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 10px 0 4px; }
+.site-cred-toggle { background: none; border: none; cursor: pointer; padding: 0; font-family: var(--font); font-size: 12.5px; }
+.site-linker-client { font-size: 12.5px; font-weight: 700; color: var(--navy); margin: 12px 0 4px; }
+.site-linker-row { display: block; font-size: 13px; padding: 3px 0; }
+.visit-siblings label { display: block; font-size: 13px; padding: 2px 0; }
+h4.section-block-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+</style>
+
+<a class="wiz-back" href="{{ url_for('maintenance.index') }}">&larr; Volver al resumen</a>
+
+{% if error %}
+  <div class="card"><p class="dtable-empty">Error al cargar la propiedad: {{ error }}</p></div>
+{% else %}
+  <p class="section-title" style="margin-top:4px;">{{ prop.name }}</p>
+  {% if prop.location %}<p class="section-sub">{{ prop.location }}</p>{% endif %}
+
+  {% if client %}
+    <p class="card-note-sm">
+      &#128100; {{ client.name }}{% if client.empresa %} ({{ client.empresa }}){% endif %}
+      {% set contact_bits = [client.phone, client.email] | select | list %}
+      {% if contact_bits %} &mdash; {{ contact_bits | join(' · ') }}{% endif %}
+    </p>
+    {% if client.notes %}<p class="card-note-sm">&#128221; {{ client.notes }}</p>{% endif %}
+  {% endif %}
+
+  {% if action_error %}
+    <p style="color:#B84345;font-size:13px;">{{ action_error }}</p>
+  {% endif %}
+
+  {% if prop.next_due_override %}
+    <div class="override-banner">
+      <span>&#9888;&#65039; Fecha esperada movida manualmente a {{ prop.next_due_override }}.</span>
+      <form method="post" action="{{ url_for('maintenance.propiedad_override', pid=pid) }}">
+        <button class="btn" type="submit">Restablecer a fecha calculada</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <hr>
+  <h4 class="section-block-title">Sitios vinculados</h4>
+  {% if not sites %}
+    <p class="card-note-sm">Ningún sitio vinculado todavía — usa "Configurar propiedades".</p>
+  {% else %}
+    {% for site in sites %}
+      {% include "maintenance/_site_block.html" %}
+    {% endfor %}
+  {% endif %}
+
+  <hr>
+  <details>
+    <summary style="cursor:pointer;font-weight:700;color:var(--navy);font-size:14px;">Agregar o quitar sitios de esta propiedad</summary>
+    <div style="margin-top:10px;">
+      {% include "maintenance/_site_linker.html" %}
+    </div>
+  </details>
+
+  <hr>
+  <h4 class="section-block-title">Registrar visita</h4>
+  <form id="visit-form" method="post" action="{{ url_for('maintenance.propiedad_visita', pid=pid) }}">
+    {% if siblings %}
+      <p class="card-note-sm">
+        ¿Esta misma salida también cubrió otras propiedades del mismo cliente? Se registra
+        como una sola visita con un solo monto total.
+      </p>
+      <div class="visit-siblings">
+        {% for sp in siblings %}
+          <label>
+            <input type="checkbox" class="sibling-checkbox" name="sibling_id" value="{{ sp.id }}"> {{ sp.name }}
+          </label>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="fgrid" style="margin-top:12px;">
+      <div>
+        <label class="flabel">Fecha de visita</label>
+        <input class="finput" type="date" name="visit_date" value="{{ today }}">
+      </div>
+      <div>
+        <label class="flabel" id="visit-amount-label">Monto (USD)</label>
+        <input class="finput" type="number" name="amount" value="0" min="0" step="0.01">
+      </div>
+    </div>
+    <div class="fgrid" style="margin-top:12px;">
+      <div>
+        <label class="flabel">Técnico</label>
+        <input class="finput" type="text" name="technician">
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <label class="flabel">Notas</label>
+      <textarea class="finput" name="notes" rows="2"></textarea>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="btn" type="submit">Registrar visita</button>
+    </div>
+  </form>
+  <script>
+    document.querySelectorAll('#visit-form .sibling-checkbox').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var any = Array.prototype.some.call(
+          document.querySelectorAll('#visit-form .sibling-checkbox'), function (c) { return c.checked; }
+        );
+        var label = document.getElementById('visit-amount-label');
+        if (label) label.textContent = any ? 'Monto total (USD)' : 'Monto (USD)';
+      });
+    });
+  </script>
+
+  <hr>
+  <h4 class="section-block-title">Historial de visitas</h4>
+  {% if not visits %}
+    <p class="card-note-sm">Sin visitas registradas todavía.</p>
+  {% else %}
+    {% include "maintenance/_visit_history.html" %}
+  {% endif %}
+{% endif %}
+{% endblock %}

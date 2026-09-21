@@ -1,0 +1,24 @@
+{# Historial de visitas (item 27) — date, then either the grouped-amount
+   wording or the row's own amount or "—", then technician · notes or "—".
+   Rendered as a .dtable like every other list in the app (Step 1's overview
+   made the same div-grid -> dtable conversion). #}
+<div class="dtable-wrap">
+  <table class="dtable">
+    <thead>
+      <tr>
+        <td>Fecha</td>
+        <td>Monto</td>
+        <td>Técnico / notas</td>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in visits %}
+        <tr>
+          <td>{{ v.visit_date }}</td>
+          <td>{{ v.amount_label }}</td>
+          <td>{{ v.detail }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

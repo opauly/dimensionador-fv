@@ -1,0 +1,22 @@
+{# Grouped checkbox site linker (item 24) — swapped as a whole (outerHTML) on
+   every checkbox change, per §1.6, so "(vinculado a otra propiedad)" labels
+   stay correct across the whole list, not just the row that was clicked. #}
+<div id="site-linker">
+  <p class="card-note-sm">
+    Todos los sitios del sistema, agrupados por cliente — marca o desmarca para vincular o
+    desvincular. El cliente de esta propiedad aparece primero.
+  </p>
+  {% if error %}<p style="color:#B84345;font-size:12.5px;">{{ error }}</p>{% endif %}
+  {% for g in linker_groups %}
+    <p class="site-linker-client">{{ g.client_label }}</p>
+    {% for s in g.sites %}
+      <label class="site-linker-row">
+        <input type="checkbox" {{ 'checked' if s.checked else '' }}
+               hx-post="{{ url_for('maintenance.propiedad_sitio', pid=pid) }}"
+               hx-target="#site-linker" hx-swap="outerHTML"
+               hx-vals='{"site_id": "{{ s.site_id }}", "schema_name": "{{ s.schema_name }}", "linked": "{{ 0 if s.checked else 1 }}"}'>
+        {{ s.label }}
+      </label>
+    {% endfor %}
+  {% endfor %}
+</div>

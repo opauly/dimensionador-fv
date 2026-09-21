@@ -1,0 +1,24 @@
+{# One linked site — port of _detail_section()'s per-site st.expander() body
+   (item 22). Included in a loop from detail.html, `site` + `pid` in context. #}
+<details class="site-block">
+  <summary>
+    <span class="site-name">{{ site.display_name }}</span>
+    <span class="pill" style="background:#f1f5f9;color:#475569;">{{ site.schema_badge }}</span>
+  </summary>
+  <div class="site-body">
+    <p class="site-sub-title">Datos del sitio</p>
+    {% if site.counts %}<p class="card-note-sm">{{ site.counts }}</p>{% endif %}
+    {% if site.commissioned_at %}<p class="card-note-sm">Comisionado: {{ site.commissioned_at }}</p>{% endif %}
+    {% for url in site.monitoring_urls %}<p class="card-note-sm">{{ url }}</p>{% endfor %}
+    {% if not site.has_extra %}<p class="card-note-sm">Sin datos adicionales.</p>{% endif %}
+
+    <p class="site-sub-title">Credenciales</p>
+    <button type="button" class="link-btn site-cred-toggle"
+            hx-get="{{ url_for('maintenance.propiedad_credenciales', pid=pid, site_id=site.site_id, schema_name=site.schema_name) }}"
+            hx-target="#cred-{{ site.schema_name }}-{{ site.site_id }}" hx-swap="innerHTML"
+            hx-trigger="click once">
+      Ver / editar credenciales
+    </button>
+    <div id="cred-{{ site.schema_name }}-{{ site.site_id }}"></div>
+  </div>
+</details>
