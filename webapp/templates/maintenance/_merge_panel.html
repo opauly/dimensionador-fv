@@ -1,0 +1,43 @@
+{# Reactive merge panel (item 17) — re-rendered wholesale on every
+   selected_id checkbox change (outerHTML swap into #merge-panel). Its inputs
+   (the gate checkbox, the keep-name select) carry `form="merge-form"` too,
+   per _setup.html's docstring, so the final submit collects everything
+   regardless of DOM nesting. Keep-name picker is keyed by property `id`
+   (§0.4 Q5) — two same-named properties still resolve to the one actually
+   selected. #}
+<div id="merge-panel">
+  {% if count == 1 %}
+    <p class="card-note-sm">Marca al menos 2 propiedades arriba para fusionarlas.</p>
+  {% elif show_panel %}
+    <h5 style="font-size:13.5px;font-weight:700;color:var(--navy);margin:8px 0;">Fusionar las seleccionadas</h5>
+
+    {% if differs %}
+      <div style="background:#FBF0DF;border:1px solid #f5d9a8;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:#a15c1b;">
+        ⚠️ Estas propiedades son de <strong>clientes distintos</strong>: {{ names }}. Fusionar
+        normalmente solo tiene sentido cuando son la misma propiedad física de un mismo cliente
+        (p. ej. varias casas de un mismo cliente).
+      </div>
+      <label style="display:block;font-size:13px;margin-bottom:10px;">
+        <input type="checkbox" name="confirm_diff_client" value="1" form="merge-form"
+               {{ 'checked' if confirm_checked else '' }}
+               hx-get="{{ url_for('maintenance.propiedades_fusionar_panel') }}"
+               hx-include="[form='merge-form']" hx-target="#merge-panel" hx-swap="outerHTML"
+               onchange="var b=document.getElementById('merge-submit-btn'); if (b) b.disabled = !this.checked;">
+        Sí, quiero fusionarlas de todas formas
+      </label>
+    {% endif %}
+
+    <label class="flabel">Nombre a conservar (las demás desaparecen; sus sitios y visitas se mueven aquí)</label>
+    <select class="finput" name="keep_id" form="merge-form" style="max-width:360px;">
+      {% for p in selected_props %}
+        <option value="{{ p.id }}" {{ 'selected' if p.id == keep_id else '' }}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+
+    <div style="margin-top:12px;">
+      <button class="btn" type="submit" form="merge-form" id="merge-submit-btn" {{ '' if confirmed_anyway else 'disabled' }}>
+        Fusionar {{ count }} propiedades en '{{ keep_label }}'
+      </button>
+    </div>
+  {% endif %}
+</div>

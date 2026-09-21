@@ -1,0 +1,131 @@
+{# Configurar propiedades (Phase 21 Step 3) — port of pages/07_maintenance.py:
+   _setup_section(). Unlinked-sites seed box, new-property form, existing-
+   properties table with a reactive merge panel (item 17, keyed by property
+   `id` per §0.4 Q5) and an inline per-row delete confirm (item 18).
+
+   The merge-related inputs (selected_id checkboxes below, plus the gate
+   checkbox / keep-name select rendered inside _merge_panel.html) all carry a
+   plain `form="merge-form"` HTML attribute pointing at the empty <form> just
+   below — this associates them for a real POST submission without needing
+   to nest a <form> around the whole table (which would collide with each
+   row's own delete-confirm <form>). See maintenance_setup.py's docstring. #}
+<style>
+.msetup-table-header { font-size: 0.68rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.06em; }
+.mrow-name { font-weight: 600; color: var(--navy); }
+.mrow-location { font-size: 0.72rem; color: var(--muted); }
+.danger-btn { background: none; border: none; color: #B84345; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: inherit; }
+.finput { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font); font-size: 13px; }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.flabel { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.msetup-note { background: var(--header-bg, #f8f9fa); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+.msetup-success { color: #16a34a; font-size: 13px; margin: 0 0 10px; }
+h4.section-block-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 8px; }
+</style>
+
+{% if error %}<p style="color:#B84345;font-size:13px;">{{ error }}</p>{% endif %}
+{% if created %}<p class="msetup-success">Propiedad '{{ created }}' creada. Vincúlala a sus sitios abajo.</p>{% endif %}
+{% if seeded %}<p class="msetup-success">{{ seeded }} propiedad(es) creada(s), una por sitio.</p>{% endif %}
+{% if merged %}<p class="msetup-success">{{ merged }} propiedad(es) fusionada(s) en '{{ keep }}'.</p>{% endif %}
+
+{% if unlinked_count %}
+  <div class="msetup-note">
+    <p style="margin:0 0 10px;">
+      Hay {{ unlinked_count }} sitio(s) en Victron Monitor o monitoreo propio sin propiedad
+      todavía. Esto solo debería pasar con sitios que ya existían antes de la migración 047 —
+      cualquier sitio nuevo recibe su propiedad automáticamente al crearse (base de datos), sin
+      necesidad de este botón.
+    </p>
+    <form method="post" action="{{ url_for('maintenance.propiedades_sembrar') }}">
+      <button class="btn" type="submit">Crear una propiedad por cada sitio sin vincular ({{ unlinked_count }})</button>
+    </form>
+  </div>
+{% endif %}
+
+<p class="card-note-sm">
+  Cada propiedad agrupa uno o más sitios bajo un mismo calendario de mantenimiento. Cliente y
+  ubicación se toman automáticamente de los sitios vinculados.
+</p>
+
+<hr>
+<h4 class="section-block-title">Nueva propiedad</h4>
+{% if form_error %}<p style="color:#B84345;font-size:13px;">{{ form_error }}</p>{% endif %}
+<form method="post" action="{{ url_for('maintenance.propiedades_crear') }}">
+  <div class="fgrid">
+    <div>
+      <label class="flabel">Nombre de la propiedad *</label>
+      <input class="finput" type="text" name="name" value="{{ new_name }}">
+    </div>
+    <div>
+      <label class="flabel">Intervalo de mantenimiento (días)</label>
+      <input class="finput" type="number" name="interval" value="{{ new_interval }}" min="1" step="30">
+    </div>
+  </div>
+  <div style="margin-top:12px;">
+    <button class="btn" type="submit">Crear propiedad</button>
+  </div>
+</form>
+
+{% if prop_rows %}
+  <hr>
+  <h4 class="section-block-title">Propiedades existentes</h4>
+  <p class="card-note-sm">
+    Marca las que en realidad son una sola propiedad (p. ej. varias casas de un mismo cliente con
+    una sola visita), elige qué nombre conservar, y fusiónalas. Sigue siendo necesario cuando se
+    agrega un sitio nuevo para un cliente existente — la base de datos le crea su propia propiedad
+    automáticamente, pero decidir si en realidad debería unirse a una propiedad que ya existe sigue
+    siendo tu decisión.
+  </p>
+
+  <form id="merge-form" method="post" action="{{ url_for('maintenance.propiedades_fusionar') }}" style="margin:0;"></form>
+
+  <div class="dtable-wrap">
+    <table class="dtable">
+      <thead>
+        <tr>
+          <td></td>
+          <td>Propiedad</td>
+          <td>Cliente</td>
+          <td>Sitios</td>
+          <td></td>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in prop_rows %}
+          <tr>
+            <td>
+              <input type="checkbox" name="selected_id" value="{{ p.id }}" form="merge-form"
+                     hx-get="{{ url_for('maintenance.propiedades_fusionar_panel') }}"
+                     hx-include="[form='merge-form']" hx-target="#merge-panel" hx-swap="outerHTML"
+                     aria-label="Seleccionar {{ p.name }} para fusionar">
+            </td>
+            <td>
+              <div class="mrow-name">{{ p.name }}</div>
+              {% if p.location %}<div class="mrow-location">{{ p.location }}</div>{% endif %}
+            </td>
+            <td>{{ p.client_label }}</td>
+            <td>{{ p.site_count }}</td>
+            <td>
+              <span id="del-slot-{{ p.id }}">
+                <button type="button" class="danger-btn"
+                        hx-get="{{ url_for('maintenance.propiedades_eliminar_confirmar', pid=p.id) }}"
+                        hx-target="#del-slot-{{ p.id }}" hx-swap="outerHTML">Eliminar</button>
+              </span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="merge-panel" style="margin-top:10px;">
+    {% include "maintenance/_merge_panel.html" %}
+  </div>
+{% endif %}
+
+{% if unlinked_count %}
+  <hr>
+  <p class="card-note-sm">
+    Para vincular sitios individuales, entra a la propiedad correspondiente y usa "Agregar o
+    quitar sitios de esta propiedad" — evita tener dos lugares distintos para la misma acción.
+  </p>
+{% endif %}

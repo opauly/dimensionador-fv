@@ -1,0 +1,29 @@
+{# Inline delete confirm (item 18) — swapped into #del-slot-<pid> by the
+   "Eliminar" button (GET, confirm=True) and collapsed back by "Cancelar"
+   (GET with cancel=1, confirm=False). "Sí, eliminar" is a plain POST + 303,
+   same as every other destructive write in this phase — its cascade
+   (sites unlinked, visit history permanently deleted) is real and
+   irreversible, hence the exact warning text carried verbatim from
+   pages/07_maintenance.py. #}
+<span id="del-slot-{{ pid }}">
+{% if confirm %}
+  <div style="display:inline-block;text-align:left;">
+    <p style="color:#B84345;font-size:12.5px;margin:0 0 6px;max-width:320px;">
+      ¿Eliminar '{{ name }}'? Sus sitios quedan sin vincular y su historial de visitas se borra.
+      Esta acción no se puede deshacer.
+    </p>
+    {% if error %}<p style="color:#B84345;font-size:12.5px;">{{ error }}</p>{% endif %}
+    <form method="post" action="{{ url_for('maintenance.propiedades_eliminar', pid=pid) }}" style="display:inline;">
+      <button class="danger-btn" type="submit">Sí, eliminar</button>
+    </form>
+    &nbsp;·&nbsp;
+    <button type="button" style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:12.5px;"
+            hx-get="{{ url_for('maintenance.propiedades_eliminar_confirmar', pid=pid, cancel=1) }}"
+            hx-target="#del-slot-{{ pid }}" hx-swap="outerHTML">Cancelar</button>
+  </div>
+{% else %}
+  <button type="button" class="danger-btn"
+          hx-get="{{ url_for('maintenance.propiedades_eliminar_confirmar', pid=pid) }}"
+          hx-target="#del-slot-{{ pid }}" hx-swap="outerHTML">Eliminar</button>
+{% endif %}
+</span>

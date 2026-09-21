@@ -1,0 +1,151 @@
+{# Calendario anual (Phase 21 Step 3) — port of pages/07_maintenance.py:
+   _calendar_section(). Current-year mode: computed schedule, 12-month grid,
+   ⚠ item 8's next_due_date.year <= year filter with its own green
+   "ya visitadas" box for anything due in a later cycle. Historical mode (any
+   past year): real logged visits from property_rows()'s carried "visits"
+   list, no status color. #}
+<style>
+.mcal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0; }
+.mcal-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-height: 110px; background: #fff; }
+.mcal-card-title { font-size: 0.78rem; font-weight: 700; color: var(--navy); border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; margin-bottom: 4px; }
+.mcal-item { font-size: 0.76rem; padding: 2px 0; line-height: 1.3; }
+.mcal-empty { font-size: 0.76rem; color: #cbd5e1; }
+.mcal-banner { border-radius: 8px; padding: 8px 4px; margin: 12px 0; }
+.mcal-banner-red { background: #fee2e2; border: 1px solid #fca5a5; }
+.mcal-banner-red .mcal-banner-title { color: #991b1b; }
+.mcal-banner-green { background: #dcfce7; border: 1px solid #86efac; }
+.mcal-banner-green .mcal-banner-title { color: #166534; }
+.mcal-banner-title { font-weight: 700; padding: 0 8px 4px; font-size: 0.85rem; }
+.mcal-banner-row { font-size: 0.8rem; padding: 2px 8px; }
+.mcal-year-form { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+</style>
+
+<div class="mcal-year-form">
+  <label class="flabel" style="margin:0;">Año</label>
+  <select class="finput" name="anio" style="width:auto;"
+          hx-get="{{ url_for('maintenance.calendario') }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">
+    {% for y in year_options %}
+      <option value="{{ y }}" {{ 'selected' if y == year else '' }}>{{ y }}</option>
+    {% endfor %}
+  </select>
+</div>
+
+<p class="section-sub" style="margin:0 0 8px;font-weight:700;color:var(--navy);">Año {{ year }}</p>
+
+{% if error %}
+  <p style="color:#B84345;font-size:13px;">{{ error }}</p>
+{% endif %}
+
+{% if rows_empty %}
+  <div class="card"><p class="dtable-empty">No hay propiedades configuradas todavía.</p></div>
+{% elif is_historical %}
+  <p class="card-note-sm">
+    Vista histórica: visitas reales registradas ese año — no el calendario de próximas
+    visitas (eso solo existe para el año actual).
+  </p>
+  {% if not any_visit %}
+    <div class="card"><p class="dtable-empty">No hay visitas registradas en {{ year }}.</p></div>
+  {% else %}
+    <div class="mcal-grid">
+      {% for m in months %}
+        <div class="mcal-card">
+          <div class="mcal-card-title">{{ m.name }}</div>
+          {% if not m.entries %}
+            <div class="mcal-empty">—</div>
+          {% else %}
+            {% for it in m.entries %}
+              <div class="mcal-item">
+                ✅ {{ it.day }} — {{ it.name }}{% if it.amount %} (${{ '%.0f'|format(it.amount) }}){% endif %}
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% else %}
+  {% if not_visited %}
+    <div class="mcal-banner mcal-banner-red">
+      <div class="mcal-banner-title">Sin mantenimiento en {{ year }}</div>
+      {% for r in not_visited %}
+        <div class="mcal-banner-row">{{ r.name }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="mcal-grid">
+    {% for m in months %}
+      <div class="mcal-card">
+        <div class="mcal-card-title">{{ m.name }}</div>
+        {% if not m.entries %}
+          <div class="mcal-empty">—</div>
+        {% else %}
+          {% for it in m.entries %}
+            <div class="mcal-item">
+              {{ it.emoji }} {{ it.day }}{% if it.year_suffix %}/{{ it.year_suffix }}{% endif %} — {{ it.name }}{% if it.visited %} ✓{% endif %}
+            </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if future_cycle %}
+    <div class="mcal-banner mcal-banner-green">
+      <div class="mcal-banner-title">✓ Ya visitadas en {{ year }} — próximo ciclo en {{ year + 1 }} o después</div>
+      {% for p in future_cycle %}
+        <div class="mcal-banner-row">{{ p.name }} — próxima visita {{ p.next_due_date_iso }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if unscheduled %}
+    <p class="card-note-sm">
+      Sin fecha calculada todavía (sin sitios ni visitas vinculadas):
+      {{ unscheduled | map(attribute='name') | join(', ') }}
+    </p>
+  {% endif %}
+
+  <hr>
+  <h4 class="section-block-title">Mover una propiedad a otro mes</h4>
+  <p class="card-note-sm">Para cuando un cliente pide cambiar su visita a otra fecha.</p>
+
+  {% if scheduled %}
+    <form id="cal-move-form" method="post" action="{{ url_for('maintenance.calendario_override') }}">
+      <input type="hidden" name="anio" value="{{ year }}">
+      <div class="fgrid">
+        <div>
+          <label class="flabel">Propiedad</label>
+          <select class="finput" name="property_id" id="cal-move-property">
+            {% for p in scheduled %}
+              <option value="{{ p.id }}" data-next-due="{{ p.next_due_date_iso }}"
+                      data-has-override="{{ '1' if p.next_due_override else '0' }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="flabel">Nueva fecha esperada</label>
+          <input class="finput" type="date" name="new_date" id="cal-move-date" value="{{ scheduled[0].next_due_date_iso }}">
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button class="btn" type="submit" name="action" value="aplicar">Aplicar</button>
+        <button class="btn" type="submit" name="action" value="restablecer" id="cal-move-reset"
+                {{ '' if scheduled[0].next_due_override else 'style="display:none;"' }}>Restablecer a fecha calculada</button>
+      </div>
+    </form>
+    <script>
+      (function () {
+        var sel = document.getElementById('cal-move-property');
+        var dateInput = document.getElementById('cal-move-date');
+        var resetBtn = document.getElementById('cal-move-reset');
+        if (!sel) return;
+        sel.addEventListener('change', function () {
+          var opt = sel.options[sel.selectedIndex];
+          if (dateInput) dateInput.value = opt.getAttribute('data-next-due') || '';
+          if (resetBtn) resetBtn.style.display = opt.getAttribute('data-has-override') === '1' ? '' : 'none';
+        });
+      })();
+    </script>
+  {% endif %}
+{% endif %}

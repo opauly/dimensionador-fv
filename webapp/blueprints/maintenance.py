@@ -14,15 +14,26 @@ linking and on-demand credentials — live in
 webapp/blueprints/maintenance_detail.py, registered onto this blueprint the
 same way admin.py registers admin_sites.register(bp) etc.
 
+Step 3 scope ("Calendario anual + Configurar propiedades"): the yearly
+calendar (current-year grid, future-cycle box, historical mode, move/reset
+picker) lives in webapp/blueprints/maintenance_calendar.py; the property
+setup tools (seed, create, merge, delete) live in
+webapp/blueprints/maintenance_setup.py. Both register their write routes onto
+this blueprint the same way maintenance_detail does.
+
 This file owns tab routing + dispatch only, mirroring admin.py: one module
 per tab/section owns that section's logic.
 """
-from flask import Blueprint, abort, render_template, request
+from datetime import date
 
-from webapp.blueprints import maintenance_detail, maintenance_overview
+from flask import Blueprint, render_template, request
+
+from webapp.blueprints import maintenance_calendar, maintenance_detail, maintenance_overview, maintenance_setup
 
 bp = Blueprint("maintenance", __name__, url_prefix="/mantenimiento")
 maintenance_detail.register(bp)
+maintenance_calendar.register(bp)
+maintenance_setup.register(bp)
 
 SECTIONS = {
     "resumen": {"label": "Resumen", "endpoint": "maintenance.index"},
@@ -42,24 +53,28 @@ def _render(active_section: str, panel_html: str):
     )
 
 
-def _render_panel(section: str) -> str:
-    if section == "resumen":
-        return maintenance_overview.render_overview_panel()
-    if section in ("calendario", "configurar"):
-        return render_template("maintenance/_placeholder.html", label=SECTIONS[section]["label"])
-    abort(404)
-
-
 @bp.route("/")
 def index():
-    return _render("resumen", _render_panel("resumen"))
+    return _render("resumen", maintenance_overview.render_overview_panel())
 
 
 @bp.route("/calendario")
 def calendario():
-    return _render("calendario", _render_panel("calendario"))
+    year_raw = request.args.get("anio")
+    try:
+        year = int(year_raw) if year_raw else date.today().year
+    except ValueError:
+        year = date.today().year
+    return _render("calendario", maintenance_calendar.render_calendar_panel(year, error=request.args.get("error")))
 
 
 @bp.route("/configurar")
 def configurar():
-    return _render("configurar", _render_panel("configurar"))
+    panel = maintenance_setup.render_setup_panel(
+        created=request.args.get("created"),
+        seeded=request.args.get("seeded"),
+        merged=request.args.get("merged"),
+        keep=request.args.get("keep"),
+        error=request.args.get("error"),
+    )
+    return _render("configurar", panel)
