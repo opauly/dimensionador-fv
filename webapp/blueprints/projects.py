@@ -39,6 +39,14 @@ placeholder to real content — `_panel_for()` now routes any tab key in
 (Guardar cambios / +Fila / delete-confirm / delete) register onto this same
 `bp`, same convention as Step 4.
 
+Step 6 scope ("Mano de obra + adelantos", plan §1.4 items 28-34): the Mano de
+obra tab goes from the Step 3 placeholder to real content — `_panel_for()`
+now routes `"mano_de_obra"` to `projects_labor.render_panel(ctx)` instead of
+`_placeholder_panel()`. `projects_labor.py`'s write routes (add/edit/delete
+worker, add/delete adelanto) register onto this same `bp`, same convention as
+Steps 4-5. ⚠ There is deliberately no expense-entry route here — see
+`projects_labor.py`'s module docstring (item 28).
+
 This file owns list/create/tab-dispatch routing only, mirroring
 `webapp/blueprints/maintenance.py`: one module per tab/section owns that
 section's logic and registers onto this same `bp` via `register(bp)` — never
@@ -51,7 +59,7 @@ rule silently breaks for that module's routes only (Phase 21 §5.5 finding
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
-from webapp.blueprints import projects_budget, projects_ledger
+from webapp.blueprints import projects_budget, projects_ledger, projects_labor
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
 )
@@ -59,6 +67,7 @@ from webapp.blueprints.projects_common import (
 bp = Blueprint("projects", __name__, url_prefix="/proyectos")
 projects_budget.register(bp)
 projects_ledger.register(bp)
+projects_labor.register(bp)
 
 
 def _parse_money(value) -> float:
@@ -246,6 +255,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return render_template("projects/_presupuesto.html", **ctx)
     if tab in LEDGER_TAB_CATEGORIES:
         return projects_ledger.render_panel(ctx, tab)
+    if tab == "mano_de_obra":
+        return projects_labor.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 
