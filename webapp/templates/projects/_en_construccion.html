@@ -1,0 +1,13 @@
+{# Placeholder for the eight Proyectos detail tabs not yet wired up in this
+   Flask port (Step 3 scope: only Presupuesto is real). Deliberately NOT
+   Streamlit's "Disponible en el siguiente paso." copy — that line means "this
+   was never built" (pages/04_project_detail.py L646), which stops being true
+   for Banco/Equipo/Materiales/Mano de obra/Viáticos/Extras (gastos) in Steps
+   5-6 and for Facturación/Pagos in Steps 7-8. This copy says the ported/
+   designed feature exists, it just isn't wired up in this port yet. #}
+<div class="card">
+  <p class="dtable-empty">
+    La pestaña "{{ tab_label }}" está en construcción en esta migración a Flask
+    — se habilita en un paso posterior de este mismo proyecto.
+  </p>
+</div>

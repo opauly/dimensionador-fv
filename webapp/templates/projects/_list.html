@@ -28,11 +28,7 @@
             <td>{{ r.sys_label }}</td>
             <td>{{ r.contract_str }}</td>
             <td>{{ badge(r.badge_label, r.badge_bg, r.badge_fg) }}</td>
-            {# Hardcoded, not url_for(): /proyectos/<id> (the detail page)
-               does not exist until Step 3 — same "hardcode now, url_for()
-               once the target exists" convention as list.html's
-               "+ Nuevo proyecto" link above. #}
-            <td><a class="plist-row-link" href="/proyectos/{{ r.id }}">&rsaquo;</a></td>
+            <td><a class="plist-row-link" href="{{ url_for('projects.detalle', pid=r.id) }}">&rsaquo;</a></td>
           </tr>
         {% endfor %}
       </tbody>

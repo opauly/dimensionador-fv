@@ -1,0 +1,26 @@
+{# Detail-page header: title block, status pills, promoted-from caption
+   (plan §1.4 items 9-11). Included by projects/page.html, which owns the
+   "← Proyectos" back link and the tab bar around this block. #}
+<p class="section-title" style="margin-top:4px;">{{ client_name }}</p>
+<p class="section-sub">{{ sys_label }} &middot; Contrato {{ contract_str }}</p>
+
+{% if status_error %}
+  <p style="color:#B84345;font-size:13px;">{{ status_error }}</p>
+{% endif %}
+
+{# Plan §1.6: "form POST + 303" — a plain form submit, not an htmx partial,
+   so every field on the page (title, tabs, caption) reflects the new status
+   on the very next render, exactly like "Crear proyecto". #}
+<form method="post" action="{{ url_for('projects.estado', pid=project.id) }}" class="pstatus-form">
+  <input type="hidden" name="tab" value="{{ active_tab }}">
+  <div class="pstatus-pills">
+    {% for value, label, is_current in status_options %}
+      <button type="submit" name="status" value="{{ value }}"
+              class="pstatus-pill{{ ' active' if is_current else '' }}">{{ label }}</button>
+    {% endfor %}
+  </div>
+</form>
+
+{% if proposal_caption %}
+  <p class="card-note-sm">{{ proposal_caption }}</p>
+{% endif %}

@@ -1,0 +1,89 @@
+{# Presupuesto tab — INGRESOS, PAGOS (read-only this step — Step 4 adds the
+   per-row Guardar / "+ Agregar pago" write paths), GASTOS por rubro, UTILIDAD.
+   Every figure here comes from `projects_common.detail_ctx()`'s single
+   `summarize()` call (plan §1.3) — nothing on this page recomputes money. #}
+<style>
+.pf-section-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 20px 0 8px; }
+.pf-section-title:first-child { margin-top: 0; }
+.pf-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.pf-card {
+  border-left: 4px solid var(--green); background: var(--header-bg);
+  border-radius: 6px; padding: 0.9rem 1.1rem;
+}
+.pf-card.navy { border-left-color: var(--navy); }
+.pf-label { font-weight: 600; font-size: 0.82rem; color: var(--muted-2); }
+.pf-value { font-size: 1.3rem; font-weight: 700; margin-top: 2px; color: var(--navy); }
+.pf-pago-row {
+  display: grid; grid-template-columns: 0.6fr 1.1fr 1.1fr 1.3fr 1.6fr;
+  gap: 8px; align-items: center; padding: 8px 6px;
+  border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.pf-pago-row-header, .pf-row-header {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--border);
+}
+.pf-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.9fr 0.9fr 0.9fr 0.9fr 0.9fr 0.9fr;
+  gap: 8px; align-items: center; padding: 8px 6px;
+  border-bottom: 1px solid var(--border); font-size: 0.82rem;
+}
+.pf-utilidad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+</style>
+
+<h4 class="pf-section-title">Ingresos</h4>
+<div class="pf-cards">
+  {% for card in ingresos_cards %}
+    <div class="pf-card{{ ' navy' if card.navy_border else '' }}">
+      <div class="pf-label">{{ card.label }}</div>
+      <div class="pf-value">{{ card.value }}</div>
+    </div>
+  {% endfor %}
+</div>
+
+<h4 class="pf-section-title">Pagos</h4>
+{% if not payment_rows %}
+  <p class="card-note-sm">Sin pagos programados.</p>
+{% else %}
+  <div class="pf-pago-row pf-pago-row-header">
+    <div>Pago</div><div>Monto</div><div>Pagado</div><div>Fecha</div><div>Cuenta bancaria</div>
+  </div>
+  {% for p in payment_rows %}
+    <div class="pf-pago-row">
+      <div style="font-weight:600;">Pago {{ p.payment_number }}</div>
+      <div>{{ p.amount_str }}</div>
+      <div>{{ 'Sí' if p.paid else 'No' }}</div>
+      <div>{{ p.paid_date or '—' }}</div>
+      <div>{{ p.bank_account or '—' }}</div>
+    </div>
+  {% endfor %}
+{% endif %}
+<p class="card-note-sm" style="margin-top:8px;">{{ recibido_line }}</p>
+
+<h4 class="pf-section-title">Gastos por rubro</h4>
+<div class="pf-row pf-row-header">
+  <div>Rubro</div><div>Costo</div><div>IVA</div><div>Costo total</div>
+  <div>Pagado</div><div>Presupuestado</div><div>Remanente</div>
+</div>
+{% for row in gastos_rows %}
+  <div class="pf-row">
+    <div style="font-weight:600;">{{ row.label }}</div>
+    <div>{{ row.costo }}</div>
+    <div>{{ row.iva }}</div>
+    <div>{{ row.costo_total }}</div>
+    <div>{{ row.pagado }}</div>
+    <div>{{ row.presupuestado }}</div>
+    <div>{{ row.remanente }}</div>
+  </div>
+{% endfor %}
+
+<h4 class="pf-section-title">Utilidad</h4>
+<div class="pf-utilidad">
+  {% for card in utilidad_cards %}
+    <div class="pf-card" style="border-left-color:{{ card.color }};background:{{ card.bg }};">
+      <div class="pf-label">{{ card.label }}</div>
+      <div class="pf-value" style="color:{{ card.color }};">{{ card.value }}</div>
+    </div>
+  {% endfor %}
+</div>

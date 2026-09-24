@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ client_name or 'Proyecto' }} — Proyectos — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.wiz-back { color: var(--muted-2); font-size: 13px; font-weight: 600; display: inline-block; margin-bottom: 10px; }
+.pstatus-pills { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+.pstatus-pill {
+  height: 28px; padding: 0 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: #fff; color: var(--muted-2); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+}
+.pstatus-pill:hover { border-color: var(--navy); color: var(--navy); }
+.pstatus-pill.active { background: var(--navy); border-color: var(--navy); color: #fff; }
+</style>
+
+<a class="wiz-back" href="{{ url_for('projects.index') }}">&larr; Proyectos</a>
+
+{% if error %}
+  <div class="card"><p class="dtable-empty">{{ error }}</p></div>
+{% elif not project %}
+  <div class="card"><p class="dtable-empty">Proyecto no encontrado.</p></div>
+{% else %}
+  {% include "projects/_header.html" %}
+
+  <div class="tabs">
+    {% for tab in tabs %}
+      <a href="{{ tab.url }}"
+         class="{{ 'active' if tab.key == active_tab else '' }}"
+         hx-get="{{ tab.url }}"
+         hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true"
+         hx-on::after-request="document.querySelectorAll('.tabs a').forEach(a=>a.classList.remove('active')); this.classList.add('active')">
+        {{ tab.label }}
+      </a>
+    {% endfor %}
+  </div>
+
+  <div id="subpanel">{{ panel_html|safe }}</div>
+{% endif %}
+{% endblock %}

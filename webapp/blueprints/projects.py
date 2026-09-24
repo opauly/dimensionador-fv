@@ -12,23 +12,34 @@ Step 2 scope ("Manual project creation", plan §1.4 item 7 / §1.6): the
 "+ Nuevo proyecto" form fragment (`GET /nuevo`), its client typeahead
 (`GET /nuevo/clientes`, `GET /nuevo/clientes/seleccionar`) and the create
 POST (`POST /`) that calls `create_project_manual(...)` and 303s to
-`/proyectos/<new_id>`. That target route (the detail page, Step 3) does not
-exist yet, so the redirect is hardcoded (`f"/proyectos/{...}"`, not
-`url_for()`) exactly as `webapp/templates/projects/_list.html`'s own row
-link already is (plan §1.9 / Step 1's scope note) — it will 404 until Step 3
-lands, which is expected. The detail page and its nine tabs (Steps 3-9)
-remain out of scope here.
+`/proyectos/<new_id>`.
 
-This file owns list/create routing + (later) tab dispatch only, mirroring
+Step 3 scope ("Detail shell + Presupuesto tab, read-only", plan §1.4 items
+8-20): the detail page itself — nine tab routes (`GET /<pid>`, `GET /<pid>/
+gastos/<categoria>`, `GET /<pid>/mano-de-obra`, `GET /<pid>/facturacion`,
+`GET /<pid>/pagos`) dispatching through `projects_common.detail_ctx(pid)`,
+plus the status-pill handler (`POST /<pid>/estado`). Only Presupuesto has
+real content this step; the other eight tabs render a one-line "en
+construcción" placeholder (`projects/_en_construccion.html`) until Steps
+5-8 build them out. `crear()`'s redirect and `_list.html`'s row link now use
+`url_for("projects.detalle", ...)` — the hardcoded `f"/proyectos/{...}"`
+Step 1/2 used (because the target route didn't exist yet) is gone.
+
+This file owns list/create/tab-dispatch routing only, mirroring
 `webapp/blueprints/maintenance.py`: one module per tab/section owns that
 section's logic and registers onto this same `bp` via `register(bp)` — never
 a second `Blueprint` instance, or the nav's `request.blueprint == 'projects'`
 rule silently breaks for that module's routes only (Phase 21 §5.5 finding
-#1, restated in plan §1.7 for this phase's six companion modules).
+#1, restated in plan §1.7 for this phase's six companion modules). Steps
+4-9's write-path modules (`projects_budget.py`, `projects_ledger.py`,
+`projects_labor.py`, `projects_invoicing.py`, `projects_payments.py`,
+`projects_promote.py`) register onto this same `bp` the same way.
 """
-from flask import Blueprint, redirect, render_template, request
+from flask import Blueprint, abort, redirect, render_template, request, url_for
 
-from webapp.blueprints.projects_common import FILTER_MAP, FILTER_OPTIONS, STATUS_BADGE, fmt_usd
+from webapp.blueprints.projects_common import (
+    FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
+)
 
 bp = Blueprint("projects", __name__, url_prefix="/proyectos")
 
@@ -195,6 +206,111 @@ def crear():
             contract_usd=contract_usd_raw, contract_iva_usd=contract_iva_usd_raw, notes=notes_raw,
         )
 
-    # /proyectos/<id> (the detail page) doesn't exist until Step 3 — hardcoded
-    # for the same reason _list.html's own row link is (plan §1.9 note).
-    return redirect(f"/proyectos/{project['id']}", code=303)
+    return redirect(url_for("projects.detalle", pid=project["id"]), code=303)
+
+
+# ── Detail page: tab shell + Presupuesto (Step 3) ───────────────────────────
+
+def _placeholder_panel(ctx: dict, key: str) -> str:
+    """Renders the "en construcción" fragment for one of the eight tabs not
+    yet built (plan Step 3 scope note — explicitly not Streamlit's
+    `Disponible en el siguiente paso.` copy, see the template's own comment).
+    Looks the label up from `ctx["tabs"]` rather than re-deriving it, so this
+    module never re-declares `projects_common.TAB_SPECS`'s labels."""
+    label = next((t["label"] for t in ctx["tabs"] if t["key"] == key), key)
+    return render_template("projects/_en_construccion.html", tab_label=label)
+
+
+def _panel_for(ctx: dict, tab: str) -> str:
+    """The one place a tab key becomes a rendered panel — shared by every
+    GET route below and by `estado()`'s error re-render, so a failed status
+    change re-renders the *same* panel the user was looking at."""
+    if tab == "presupuesto":
+        return render_template("projects/_presupuesto.html", **ctx)
+    return _placeholder_panel(ctx, tab)
+
+
+def _project_page(pid: str, tab: str):
+    """Shared shell for every `/<pid>...` GET route (plan §1.4 item 13): one
+    `detail_ctx()` call, then either the requested tab's panel (htmx tab
+    swap) or the full `projects/page.html` shell around it. This is the only
+    place the two detail-page error states are rendered, so no route repeats
+    the try/except."""
+    is_hx = bool(request.headers.get("HX-Request"))
+    try:
+        ctx = detail_ctx(pid, active_tab=tab)
+    except Exception as exc:
+        error = f"Error cargando proyecto: {exc}"
+        if is_hx:
+            return render_template("admin/_error.html", message=error)
+        return render_template("projects/page.html", error=error, project=None)
+
+    if ctx is None:
+        if is_hx:
+            return render_template("admin/_error.html", message="Proyecto no encontrado.")
+        return render_template("projects/page.html", error=None, project=None)
+
+    panel_html = _panel_for(ctx, tab)
+    if is_hx:
+        return panel_html
+    return render_template("projects/page.html", error=None, panel_html=panel_html, status_error=None, **ctx)
+
+
+@bp.route("/<pid>")
+def detalle(pid):
+    return _project_page(pid, "presupuesto")
+
+
+@bp.route("/<pid>/gastos/<categoria>")
+def gastos(pid, categoria):
+    if categoria not in LEDGER_TAB_CATEGORIES:
+        abort(404)
+    return _project_page(pid, categoria)
+
+
+@bp.route("/<pid>/mano-de-obra")
+def mano_de_obra(pid):
+    return _project_page(pid, "mano_de_obra")
+
+
+@bp.route("/<pid>/facturacion")
+def facturacion(pid):
+    return _project_page(pid, "facturacion")
+
+
+@bp.route("/<pid>/pagos")
+def pagos(pid):
+    return _project_page(pid, "pagos")
+
+
+@bp.route("/<pid>/estado", methods=["POST"])
+def estado(pid):
+    """Status-pill change (plan §1.4 item 10). Server-side validation is not
+    cosmetic here: `projects.status` has a DB CHECK constraint, but this
+    rejects an out-of-vocabulary value with a plain 400 before it ever
+    reaches `update_project_status()`, rather than relying on the DB to
+    reject it silently or surface a raw 500."""
+    from config import PROJECT_STATUSES
+    from database.projects_db import update_project_status
+
+    status = request.form.get("status")
+    tab = request.form.get("tab") or "presupuesto"
+    if status not in PROJECT_STATUSES:
+        abort(400)
+
+    try:
+        update_project_status(pid, status)
+    except Exception as exc:
+        try:
+            ctx = detail_ctx(pid, active_tab=tab)
+        except Exception:
+            ctx = None
+        if ctx is None:
+            abort(404)
+        panel_html = _panel_for(ctx, tab)
+        return render_template(
+            "projects/page.html", error=None, panel_html=panel_html,
+            status_error=f"Error: {exc}", **ctx,
+        )
+
+    return redirect(tab_url(pid, tab), code=303)

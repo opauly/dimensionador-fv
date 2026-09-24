@@ -19,6 +19,15 @@ them. `fmt_usd`/`fmt_pct` are thin wrappers over `utils/formatting.py` so
 every panel formats money the same way; no template ever does money
 arithmetic (plan §1.3 rule 2) or reimplements a label/color/percent lookup
 that belongs in this file.
+
+Step 3 ("Detail shell + Presupuesto tab, read-only") adds this module's other
+load-bearing piece: `detail_ctx(pid)`, the one context builder every route on
+`/proyectos/<pid>...` renders from (full-page GET and, from Step 4 on, every
+write route's re-render) — same discipline as
+`maintenance_detail.detail_ctx()` (Phase 21) and `maintenance_common.
+property_rows()`. `TAB_SPECS`/`TAB_KEYS`/`tab_url()` are the tab-routing
+vocabulary `webapp/blueprints/projects.py`'s GET dispatch and `_header.html`'s
+status-pill redirect both read, so the tab order and URLs are declared once.
 """
 from utils import formatting as _fmt
 
@@ -70,6 +79,47 @@ TAB_LABELS = [
     "Viáticos", "Extras (gastos)", "Facturación", "Pagos",
 ]
 
+# Same nine tabs, keyed for routing (`detail_ctx()`/`tab_url()` below and
+# `webapp/blueprints/projects.py`'s tab-dispatch routes). "category" is set
+# for the five tabs backed by the shared expense-ledger renderer (Step 5) —
+# it is what `GET /<pid>/gastos/<categoria>` validates against and what a
+# ledger row's own `category` column carries. Order matches TAB_LABELS/
+# `pages/04_project_detail.py` L30-33 exactly; do not reorder.
+TAB_SPECS = [
+    {"key": "presupuesto", "label": "Presupuesto"},
+    {"key": "banco", "label": "Banco", "category": "banco"},
+    {"key": "equipo", "label": "Equipo", "category": "equipo"},
+    {"key": "materiales", "label": "Materiales", "category": "materiales"},
+    {"key": "mano_de_obra", "label": "Mano de obra"},
+    {"key": "viaticos", "label": "Viáticos", "category": "viaticos"},
+    {"key": "extras", "label": "Extras (gastos)", "category": "extras"},
+    {"key": "facturacion", "label": "Facturación"},
+    {"key": "pagos", "label": "Pagos"},
+]
+TAB_KEYS = [t["key"] for t in TAB_SPECS]
+LEDGER_TAB_CATEGORIES = {t["category"] for t in TAB_SPECS if "category" in t}
+
+
+def tab_url(pid: str, key: str) -> str:
+    """The URL for one detail-page tab — the only place this section
+    translates a tab key into an `url_for()` call, so
+    `projects.py`'s GET dispatch, `_header.html`'s status-pill redirect
+    target and `page.html`'s tab bar can never point at three different
+    URLs for the same tab."""
+    from flask import url_for
+
+    if key not in TAB_KEYS:
+        key = "presupuesto"
+    if key == "presupuesto":
+        return url_for("projects.detalle", pid=pid)
+    if key == "mano_de_obra":
+        return url_for("projects.mano_de_obra", pid=pid)
+    if key == "facturacion":
+        return url_for("projects.facturacion", pid=pid)
+    if key == "pagos":
+        return url_for("projects.pagos", pid=pid)
+    return url_for("projects.gastos", pid=pid, categoria=key)
+
 # ── Facturación category labels — new construction (§1.10.1); config.py has
 #    no label dict for config.INVOICE_CATEGORIES, so this is the one place
 #    Step 7 (and this step, since the module is built now) defines it. Order
@@ -117,3 +167,137 @@ def fmt_usd(amount) -> str:
 
 def fmt_pct(amount, decimals: int = 2) -> str:
     return _fmt.fmt_pct(amount, decimals=decimals)
+
+
+# ── Presupuesto tab figures — the only other money math on this page,
+#    computed here (never in a route, never in a template) per plan §1.3
+#    rules 2/3/5. Both figures `summarize()` deliberately leaves out —
+#    the INGRESOS extras card and each ledger's own TOTAL — are computed
+#    once, in Python, exactly where Streamlit computes them
+#    (pages/04_project_detail.py L117, L389). ─────────────────────────────
+def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
+    from config import EXPENSE_CATEGORIES
+
+    project = bundle["project"]
+    extras_amount_sum = sum(float(e.get("amount_usd") or 0) for e in bundle["extras"])
+
+    ingresos_cards = [
+        {"label": "Monto del contrato", "value": fmt_usd(project.get("contract_usd")), "navy_border": False},
+        {"label": "IVA incluido", "value": fmt_usd(project.get("contract_iva_usd")), "navy_border": False},
+        {"label": "Extras (órdenes adicionales)", "value": fmt_usd(extras_amount_sum), "navy_border": False},
+        {"label": "Gran total", "value": fmt_usd(result["ingresos_total"]), "navy_border": True},
+    ]
+
+    # Read-only this step (plan Step 3 scope) — no id/save affordance yet;
+    # Step 4 adds the per-row form and the "+ Agregar pago" action (items 15/17).
+    payment_rows = [
+        {
+            "payment_number": p.get("payment_number"),
+            "amount_str": fmt_usd(p.get("amount_usd")),
+            "paid": bool(p.get("paid")),
+            "paid_date": p.get("paid_date") or "",
+            "bank_account": p.get("bank_account") or "",
+        }
+        for p in bundle["payments"]
+    ]
+
+    # ⚠ plan §1.4 item 18: 0.0, never a divide-by-zero, when ingresos_total
+    # is falsy. `result["recibido"]`/`ingresos_total"]` are the only inputs —
+    # never a second sum over `bundle["payments"]` (§1.3 rule 7).
+    ingresos_total = result["ingresos_total"]
+    pct_recibido = (result["recibido"] / ingresos_total * 100) if ingresos_total else 0.0
+    recibido_line = (
+        f"Recibido {fmt_usd(result['recibido'])} de {fmt_usd(ingresos_total)} "
+        f"({fmt_pct(pct_recibido)})"
+    )
+
+    by_category = result["by_category"]
+    gastos_rows = [
+        {
+            "label": RUBRO_LABELS.get(cat, cat),
+            "costo": fmt_usd(by_category.get(cat, {}).get("costo")),
+            "iva": fmt_usd(by_category.get(cat, {}).get("iva")),
+            "costo_total": fmt_usd(by_category.get(cat, {}).get("costo_total")),
+            "pagado": fmt_usd(by_category.get(cat, {}).get("pagado")),
+            "presupuestado": fmt_usd(by_category.get(cat, {}).get("presupuestado")),
+            "remanente": fmt_usd(by_category.get(cat, {}).get("remanente")),
+        }
+        for cat in EXPENSE_CATEGORIES
+    ]
+
+    def _utilidad_card(label: str, value: float) -> dict:
+        is_positive = value >= 0
+        return {
+            "label": label,
+            "value": fmt_usd(value),
+            "color": "#4BAE6A" if is_positive else "#dc2626",
+            "bg": "#e8f5ee" if is_positive else "#fee2e2",
+        }
+
+    iva_a_pagar = result["iva_a_pagar"]
+    # ⚠ plan §1.4 item 20: label switches when iva_a_pagar < 0.
+    iva_label = "IVA a pagar" if iva_a_pagar >= 0 else "Crédito IVA (a favor)"
+    utilidad_cards = [
+        _utilidad_card("Utilidad bruta", result["utilidad_bruta"]),
+        _utilidad_card(iva_label, iva_a_pagar),
+        _utilidad_card("Utilidad neta", result["utilidad_neta"]),
+    ]
+
+    return {
+        "ingresos_cards": ingresos_cards,
+        "payment_rows": payment_rows,
+        "recibido_line": recibido_line,
+        "gastos_rows": gastos_rows,
+        "utilidad_cards": utilidad_cards,
+    }
+
+
+def detail_ctx(project_id: str, active_tab: str = "presupuesto") -> dict | None:
+    """The one function every Proyectos detail-page route renders from,
+    including after a mutation (plan §1.3): one `get_project_bundle()` call,
+    one `summarize()` call, and every header/label/Presupuesto figure
+    derived from that single pair of calls — no route or template
+    recomputes any of it.
+
+    Returns `None` when `project_id` doesn't resolve to a row — the "Proyecto
+    no encontrado." state (pages/04_project_detail.py L590). Lets any
+    exception `get_project_bundle()` raises propagate to the caller, which
+    renders it as "Error cargando proyecto: {e}" (L585) — same two-state
+    shape as the Streamlit page, deliberately not collapsed into one.
+    """
+    from calculations.project_finance import summarize
+    from config import PROJECT_STATUSES, SYSTEM_TYPE_LABELS
+    from database.projects_db import get_project_bundle
+
+    bundle = get_project_bundle(project_id)
+    project = bundle.get("project")
+    if not project:
+        return None
+
+    result = summarize(
+        project, bundle["payments"], bundle["expenses"], bundle["labor"], bundle["extras"],
+    )
+
+    status = project.get("status") or "active"
+    if active_tab not in TAB_KEYS:
+        active_tab = "presupuesto"
+
+    ctx = {
+        "project": project,
+        "bundle": bundle,
+        "result": result,
+        "client_name": project.get("client_name") or "Sin nombre",
+        "sys_label": SYSTEM_TYPE_LABELS.get(project.get("system_type", ""), "—"),
+        "status": status,
+        "status_label": STATUS_LABELS.get(status, status),
+        "contract_str": fmt_usd(project.get("contract_usd")),
+        "status_options": [(s, STATUS_LABELS.get(s, s), s == status) for s in PROJECT_STATUSES],
+        "proposal_caption": (
+            f"Promovido desde cotización — proposal_id {project['proposal_id']}"
+            if project.get("proposal_id") else None
+        ),
+        "active_tab": active_tab,
+        "tabs": [{"key": t["key"], "label": t["label"], "url": tab_url(project_id, t["key"])} for t in TAB_SPECS],
+    }
+    ctx.update(_presupuesto_ctx(bundle, result))
+    return ctx
