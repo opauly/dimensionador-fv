@@ -18,6 +18,7 @@ def create_app() -> Flask:
     from webapp.blueprints.admin import bp as admin_bp
     from webapp.blueprints.dashboard import bp as dashboard_bp
     from webapp.blueprints.maintenance import bp as maintenance_bp
+    from webapp.blueprints.projects import bp as projects_bp
     from webapp.blueprints.proposals import bp as proposals_bp
     from webapp.blueprints.wizard import bp as wizard_bp
 
@@ -26,6 +27,7 @@ def create_app() -> Flask:
     app.register_blueprint(proposals_bp)
     app.register_blueprint(wizard_bp)
     app.register_blueprint(maintenance_bp)
+    app.register_blueprint(projects_bp)
 
     @app.errorhandler(413)
     def too_large(_exc):

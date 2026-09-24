@@ -19,11 +19,13 @@ PHASES = [
 
 # Nav entries not yet ported to this branch — each renders a stub page so the
 # sidebar shape matches the target app while pages migrate one at a time.
-# "proposals" is ported (webapp/blueprints/proposals.py) and no longer listed
-# here; "maintenance" is ported as of Phase 21 (webapp/blueprints/maintenance.py).
-STUBS = {
-    "projects": "Proyectos",
-}
+# "proposals" is ported (webapp/blueprints/proposals.py); "maintenance" is
+# ported as of Phase 21 (webapp/blueprints/maintenance.py); "projects" is
+# ported as of Phase 22 Step 1 (webapp/blueprints/projects.py) and no longer
+# listed here. This dict is empty until a future nav entry is stubbed again;
+# the route below stays (Phase 22 §2 Step 10's working assumption) since
+# removing it is a separate, no-benefit cleanup.
+STUBS = {}
 
 
 @bp.route("/")

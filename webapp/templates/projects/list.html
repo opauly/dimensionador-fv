@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Proyectos — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.plist-filters { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+.filter-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.filter-pill { position: relative; }
+.filter-pill input { position: absolute; opacity: 0; width: 0; height: 0; }
+.filter-pill span {
+  display: inline-flex; align-items: center; height: 28px; padding: 0 12px;
+  border-radius: 20px; border: 1px solid var(--border); color: var(--muted-2);
+  font-size: 12.5px; font-weight: 600; cursor: pointer; user-select: none;
+}
+.filter-pill input:checked + span { background: var(--navy); border-color: var(--navy); color: #fff; }
+.plist-row-link { color: var(--navy); font-weight: 700; font-size: 1rem; }
+</style>
+
+<div style="display:flex;justify-content:space-between;align-items:baseline;">
+  <p class="section-title">Proyectos</p>
+  {# Hardcoded, not url_for(): /proyectos/nuevo does not exist until Step 2
+     (PLAN_PHASE22_PROJECTS_JINJA.md, Step 1's scope note) — same pattern
+     webapp/blueprints/proposals.py once used for /proyectos/<id> before this
+     blueprint existed. Step 2 replaces this with an hx-get toggle (plan
+     §1.6) targeting an empty "#nuevo" fragment; today it is a plain link
+     that 404s until that step lands. #}
+  <a class="btn" href="/proyectos/nuevo">+ Nuevo proyecto</a>
+</div>
+
+<form id="pfilters" class="plist-filters">
+  <div class="filter-pills">
+    {% for opt in filter_options %}
+      <label class="filter-pill">
+        <input type="radio" name="estado" value="{{ opt }}" {{ 'checked' if opt == estado else '' }}
+               hx-get="{{ url_for('projects.index') }}" hx-target="#subpanel" hx-swap="innerHTML"
+               hx-trigger="change" hx-include="#pfilters" hx-push-url="true">
+        <span>{{ opt }}</span>
+      </label>
+    {% endfor %}
+  </div>
+</form>
+
+<div id="subpanel">{{ panel_html|safe }}</div>
+{% endblock %}
