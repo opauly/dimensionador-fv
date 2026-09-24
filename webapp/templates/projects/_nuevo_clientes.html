@@ -1,0 +1,24 @@
+{# Client typeahead results — port of pages/03_projects.py:_render_new_project_form()
+   L155-166's `if matches:` block, same gate (no dropdown at all when there are
+   zero matches, even with 2+ characters typed — Streamlit never showed the
+   free-text option on its own). "(usar texto libre...)" is always the first
+   row when the dropdown renders (verbatim L159); each match is
+   "{name} — {empresa}" (L160-161, only when empresa is set). Clicking either
+   swaps #client-field via nuevo_clientes_seleccionar — see that route's
+   docstring in webapp/blueprints/projects.py. #}
+{% if q and q|length >= 2 and matches %}
+  <div class="dtable-wrap">
+    <div class="client-match"
+         hx-get="{{ url_for('projects.nuevo_clientes_seleccionar', name=q) }}"
+         hx-target="#client-field" hx-swap="outerHTML">
+      (usar texto libre — sin cliente registrado)
+    </div>
+    {% for m in matches %}
+      <div class="client-match"
+           hx-get="{{ url_for('projects.nuevo_clientes_seleccionar', client_id=m.id, name=m.name) }}"
+           hx-target="#client-field" hx-swap="outerHTML">
+        {{ m.name }}{% if m.empresa %} — {{ m.empresa }}{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endif %}

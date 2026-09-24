@@ -17,14 +17,16 @@
 
 <div style="display:flex;justify-content:space-between;align-items:baseline;">
   <p class="section-title">Proyectos</p>
-  {# Hardcoded, not url_for(): /proyectos/nuevo does not exist until Step 2
-     (PLAN_PHASE22_PROJECTS_JINJA.md, Step 1's scope note) — same pattern
-     webapp/blueprints/proposals.py once used for /proyectos/<id> before this
-     blueprint existed. Step 2 replaces this with an hx-get toggle (plan
-     §1.6) targeting an empty "#nuevo" fragment; today it is a plain link
-     that 404s until that step lands. #}
-  <a class="btn" href="/proyectos/nuevo">+ Nuevo proyecto</a>
+  {# Step 2 (PLAN_PHASE22_PROJECTS_JINJA.md §1.6 pattern 2): hx-get the
+     manual-create form into the empty #nuevo container below; "Cancelar"
+     inside that fragment swaps an empty one back in its place. #}
+  <button type="button" class="btn" style="cursor:pointer;"
+          hx-get="{{ url_for('projects.nuevo') }}" hx-target="#nuevo" hx-swap="outerHTML">
+    + Nuevo proyecto
+  </button>
 </div>
+
+<div id="nuevo"></div>
 
 <form id="pfilters" class="plist-filters">
   <div class="filter-pills">

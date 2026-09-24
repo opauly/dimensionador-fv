@@ -1,0 +1,64 @@
+{# Manual project creation form (Phase 22 Step 2) — port of
+   pages/03_projects.py:_render_new_project_form() (L139-211) onto htmx.
+   Loaded into list.html's empty #nuevo container by the "+ Nuevo proyecto"
+   toggle (plan §1.6 pattern 2); "Cancelar" swaps _nuevo_closed.html back in.
+   "Crear proyecto" is a plain <form method=post> ending in a 303 on success
+   ("form POST + 303", same convention as every other successful write in
+   this app) — its target route is webapp/blueprints/projects.py:crear(),
+   which re-renders this same fragment with `error` set and every field's
+   posted value preserved on a validation failure, matching
+   webapp/blueprints/maintenance_setup.py:propiedades_crear()'s precedent. #}
+<style>
+.pnew-wrap { border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 14px 16px 12px; margin: 4px 0 16px; background: #fff; }
+.pnew-title { font-size: 0.92rem; font-weight: 700; color: var(--navy); margin: 0 0 10px; }
+.pnew-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+.client-match { padding: 8px 12px; cursor: pointer; font-size: 13px; border-top: 1px solid var(--row-border); }
+.client-match:first-child { border-top: none; }
+.client-match:hover { background: var(--header-bg); }
+.pnew-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+.pnew-cancel { background: none; border: none; color: var(--muted-2); font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: 13px; }
+</style>
+<div id="nuevo">
+  <div class="pnew-wrap">
+    <p class="pnew-title">Nuevo proyecto (sin cotización)</p>
+    <form method="post" action="{{ url_for('projects.crear') }}">
+      {% include "projects/_client_field.html" %}
+
+      <div class="pnew-grid3">
+        <div>
+          <label class="flabel">Tipo de sistema</label>
+          <select class="finput" name="system_type">
+            {% for value, label in system_type_options %}
+              <option value="{{ value }}" {{ 'selected' if value == system_type else '' }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="flabel">Contrato (USD, monto total)</label>
+          <input class="finput" type="number" name="contract_usd" value="{{ contract_usd }}"
+                 min="0" step="10" title="El total del contrato, con IVA incluido si corresponde.">
+        </div>
+        <div>
+          <label class="flabel">IVA incluido (USD)</label>
+          <input class="finput" type="number" name="contract_iva_usd" value="{{ contract_iva_usd }}"
+                 min="0" step="10" title="Monto de IVA ya incluido en el total de arriba, si aplica. Normalmente 0.">
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <label class="flabel">Notas</label>
+        <textarea class="finput" name="notes" rows="2">{{ notes }}</textarea>
+      </div>
+
+      {% if error %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:10px 0 0;">{{ error }}</p>{% endif %}
+
+      <div class="pnew-actions">
+        <button class="btn" type="submit" style="cursor:pointer;">Crear proyecto</button>
+        <button type="button" class="pnew-cancel"
+                hx-get="{{ url_for('projects.nuevo', cancel=1) }}" hx-target="#nuevo" hx-swap="outerHTML">
+          Cancelar
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

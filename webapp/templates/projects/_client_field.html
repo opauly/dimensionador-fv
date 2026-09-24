@@ -1,0 +1,18 @@
+{# The "Cliente" input + its hidden client_id — its own fragment (mirrors
+   wizard/_s1_fields.html being its own swap target) because both the fresh
+   _nuevo.html render AND a typeahead-match click (nuevo_clientes_seleccionar,
+   outerHTML swap of #client-field) render exactly this div and nothing else.
+   client_id is accepted for symmetry with create_project_manual()'s
+   signature but is not a projects column (plan §0.4 Q6) — it rides along in
+   a hidden input purely so the POST payload matches Streamlit's call shape;
+   dropping it would change nothing this phase asserts. #}
+<div id="client-field">
+  <label class="flabel">Cliente</label>
+  <input class="finput" type="text" name="client_name" autocomplete="off"
+         placeholder="Buscar cliente existente o escribir nombre nuevo…"
+         value="{{ client_name }}"
+         hx-get="{{ url_for('projects.nuevo_clientes') }}" hx-target="#client-matches" hx-swap="innerHTML"
+         hx-trigger="keyup changed delay:300ms">
+  <input type="hidden" name="client_id" value="{{ client_id or '' }}">
+  <div id="client-matches" style="margin-top:4px;"></div>
+</div>
