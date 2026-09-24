@@ -192,8 +192,8 @@ CREATE TABLE IF NOT EXISTS project_payments (
     paid                boolean NOT NULL DEFAULT false,
     paid_date           date,
     bank_account        text,
-    onvo_commission_pct numeric(5,4) NOT NULL DEFAULT 0.024,
-    onvo_iva_pct        numeric(5,4),
+    onvo_commission_pct numeric(5,4) NOT NULL DEFAULT 0,  -- migration 048: was DEFAULT 0.024, an unchosen commission
+    onvo_iva_pct        numeric(5,4) DEFAULT 0,            -- migration 048
     net_deposited       numeric(10,2),
     notes               text,
     created_at          timestamptz DEFAULT now()
