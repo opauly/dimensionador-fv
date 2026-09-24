@@ -1,0 +1,126 @@
+{# Shared renderer for the five expense-ledger tabs — Banco / Equipo /
+   Materiales / Viáticos / Extras (gastos) — Phase 22 Step 5 (plan §1.4 items
+   21-27, §1.6, §0.4 Q4). One `<form>` per ledger:
+
+   - "Guardar cambios" is an htmx POST (target #subpanel) so it can carry
+     `hx-disabled-elt`/`hx-indicator` (plan §1.6's ⚠ note) while the backend
+     still ends in a plain `303` redirect (webapp/blueprints/projects_ledger.
+     py:gastos_guardar) — htmx follows that redirect itself and swaps the
+     freshly-rendered ledger back into #subpanel, so a save can never leave
+     stale figures on screen.
+   - "+ Fila" posts every current input/select in this form and gets back
+     this WHOLE fragment (outerHTML swap) with one more blank row appended —
+     round-trip from posted values, nothing persisted (plan §1.2). Two
+     already-typed, still-unsaved rows must both survive this.
+   - Row deletion is its own explicit action, never inferred from a row's
+     absence in the Guardar payload (§0.4 Q4): a *persisted* row's "✕"
+     (rendered whenever `row.id` is set) opens `_ledger_delete.html`'s inline
+     confirm in that row's own action cell; an *unsaved* new row's "✕" (no
+     `id` yet — nothing exists in the DB to delete) just removes its `<tr>`
+     from the DOM, since nothing was ever persisted for it either way.
+   - `Total` is display-only — the Postgres-generated `total_with_iva` value
+     already on each fetched row. It is rendered as plain text, never as a
+     named form field, so no Guardar payload can ever carry it (plan item
+     23).
+   - Budget-skeleton rows (`amount_usd == 0 and budgeted_usd > 0`, item 24 —
+     the disclosed §0.4 Q5 deviation from Streamlit) render dimmed with a
+     small "presupuesto" pill next to Rubro.
+#}
+<div id="ledger-{{ categoria }}">
+<style>
+.pl-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 10px; }
+.pl-wrap { overflow-x: auto; }
+.pl-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.pl-table th {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; text-align: left; padding: 6px; border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.pl-table td { padding: 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.pl-table tr.pl-dim td { opacity: 0.55; }
+.pl-pill {
+  display: inline-block; font-size: 0.62rem; font-weight: 700; color: #92400e;
+  background: #fef3c7; border-radius: 10px; padding: 1px 7px; margin-left: 6px; vertical-align: middle;
+  white-space: nowrap;
+}
+.pl-table input[type="text"], .pl-table input[type="number"], .pl-table select {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.82rem;
+  border: 1px solid var(--border); border-radius: 4px; font-family: var(--font);
+}
+.pl-table input[type="checkbox"] { width: 16px; height: 16px; }
+.pl-total-line { text-align: right; font-weight: 700; color: var(--navy); margin-top: 8px; }
+.pl-x-btn {
+  background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer;
+  padding: 2px 6px; font-size: 0.9rem; font-family: var(--font); line-height: 1;
+}
+.pl-btn-outline {
+  height: 30px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--navy);
+  background: #fff; color: var(--navy); font-size: 0.82rem; font-weight: 600; cursor: pointer; margin-top: 8px;
+}
+.pl-save-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+</style>
+
+<h4 class="pl-title">{{ label }}</h4>
+{% if error %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:0 0 8px;">⚠ {{ error }}</p>{% endif %}
+
+<form id="ledger-form-{{ categoria }}"
+      hx-post="{{ url_for('projects.gastos_guardar', pid=pid, categoria=categoria) }}"
+      hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this" hx-indicator="#ledger-save-spin-{{ categoria }}">
+  <div class="pl-wrap">
+    <table class="pl-table">
+      <thead>
+        <tr>
+          <th>Rubro</th><th>Valor USD</th><th>IVA</th><th>Total</th>
+          <th>Fecha</th><th>Pagado</th><th>Comentarios</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="{{ 'pl-dim' if row.dimmed else '' }}">
+          <td>
+            <input type="hidden" name="row-{{ loop.index0 }}-id" value="{{ row.id or '' }}">
+            <input type="text" name="row-{{ loop.index0 }}-description" value="{{ row.description }}">
+            {% if row.dimmed %}<span class="pl-pill">presupuesto</span>{% endif %}
+          </td>
+          <td><input type="number" min="0" step="0.01" name="row-{{ loop.index0 }}-amount_usd" value="{{ row.amount_str }}"></td>
+          <td>
+            <select name="row-{{ loop.index0 }}-iva_label">
+              {% for opt in ['0%', '13%'] %}
+                <option value="{{ opt }}" {{ 'selected' if opt == row.iva_label else '' }}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>{{ row.total_str }}</td>
+          <td><input type="text" name="row-{{ loop.index0 }}-expense_date" value="{{ row.expense_date }}" placeholder="YYYY-MM-DD"></td>
+          <td style="text-align:center;"><input type="checkbox" name="row-{{ loop.index0 }}-paid" {{ 'checked' if row.paid else '' }}></td>
+          <td><input type="text" name="row-{{ loop.index0 }}-notes" value="{{ row.notes }}"></td>
+          <td>
+            {% if row.id %}
+              <span id="del-slot-{{ row.id }}">
+                <button type="button" class="pl-x-btn" title="Eliminar"
+                        hx-get="{{ url_for('projects.gasto_eliminar_confirmar', pid=pid, eid=row.id, categoria=categoria) }}"
+                        hx-target="#del-slot-{{ row.id }}" hx-swap="outerHTML">&#10005;</button>
+              </span>
+            {% else %}
+              <button type="button" class="pl-x-btn" title="Quitar fila" onclick="this.closest('tr').remove()">&#10005;</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <button type="button" class="pl-btn-outline"
+          hx-post="{{ url_for('projects.gastos_fila', pid=pid, categoria=categoria) }}"
+          hx-include="#ledger-form-{{ categoria }} input, #ledger-form-{{ categoria }} select"
+          hx-target="#ledger-{{ categoria }}" hx-swap="outerHTML">+ Fila</button>
+
+  <div class="pl-save-row">
+    <button type="submit" class="btn">Guardar cambios</button>
+    <span id="ledger-save-spin-{{ categoria }}" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Guardando…</span>
+  </div>
+</form>
+
+<p class="pl-total-line">TOTAL: {{ total_str }}</p>
+</div>

@@ -31,6 +31,14 @@ Step 4 scope ("Pagos block write paths (Presupuesto)", plan §1.4 items
 immediately after it is created, the same way `maintenance.py` registers
 `maintenance_detail.register(bp)`.
 
+Step 5 scope ("The five expense ledgers", plan §1.4 items 21-27): the
+Banco/Equipo/Materiales/Viáticos/Extras (gastos) tabs go from the Step 3
+placeholder to real content — `_panel_for()` now routes any tab key in
+`LEDGER_TAB_CATEGORIES` to `projects_ledger.render_panel(ctx, tab)` instead of
+`_placeholder_panel()`. All four of `projects_ledger.py`'s write routes
+(Guardar cambios / +Fila / delete-confirm / delete) register onto this same
+`bp`, same convention as Step 4.
+
 This file owns list/create/tab-dispatch routing only, mirroring
 `webapp/blueprints/maintenance.py`: one module per tab/section owns that
 section's logic and registers onto this same `bp` via `register(bp)` — never
@@ -43,13 +51,14 @@ rule silently breaks for that module's routes only (Phase 21 §5.5 finding
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
-from webapp.blueprints import projects_budget
+from webapp.blueprints import projects_budget, projects_ledger
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
 )
 
 bp = Blueprint("projects", __name__, url_prefix="/proyectos")
 projects_budget.register(bp)
+projects_ledger.register(bp)
 
 
 def _parse_money(value) -> float:
@@ -235,6 +244,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
     change re-renders the *same* panel the user was looking at."""
     if tab == "presupuesto":
         return render_template("projects/_presupuesto.html", **ctx)
+    if tab in LEDGER_TAB_CATEGORIES:
+        return projects_ledger.render_panel(ctx, tab)
     return _placeholder_panel(ctx, tab)
 
 
