@@ -6,7 +6,14 @@
 <title>{% block title %}Pauly&amp;Co Solar Tool{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 <script src="{{ url_for('static', filename='vendor/htmx.min.js') }}" defer></script>
-<script src="{{ url_for('static', filename='vendor/plotly-basic.min.js') }}" defer></script>
+<!-- Not deferred: wizard step pages embed a plain, non-deferred <script>Plotly.newPlot(...)</script>
+     directly in the body (via Plotly's own fig.to_html() export). A deferred script runs only after
+     the whole document has parsed, which is always AFTER any earlier inline <script> in the body --
+     so on a fresh full-page load (e.g. revisiting a wizard step that already has a computed chart,
+     as opposed to reaching it via an htmx-triggered "Calcular" action after the page has long since
+     loaded), `Plotly` would be undefined when that inline script runs. Loading this one synchronously
+     guarantees `Plotly` exists before any body content, inline chart script included, is parsed. -->
+<script src="{{ url_for('static', filename='vendor/plotly-basic.min.js') }}"></script>
 </head>
 <body>
   <div class="shell">
