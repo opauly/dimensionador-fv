@@ -188,10 +188,11 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
         {"label": "Gran total", "value": fmt_usd(result["ingresos_total"]), "navy_border": True},
     ]
 
-    # Read-only this step (plan Step 3 scope) — no id/save affordance yet;
-    # Step 4 adds the per-row form and the "+ Agregar pago" action (items 15/17).
+    # Step 4: each row now carries its `id` (for the per-row Guardar form's
+    # POST target) alongside the read-only display fields Step 3 already had.
     payment_rows = [
         {
+            "id": p.get("id"),
             "payment_number": p.get("payment_number"),
             "amount_str": fmt_usd(p.get("amount_usd")),
             "paid": bool(p.get("paid")),
@@ -200,6 +201,11 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
         }
         for p in bundle["payments"]
     ]
+
+    # ⚠ plan §1.4 item 17: "+ Agregar pago"'s `Pago #` field defaults to
+    # `max(existing payment_number) + 1` — 1 when there are none yet.
+    existing_numbers = [p.get("payment_number") or 0 for p in bundle["payments"]]
+    next_payment_number = (max(existing_numbers) + 1) if existing_numbers else 1
 
     # ⚠ plan §1.4 item 18: 0.0, never a divide-by-zero, when ingresos_total
     # is falsy. `result["recibido"]`/`ingresos_total"]` are the only inputs —
@@ -246,6 +252,7 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
     return {
         "ingresos_cards": ingresos_cards,
         "payment_rows": payment_rows,
+        "next_payment_number": next_payment_number,
         "recibido_line": recibido_line,
         "gastos_rows": gastos_rows,
         "utilidad_cards": utilidad_cards,

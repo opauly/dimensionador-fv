@@ -25,6 +25,12 @@ construcción" placeholder (`projects/_en_construccion.html`) until Steps
 `url_for("projects.detalle", ...)` — the hardcoded `f"/proyectos/{...}"`
 Step 1/2 used (because the target route didn't exist yet) is gone.
 
+Step 4 scope ("Pagos block write paths (Presupuesto)", plan §1.4 items
+15/17): the per-payment `Guardar` and `+ Agregar pago` routes live in
+`webapp/blueprints/projects_budget.py`, registered onto this same `bp`
+immediately after it is created, the same way `maintenance.py` registers
+`maintenance_detail.register(bp)`.
+
 This file owns list/create/tab-dispatch routing only, mirroring
 `webapp/blueprints/maintenance.py`: one module per tab/section owns that
 section's logic and registers onto this same `bp` via `register(bp)` — never
@@ -37,11 +43,13 @@ rule silently breaks for that module's routes only (Phase 21 §5.5 finding
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
+from webapp.blueprints import projects_budget
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
 )
 
 bp = Blueprint("projects", __name__, url_prefix="/proyectos")
+projects_budget.register(bp)
 
 
 def _parse_money(value) -> float:
