@@ -1,0 +1,192 @@
+{# Pagos / ONVO tab — Phase 22 Step 8 (plan §1.4 items 43-50, §1.10). **New
+   construction** — there is no Streamlit page behind this; §1.10.5's
+   hand-computed reference numbers are the oracle, not a side-by-side diff.
+
+   - The método toggle (`Transferencia` / `ONVO tarjeta`) is a **pure
+     client-side convenience** (item 45): it only writes into this row's own
+     two rate `<input>`s (`commission_pct` / `iva_pct`) via inline `onclick`
+     — nothing is submitted, and there is no third "method" value stored
+     anywhere. Both rates stay freely editable by hand afterwards.
+   - Every USD figure shown (`Comisión USD` / `IVA USD` / `Por depositar`)
+     is `webapp/blueprints/projects_payments.py:render_panel()`'s freshly
+     computed `onvo_breakdown()` result for this row's *persisted* rates
+     (item 46) — never the persisted `net_deposited` column, so a stale or
+     hand-corrupted value there can never surface here.
+   - Each row's own `Guardar` is its own `<form>`, htmx-posted to
+     `pago_onvo_guardar`, target `#subpanel` — same one-row-one-form shape
+     as `_presupuesto.html`'s own Pagos block, but a **different URL**: this
+     is the only route allowed to write `onvo_commission_pct` /
+     `onvo_iva_pct` / `net_deposited` (item 50).
+   - "Registrar comisión como gasto Banco" is its own tiny `<form>`, shown
+     only when this payment has no `banco` expense yet carrying its
+     `onvo:{id}` marker (item 49) — once registered, the row shows a plain
+     confirmation line instead of the button, so a second click is
+     impossible from the UI itself (the route also refuses it server-side).
+   - The footer's four figures come from `payments_summary()` over paid
+     payments only; the `Recibido … / Pendiente …` line is `detail_ctx()`'s
+     own `recibido_line` string, reused verbatim — never recomputed here —
+     so this tab's figure is byte-identical to the Presupuesto tab's own
+     (plan §1.3 rule 7, item 47).
+#}
+<div id="pagos-panel">
+<style>
+.pg-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 2px; }
+.pg-contrato { font-size: 0.82rem; color: var(--muted); margin: 0 0 14px; }
+.pg-card {
+  border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px;
+}
+.pg-card-header {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 10px;
+}
+.pg-pago-label { font-weight: 700; color: var(--navy); font-size: 0.9rem; }
+.pg-monto { font-size: 0.82rem; color: var(--muted-2); }
+.pg-toggle { display: flex; gap: 6px; }
+.pg-toggle-btn {
+  height: 26px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: #fff; color: var(--muted-2); font-size: 0.76rem; font-weight: 600; cursor: pointer;
+  font-family: var(--font);
+}
+.pg-toggle-btn.active { background: var(--navy); border-color: var(--navy); color: #fff; }
+.pg-grid {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px;
+}
+.pg-grid-2 { grid-template-columns: 0.6fr 1fr 1.2fr 1.6fr; }
+.pg-grid label {
+  display: block; font-size: 0.68rem; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px;
+}
+.pg-grid input[type="text"], .pg-grid input[type="number"] {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.82rem;
+  border: 1px solid var(--border); border-radius: 4px; font-family: var(--font);
+}
+.pg-figure { font-size: 0.9rem; font-weight: 600; color: var(--navy); }
+.pg-figure-strong { font-size: 1rem; font-weight: 700; }
+.pg-actions { display: flex; align-items: center; gap: 10px; }
+.pg-btn-outline {
+  height: 28px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--navy);
+  background: #fff; color: var(--navy); font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  font-family: var(--font);
+}
+.pg-banco-row { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.pg-section-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 20px 0 8px; }
+.pg-footer {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 6px;
+}
+.pg-footer-card {
+  border-left: 4px solid var(--navy); background: var(--header-bg); border-radius: 6px; padding: 0.9rem 1.1rem;
+}
+.pg-footer-label { font-weight: 600; font-size: 0.82rem; color: var(--muted-2); }
+.pg-footer-value { font-size: 1.2rem; font-weight: 700; margin-top: 2px; color: var(--navy); }
+</style>
+
+<h4 class="pg-title">Pagos — {{ client_name }}</h4>
+<p class="pg-contrato">Contrato total: {{ contract_str }}</p>
+
+{% if error %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:0 0 8px;">⚠ {{ error }}</p>{% endif %}
+{% if banco_message %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:0 0 8px;">⚠ {{ banco_message }}</p>{% endif %}
+
+{% if not payment_rows %}
+  <p class="card-note-sm">Sin pagos programados.</p>
+{% else %}
+  {% for p in payment_rows %}
+    <div class="pg-card">
+      <form hx-post="{{ url_for('projects.pago_onvo_guardar', pid=pid, payment_id=p.id) }}"
+            hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this">
+        <div class="pg-card-header">
+          <div class="pg-pago-label">Pago {{ p.payment_number }}</div>
+          <div class="pg-monto">Monto bruto: {{ p.amount_str }}</div>
+          <div class="pg-toggle">
+            <button type="button" class="pg-toggle-btn {{ 'active' if p.is_transferencia else '' }}"
+                    onclick="document.getElementById('cpct-{{ p.id }}').value='0'; document.getElementById('ipct-{{ p.id }}').value='0';">
+              Transferencia
+            </button>
+            <button type="button" class="pg-toggle-btn {{ 'active' if not p.is_transferencia else '' }}"
+                    onclick="document.getElementById('cpct-{{ p.id }}').value='{{ default_commission_pct }}'; document.getElementById('ipct-{{ p.id }}').value='{{ default_iva_pct }}';">
+              ONVO tarjeta
+            </button>
+          </div>
+        </div>
+
+        <div class="pg-grid">
+          <div>
+            <label>Comisión %</label>
+            <input id="cpct-{{ p.id }}" type="number" min="0" step="0.001" name="commission_pct" value="{{ p.commission_pct_input }}">
+          </div>
+          <div>
+            <label>IVA sobre comisión %</label>
+            <input id="ipct-{{ p.id }}" type="number" min="0" step="0.001" name="iva_pct" value="{{ p.iva_pct_input }}">
+          </div>
+          <div>
+            <label>Comisión USD</label>
+            <div class="pg-figure">{{ p.commission_str }}</div>
+          </div>
+          <div>
+            <label>IVA USD</label>
+            <div class="pg-figure">{{ p.iva_str }}</div>
+          </div>
+          <div>
+            <label>Por depositar</label>
+            <div class="pg-figure pg-figure-strong">{{ p.net_str }}</div>
+          </div>
+        </div>
+
+        <div class="pg-grid pg-grid-2">
+          <div>
+            <label>Pagado</label>
+            <input type="checkbox" name="paid" {{ 'checked' if p.paid else '' }}>
+          </div>
+          <div>
+            <label>Fecha</label>
+            <input type="text" name="paid_date" value="{{ p.paid_date }}" placeholder="YYYY-MM-DD">
+          </div>
+          <div>
+            <label>Cuenta bancaria</label>
+            <input type="text" name="bank_account" value="{{ p.bank_account }}">
+          </div>
+          <div>
+            <label>Notas</label>
+            <input type="text" name="notes" value="{{ p.notes }}">
+          </div>
+        </div>
+
+        <div class="pg-actions">
+          <button type="submit" class="btn">Guardar</button>
+        </div>
+      </form>
+
+      <div class="pg-banco-row">
+        {% if p.banco_registered %}
+          <span class="card-note-sm">Comisión ya registrada como gasto Banco.</span>
+        {% else %}
+          <form hx-post="{{ url_for('projects.pago_banco_expense', pid=pid, payment_id=p.id) }}"
+                hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this">
+            <button type="submit" class="pg-btn-outline">Registrar comisión como gasto Banco</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}
+
+<h4 class="pg-section-title">Resumen</h4>
+<div class="pg-footer">
+  <div class="pg-footer-card">
+    <div class="pg-footer-label">Total pagado por el cliente</div>
+    <div class="pg-footer-value">{{ summary_gross_str }}</div>
+  </div>
+  <div class="pg-footer-card">
+    <div class="pg-footer-label">Comisión total</div>
+    <div class="pg-footer-value">{{ summary_commission_str }}</div>
+  </div>
+  <div class="pg-footer-card">
+    <div class="pg-footer-label">IVA sobre comisión total</div>
+    <div class="pg-footer-value">{{ summary_iva_str }}</div>
+  </div>
+  <div class="pg-footer-card">
+    <div class="pg-footer-label">Total por depositar</div>
+    <div class="pg-footer-value">{{ summary_net_str }}</div>
+  </div>
+</div>
+<p class="card-note-sm">{{ recibido_line }}</p>
+</div>

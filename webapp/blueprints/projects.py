@@ -63,10 +63,21 @@ not a port. `_panel_for()` now routes `"facturacion"` to
 `projects_invoicing.py`'s write routes (Guardar cambios / +Fila /
 delete-confirm / delete) register onto this same `bp`, same convention as
 Steps 4-6.
+
+Step 8 scope ("Pagos / ONVO", plan §1.4 items 43-50, §1.10.2-5): new
+construction, not a port. `_panel_for()` now routes `"pagos"` to
+`projects_payments.render_panel(ctx)` instead of `_placeholder_panel()`.
+`projects_payments.py`'s write routes (per-payment `Guardar` on
+`onvo_commission_pct`/`onvo_iva_pct`/`net_deposited`, plus "Registrar
+comisión como gasto Banco") register onto this same `bp`, same convention
+as Steps 4-7 — on URLs distinct from `projects_budget.py`'s own
+Presupuesto-tab payment editor (item 50).
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
-from webapp.blueprints import projects_budget, projects_invoicing, projects_ledger, projects_labor
+from webapp.blueprints import (
+    projects_budget, projects_invoicing, projects_ledger, projects_labor, projects_payments,
+)
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
 )
@@ -76,6 +87,7 @@ projects_budget.register(bp)
 projects_ledger.register(bp)
 projects_labor.register(bp)
 projects_invoicing.register(bp)
+projects_payments.register(bp)
 
 
 def _parse_money(value) -> float:
@@ -267,6 +279,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return projects_labor.render_panel(ctx)
     if tab == "facturacion":
         return projects_invoicing.render_panel(ctx)
+    if tab == "pagos":
+        return projects_payments.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 

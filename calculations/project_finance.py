@@ -176,6 +176,44 @@ def onvo_breakdown(amount_usd: float, commission_pct: float, iva_pct: float) -> 
     }
 
 
+def payments_summary(payments: list[dict], commission_of=onvo_breakdown) -> dict:
+    """Footer aggregation for the Pagos/ONVO screen (REQUIREMENTS.md §5.6,
+    plan §1.10.4).
+
+    Returns `{gross_paid, commission_total, iva_on_commission_total,
+    net_deposited_total}`, computed over **paid** payments only, by calling
+    `commission_of()` (`onvo_breakdown` by default) once per row — never by
+    re-deriving the per-row math independently. Sums the already-rounded
+    per-payment figures (each payment is one real transaction with its own
+    statement line), which is what a processor statement adds up to.
+
+    ⚠ Deliberately does NOT return recibido/pendiente — those come from
+    `summarize()`, so the Presupuesto tab and the Pagos tab can never
+    disagree (plan §1.3 rule 7)."""
+    gross_paid = 0.0
+    commission_total = 0.0
+    iva_on_commission_total = 0.0
+    net_deposited_total = 0.0
+
+    for p in payments:
+        if not p.get("paid"):
+            continue
+        breakdown = commission_of(
+            _num(p.get("amount_usd")), _num(p.get("onvo_commission_pct")), _num(p.get("onvo_iva_pct")),
+        )
+        gross_paid += breakdown["gross"]
+        commission_total += breakdown["commission"]
+        iva_on_commission_total += breakdown["iva_on_commission"]
+        net_deposited_total += breakdown["net_deposited"]
+
+    return {
+        "gross_paid": round(gross_paid, 2),
+        "commission_total": round(commission_total, 2),
+        "iva_on_commission_total": round(iva_on_commission_total, 2),
+        "net_deposited_total": round(net_deposited_total, 2),
+    }
+
+
 def invoice_summary(invoice_items: list[dict], project: dict, extras: list[dict]) -> dict:
     """Facturación totals + the contract reconciliation (REQUIREMENTS.md §5.5,
     PLAN_PHASE6.md Step 7, plan §1.10.4).

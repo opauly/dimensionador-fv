@@ -21,7 +21,9 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from calculations.project_finance import summarize, labor_balance, onvo_breakdown, invoice_summary
+from calculations.project_finance import (
+    summarize, labor_balance, onvo_breakdown, invoice_summary, payments_summary,
+)
 
 _failures: list[str] = []
 
@@ -170,6 +172,85 @@ check("empty delta", empty_invoice_result["delta"], 0.00)
 check("utilidad_bruta unaffected by invoice_summary", jorge_result_step5["utilidad_bruta"], 5720.70)
 check("iva_a_pagar unaffected by invoice_summary", jorge_result_step5["iva_a_pagar"], 0.00)
 check("utilidad_neta unaffected by invoice_summary", jorge_result_step5["utilidad_neta"], 5720.70)
+
+
+# ── Step 8 — ONVO (payments_summary + onvo_breakdown fixture, §1.10.5) ──────
+# Jorge's Pago 1 ($7,224.00) as Transferencia (0/0) vs ONVO tarjeta
+# (0.024/0.13) — PLAN_PHASE6.md Step 8's own hand-computed fixture, also the
+# proof numbers for the Step-0 migration's live check. Plus the utilidad-
+# invariance assertion (item 48): the two variants of the same payment must
+# never move utilidad_bruta/utilidad_neta, since ONVO fees are a bank cost,
+# never a revenue reduction.
+
+section("Step 8 — ONVO (onvo_breakdown + payments_summary + invariance)")
+
+transferencia_breakdown = onvo_breakdown(7224.00, 0.0, 0.0)
+check("transferencia commission", transferencia_breakdown["commission"], 0.00)
+check("transferencia iva_on_commission", transferencia_breakdown["iva_on_commission"], 0.00)
+check("transferencia net_deposited", transferencia_breakdown["net_deposited"], 7224.00)
+
+onvo_card_breakdown = onvo_breakdown(7224.00, 0.024, 0.13)
+check("onvo commission", onvo_card_breakdown["commission"], 173.38)
+check("onvo iva_on_commission", onvo_card_breakdown["iva_on_commission"], 22.54)
+check("onvo net_deposited", onvo_card_breakdown["net_deposited"], 7028.08)
+
+payment_transferencia = {
+    "amount_usd": 7224.00, "paid": True, "onvo_commission_pct": 0.0, "onvo_iva_pct": 0.0,
+}
+payment_onvo = {
+    "amount_usd": 7224.00, "paid": True, "onvo_commission_pct": 0.024, "onvo_iva_pct": 0.13,
+}
+
+summary_transferencia = payments_summary([payment_transferencia])
+check("payments_summary transferencia gross_paid", summary_transferencia["gross_paid"], 7224.00)
+check("payments_summary transferencia commission_total", summary_transferencia["commission_total"], 0.00)
+check(
+    "payments_summary transferencia iva_on_commission_total",
+    summary_transferencia["iva_on_commission_total"], 0.00,
+)
+check("payments_summary transferencia net_deposited_total", summary_transferencia["net_deposited_total"], 7224.00)
+
+summary_onvo = payments_summary([payment_onvo])
+check("payments_summary onvo gross_paid", summary_onvo["gross_paid"], 7224.00)
+check("payments_summary onvo commission_total", summary_onvo["commission_total"], 173.38)
+check("payments_summary onvo iva_on_commission_total", summary_onvo["iva_on_commission_total"], 22.54)
+check("payments_summary onvo net_deposited_total", summary_onvo["net_deposited_total"], 7028.08)
+
+# Unpaid rows are excluded entirely, and an empty list renders an
+# empty-state footer of zeros, never a crash (plan Step 8 validation, last
+# bullet — the pure-function half of that check).
+summary_unpaid = payments_summary([{**payment_onvo, "paid": False}])
+check("payments_summary excludes unpaid gross_paid", summary_unpaid["gross_paid"], 0.00)
+check("payments_summary excludes unpaid commission_total", summary_unpaid["commission_total"], 0.00)
+
+summary_empty = payments_summary([])
+check("payments_summary empty gross_paid", summary_empty["gross_paid"], 0.00)
+check("payments_summary empty commission_total", summary_empty["commission_total"], 0.00)
+check("payments_summary empty iva_on_commission_total", summary_empty["iva_on_commission_total"], 0.00)
+check("payments_summary empty net_deposited_total", summary_empty["net_deposited_total"], 0.00)
+
+# ⚠ item 48 — the invariance assertion: reuse the Step 5 fixture (Jorge +
+# Equipo expense + Cuadrilla labor, utilidad_bruta/neta $5,720.70) with the
+# same payment paid as either Transferencia or ONVO tarjeta — the fee
+# variant must not move utilidad_bruta/utilidad_neta by even one cent.
+result_transferencia = summarize(
+    jorge_project, [payment_transferencia], jorge_expenses_step4, jorge_labor_step5, [],
+)
+result_onvo = summarize(
+    jorge_project, [payment_onvo], jorge_expenses_step4, jorge_labor_step5, [],
+)
+check("invariance: utilidad_bruta (transferencia)", result_transferencia["utilidad_bruta"], 5720.70)
+check("invariance: utilidad_bruta (onvo)", result_onvo["utilidad_bruta"], 5720.70)
+check(
+    "invariance: utilidad_bruta identical across método",
+    result_transferencia["utilidad_bruta"], result_onvo["utilidad_bruta"],
+)
+check("invariance: utilidad_neta (transferencia)", result_transferencia["utilidad_neta"], 5720.70)
+check("invariance: utilidad_neta (onvo)", result_onvo["utilidad_neta"], 5720.70)
+check(
+    "invariance: utilidad_neta identical across método",
+    result_transferencia["utilidad_neta"], result_onvo["utilidad_neta"],
+)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────
