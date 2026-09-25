@@ -1,0 +1,29 @@
+{# Inline delete confirm for one Facturación line item (plan §0.4 Q4's rule,
+   applied here exactly as `_ledger_delete.html` applies it to expenses:
+   deletion is never inferred from a row's absence in "Guardar cambios",
+   always its own explicit action). Swapped into `#fdel-slot-<iid>` — that
+   row's own action cell — by the "✕" button (GET, confirm=True) and
+   collapsed back by "Cancelar" (GET cancel=1, confirm=False). "Sí, eliminar"
+   is an htmx POST (not a plain form submit) so it can carry
+   `hx-disabled-elt` — this is a money row, a double-click must not fire two
+   deletes. #}
+<span id="fdel-slot-{{ iid }}">
+{% if confirm %}
+  <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;">
+    <span style="color:#B84345;font-size:11px;">¿Eliminar?</span>
+    <form style="display:inline;"
+          hx-post="{{ url_for('projects.factura_eliminar', pid=pid, iid=iid) }}"
+          hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this">
+      <button type="submit" class="fa-x-btn" style="color:#fff;background:#dc2626;border-radius:4px;padding:2px 8px;">Sí</button>
+    </form>
+    <button type="button" class="fa-x-btn"
+            hx-get="{{ url_for('projects.factura_eliminar_confirmar', pid=pid, iid=iid, cancel=1) }}"
+            hx-target="#fdel-slot-{{ iid }}" hx-swap="outerHTML">Cancelar</button>
+  </span>
+  {% if error %}<p style="color:#B84345;font-size:11px;margin:2px 0 0;">{{ error }}</p>{% endif %}
+{% else %}
+  <button type="button" class="fa-x-btn" title="Eliminar"
+          hx-get="{{ url_for('projects.factura_eliminar_confirmar', pid=pid, iid=iid) }}"
+          hx-target="#fdel-slot-{{ iid }}" hx-swap="outerHTML">&#10005;</button>
+{% endif %}
+</span>

@@ -21,7 +21,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from calculations.project_finance import summarize, labor_balance, onvo_breakdown
+from calculations.project_finance import summarize, labor_balance, onvo_breakdown, invoice_summary
 
 _failures: list[str] = []
 
@@ -128,6 +128,48 @@ check(
     jorge_result_step5["by_category"]["mano_de_obra"]["costo"],
     920.00,
 )
+
+
+# ── Step 7 — Facturación (invoice_summary reconciliation view) ──────────────
+# Jorge's contract ($10,320.00) plus the Step 6 extra ($500 @ 13% -> $565.00,
+# supplied here as a hand-built dict with no `total_with_iva` key, to exercise
+# invoice_summary()'s amount_usd * (1 + iva_rate) fallback per PLAN_PHASE22
+# §1.10.4). PLAN_PHASE6.md Step 7's own hand-computed fixture (§1.10.5).
+
+section("Step 7 — Facturación (invoice_summary + contract reconciliation)")
+
+invoice_items_step7 = [
+    {"category": "equipos", "amount_usd": 8000.00, "iva_rate": 0.0},
+    {"category": "materiales", "amount_usd": 1000.00, "iva_rate": 0.13},
+    {"category": "servicios", "amount_usd": 1000.00, "iva_rate": 0.13},
+]
+extra_step6 = {"amount_usd": 500.00, "iva_rate": 0.13}  # no total_with_iva -> fallback path
+invoice_result = invoice_summary(invoice_items_step7, jorge_project, [extra_step6])
+
+check("by_category.equipos", invoice_result["by_category"]["equipos"], {"subtotal": 8000.00, "iva": 0.00, "total": 8000.00})
+check("by_category.materiales", invoice_result["by_category"]["materiales"], {"subtotal": 1000.00, "iva": 130.00, "total": 1130.00})
+check("by_category.servicios", invoice_result["by_category"]["servicios"], {"subtotal": 1000.00, "iva": 130.00, "total": 1130.00})
+check("subtotal", invoice_result["subtotal"], 10000.00)
+check("iva", invoice_result["iva"], 260.00)
+check("total_general", invoice_result["total_general"], 10260.00)
+check("delta (amber, extra present)", invoice_result["delta"], -625.00)
+
+# Empty-items case (plan item 42): zero items -> three zeroed categories, and
+# with no contract/extras in play here, total_general/delta are also zero.
+empty_invoice_result = invoice_summary([], {"contract_usd": 0.0}, [])
+for cat in ("equipos", "materiales", "servicios"):
+    check(f"empty by_category.{cat}", empty_invoice_result["by_category"][cat], {"subtotal": 0.00, "iva": 0.00, "total": 0.00})
+check("empty total_general", empty_invoice_result["total_general"], 0.00)
+check("empty delta", empty_invoice_result["delta"], 0.00)
+
+# ⚠ item 40: invoice_summary() must never feed summarize() / move the P&L —
+# assert the Jorge+Equipo+labor (Step 5) figures are untouched by the presence
+# of invoice items above (they are computed from entirely separate inputs, so
+# this is really "invoice_summary() has no side effects", not a live UI check,
+# but it documents the invariant the UI-level check exercises for real).
+check("utilidad_bruta unaffected by invoice_summary", jorge_result_step5["utilidad_bruta"], 5720.70)
+check("iva_a_pagar unaffected by invoice_summary", jorge_result_step5["iva_a_pagar"], 0.00)
+check("utilidad_neta unaffected by invoice_summary", jorge_result_step5["utilidad_neta"], 5720.70)
 
 
 # ── Summary ───────────────────────────────────────────────────────────────

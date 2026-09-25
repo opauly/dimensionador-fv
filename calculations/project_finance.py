@@ -35,7 +35,7 @@ end — never round an intermediate, or the ONVO $7,028.08 case (and others)
 drift by a cent (PLAN_PHASE6.md §4 risk #7).
 """
 
-from config import EXPENSE_CATEGORIES
+from config import EXPENSE_CATEGORIES, INVOICE_CATEGORIES
 
 
 def _num(value) -> float:
@@ -173,4 +173,71 @@ def onvo_breakdown(amount_usd: float, commission_pct: float, iva_pct: float) -> 
         "commission": commission,
         "iva_on_commission": iva,
         "net_deposited": net,
+    }
+
+
+def invoice_summary(invoice_items: list[dict], project: dict, extras: list[dict]) -> dict:
+    """Facturación totals + the contract reconciliation (REQUIREMENTS.md §5.5,
+    PLAN_PHASE6.md Step 7, plan §1.10.4).
+
+    Returns per-category `{subtotal, iva, total}` for ALL THREE
+    `config.INVOICE_CATEGORIES` (present even when a category has zero rows —
+    same rule as `_summarize_by_category`'s six rubros, plan §1.4 item 37),
+    plus `subtotal`/`iva`/`total_general` and
+
+        delta = total_general - (contract_usd + Σ extras.total_with_iva)
+
+    `contract_usd` is already the FULL quoted total (see the module
+    docstring) — there is no `* (1 + rate)` applied to it here.
+
+    ⚠ Facturación is a reconciliation view only. This function must never be
+    fed into `summarize()` and must never be read by any profit figure (plan
+    §1.4 item 40) — it exists purely to compare invoiced totals against the
+    contract, not to compute utilidad_bruta/iva_a_pagar/utilidad_neta.
+
+    `extras[].total_with_iva` is a generated column present on every fetched
+    row, but hand-built extras dicts (e.g. `derive_*`-built ones, or a test
+    fixture) may not carry it — fall back to
+    `amount_usd * (1 + iva_rate)` in that case.
+    """
+    by_category: dict[str, dict] = {
+        cat: {"subtotal": 0.0, "iva": 0.0, "total": 0.0} for cat in INVOICE_CATEGORIES
+    }
+
+    for item in invoice_items:
+        cat = item.get("category")
+        if cat not in by_category:
+            continue
+        amount = _num(item.get("amount_usd"))
+        iva_rate = _num(item.get("iva_rate"))
+        row = by_category[cat]
+        row["subtotal"] += amount
+        row["iva"] += amount * iva_rate
+
+    for row in by_category.values():
+        row["subtotal"] = round(row["subtotal"], 2)
+        row["iva"] = round(row["iva"], 2)
+        row["total"] = round(row["subtotal"] + row["iva"], 2)
+
+    subtotal = round(sum(row["subtotal"] for row in by_category.values()), 2)
+    iva = round(sum(row["iva"] for row in by_category.values()), 2)
+    total_general = round(subtotal + iva, 2)
+
+    contract_usd = _num(project.get("contract_usd"))
+    extras_total = 0.0
+    for extra in extras:
+        total_with_iva = extra.get("total_with_iva")
+        if total_with_iva is not None:
+            extras_total += _num(total_with_iva)
+        else:
+            extras_total += _num(extra.get("amount_usd")) * (1 + _num(extra.get("iva_rate")))
+
+    delta = round(total_general - (contract_usd + extras_total), 2)
+
+    return {
+        "by_category": by_category,
+        "subtotal": subtotal,
+        "iva": iva,
+        "total_general": total_general,
+        "delta": delta,
     }

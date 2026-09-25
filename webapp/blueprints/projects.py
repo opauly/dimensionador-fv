@@ -56,10 +56,17 @@ rule silently breaks for that module's routes only (Phase 21 §5.5 finding
 4-9's write-path modules (`projects_budget.py`, `projects_ledger.py`,
 `projects_labor.py`, `projects_invoicing.py`, `projects_payments.py`,
 `projects_promote.py`) register onto this same `bp` the same way.
+
+Step 7 scope ("Facturación", plan §1.4 items 35-42, §1.10): new construction,
+not a port. `_panel_for()` now routes `"facturacion"` to
+`projects_invoicing.render_panel(ctx)` instead of `_placeholder_panel()`.
+`projects_invoicing.py`'s write routes (Guardar cambios / +Fila /
+delete-confirm / delete) register onto this same `bp`, same convention as
+Steps 4-6.
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
-from webapp.blueprints import projects_budget, projects_ledger, projects_labor
+from webapp.blueprints import projects_budget, projects_invoicing, projects_ledger, projects_labor
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
 )
@@ -68,6 +75,7 @@ bp = Blueprint("projects", __name__, url_prefix="/proyectos")
 projects_budget.register(bp)
 projects_ledger.register(bp)
 projects_labor.register(bp)
+projects_invoicing.register(bp)
 
 
 def _parse_money(value) -> float:
@@ -257,6 +265,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return projects_ledger.render_panel(ctx, tab)
     if tab == "mano_de_obra":
         return projects_labor.render_panel(ctx)
+    if tab == "facturacion":
+        return projects_invoicing.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 

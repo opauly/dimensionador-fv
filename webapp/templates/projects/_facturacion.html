@@ -1,0 +1,175 @@
+{# Facturación tab — line-item editor over `project_invoice_items`, plus the
+   per-category summary and the contract-reconciliation line. Phase 22 Step 7
+   (plan §1.4 items 35-42, §1.10.1/§1.10.4). **New construction** — there is
+   no Streamlit page behind this; §1.10.5's hand-computed reference numbers
+   are the oracle, not a side-by-side diff.
+
+   Edit model, identical in shape to `_ledger.html` (read that file's own
+   comment for the full round-trip rationale):
+   - "Guardar cambios" is an htmx POST (target #subpanel) with
+     `hx-disabled-elt` so it can't double-submit; the backend ends in a plain
+     303 that htmx follows back into #subpanel.
+   - "+ Fila" posts every current input/select and gets back this WHOLE
+     fragment (outerHTML swap) with one more blank row appended — round-trip
+     from posted values, nothing persisted.
+   - A persisted row's "✕" (rendered whenever `row.id` is set) opens
+     `_factura_delete.html`'s inline confirm in that row's own action cell;
+     an unsaved new row's "✕" just removes its `<tr>` (nothing to delete).
+   - `IVA` and `Total` are display-only — the Postgres-generated
+     `iva_amount`/`total_usd` columns already on each fetched row (plan item
+     36). Rendered as plain text, never as named form fields, so no Guardar
+     payload can ever carry them.
+
+   ⚠ The summary block below (per-category totals, TOTAL GENERAL, Δ) always
+   reflects the *persisted* invoice items — it is computed by
+   `projects_invoicing.render_panel()` from `bundle["invoice_items"]`, never
+   from an in-progress, unsaved edit (same split as the ledger's own TOTAL
+   line, plan §4 risk #7). And per plan item 40: nothing here ever feeds
+   `summarize()` — this tab cannot move utilidad_bruta/iva_a_pagar/
+   utilidad_neta.
+#}
+<div id="facturacion-panel">
+<style>
+.fa-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 10px; }
+.fa-wrap { overflow-x: auto; }
+.fa-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.fa-table th {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; text-align: left; padding: 6px; border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+.fa-table td { padding: 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.fa-table input[type="text"], .fa-table input[type="number"], .fa-table select {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.82rem;
+  border: 1px solid var(--border); border-radius: 4px; font-family: var(--font);
+}
+.fa-x-btn {
+  background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer;
+  padding: 2px 6px; font-size: 0.9rem; font-family: var(--font); line-height: 1;
+}
+.fa-btn-outline {
+  height: 30px; padding: 0 12px; border-radius: 4px; border: 1px solid var(--navy);
+  background: #fff; color: var(--navy); font-size: 0.82rem; font-weight: 600; cursor: pointer; margin-top: 8px;
+}
+.fa-save-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.fa-section-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 8px; }
+.fa-cat-row {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 8px; align-items: center;
+  padding: 8px 6px; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+}
+.fa-cat-row-header {
+  font-size: 0.68rem; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; border-bottom: 2px solid var(--border);
+}
+.fa-total-row {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 8px; align-items: center;
+  padding: 10px 6px; font-weight: 700; color: var(--navy); background: var(--header-bg);
+  border-radius: 6px; margin-top: 6px;
+}
+.fa-delta-box {
+  margin-top: 14px; border-radius: 6px; padding: 0.9rem 1.1rem; border-left: 4px solid;
+}
+.fa-delta-box.ok { border-left-color: #4BAE6A; background: #e8f5ee; }
+.fa-delta-box.warn { border-left-color: #d97706; background: #fef3c7; }
+.fa-delta-label { font-weight: 600; font-size: 0.82rem; color: var(--muted-2); }
+.fa-delta-value { font-size: 1.3rem; font-weight: 700; margin-top: 2px; }
+.fa-delta-box.ok .fa-delta-value { color: #16a34a; }
+.fa-delta-box.warn .fa-delta-value { color: #92400e; }
+.fa-delta-caption { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+</style>
+
+<h4 class="fa-title">Facturación</h4>
+{% if error %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:0 0 8px;">⚠ {{ error }}</p>{% endif %}
+
+{% if not rows %}
+  <p class="card-note-sm">Sin renglones de factura.</p>
+{% endif %}
+
+<form id="facturacion-form"
+      hx-post="{{ url_for('projects.facturacion_guardar', pid=pid) }}"
+      hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this" hx-indicator="#facturacion-save-spin">
+  <div class="fa-wrap">
+    <table class="fa-table">
+      <thead>
+        <tr>
+          <th>Artículo</th><th>Categoría</th><th>Tasa IVA</th><th>Monto</th>
+          <th>IVA</th><th>Total</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>
+            <input type="hidden" name="row-{{ loop.index0 }}-id" value="{{ row.id or '' }}">
+            <input type="text" name="row-{{ loop.index0 }}-description" value="{{ row.description }}">
+          </td>
+          <td>
+            <select name="row-{{ loop.index0 }}-category">
+              {% for value, label in category_options %}
+                <option value="{{ value }}" {{ 'selected' if value == row.category else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select name="row-{{ loop.index0 }}-iva_label">
+              {% for opt in ['0%', '13%'] %}
+                <option value="{{ opt }}" {{ 'selected' if opt == row.iva_label else '' }}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input type="number" min="0" step="0.01" name="row-{{ loop.index0 }}-amount_usd" value="{{ row.amount_str }}"></td>
+          <td>{{ row.iva_str }}</td>
+          <td>{{ row.total_str }}</td>
+          <td>
+            {% if row.id %}
+              <span id="fdel-slot-{{ row.id }}">
+                <button type="button" class="fa-x-btn" title="Eliminar"
+                        hx-get="{{ url_for('projects.factura_eliminar_confirmar', pid=pid, iid=row.id) }}"
+                        hx-target="#fdel-slot-{{ row.id }}" hx-swap="outerHTML">&#10005;</button>
+              </span>
+            {% else %}
+              <button type="button" class="fa-x-btn" title="Quitar fila" onclick="this.closest('tr').remove()">&#10005;</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <button type="button" class="fa-btn-outline"
+          hx-post="{{ url_for('projects.facturacion_fila', pid=pid) }}"
+          hx-include="#facturacion-form input, #facturacion-form select"
+          hx-target="#facturacion-panel" hx-swap="outerHTML">+ Fila</button>
+
+  <div class="fa-save-row">
+    <button type="submit" class="btn">Guardar cambios</button>
+    <span id="facturacion-save-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Guardando…</span>
+  </div>
+</form>
+
+<h4 class="fa-section-title">Resumen por categoría</h4>
+<div class="fa-cat-row fa-cat-row-header">
+  <div>Categoría</div><div>Subtotal</div><div>IVA</div><div>Total</div>
+</div>
+{% for row in category_rows %}
+  <div class="fa-cat-row">
+    <div style="font-weight:600;">{{ row.label }}</div>
+    <div>{{ row.subtotal }}</div>
+    <div>{{ row.iva }}</div>
+    <div>{{ row.total }}</div>
+  </div>
+{% endfor %}
+<div class="fa-total-row">
+  <div>TOTAL GENERAL</div><div>{{ subtotal_str }}</div><div>{{ iva_str }}</div><div>{{ total_general_str }}</div>
+</div>
+
+<div class="fa-delta-box {{ 'ok' if delta_ok else 'warn' }}">
+  <div class="fa-delta-label">Δ = TOTAL GENERAL − (Contrato + Extras)</div>
+  <div class="fa-delta-value">{{ delta_str }}</div>
+  <p class="fa-delta-caption">
+    Facturación es una vista de conciliación contra el contrato — nunca alimenta utilidad bruta,
+    IVA a pagar ni utilidad neta.
+  </p>
+</div>
+</div>
