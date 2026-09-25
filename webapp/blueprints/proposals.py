@@ -10,8 +10,11 @@ step). The wizard itself (Step 3+) and the Projects module are not built here:
   "Nueva versión" 303s there too — that blueprint doesn't exist until Step 3,
   so both 404 for now. That is expected; the routes are wired correctly so
   Step 3 only needs to add the target.
-- "Ver proyecto →" links to /proyectos/<id> — the Projects blueprint is a
-  stub on this branch (§0.3 Q4), so this also 404s for now.
+- "Ver proyecto →" links to `url_for("projects.detalle", ...)` and "Mover a
+  Proyecto" hx-gets `url_for("projects.promover_form", ...)` — the Projects
+  blueprint was a stub when this module was first built (§0.3 Q4), but Phase
+  22 (PLAN_PHASE22_PROJECTS_JINJA.md §1.9) has since built it out and wired
+  both here for real.
 
 Status/system-type labels, colours and the search+status filtering logic are
 copied verbatim from pages/01_proposals.py (STATUS_BADGE / STATUS_DOT /
@@ -23,7 +26,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from flask import Blueprint, abort, redirect, render_template, request, send_file
+from flask import Blueprint, abort, redirect, render_template, request, send_file, url_for
 
 bp = Blueprint("proposals", __name__, url_prefix="/cotizaciones")
 
@@ -304,9 +307,7 @@ def _detail_ctx(proposal: dict, versions: list[dict], versions_error: str | None
         "versions": [_version_row_ctx(v, proposal) for v in reversed(versions)],
         "versions_error": versions_error,
         "project": project,
-        # Same deal — hardcoded because the Projects blueprint doesn't exist
-        # yet either (§0.3 Q4).
-        "project_url": f"/proyectos/{project['id']}" if project else None,
+        "project_url": url_for("projects.detalle", pid=project["id"]) if project else None,
         "project_error": project_error,
         "message": message,
     }

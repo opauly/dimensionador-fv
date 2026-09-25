@@ -1,0 +1,145 @@
+{# "Mover a Proyecto" promotion form (Phase 22 Step 9, plan §1.9, §1.4 items
+   51-53) — port of the form half of pages/01_proposals.py:
+   _render_promotion_block() (L456-581). The already-promoted "Ver proyecto
+   →" half of that Streamlit function stays where it already lives, in
+   proposals/_detail.html's own `project`/`project_error` branches — this
+   fragment is only ever loaded from the `{% else %}` branch there.
+
+   Loaded into proposals/_detail.html's persistent, empty
+   `#promote-{{ pid }}` div by the "Mover a Proyecto" button's
+   `hx-get`/`hx-swap="innerHTML"`. Every round trip below — the live
+   `change`-triggered preview, both "+ Fila" buttons and "Cancelar" —
+   targets that SAME persistent div with `hx-swap="innerHTML"` too, so this
+   fragment's own root never declares an id of its own and no duplicate-id
+   situation is ever created (unlike the outerHTML-swapped fragments
+   elsewhere in this section).
+
+   Confirmar is a genuine, non-htmx `<form method="post">` (same "form POST
+   + 303" convention as projects/_nuevo.html's `Crear proyecto`), so a
+   successful promotion is a real browser navigation to `/proyectos/<new_id>`
+   — not an htmx-swapped fragment still living under `/cotizaciones/<pid>`.
+   The live-preview `change` listener below is scoped to its own wrapper div
+   (`#promote-live-{{ pid }}`), not the `<form>` itself, so it never
+   intercepts Confirmar's real submit event. #}
+<style>
+.promo-title { font-size: 0.82rem; font-weight: 700; color: #166534; margin: 0 0 8px; }
+.promo-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.promo-label { display: block; font-size: 12px; color: var(--muted-2); margin-bottom: 4px; }
+.promo-input {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; font-family: var(--font); font-size: 13px;
+}
+.promo-caption { font-size: 0.78rem; color: var(--muted-2); margin: 10px 0 6px; }
+.promo-recon { font-size: 0.76rem; color: var(--muted-2); margin: 8px 0 12px; line-height: 1.5; }
+.promo-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 6px; }
+.promo-table th {
+  font-size: 0.66rem; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: 0.05em; text-align: left; padding: 5px; border-bottom: 2px solid var(--border);
+}
+.promo-table td { padding: 5px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.promo-table input, .promo-table select { width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.82rem; border: 1px solid var(--border); border-radius: 4px; font-family: var(--font); }
+.promo-x-btn { background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer; padding: 2px 6px; font-size: 0.9rem; font-family: var(--font); }
+.promo-btn-outline {
+  height: 28px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--navy); background: #fff;
+  color: var(--navy); font-size: 0.78rem; font-weight: 600; cursor: pointer; margin: 4px 0 12px;
+}
+.promo-preset { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: 10px 0; font-size: 0.85rem; }
+.promo-preset label { display: flex; align-items: center; gap: 4px; font-weight: 600; color: var(--muted-2); cursor: pointer; }
+.promo-schedule-preview { font-size: 0.82rem; color: var(--muted-2); margin: 6px 0 12px; }
+.promo-actions { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+.promo-cancel { background: none; border: none; color: var(--muted-2); font-weight: 600; cursor: pointer; padding: 0; font-family: var(--font); font-size: 13px; }
+.promo-error { color: #B84345; font-size: 13px; margin: 0 0 8px; }
+</style>
+
+<p class="promo-title">Mover a Proyecto</p>
+
+{% if error %}<p class="promo-error">{{ error }}</p>{% endif %}
+
+<form id="promote-form-{{ pid }}" method="post" action="{{ url_for('projects.promote_confirmar', pid=pid, vid=vid) }}">
+  <div id="promote-live-{{ pid }}"
+       hx-post="{{ url_for('projects.promover_tabla', pid=pid, vid=vid) }}"
+       hx-trigger="change delay:400ms"
+       hx-include="#promote-live-{{ pid }} input, #promote-live-{{ pid }} select"
+       hx-target="#promote-{{ pid }}" hx-swap="innerHTML">
+
+    <div class="promo-grid2">
+      <div>
+        <label class="promo-label">Monto del contrato (USD, según cotización)</label>
+        <input type="number" class="promo-input" name="contract_usd" value="{{ contract_usd }}" min="0" step="10"
+               title="El total cotizado — ya incluye el IVA de cada renglón que corresponde (equipos exentos, mano de obra/materiales/servicios al 13%, etc.). El desglose por renglón se factura en la pestaña Facturación del proyecto.">
+      </div>
+      <div>
+        <label class="promo-label">IVA incluido en el contrato (USD)</label>
+        <input type="number" class="promo-input" name="contract_iva_usd" value="{{ contract_iva_usd }}" min="0" step="10"
+               title="Monto de IVA ya incluido en el total de arriba (tomado de los renglones de la cotización con IVA — equipos suelen ser exentos, mano de obra/materiales/servicios suelen llevar 13%). Se usa para calcular la utilidad neta sin IVA en el Presupuesto del proyecto — no cambia el monto del contrato ni el esquema de pagos.">
+      </div>
+    </div>
+
+    <p class="promo-caption">Mapeo de presupuesto por rubro — editable antes de confirmar</p>
+    <table class="promo-table">
+      <thead><tr><th>Concepto</th><th>Rubro</th><th>Presupuesto USD</th><th></th></tr></thead>
+      <tbody>
+        {% for row in budget_rows %}
+        <tr>
+          <td><input type="text" name="row-{{ loop.index0 }}-description" value="{{ row.description }}"></td>
+          <td>
+            <select name="row-{{ loop.index0 }}-category">
+              {% for value, label in category_options %}
+                <option value="{{ value }}" {{ 'selected' if value == row.category else '' }}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input type="number" min="0" step="0.01" name="row-{{ loop.index0 }}-budgeted_usd" value="{{ row.budgeted_str }}"></td>
+          <td><button type="button" class="promo-x-btn" title="Quitar fila" onclick="this.closest('tr').remove()">&#10005;</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="promo-btn-outline"
+            hx-post="{{ url_for('projects.promover_tabla', pid=pid, vid=vid) }}"
+            hx-vals='{"accion": "fila_presupuesto"}'
+            hx-include="#promote-live-{{ pid }} input, #promote-live-{{ pid }} select"
+            hx-target="#promote-{{ pid }}" hx-swap="innerHTML">+ Fila</button>
+
+    <p class="promo-recon">{{ recon_caption }}</p>
+
+    <div class="promo-preset">
+      <span class="promo-label" style="margin:0;">Esquema de pagos</span>
+      {% for value in preset_options %}
+        <label>
+          <input type="radio" name="preset" value="{{ value }}" {{ 'checked' if value == preset else '' }}>
+          {{ value }}
+        </label>
+      {% endfor %}
+    </div>
+
+    {% if preset == 'Personalizado' %}
+      <table class="promo-table">
+        <thead><tr><th>Pago #</th><th>Monto USD</th><th></th></tr></thead>
+        <tbody>
+          {% for row in schedule_rows %}
+          <tr>
+            <td><input type="number" min="1" step="1" name="sched-{{ loop.index0 }}-payment_number" value="{{ row.payment_number }}"></td>
+            <td><input type="number" min="0" step="0.01" name="sched-{{ loop.index0 }}-amount_usd" value="{{ row.amount_str }}"></td>
+            <td><button type="button" class="promo-x-btn" title="Quitar fila" onclick="this.closest('tr').remove()">&#10005;</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" class="promo-btn-outline"
+              hx-post="{{ url_for('projects.promover_tabla', pid=pid, vid=vid) }}"
+              hx-vals='{"accion": "fila_calendario"}'
+              hx-include="#promote-live-{{ pid }} input, #promote-live-{{ pid }} select"
+              hx-target="#promote-{{ pid }}" hx-swap="innerHTML">+ Fila</button>
+    {% else %}
+      <p class="promo-schedule-preview">{{ schedule_preview }}</p>
+    {% endif %}
+  </div>
+
+  <div class="promo-actions">
+    <button type="submit" class="btn">Confirmar</button>
+    <button type="button" class="promo-cancel"
+            hx-get="{{ url_for('projects.promover_form', pid=pid, vid=vid, cancel=1) }}"
+            hx-target="#promote-{{ pid }}" hx-swap="innerHTML">Cancelar</button>
+  </div>
+</form>

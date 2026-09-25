@@ -82,9 +82,13 @@
         <p style="color:#B84345;font-size:12.5px;margin:0;">Error verificando proyecto: {{ project_error }}</p>
       {% elif project %}
         <a class="det-btn det-btn-outline" href="{{ project_url }}">Ver proyecto →</a>
+      {% elif cur_version_id %}
+        <button type="button" class="det-btn det-btn-outline"
+                hx-get="{{ url_for('projects.promover_form', pid=pid, vid=cur_version_id) }}"
+                hx-target="#promote-{{ pid }}" hx-swap="innerHTML">Mover a Proyecto</button>
+        <div id="promote-{{ pid }}"></div>
       {% else %}
         <span class="det-btn det-btn-outline disabled" aria-disabled="true">Mover a Proyecto</span>
-        <p class="card-note-sm" style="margin:6px 0 0;">disponible cuando se migre Proyectos</p>
       {% endif %}
     </div>
   {% endif %}

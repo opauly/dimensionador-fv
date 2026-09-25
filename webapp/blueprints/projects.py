@@ -72,11 +72,21 @@ construction, not a port. `_panel_for()` now routes `"pagos"` to
 comisión como gasto Banco") register onto this same `bp`, same convention
 as Steps 4-7 — on URLs distinct from `projects_budget.py`'s own
 Presupuesto-tab payment editor (item 50).
+
+Step 9 scope ("Mover a Proyecto": the Cotizaciones integration, plan §1.9,
+§1.4 items 51-53): `projects_promote.py`'s three routes (`GET
+/promover/<pid>/<vid>`, `POST /promover/<pid>/<vid>/tabla`, `POST
+/promover/<pid>/<vid>`) register onto this same `bp`, same convention as
+Steps 4-8. This closes the disabled placeholder Phase 20 left in
+`proposals/_detail.html` — the corresponding edits on the Cotizaciones side
+(the real button, and `proposals.py`'s `url_for()` fix) live in that
+blueprint, not here.
 """
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from webapp.blueprints import (
     projects_budget, projects_invoicing, projects_ledger, projects_labor, projects_payments,
+    projects_promote,
 )
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
@@ -88,6 +98,7 @@ projects_ledger.register(bp)
 projects_labor.register(bp)
 projects_invoicing.register(bp)
 projects_payments.register(bp)
+projects_promote.register(bp)
 
 
 def _parse_money(value) -> float:
