@@ -616,8 +616,10 @@ project_payments (
   paid        boolean DEFAULT false,
   paid_date   date,
   bank_account text, -- BAC, etc.
-  onvo_commission_pct numeric(5,4) DEFAULT 0.024,
-  onvo_iva_pct numeric(5,4),
+  onvo_commission_pct numeric(5,4) DEFAULT 0, -- was DEFAULT 0.024 (an unchosen commission
+                                                -- nobody set), fixed by migration 048
+                                                -- (PLAN_PHASE22_PROJECTS_JINJA.md §1.10.3)
+  onvo_iva_pct numeric(5,4) DEFAULT 0, -- migration 048
   net_deposited numeric(10,2),
   notes       text
 )

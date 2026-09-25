@@ -60,6 +60,39 @@ for what the feature actually is versus its original spec.
 
 ---
 
+## Flask/Jinja2 + htmx port of Proyectos (`main_jinja` branch/worktree)
+
+**Added 2026-09-25.** Same worktree/branch as the two ports above. `main_jinja` re-platforms the
+projects list + financial workspace (Presupuesto, the five expense ledgers, Mano de obra, "Mover a
+Proyecto") onto Flask/Jinja2/htmx, reusing `database/projects_db.py` and
+`calculations/project_finance.py` unmodified except for two additive pure functions
+(`invoice_summary()`, `payments_summary()`). **Unlike the two ports above, this phase also built two
+screens that never shipped in Streamlit at all** — Facturación and Pagos/ONVO, Phase 6 Steps 7–8,
+designed in `PLAN_PHASE6.md` but left as `st.info("Disponible en el siguiente paso.")` placeholders
+since that phase's original commit (Oscar's decision, 2026-09-21, to build them for real rather than
+port a placeholder). `pages/03_projects.py`/`pages/04_project_detail.py` (Streamlit) are untouched and
+stay the production app for the ported surfaces — but they do **not** get Facturación/Pagos, so as of
+this phase the two apps are no longer feature-equivalent. See `PHASES.md`'s corrected Phase 6 entry
+for what the underlying feature actually is versus its original spec.
+
+Also fixed, as part of this phase: a real data-integrity bug where `project_payments.
+onvo_commission_pct` had defaulted to `0.024` (an unchosen 2.4% ONVO commission) since the table's
+creation, with nothing in either app ever reading or writing it — migration `048`
+(`project_payment_commission_truth.sql`) changed the default to `0` before the new Pagos/ONVO screen
+could read it. At the time the migration ran, the live `project_payments` table had **0 rows**
+(nothing had ever created a `projects` row despite won proposals existing), so the destructive
+backfill half of the migration affected 0 rows both before and after — see
+`PLAN_PHASE22_PROJECTS_JINJA.md` §1.10.3 and Step 0's own commit (`e77475a`) for the full audit.
+
+| Item | Value |
+|---|---|
+| **Status** | Steps 0–10 complete and independently audited (2026-09-24 → 2026-09-25). List, detail header, Presupuesto, the five expense ledgers, Mano de obra, and "Mover a Proyecto" all fully wired end to end against the live Supabase project; Facturación and Pagos/ONVO built and verified against hand-computed reference numbers (no Streamlit equivalent to diff against). **Still unbuilt, in both apps, deliberately out of this phase's scope:** the INGRESOS extras editor (Phase 6 Step 6 — `add_extra`/`update_extra`/`delete_extra` still have zero call sites) and the projects list's own polish (a client search box, per-project financial columns, Phase 6 Step 9's unbuilt half). |
+| **Plan / full history** | [`PLAN_PHASE22_PROJECTS_JINJA.md`](PLAN_PHASE22_PROJECTS_JINJA.md) — decisions (§0.4), all 11 build steps (Step 0's data migration plus Steps 1–10), and the Step 10 cutover audit (53-item do-not-drop/must-build checklist independently re-verified, most live against the real Supabase project, including a full create → exercise every tab → delete cycle on a purpose-created QA project with hand-computed figures for every tab). |
+| **What's NOT decided yet** | The fate of `pages/03_projects.py`/`pages/04_project_detail.py` (plan §0.4 Q7) — deferred to a separate conversation with Oscar, same precedent as Phase 20/21's own Streamlit-file deferrals. This decision now carries new weight this phase surfaced: the two apps are no longer feature-equivalent (Flask has Facturación/Pagos, Streamlit does not), which the eventual "delete the Streamlit pages" conversation needs to account for. |
+| **Run it** | Same app/process as Cotizaciones/Mantenimiento above — `/proyectos` once the Flask app is running. |
+
+---
+
 ## Environment
 
 | Item | Value |
@@ -480,7 +513,7 @@ The phase tag tells you when each function gets implemented.
 | `wizard/off_grid.py` | ✅ done | Steps 4–8, verified live in browser incl. real PDF generation |
 | `wizard/hybrid.py` | ✅ done | Thin wrapper over off_grid.py + grid-connection option + AC-coupling note |
 | `proposals/templates/off_grid_{es,en}.html` | ✅ done | Built against real Jorge Ramírez reference PDF |
-| `database/projects_db.py` | ✅ done | Full CRUD for projects + all financial sub-tables (Presupuesto, expense ledgers, labor advances, invoice items, extras) — 670 lines, `pages/03_projects.py` (268 lines) + `pages/04_project_detail.py` (649 lines) are the matching UI |
+| `database/projects_db.py` | ✅ done | Full CRUD for projects + all financial sub-tables (Presupuesto, expense ledgers, labor advances, invoice items, extras) — 670 lines. ⚠ Corrected 2026-09-25: this row previously implied the whole surface was user-reachable via `pages/03_projects.py` (268 lines) + `pages/04_project_detail.py` (649 lines) — it wasn't. The invoice-item CRUD (Facturación) and the extras CRUD had **zero call sites** in Streamlit; those two tabs showed `Disponible en el siguiente paso.` since Phase 6's original commit. Facturación finally became user-reachable in Phase 22 — but in Flask (`PLAN_PHASE22_PROJECTS_JINJA.md`), not here; the extras CRUD still has zero call sites in either app. |
 | `ai/tariff_updater.py` | 7 | Still a stub — CNFL tariff refresh in production actually runs through a different path, `aresep/tariff_parser.py` + `pages/05_admin.py`'s "Aplicar actualización" (xlsx-based, not this module's originally-planned PDF-based approach) |
 
 ---

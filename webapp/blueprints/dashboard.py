@@ -10,9 +10,9 @@ PHASES = [
     ("Fase 1 — Motor PDF", "Completa"),
     ("Fase 2 — Asistente Grid Zero", "Completa"),
     ("Fase 3 — Gestión de cotizaciones", "Completa"),
-    ("Fase 4 — Funciones AI", "Pendiente"),
-    ("Fase 5 — Off-Grid + Híbrido", "Pendiente"),
-    ("Fase 6 — Módulo Proyectos", "Pendiente"),
+    ("Fase 4 — Funciones AI", "Completa"),
+    ("Fase 5 — Off-Grid + Híbrido", "Completa"),
+    ("Fase 6 — Módulo Proyectos", "Completa"),
     ("Fase 7 — Admin + Pulido", "Pendiente"),
     ("Fase 8 — QA + Entrega", "Pendiente"),
 ]

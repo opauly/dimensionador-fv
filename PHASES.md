@@ -21,7 +21,7 @@
 | 3 — Proposal Management | ✅ Complete + UX polish (directed flow, per-version PDF) |
 | 4 — AI Features | ✅ Complete (bill parser, tablero, datasheet, load estimator, daytime fraction) |
 | 5 — Off-Grid + Hybrid | ✅ Complete — includes a taxonomy-driven load profile estimator beyond the original spec (see below) |
-| 6 — Projects Module | ✅ Complete (corrected 2026-09-02 — this row previously said "Not started"; the module has been fully built since Phase 6's original commit, see `database/projects_db.py`/`pages/03_projects.py`/`pages/04_project_detail.py`) |
+| 6 — Projects Module | 🔶 Partial (corrected 2026-09-25 — the 2026-09-02 correction below overshot and said "✅ Complete"; it wasn't. Steps 1–5 of 9 shipped in Streamlit — list, detail, Presupuesto, the five expense ledgers, Mano de obra. Step 9 partial (list/nav wiring only, no search box or per-project financial columns). Step 6 (the INGRESOS extras editor) still unbuilt anywhere — `add_extra`/`update_extra`/`delete_extra` have zero call sites. Steps 7–8 (Facturación, Pagos/ONVO) were never built in Streamlit at all — `pages/04_project_detail.py` still shows two `Disponible en el siguiente paso.` placeholders — but **were built for real in Flask by Phase 22**, see its own row below and `PLAN_PHASE22_PROJECTS_JINJA.md` §0.2) |
 | 7 — Admin + Polish | 🔶 Partial (equipment catalog ✅, ARESEP xlsx parser ✅ — now with a demand/energy-field split guard, see below — tariff manager UI ✅, Clientes/Prospectos ✅, tariff formula simplified and corrected against real invoices ✅; cost templates, settings page still pending) |
 | 8 — QA + Handoff | ⬜ Not started |
 | 9 — Victron Monitor Multi-Tenant Hardening | ⬜ Not started (separate product, no dependency on 0–8) |
@@ -37,6 +37,7 @@
 | 19 — VRM Monitor: Admin Fleet Health Dashboard (new, added 2026-09-02) | ✅ Phases 1–2.5 complete and live (2026-08-30 → 2026-09-02); Phase 3 (anomaly detection, from the original plan) not built — see below |
 | 20 — Cotizaciones: Flask/Jinja2 + htmx port of the proposals list + full 8-step wizard (Grid Zero, Off-Grid, Hybrid), off Streamlit | ✅ Steps 0–10 complete and audited (2026-09-18 → 2026-09-20), on the `main_jinja` branch/worktree — `main` (Streamlit) stays untouched and running in parallel; see `PLAN_PHASE20_PROPOSALS_JINJA.md`, including its §5 Step 10 audit (all 26 do-not-drop items independently re-verified live, not just re-read from prior steps' own commit messages). One decision explicitly deferred, not forgotten: whether `pages/01_proposals.py`/`pages/02_new_proposal.py`/`pages/02b_new_proposal_test.py`/the Streamlit `wizard/*.py` UI modules get deleted is "a deliberate, separate commit" made with Oscar (plan §1.9/§3) — they remain intact and unmodified on `main_jinja` today. |
 | 21 — Mantenimiento: Flask/Jinja2 + htmx port of the site register & preventive-maintenance scheduler (Resumen, Calendario anual, Configurar propiedades, property detail), off Streamlit | ✅ Steps 1–4 complete and audited (2026-09-20 → 2026-09-21), on the `main_jinja` branch/worktree — `main` (Streamlit, `pages/07_maintenance.py`) stays untouched and running in parallel; see `PLAN_PHASE21_MAINTENANCE_JINJA.md`, including its Step 4 cutover audit (all 19 do-not-drop checklist items independently re-verified, most live against the real Supabase project, including a full create-link-overdue-visit-cleanup cycle on a purpose-created QA property). Two decisions explicitly deferred, not forgotten: the fate of `pages/07_maintenance.py` (plan §0.4 Q6, same precedent as Phase 20 §1.9), and the cross-schema `vrm.sites`/`monitoring.sites` ↔ `public.site_properties` coupling this phase documented but did not change (plan §0.2, now also in `ARCHITECTURE.md`). |
+| 22 — Proyectos: Flask/Jinja2 + htmx port of the projects list + financial workspace (Presupuesto, five expense ledgers, Mano de obra, "Mover a Proyecto"), off Streamlit, **plus two screens Phase 6 designed but never shipped anywhere — Facturación and Pagos/ONVO — built for real in Flask**, plus migration `048` fixing a live data-integrity bug (`project_payments.onvo_commission_pct` had defaulted to an unchosen 2.4% since creation) | ✅ Steps 0–10 complete and audited (2026-09-24 → 2026-09-25), on the `main_jinja` branch/worktree — `main` (Streamlit, `pages/03_projects.py`/`pages/04_project_detail.py`) stays untouched and running in parallel and does **not** get Facturación/Pagos — the two apps are no longer feature-equivalent as of this phase; see `PLAN_PHASE22_PROJECTS_JINJA.md`, including its Step 10 cutover audit (all 53 do-not-drop/must-build checklist items independently re-verified, most live against the real Supabase project). The INGRESOS extras editor (Phase 6 Step 6) and Phase 6 Step 9's list polish (search box, per-project financial columns) remain unbuilt, deliberately out of this phase's scope. Fate of the two Streamlit pages explicitly deferred, not forgotten (plan §0.4 Q7, same precedent as Phase 20 §1.9/Phase 21 §0.4 Q6). |
 
 ---
 
@@ -323,6 +324,41 @@ Real usage after the phase "completed" surfaced gaps the original spec didn't an
 ---
 
 ## Phase 6 — Projects Module (5–6 days)
+
+> **Corrected 2026-09-25** — this section's table row said "✅ Complete" (a 2026-09-02 correction
+> that itself overshot, replacing an earlier "Not started"). Neither was accurate. Everything below
+> this note is the *original spec*, kept as history — **read it as history, not as a description of
+> what's actually in the repo.** What really shipped, reading the code (not the table), step by step
+> against this spec's own "Tasks" below:
+>
+> - **Steps 1–5 shipped in Streamlit**, matching this spec closely: the promote-to-project flow, the
+>   Presupuesto screen (INGRESOS/PAGOS/GASTOS/UTILIDAD), the five expense ledgers, and Mano de obra
+>   with worker advances. `database/projects_db.py` and `calculations/project_finance.py` are both
+>   complete and correct — see `PLAN_PHASE22_PROJECTS_JINJA.md` §0.1–§0.2 for the line-by-line
+>   evidence.
+> - **Facturación and "Client payments / ONVO" — this spec's own last two sections — were never
+>   built in Streamlit at all.** `pages/04_project_detail.py`'s Facturación and Pagos tabs have shown
+>   `st.info("Disponible en el siguiente paso.")` since Phase 6's original commit; the CRUD for
+>   `project_invoice_items` existed but had zero call sites, and `onvo_breakdown()` was a finished,
+>   correct, never-called function. **Phase 22 built both screens for real, but in Flask, not
+>   Streamlit** (Oscar's decision, 2026-09-21) — `pages/04_project_detail.py` still shows its two
+>   placeholders today, unmodified, while the Flask app's `/proyectos/<id>/facturacion` and
+>   `/proyectos/<id>/pagos` are real, working screens. The two apps are no longer feature-equivalent.
+> - **The INGRESOS extras editor was never built either**, in either app — `add_extra`/
+>   `update_extra`/`delete_extra` still have zero call sites; Presupuesto's "Extras (órdenes
+>   adicionales)" card is read-only. Phase 22's Oscar-approved scope named Facturación and Pagos/ONVO
+>   specifically, not this — it remains unbuilt and out of scope.
+> - **The projects list's own polish (a client search box, per-project financial columns) was never
+>   built** — the list is four columns and a status filter, in both apps.
+> - **A real, live data-integrity bug was found and fixed along the way:** `project_payments.
+>   onvo_commission_pct` defaulted to `0.024` (an unchosen 2.4% ONVO commission) since this table's
+>   creation, with nothing in either app ever reading or writing it — meaning every historical payment
+>   silently asserted a card-processing fee that, for a bank transfer, never happened. Migration `048`
+>   (Phase 22 Step 0) changed the default to `0` before the Flask Pagos/ONVO screen shipped, so the
+>   fiction never reached the UI. See `PLAN_PHASE22_PROJECTS_JINJA.md` §1.10.3.
+>
+> Full account, including a Step 10 cutover audit of all 53 of the phase's own do-not-drop/must-build
+> checklist items: `PLAN_PHASE22_PROJECTS_JINJA.md`.
 
 **Goal:** Financial tracking for active projects. The tool covers the full job lifecycle.
 
