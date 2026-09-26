@@ -14,6 +14,12 @@
 .s7-foot .total-row td { border-top:2px solid #e5e7eb; padding-top:8px; font-weight:700; font-size:1.05rem; }
 .s7-foot .wp-row td { color:#9ca3af; font-size:0.78rem; }
 .s7-msg { font-size:0.82rem; color:#166534; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:6px 10px; margin:8px 0; display:inline-block; }
+.s7-margin-row { display:flex; align-items:center; gap:8px; margin-bottom:10px; padding:8px 10px; background:#f9fafb; border:1px solid #e5e7eb; border-radius:6px; flex-wrap:wrap; }
+.s7-margin-label { font-weight:600; font-size:0.88rem; }
+.s7-margin-row input { width:80px; }
+.s7-margin-note { font-size:0.76rem; color:#6b7280; }
+.s7-price-shown { text-align:right; white-space:nowrap; }
+.s7-no-margin { font-size:0.68rem; color:#9ca3af; }
 </style>
 
 <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
@@ -29,11 +35,18 @@
 <div id="s7-tabla-rows"
      hx-post="{{ url_for('wizard.paso7_tabla', vid=vid) }}" hx-trigger="change delay:400ms"
      hx-include="#s7-tabla-rows input, #s7-tabla-rows select" hx-target="#s7-costos" hx-swap="outerHTML">
+  <div class="s7-margin-row">
+    <label class="s7-margin-label" for="margin_pct_pct">Margen de utilidad</label>
+    <input class="finput" type="number" min="0" step="0.5" id="margin_pct_pct" name="margin_pct_pct"
+           value="{{ '%.1f'|format((margin_pct or 0) * 100) }}"> %
+    <span class="s7-margin-note">Se aplica sobre el costo real de cada ítem y reparte la utilidad entre todos — excepto el Permiso de Interconexión, que se cobra sin margen.
+      {%- if margin_suggestion %} Sugerido a partir de {{ margin_suggestion.n }} proyecto{{ 's' if margin_suggestion.n != 1 else '' }} {{ 'de este mismo tipo de sistema' if margin_suggestion.same_type else 'de otros tipos de sistema (sin historial propio aún)' }} — ajustable.{% endif %}</span>
+  </div>
   <div class="dtable-wrap">
     <table class="dtable">
       <thead><tr>
         <td>Descripción (ES)</td><td>Descripción (EN)</td><td>Qty</td>
-        <td>Precio unit. (USD)</td><td>IVA</td><td>Especificaciones</td><td></td>
+        <td>Costo real (USD)</td><td>Precio mostrado</td><td>IVA</td><td>Especificaciones</td><td></td>
       </tr></thead>
       <tbody>
         {% for row in rows %}
@@ -42,6 +55,10 @@
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item_en" value="{{ row.item_en }}"></td>
           <td><input class="finput" type="number" min="0" step="1" name="r-{{ loop.index0 }}-qty" value="{{ row.qty if row.qty is not none else '' }}"></td>
           <td><input class="finput" type="number" min="0" step="0.01" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}"></td>
+          <td class="s7-price-shown">
+            ${{ '{:,.2f}'.format(row.unit_price_shown) }}
+            {% if not row.markup_eligible %}<div class="s7-no-margin">sin margen</div>{% endif %}
+          </td>
           <td>
             <select class="finput" name="r-{{ loop.index0 }}-iva" title="IVA aplicable a este producto/servicio">
               {% for opt in iva_options %}

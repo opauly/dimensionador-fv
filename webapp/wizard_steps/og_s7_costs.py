@@ -53,7 +53,10 @@ from webapp.wizard_steps.gz_s7_costs import (
     _IVA_OPTIONS,
     _iva_float,
     _iva_str,
+    _margin_from_form,
     _row_subtotal,
+    _shown_price,
+    _suggested_margin_pct,
 )
 
 _LINE_FIELDS = ["item", "item_en", "qty", "unit_cost", "iva", "specs"]
@@ -89,12 +92,30 @@ _FALLBACK_SERVICES: list[dict] = [
 # ── catalog / pricing helpers (do-not-drop items 17, 18, 24, 25) ─────────
 
 
-def _load_service_defaults() -> list[dict]:
-    """Enabled, Off-Grid-applicable service defaults from DB; fall back to
-    `_FALLBACK_SERVICES`. Do-not-drop item 24 — this is the actual filter
-    that excludes the interconnection permit from a true Off-Grid quote
-    (its `system_types` row is `["grid_zero", "hybrid"]`, which does not
-    contain `"off_grid"`)."""
+def _system_type(blob: dict) -> str:
+    """The draft's actual system type ("off_grid" or "hybrid" — this module
+    is never used for "grid_zero", see webapp/blueprints/wizard.py's step-7
+    dispatch table), falling back to "off_grid" only for a draft saved
+    before Step 2 (Tipo e idioma) ever wrote `meta.system_type`."""
+    return (blob.get("meta") or {}).get("system_type") or "off_grid"
+
+
+def _load_service_defaults(system_type: str = "off_grid") -> list[dict]:
+    """Enabled service defaults applicable to `system_type`, from DB; falls
+    back to `_FALLBACK_SERVICES`. Do-not-drop item 24 — this is the actual
+    filter that excludes the interconnection permit from a true Off-Grid
+    quote (its `system_types` row is `["grid_zero", "hybrid"]`, which does
+    not contain `"off_grid"`).
+
+    Bug fixed 2026-09-26 (found during Phase 23's review, unrelated to that
+    phase's own change): this always checked the literal string
+    `"off_grid"` regardless of which system type the draft actually was —
+    since this module also serves Hybrid quotes (`webapp/blueprints/
+    wizard.py`'s step-7 dispatch maps both `"off_grid"` and `"hybrid"` to
+    `og_s7_costs`), a real Hybrid quote was filtered as if it were Off-Grid,
+    silently dropping "Permiso de Interconexión" even though its
+    `system_types` explicitly includes `"hybrid"`. Every caller now passes
+    the draft's real system type via `_system_type(blob)`."""
     try:
         from database.equipment_db import list_service_defaults
 
@@ -103,7 +124,7 @@ def _load_service_defaults() -> list[dict]:
             return [
                 r for r in rows
                 if r.get("enabled", True)
-                and (not r.get("system_types") or "off_grid" in r["system_types"])
+                and (not r.get("system_types") or system_type in r["system_types"])
             ]
     except Exception:
         pass
@@ -112,6 +133,7 @@ def _load_service_defaults() -> list[dict]:
 
 def _get_current_prices(
     panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
+    system_type: str = "off_grid",
 ) -> dict[str, float]:
     """Fetch live prices from DB for equipment + service defaults, falling
     back to each dict's own (possibly stale) `cost_usd` if the DB call
@@ -158,18 +180,19 @@ def _get_current_prices(
             prices["Monitoreo"] = round(float((r.data or {}).get("cost_usd") or 0), 2)
         except Exception:
             prices["Monitoreo"] = round(float(monitoring.get("cost_usd") or 0), 2)
-    for svc in _load_service_defaults():
+    for svc in _load_service_defaults(system_type):
         prices[svc["item"]] = round(float(svc.get("unit_cost_usd") or 0), 2)
     return prices
 
 
 def _refresh_prices_core(
     line_items: list[dict], panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
+    system_type: str = "off_grid",
 ) -> tuple[list[dict], int]:
     """(updated_line_items, n_changed) — do-not-drop item 25: ONLY
     `unit_cost` is touched; qty, iva_pct, specs and custom (non-catalog)
     rows are returned untouched."""
-    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring)
+    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type)
     updated, changes = [], 0
     for li in line_items:
         new_li = dict(li)
@@ -207,8 +230,9 @@ def _seed_line_items(blob: dict) -> list[dict]:
     # wizard/off_grid.py's own defensive fallback verbatim); it is not a
     # second source of truth this step invents.
     inverter_qty = equipment.get("inverter_qty") or (2 if split_phase.get("requires_split_phase") else 1)
+    system_type = _system_type(blob)
 
-    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring)
+    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type)
     items: list[dict] = []
 
     if panel:
@@ -256,13 +280,13 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
             "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
         })
-    items.append({
-        "item": "Estructura de montaje", "item_en": "Mounting structure",
-        "qty": None, "unit_cost": 0.0, "iva_pct": 0.13,
-        "specs": "Arreglo de módulos", "specs_en": "Module array",
-    })
+    # Phase 23: "Estructura de montaje" used to be hardcoded here (Off-Grid/
+    # Hybrid only). Migration 049 folded it into `service_defaults` for all
+    # three system types (system_types=NULL), so the generic catalog loop
+    # below now picks it up on its own — appending it a second time here
+    # would show the line twice.
 
-    for svc in _load_service_defaults():
+    for svc in _load_service_defaults(system_type):
         item_name = svc["item"]
         items.append({
             "item":      item_name,
@@ -282,25 +306,39 @@ def _seed_line_items(blob: dict) -> list[dict]:
 # ── totals ────────────────────────────────────────────────────────────
 
 
-def _finalize(blob: dict, items: list[dict]) -> dict:
-    """Recompute qty/unit_cost -> per-row total -> subtotal/IVA/TOTAL/$-per-
-    Wp from `items` — the one place every action + `build_context()` derives
-    the footer from (PLAN §1.3)."""
+def _finalize(blob: dict, items: list[dict], margin_pct: float | None = None) -> dict:
+    """Recompute qty/unit_cost -> per-row shown price -> total ->
+    subtotal/IVA/TOTAL/$-per-Wp from `items` — the one place every action +
+    `build_context()` derives the footer from (PLAN §1.3). Phase 23 change
+    identical to `gz_s7_costs.py`'s own `_finalize()` — see that module's
+    docstring for the full reasoning; not repeated here."""
     equipment = blob.get("equipment") or {}
     panel = equipment.get("panel") or {}
     panel_count = equipment.get("panel_count", 0)
     panel_wp = float(panel.get("wp") or 0)
 
+    if margin_pct is None:
+        margin_pct = float((blob.get("costs") or {}).get("margin_pct") or 0.0)
+
+    eligible = {row["item"]: bool(row.get("markup_eligible", True))
+                for row in _load_service_defaults(_system_type(blob))}
+
     finalized = []
     subtotal = 0.0
     iva_amount = 0.0
     for it in items:
-        unit_cost = float(it.get("unit_cost") or 0)
+        real_cost = float(it.get("unit_cost") or 0)
+        item_name = it.get("item") or ""
+        shown_price = _shown_price(real_cost, item_name, margin_pct, eligible)
         iva_pct = float(it.get("iva_pct") or 0)
-        line_total = _row_subtotal(it.get("qty"), unit_cost)
+        line_total = _row_subtotal(it.get("qty"), shown_price)
         subtotal += line_total
         iva_amount += round(line_total * iva_pct, 2)
-        finalized.append({**it, "unit_cost": unit_cost, "iva_pct": iva_pct, "total": line_total})
+        finalized.append({
+            **it, "unit_cost": real_cost, "unit_price_shown": shown_price,
+            "markup_eligible": eligible.get(item_name, True),
+            "iva_pct": iva_pct, "total": line_total,
+        })
 
     subtotal = round(subtotal, 2)
     iva_amount = round(iva_amount, 2)
@@ -314,6 +352,7 @@ def _finalize(blob: dict, items: list[dict]) -> dict:
         "iva_usd": iva_amount,
         "total_usd": total,
         "cost_per_wp": cost_per_wp,
+        "margin_pct": margin_pct,
     }
 
 
@@ -349,7 +388,7 @@ def _items_from_form(blob: dict, form) -> list[dict]:
 
 def recompute_table(blob: dict, form) -> dict:
     """`paso/7/tabla`'s core logic — PLAN §1.5's live-recompute pattern."""
-    return _finalize(blob, _items_from_form(blob, form))
+    return _finalize(blob, _items_from_form(blob, form), _margin_from_form(blob, form))
 
 
 def add_line_row(blob: dict, form) -> dict:
@@ -358,7 +397,7 @@ def add_line_row(blob: dict, form) -> dict:
         "item": "", "item_en": "", "qty": None, "unit_cost": 0.0,
         "iva_pct": 0.0, "specs": "", "specs_en": "",
     })
-    return _finalize(blob, items)
+    return _finalize(blob, items, _margin_from_form(blob, form))
 
 
 def remove_line_row(blob: dict, form) -> dict:
@@ -366,11 +405,13 @@ def remove_line_row(blob: dict, form) -> dict:
     idx = int(form.get("_row", -1) or -1)
     if 0 <= idx < len(items):
         items.pop(idx)
-    return _finalize(blob, items)
+    return _finalize(blob, items, _margin_from_form(blob, form))
 
 
 def refresh_prices(blob: dict) -> tuple[dict, int]:
-    """`paso/7/refrescar`'s core logic. Returns (new_costs, n_changed)."""
+    """`paso/7/refrescar`'s core logic. Returns (new_costs, n_changed). No
+    form is submitted for this action, so `_finalize()` keeps whatever
+    margin is already persisted on the blob."""
     equipment = blob.get("equipment") or {}
     panel = equipment.get("panel") or {}
     inverter = equipment.get("inverter") or {}
@@ -378,14 +419,14 @@ def refresh_prices(blob: dict) -> tuple[dict, int]:
     cc = equipment.get("charge_controller") or {}
     monitoring = equipment.get("monitoring")
     current = blob.get("costs", {}).get("line_items") or _seed_line_items(blob)
-    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring)
+    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring, _system_type(blob))
     return _finalize(blob, updated), n_changed
 
 
 def save_step(blob: dict, form) -> dict:
     """`Siguiente`/`Atrás`'s persisted fields — re-parses the submitted form
     at click time, same rule as `gz_s7_costs.py:save_step()`."""
-    return _finalize(blob, _items_from_form(blob, form))
+    return _finalize(blob, _items_from_form(blob, form), _margin_from_form(blob, form))
 
 
 # ── build_context ────────────────────────────────────────────────────
@@ -394,7 +435,18 @@ def save_step(blob: dict, form) -> dict:
 def build_context(blob: dict) -> dict:
     blob = blob or {}
     items = blob.get("costs", {}).get("line_items") or _seed_line_items(blob)
-    finalized = _finalize(blob, items)
+
+    # Phase 23: see gz_s7_costs.py:build_context()'s own comment — identical
+    # "never touched" rule, not repeated here.
+    costs_section = blob.get("costs") or {}
+    margin_suggestion = None
+    margin_override = None
+    if "margin_pct" not in costs_section:
+        margin_suggestion = _suggested_margin_pct(blob)
+        if margin_suggestion is not None:
+            margin_override = margin_suggestion["margin_pct"]
+
+    finalized = _finalize(blob, items, margin_override)
 
     rows = [
         {**it, "iva_display": _iva_str(it.get("iva_pct", 0))}
@@ -408,6 +460,8 @@ def build_context(blob: dict) -> dict:
         "iva_usd": finalized["iva_usd"],
         "total_usd": finalized["total_usd"],
         "cost_per_wp": finalized["cost_per_wp"],
+        "margin_pct": finalized["margin_pct"],
+        "margin_suggestion": margin_suggestion,
         "refresh_message": None,
         "can_continue": finalized["total_usd"] > 0,
     }

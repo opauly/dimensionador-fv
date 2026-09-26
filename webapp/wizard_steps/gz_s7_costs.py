@@ -75,6 +75,17 @@ def _row_subtotal(qty, unit_cost) -> float:
     return round(q * float(unit_cost or 0), 2)
 
 
+def _shown_price(real_cost: float, item_name: str, margin_pct: float, eligible: dict[str, bool]) -> float:
+    """Phase 23: costo_real x (1 + margen) for every markup-eligible row;
+    pass-through at cost for a row explicitly flagged
+    `markup_eligible=False` (only "Permiso de Interconexión" today).
+    Equipment and custom rows are never in `eligible` and default to
+    markup-eligible = True (PLAN_PHASE23 §1.2)."""
+    if not eligible.get(item_name, True):
+        return round(float(real_cost or 0), 2)
+    return round(float(real_cost or 0) * (1 + margin_pct), 2)
+
+
 # ── catalog / pricing helpers (do-not-drop items 23, 24) ────────────────
 
 
@@ -229,26 +240,48 @@ def _seed_line_items(blob: dict) -> list[dict]:
 # ── totals ────────────────────────────────────────────────────────────
 
 
-def _finalize(blob: dict, items: list[dict]) -> dict:
-    """Recompute qty/unit_cost -> per-row total -> subtotal/IVA/TOTAL/$-per-
-    Wp from `items` — the one place every action + `build_context()` derives
-    the footer from, so they can never disagree (PLAN §1.3)."""
+def _finalize(blob: dict, items: list[dict], margin_pct: float | None = None) -> dict:
+    """Recompute qty/unit_cost -> per-row shown price -> total ->
+    subtotal/IVA/TOTAL/$-per-Wp from `items` — the one place every action +
+    `build_context()` derives the footer from, so they can never disagree
+    (PLAN §1.3).
+
+    Phase 23: `unit_cost` on each item is now the estimator's typed REAL
+    COST, not the shown price — `margin_pct` (a fraction, e.g. 0.20 for 20%)
+    is applied on top per PLAN_PHASE23_PROFIT_DISTRIBUTION.md §1.2 via
+    `_shown_price()`, except for rows `service_defaults` flags
+    `markup_eligible=False` (Permiso de Interconexión), which stay
+    pass-through at cost. `margin_pct=None` means "use whatever is already
+    persisted on the blob" — every call site that isn't itself parsing a
+    freshly-submitted margin field (refresh_prices, build_context) relies on
+    this so the margin never resets to 0 on an unrelated action."""
     equipment = blob.get("equipment") or {}
     panel = equipment.get("panel") or {}
     chosen = equipment.get("chosen_scenario") or {}
     panel_count = chosen.get("total_panels", 0)
     panel_wp = float(panel.get("wp") or 0)
 
+    if margin_pct is None:
+        margin_pct = float((blob.get("costs") or {}).get("margin_pct") or 0.0)
+
+    eligible = {row["item"]: bool(row.get("markup_eligible", True)) for row in _load_service_defaults()}
+
     finalized = []
     subtotal = 0.0
     iva_amount = 0.0
     for it in items:
-        unit_cost = float(it.get("unit_cost") or 0)
+        real_cost = float(it.get("unit_cost") or 0)
+        item_name = it.get("item") or ""
+        shown_price = _shown_price(real_cost, item_name, margin_pct, eligible)
         iva_pct = float(it.get("iva_pct") or 0)
-        line_total = _row_subtotal(it.get("qty"), unit_cost)
+        line_total = _row_subtotal(it.get("qty"), shown_price)
         subtotal += line_total
         iva_amount += round(line_total * iva_pct, 2)
-        finalized.append({**it, "unit_cost": unit_cost, "iva_pct": iva_pct, "total": line_total})
+        finalized.append({
+            **it, "unit_cost": real_cost, "unit_price_shown": shown_price,
+            "markup_eligible": eligible.get(item_name, True),
+            "iva_pct": iva_pct, "total": line_total,
+        })
 
     subtotal = round(subtotal, 2)
     iva_amount = round(iva_amount, 2)
@@ -262,7 +295,21 @@ def _finalize(blob: dict, items: list[dict]) -> dict:
         "iva_usd": iva_amount,
         "total_usd": total,
         "cost_per_wp": cost_per_wp,
+        "margin_pct": margin_pct,
     }
+
+
+def _margin_from_form(blob: dict, form) -> float:
+    """Reads the single "Margen de utilidad" field — typed as a percentage
+    number (e.g. 20 for 20%) — and returns it as a fraction (0.20). Falls
+    back to whatever margin is already persisted on the blob when the field
+    is blank/absent, so +Fila/quitar fila never resets it to 0."""
+    from webapp.wizard_steps.common import to_float
+
+    pct = to_float(form.get("margin_pct_pct"), None)
+    if pct is not None:
+        return round(pct / 100.0, 4)
+    return float((blob.get("costs") or {}).get("margin_pct") or 0.0)
 
 
 def _items_from_form(blob: dict, form) -> list[dict]:
@@ -300,7 +347,7 @@ def _items_from_form(blob: dict, form) -> list[dict]:
 
 def recompute_table(blob: dict, form) -> dict:
     """`paso/7/tabla`'s core logic — PLAN §1.5's live-recompute pattern."""
-    return _finalize(blob, _items_from_form(blob, form))
+    return _finalize(blob, _items_from_form(blob, form), _margin_from_form(blob, form))
 
 
 def add_line_row(blob: dict, form) -> dict:
@@ -309,7 +356,7 @@ def add_line_row(blob: dict, form) -> dict:
         "item": "", "item_en": "", "qty": None, "unit_cost": 0.0,
         "iva_pct": 0.0, "specs": "", "specs_en": "",
     })
-    return _finalize(blob, items)
+    return _finalize(blob, items, _margin_from_form(blob, form))
 
 
 def remove_line_row(blob: dict, form) -> dict:
@@ -317,13 +364,15 @@ def remove_line_row(blob: dict, form) -> dict:
     idx = int(form.get("_row", -1) or -1)
     if 0 <= idx < len(items):
         items.pop(idx)
-    return _finalize(blob, items)
+    return _finalize(blob, items, _margin_from_form(blob, form))
 
 
 def refresh_prices(blob: dict) -> tuple[dict, int]:
     """`paso/7/refrescar`'s core logic. Returns (new_costs, n_changed) — the
     caller surfaces `n_changed` in the fragment (do-not-drop item 25's
-    "reports how many rows changed" requirement)."""
+    "reports how many rows changed" requirement). No form is submitted for
+    this action, so `_finalize()` keeps whatever margin is already
+    persisted on the blob (its own `margin_pct=None` default)."""
     equipment = blob.get("equipment") or {}
     panel = equipment.get("panel") or {}
     inverter = equipment.get("inverter") or {}
@@ -338,7 +387,25 @@ def save_step(blob: dict, form) -> dict:
     at click time (same "whatever is on screen is what gets saved" rule
     gz_s5_consumption.save_step() documents), so a cell edited but not yet
     round-tripped through the change-triggered recompute is not lost."""
-    return _finalize(blob, _items_from_form(blob, form))
+    return _finalize(blob, _items_from_form(blob, form), _margin_from_form(blob, form))
+
+
+# ── suggested margin (Phase 23, PLAN §1.3) ──────────────────────────────
+
+
+def _suggested_margin_pct(blob: dict) -> dict | None:
+    """Best-effort starting margin from historical project performance —
+    `None` on any failure (no history yet, DB unreachable), same defensive
+    fallback shape `_get_current_prices()` already uses for catalog reads.
+    Never raises, since a suggestion is a convenience, not a requirement."""
+    try:
+        from calculations.pricing_benchmarks import suggest_margin_pct
+        from database.projects_db import list_margin_benchmark_rows
+
+        system_type = (blob.get("meta") or {}).get("system_type") or "grid_zero"
+        return suggest_margin_pct(list_margin_benchmark_rows(), system_type)
+    except Exception:
+        return None
 
 
 # ── build_context ────────────────────────────────────────────────────
@@ -347,7 +414,22 @@ def save_step(blob: dict, form) -> dict:
 def build_context(blob: dict) -> dict:
     blob = blob or {}
     items = blob.get("costs", {}).get("line_items") or _seed_line_items(blob)
-    finalized = _finalize(blob, items)
+
+    # Phase 23: only a draft that has NEVER had a margin set (not even 0%,
+    # which is a deliberate choice) gets the suggested value pre-filled —
+    # `"margin_pct" not in costs_section` is what tells "never touched"
+    # apart from "explicitly set to 0", which `finalized["margin_pct"] == 0`
+    # alone can't (0.0 is both the untouched-blob fallback AND a valid
+    # deliberate margin).
+    costs_section = blob.get("costs") or {}
+    margin_suggestion = None
+    margin_override = None
+    if "margin_pct" not in costs_section:
+        margin_suggestion = _suggested_margin_pct(blob)
+        if margin_suggestion is not None:
+            margin_override = margin_suggestion["margin_pct"]
+
+    finalized = _finalize(blob, items, margin_override)
 
     rows = [
         {**it, "iva_display": _iva_str(it.get("iva_pct", 0))}
@@ -361,6 +443,8 @@ def build_context(blob: dict) -> dict:
         "iva_usd": finalized["iva_usd"],
         "total_usd": finalized["total_usd"],
         "cost_per_wp": finalized["cost_per_wp"],
+        "margin_pct": finalized["margin_pct"],
+        "margin_suggestion": margin_suggestion,
         "refresh_message": None,
         "can_continue": finalized["total_usd"] > 0,
     }

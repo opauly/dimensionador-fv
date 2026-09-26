@@ -26,6 +26,11 @@
         <div style="display:flex;align-items:end;">
           <label style="font-size:13px;"><input type="checkbox" name="enabled" {{ 'checked' if existing.get('enabled', True) else '' }}> Habilitado</label>
         </div>
+        <div style="display:flex;align-items:end;">
+          <label style="font-size:13px;" title="Si está marcado, el margen de utilidad de la cotización (Paso 7) se aplica sobre el costo real de este ítem. Desmárcalo para un costo de paso directo, como el Permiso de Interconexión.">
+            <input type="checkbox" name="markup_eligible" {{ 'checked' if existing.get('markup_eligible', True) else '' }}> Aplica margen de utilidad
+          </label>
+        </div>
       </div>
       <div class="fgrid" style="margin-top:12px;">
         <div><label class="flabel">Descripción / Specs (ES)</label><textarea class="finput" name="specs" rows="2">{{ existing.specs or '' }}</textarea></div>
@@ -57,7 +62,7 @@
   <form id="services_batch" hx-post="{{ url_for('admin.services_batch_save') }}" hx-target="#subpanel"></form>
   <div class="dtable-wrap">
     <table class="dtable">
-      <thead><tr><td>Servicio</td><td>Precio (USD)</td><td>IVA</td><td>Habilitado</td><td></td></tr></thead>
+      <thead><tr><td>Servicio</td><td>Precio (USD)</td><td>IVA</td><td>Habilitado</td><td title="Si está marcado, el margen de utilidad de la cotización se aplica sobre el costo real de este ítem.">Con margen</td><td></td></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
@@ -73,6 +78,7 @@
               </select>
             </td>
             <td><input type="checkbox" form="services_batch" name="enabled_{{ r.id }}" {{ 'checked' if r.get('enabled', True) else '' }}></td>
+            <td><input type="checkbox" form="services_batch" name="markup_{{ r.id }}" {{ 'checked' if r.get('markup_eligible', True) else '' }}></td>
             <td style="white-space:nowrap;">
               <a class="link-btn" hx-get="{{ url_for('admin.index', section='servicios') }}?edit={{ r.id }}"
                  hx-target="#subpanel" hx-push-url="true"

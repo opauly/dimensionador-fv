@@ -93,6 +93,29 @@ backfill half of the migration affected 0 rows both before and after — see
 
 ---
 
+## Cotizaciones: single-margin profit distribution (Phase 23, `main_jinja` branch/worktree)
+
+**Added 2026-09-26.** Same worktree/branch as the three ports above, but not a port — a new pricing
+mechanism for the Cotizaciones cost table (Step 7 of both wizards) so a quotation never shows an
+explicit "Utilidad" line. Oscar sets one overall margin % per quote; every cost line's shown price
+becomes `costo_real × (1 + margen)`, except "Permiso de Interconexión" (a flat government fee, kept
+pass-through at cost, no markup). `calculations/profit-distribution-quotation-system.md` — Oscar's own
+earlier written spec — describes a *different* mechanism (fixed per-category $ /% anchors plus a
+residual line solving backwards to a target total); Oscar reviewed that plan and asked for this
+simpler proportional-margin design instead, so **that spec document no longer matches what shipped**
+— see `PLAN_PHASE23_PROFIT_DISTRIBUTION.md`'s "Revision note" for the full reasoning, including the
+math showing "distribute profit proportionally to cost weight" collapses to "apply one uniform %
+markup," which is what actually got built.
+
+| Item | Value |
+|---|---|
+| **Status** | All 4 steps complete and verified 2026-09-26: migration `049` (a `markup_eligible` flag on `service_defaults`, off only for Permiso de Interconexión, plus an admin toggle for it), the calc-engine change in both `gz_s7_costs.py`/`og_s7_costs.py` (`costo_real × (1+margen)` per eligible line, "Estructura de montaje" now offered to all three system types instead of Off-Grid/Hybrid only), and a historical-margin suggestion helper. One real bug found and fixed during verification: `database/equipment_db.py:list_service_defaults()`'s explicit column whitelist had never been updated to select the new `markup_eligible` column, so every row silently came back eligible (including Permiso de Interconexión) until the `.select()` was fixed. **Same-day follow-up fix (pre-existing, unrelated to the profit-distribution change itself):** `og_s7_costs.py:_load_service_defaults()`'s filter hardcoded the literal string `"off_grid"` instead of reading a draft's actual system type, so real Hybrid quotes (which share this module with Off-Grid) were silently denied "Permiso de Interconexión" even though the catalog explicitly tags it for Hybrid — fixed by threading the draft's real system type through `_load_service_defaults()`/`_get_current_prices()`/`_refresh_prices_core()` from a new `_system_type(blob)` helper. |
+| **Plan / full history** | [`PLAN_PHASE23_PROFIT_DISTRIBUTION.md`](PLAN_PHASE23_PROFIT_DISTRIBUTION.md) — the Revision note explaining the pivot away from the original spec doc, the schema/calc-engine design (§1), and all 4 build steps with their verification notes. |
+| **What's NOT decided yet** | The actual long-term `unit_cost_usd` Oscar wants for "Diseño Eléctrico y Administración" — migration 049 seeded a $300 placeholder (previously $0) so the line participates in the markup instead of pricing at $0; editable anytime via the admin Servicios panel. Also: this Supabase project currently has **0 rows in `projects`** (see the Proyectos section above — no quote has ever been promoted to a project), so the margin-suggestion feature has no history to suggest from yet. It degrades correctly (blank/0% default, no crash) and will start suggesting real margins automatically once the first quote is promoted. |
+| **Run it** | Same app/process as the three ports above — Cotizaciones → any quote → Paso 7 "Costos". The admin toggle lives at `/admin/servicios`. |
+
+---
+
 ## Environment
 
 | Item | Value |

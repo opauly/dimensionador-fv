@@ -399,6 +399,38 @@ def get_project_bundle(project_id: str) -> dict:
     }
 
 
+def list_margin_benchmark_rows() -> list[dict]:
+    """One row per project — `{system_type, ingresos_base, gastos_base}` —
+    the source data `calculations/pricing_benchmarks.py:suggest_margin_pct()`
+    benchmarks a new Cotización's starting margin against
+    (PLAN_PHASE23_PROFIT_DISTRIBUTION.md §1.3). Reuses
+    `calculations/project_finance.py:summarize()`, the same function the
+    Presupuesto tab itself calls, so this can never compute a different
+    ingresos/gastos figure than what a project's own dashboard shows.
+    Chatty (one `get_project_bundle()` per project) but tolerated at this
+    app's real project count, same call-volume trade-off Phase 21 §0.3 made
+    for the Mantenimiento register at a similar scale. Skips any project
+    `summarize()` can't run on (e.g. malformed/legacy data) rather than
+    raising, since one bad project shouldn't break every quote's margin
+    suggestion."""
+    from calculations.project_finance import summarize
+
+    rows = []
+    for p in list_projects():
+        try:
+            bundle = get_project_bundle(p["id"])
+            s = summarize(bundle["project"], bundle["payments"], bundle["expenses"],
+                           bundle["labor"], bundle["extras"])
+        except Exception:
+            continue
+        rows.append({
+            "system_type": p.get("system_type"),
+            "ingresos_base": s["ingresos_base"],
+            "gastos_base": s["gastos_base"],
+        })
+    return rows
+
+
 # ── Payments ─────────────────────────────────────────────────────────────
 
 def add_payment(project_id: str, payment_number: int, amount_usd: float, **kwargs) -> dict:

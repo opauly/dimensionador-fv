@@ -24,6 +24,10 @@ def _payload_from_form(form):
         "specs_en": form.get("specs_en", "").strip(),
         "sort_order": int(float(form.get("sort_order") or 0)),
         "system_types": system_types,
+        # Phase 23: whether this line gets marked up by the quote's overall
+        # margin (PLAN_PHASE23_PROFIT_DISTRIBUTION.md §1.1/§1.2) — off only
+        # for Permiso de Interconexión today.
+        "markup_eligible": _bool(form, "markup_eligible"),
     }, chosen
 
 
@@ -97,12 +101,16 @@ def register(bp):
             new_price = float(form.get(f"price_{r['id']}") or 0)
             new_iva = float(form.get(f"iva_{r['id']}") or 0)
             new_enabled = _bool(form, f"enabled_{r['id']}")
+            new_markup = _bool(form, f"markup_{r['id']}")
             old_price = float(r.get("unit_cost_usd") or 0)
             old_iva = float(r.get("iva_pct") or 0)
             old_enabled = bool(r.get("enabled", True))
-            if abs(new_price - old_price) > 0.001 or abs(new_iva - old_iva) > 0.001 or new_enabled != old_enabled:
+            old_markup = bool(r.get("markup_eligible", True))
+            if (abs(new_price - old_price) > 0.001 or abs(new_iva - old_iva) > 0.001
+                    or new_enabled != old_enabled or new_markup != old_markup):
                 upsert_service_default({
                     "id": r["id"], "item": r["item"],
                     "unit_cost_usd": new_price, "iva_pct": new_iva, "enabled": new_enabled,
+                    "markup_eligible": new_markup,
                 })
         return redirect(url_for("admin.index", section="servicios"))

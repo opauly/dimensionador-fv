@@ -194,7 +194,8 @@ def list_service_defaults() -> list[dict]:
     result = (
         get_client()
         .table("service_defaults")
-        .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order, system_types")
+        .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order, "
+                "system_types, markup_eligible")
         .order("sort_order")
         .execute()
     )
