@@ -28,7 +28,8 @@
   <h4>Estado del proyecto</h4>
   <ul class="phase-list">
     {% for name, status in phases %}
-      <li><span class="phase-status {{ 'done' if status == 'Completa' else 'pending' }}">{{ status }}</span> {{ name }}</li>
+      <li><span class="phase-status {{ 'done' if status == 'Completa' else ('partial' if status == 'Parcial' else 'pending') }}">{{ status }}</span> {{ name }}</li>
     {% endfor %}
   </ul>
+  <p class="card-note-sm">VRM Monitor (Fases 9, 12–19) es un producto aparte, con su propia interfaz — no se muestra aquí.</p>
 {% endblock %}

@@ -5,6 +5,16 @@ from flask import Blueprint, abort, render_template
 
 bp = Blueprint("dashboard", __name__)
 
+# Corrected 2026-09-27 — this list had gone stale the same way PHASES.md's
+# own table went stale before its 2026-09-02 correction (see that file's own
+# note): it stopped at Fase 8 and never picked up Fase 10 (Mantenimiento,
+# part of this same app) or Fases 20–23 (the Flask/Jinja2 port + Phase 23's
+# margin mechanism, all live on this exact branch). Fases 9, 12–19 are
+# VRM Monitor — a separate product with its own UI — and are deliberately
+# left off this app's own front page; see PHASES.md for that product's
+# phase history. Three statuses now, not two ("Parcial" added) — Fases 6/7
+# were previously shown as "Completa"/"Pendiente" respectively, neither of
+# which was accurate (PHASES.md's own corrected rows call both "🔶 Partial").
 PHASES = [
     ("Fase 0 — Fundación", "Completa"),
     ("Fase 1 — Motor PDF", "Completa"),
@@ -12,9 +22,15 @@ PHASES = [
     ("Fase 3 — Gestión de cotizaciones", "Completa"),
     ("Fase 4 — Funciones AI", "Completa"),
     ("Fase 5 — Off-Grid + Híbrido", "Completa"),
-    ("Fase 6 — Módulo Proyectos", "Completa"),
-    ("Fase 7 — Admin + Pulido", "Pendiente"),
+    ("Fase 6 — Módulo Proyectos", "Parcial"),
+    ("Fase 7 — Admin + Pulido", "Parcial"),
     ("Fase 8 — QA + Entrega", "Pendiente"),
+    ("Fase 10 — Mantenimiento (registro de sitios)", "Completa"),
+    ("Fase 11 — Calibración de diseño desde datos de flota", "Pendiente"),
+    ("Fase 20 — Cotizaciones: puerto a Flask/Jinja2", "Completa"),
+    ("Fase 21 — Mantenimiento: puerto a Flask/Jinja2", "Completa"),
+    ("Fase 22 — Proyectos: puerto a Flask/Jinja2 + Facturación/Pagos", "Completa"),
+    ("Fase 23 — Distribución de utilidad (margen único)", "Completa"),
 ]
 
 # Nav entries not yet ported to this branch — each renders a stub page so the

@@ -143,6 +143,7 @@ table.dtable { width: 100%; border-collapse: collapse; }
 .phase-list li { padding: 0.3rem 0; font-size: 0.95rem; }
 .phase-status { display: inline-block; width: 90px; font-weight: 600; font-size: 0.85rem; }
 .phase-status.done { color: var(--green); }
+.phase-status.partial { color: #B45309; }
 .phase-status.pending { color: var(--muted); }
 
 #flash {
