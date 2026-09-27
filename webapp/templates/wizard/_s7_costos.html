@@ -18,8 +18,10 @@
 .s7-margin-label { font-weight:600; font-size:0.88rem; }
 .s7-margin-row input { width:80px; }
 .s7-margin-note { font-size:0.76rem; color:#6b7280; }
+.s7-profit-usd { font-size:0.8rem; font-weight:600; color:#166534; white-space:nowrap; }
 .s7-price-shown { text-align:right; white-space:nowrap; }
 .s7-no-margin { font-size:0.68rem; color:#9ca3af; }
+.s7-pct-total { text-align:right; white-space:nowrap; color:#6b7280; font-size:0.85rem; }
 </style>
 
 <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
@@ -39,6 +41,7 @@
     <label class="s7-margin-label" for="margin_pct_pct">Margen de utilidad</label>
     <input class="finput" type="number" min="0" step="0.5" id="margin_pct_pct" name="margin_pct_pct"
            value="{{ '%.1f'|format((margin_pct or 0) * 100) }}"> %
+    <span class="s7-profit-usd" title="Utilidad total en esta cotización, sin IVA — cifra interna, nunca aparece en el PDF del cliente.">= ${{ '{:,.2f}'.format(profit_usd or 0) }} de utilidad (interno, no visible en el PDF)</span>
     <span class="s7-margin-note">Se aplica sobre el costo real de cada ítem y reparte la utilidad entre todos — excepto el Permiso de Interconexión, que se cobra sin margen.
       {%- if margin_suggestion %} Sugerido a partir de {{ margin_suggestion.n }} proyecto{{ 's' if margin_suggestion.n != 1 else '' }} {{ 'de este mismo tipo de sistema' if margin_suggestion.same_type else 'de otros tipos de sistema (sin historial propio aún)' }} — ajustable.{% endif %}</span>
   </div>
@@ -46,7 +49,7 @@
     <table class="dtable">
       <thead><tr>
         <td>Descripción (ES)</td><td>Descripción (EN)</td><td>Qty</td>
-        <td>Costo real (USD)</td><td>Precio mostrado</td><td>IVA</td><td>Especificaciones</td><td></td>
+        <td>Costo real (USD)</td><td>Precio mostrado</td><td title="Participación de este ítem en el TOTAL de la cotización — cifra interna, no aparece en el PDF.">% del Total</td><td>IVA</td><td>Especificaciones</td><td></td>
       </tr></thead>
       <tbody>
         {% for row in rows %}
@@ -59,6 +62,7 @@
             ${{ '{:,.2f}'.format(row.unit_price_shown) }}
             {% if not row.markup_eligible %}<div class="s7-no-margin">sin margen</div>{% endif %}
           </td>
+          <td class="s7-pct-total">{{ '%.1f'|format(row.pct_of_total or 0) }}%</td>
           <td>
             <select class="finput" name="r-{{ loop.index0 }}-iva" title="IVA aplicable a este producto/servicio">
               {% for opt in iva_options %}

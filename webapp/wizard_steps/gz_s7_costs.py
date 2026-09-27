@@ -269,14 +269,17 @@ def _finalize(blob: dict, items: list[dict], margin_pct: float | None = None) ->
     finalized = []
     subtotal = 0.0
     iva_amount = 0.0
+    profit_usd = 0.0
     for it in items:
         real_cost = float(it.get("unit_cost") or 0)
         item_name = it.get("item") or ""
         shown_price = _shown_price(real_cost, item_name, margin_pct, eligible)
         iva_pct = float(it.get("iva_pct") or 0)
         line_total = _row_subtotal(it.get("qty"), shown_price)
+        real_cost_total = _row_subtotal(it.get("qty"), real_cost)
         subtotal += line_total
         iva_amount += round(line_total * iva_pct, 2)
+        profit_usd += line_total - real_cost_total
         finalized.append({
             **it, "unit_cost": real_cost, "unit_price_shown": shown_price,
             "markup_eligible": eligible.get(item_name, True),
@@ -286,8 +289,17 @@ def _finalize(blob: dict, items: list[dict], margin_pct: float | None = None) ->
     subtotal = round(subtotal, 2)
     iva_amount = round(iva_amount, 2)
     total = round(subtotal + iva_amount, 2)
+    profit_usd = round(profit_usd, 2)
     panel_wp_total = panel_count * panel_wp
     cost_per_wp = round(total / panel_wp_total, 3) if panel_wp_total else 0.0
+
+    # Read-only "share of TOTAL" per row — a second pass since `total` is
+    # only known once every row's line_total has been summed. Pre-tax line
+    # total against the tax-inclusive TOTAL (by design, per how this was
+    # asked for), so rows won't sum to exactly 100% when IVA is nonzero —
+    # the IVA itself has no owning row to attribute it to.
+    for it in finalized:
+        it["pct_of_total"] = round(it["total"] / total * 100, 1) if total else 0.0
 
     return {
         "line_items": finalized,
@@ -296,6 +308,13 @@ def _finalize(blob: dict, items: list[dict], margin_pct: float | None = None) ->
         "total_usd": total,
         "cost_per_wp": cost_per_wp,
         "margin_pct": margin_pct,
+        # Internal-only figure — never surfaced to the client PDF
+        # (proposals/generator.py's cost_items builder whitelists fields
+        # explicitly and doesn't include this one). Total profit embedded
+        # across every markup-eligible line at the current margin — 0 for
+        # Permiso de Interconexión by construction (shown_price==real_cost
+        # there), so it never needs special-casing here.
+        "profit_usd": profit_usd,
     }
 
 
@@ -445,6 +464,7 @@ def build_context(blob: dict) -> dict:
         "cost_per_wp": finalized["cost_per_wp"],
         "margin_pct": finalized["margin_pct"],
         "margin_suggestion": margin_suggestion,
+        "profit_usd": finalized["profit_usd"],
         "refresh_message": None,
         "can_continue": finalized["total_usd"] > 0,
     }
