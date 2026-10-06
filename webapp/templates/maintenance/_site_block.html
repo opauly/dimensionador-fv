@@ -1,16 +1,52 @@
 {# One linked site — port of _detail_section()'s per-site st.expander() body
-   (item 22). Included in a loop from detail.html, `site` + `pid` in context. #}
-<details class="site-block">
+   (item 22), plus an inline name/location edit (added — these live on the
+   site row itself, not the property; see database/site_properties_db.py's
+   module docstring and update_site_fields()). Included in a loop from
+   detail.html, `site` + `pid` in context; `editing`/`error` are set only when
+   this fragment is re-rendered standalone by the edit routes below, so the
+   whole <details> carries an id and gets swapped as one block — swapping just
+   the edit form would leave the summary's old name stale. #}
+<details class="site-block" id="site-block-{{ site.schema_name }}-{{ site.site_id }}" {% if editing %}open{% endif %}>
   <summary>
     <span class="site-name">{{ site.display_name }}</span>
     <span class="pill" style="background:#f1f5f9;color:#475569;">{{ site.schema_badge }}</span>
   </summary>
   <div class="site-body">
     <p class="site-sub-title">Datos del sitio</p>
-    {% if site.counts %}<p class="card-note-sm">{{ site.counts }}</p>{% endif %}
-    {% if site.commissioned_at %}<p class="card-note-sm">Comisionado: {{ site.commissioned_at }}</p>{% endif %}
-    {% for url in site.monitoring_urls %}<p class="card-note-sm">{{ url }}</p>{% endfor %}
-    {% if not site.has_extra %}<p class="card-note-sm">Sin datos adicionales.</p>{% endif %}
+    {% if editing %}
+      <form hx-post="{{ url_for('maintenance.propiedad_sitio_editar', pid=pid) }}"
+            hx-target="#site-block-{{ site.schema_name }}-{{ site.site_id }}" hx-swap="outerHTML">
+        <input type="hidden" name="site_id" value="{{ site.site_id }}">
+        <input type="hidden" name="schema_name" value="{{ site.schema_name }}">
+        <div class="fgrid" style="margin:4px 0 8px;">
+          <div>
+            <label class="flabel">Nombre del sitio</label>
+            <input class="finput" type="text" name="display_name" value="{{ site.display_name }}">
+          </div>
+          <div>
+            <label class="flabel">Ubicación</label>
+            <input class="finput" type="text" name="location" value="{{ site.location }}">
+          </div>
+        </div>
+        {% if error %}<p style="color:#B84345;font-size:12.5px;margin:2px 0 8px;">{{ error }}</p>{% endif %}
+        <button class="btn" type="submit" style="padding:4px 10px;font-size:12.5px;">Guardar</button>
+        &nbsp;
+        <button type="button" style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:12.5px;"
+                hx-get="{{ url_for('maintenance.propiedad_sitio_editar_form', pid=pid, site_id=site.site_id, schema_name=site.schema_name, cancel=1) }}"
+                hx-target="#site-block-{{ site.schema_name }}-{{ site.site_id }}" hx-swap="outerHTML">Cancelar</button>
+      </form>
+    {% else %}
+      {% if site.location %}<p class="card-note-sm">&#128205; {{ site.location }}</p>{% endif %}
+      {% if site.counts %}<p class="card-note-sm">{{ site.counts }}</p>{% endif %}
+      {% if site.commissioned_at %}<p class="card-note-sm">Comisionado: {{ site.commissioned_at }}</p>{% endif %}
+      {% for url in site.monitoring_urls %}<p class="card-note-sm">{{ url }}</p>{% endfor %}
+      {% if not site.has_extra %}<p class="card-note-sm">Sin datos adicionales.</p>{% endif %}
+      <button type="button" class="link-btn site-cred-toggle"
+              hx-get="{{ url_for('maintenance.propiedad_sitio_editar_form', pid=pid, site_id=site.site_id, schema_name=site.schema_name) }}"
+              hx-target="#site-block-{{ site.schema_name }}-{{ site.site_id }}" hx-swap="outerHTML">
+        Editar nombre / ubicación
+      </button>
+    {% endif %}
 
     <p class="site-sub-title">Credenciales</p>
     <button type="button" class="link-btn site-cred-toggle"

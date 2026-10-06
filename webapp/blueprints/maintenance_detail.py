@@ -41,10 +41,11 @@ def _site_ctx(s: dict) -> dict:
         "schema_name": s["schema_name"],
         "display_name": s.get("display_name") or s["site_id"],
         "schema_badge": schema_badge,
+        "location": s.get("location") or "",
         "counts": counts,
         "commissioned_at": s.get("commissioned_at"),
         "monitoring_urls": monitoring_urls,
-        "has_extra": bool(counts or s.get("commissioned_at") or monitoring_urls),
+        "has_extra": bool(counts or s.get("location") or s.get("commissioned_at") or monitoring_urls),
     }
 
 
@@ -241,6 +242,70 @@ def register(bp):
             abort(404)
         return render_template(
             "maintenance/_site_linker.html", pid=pid, linker_groups=ctx["linker_groups"], error=error,
+        )
+
+    @bp.route("/propiedad/<pid>/sitio/editar-form")
+    def propiedad_sitio_editar_form(pid):
+        from database.site_properties_db import list_all_sites_for_maintenance
+
+        site_id = request.args.get("site_id")
+        schema_name = request.args.get("schema_name")
+        editing = request.args.get("cancel") != "1"
+
+        site = next(
+            (s for s in list_all_sites_for_maintenance()
+             if s["site_id"] == site_id and s["schema_name"] == schema_name),
+            None,
+        )
+        if site is None:
+            abort(404)
+
+        return render_template(
+            "maintenance/_site_block.html", pid=pid, site=_site_ctx(site), editing=editing, error=None,
+        )
+
+    @bp.route("/propiedad/<pid>/sitio/editar", methods=["POST"])
+    def propiedad_sitio_editar(pid):
+        from database.site_properties_db import list_all_sites_for_maintenance, update_site_fields
+
+        form = request.form
+        site_id = form.get("site_id")
+        schema_name = form.get("schema_name")
+        display_name = (form.get("display_name") or "").strip()
+        location = (form.get("location") or "").strip() or None
+
+        if not display_name:
+            site = next(
+                (s for s in list_all_sites_for_maintenance()
+                 if s["site_id"] == site_id and s["schema_name"] == schema_name),
+                None,
+            )
+            if site is None:
+                abort(404)
+            ctx = _site_ctx(site)
+            ctx["display_name"] = form.get("display_name") or ""
+            ctx["location"] = location or ""
+            return render_template(
+                "maintenance/_site_block.html", pid=pid, site=ctx, editing=True,
+                error="El nombre del sitio es obligatorio.",
+            )
+
+        error = None
+        try:
+            update_site_fields(site_id, schema_name, display_name=display_name, location=location)
+        except Exception as exc:
+            error = f"Error al guardar: {exc}"
+
+        site = next(
+            (s for s in list_all_sites_for_maintenance()
+             if s["site_id"] == site_id and s["schema_name"] == schema_name),
+            None,
+        )
+        if site is None:
+            abort(404)
+        return render_template(
+            "maintenance/_site_block.html", pid=pid, site=_site_ctx(site),
+            editing=bool(error), error=error,
         )
 
     @bp.route("/propiedad/<pid>/credenciales")

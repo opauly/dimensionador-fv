@@ -56,8 +56,8 @@ h4.section-block-title { font-size: 15px; font-weight: 700; color: var(--navy); 
       <input class="finput" type="text" name="name" value="{{ new_name }}">
     </div>
     <div>
-      <label class="flabel">Intervalo de mantenimiento (días)</label>
-      <input class="finput" type="number" name="interval" value="{{ new_interval }}" min="1" step="30">
+      <label class="flabel">Intervalo de mantenimiento (meses)</label>
+      <input class="finput" type="number" name="interval_months" value="{{ new_interval_months }}" min="1" step="1">
     </div>
   </div>
   <div style="margin-top:12px;">
@@ -86,6 +86,7 @@ h4.section-block-title { font-size: 15px; font-weight: 700; color: var(--navy); 
           <td>Propiedad</td>
           <td>Cliente</td>
           <td>Sitios</td>
+          <td>Intervalo</td>
           <td></td>
         </tr>
       </thead>
@@ -98,13 +99,20 @@ h4.section-block-title { font-size: 15px; font-weight: 700; color: var(--navy); 
                      hx-include="[form='merge-form']" hx-target="#merge-panel" hx-swap="outerHTML"
                      aria-label="Seleccionar {{ p.name }} para fusionar">
             </td>
-            <td>
+            <td id="prop-cell-{{ p.id }}">
               <div class="mrow-name">{{ p.name }}</div>
               {% if p.location %}<div class="mrow-location">{{ p.location }}</div>{% endif %}
             </td>
             <td>{{ p.client_label }}</td>
             <td>{{ p.site_count }}</td>
+            <td id="interval-cell-{{ p.id }}">{{ p.interval_months }} meses</td>
             <td>
+              <span id="edit-slot-{{ p.id }}">
+                <button type="button" style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:inherit;"
+                        hx-get="{{ url_for('maintenance.propiedades_editar_form', pid=p.id) }}"
+                        hx-target="#edit-slot-{{ p.id }}" hx-swap="outerHTML">Editar</button>
+              </span>
+              &nbsp;·&nbsp;
               <span id="del-slot-{{ p.id }}">
                 <button type="button" class="danger-btn"
                         hx-get="{{ url_for('maintenance.propiedades_eliminar_confirmar', pid=p.id) }}"

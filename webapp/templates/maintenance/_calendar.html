@@ -9,6 +9,21 @@
 .mcal-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; min-height: 110px; background: #fff; }
 .mcal-card-title { font-size: 0.78rem; font-weight: 700; color: var(--navy); border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; margin-bottom: 4px; }
 .mcal-item { font-size: 0.76rem; padding: 2px 0; line-height: 1.3; }
+.mcal-info-wrap { position: relative; display: inline-block; }
+.mcal-info-btn {
+  background: none; border: none; padding: 0; margin-left: 2px; color: var(--muted-2, #94a3b8);
+  font-size: 0.72rem; cursor: pointer; line-height: 1; vertical-align: middle;
+}
+.mcal-info-btn:hover, .mcal-info-btn:focus { color: var(--navy); }
+.mcal-tooltip {
+  display: none; position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%);
+  background: var(--navy, #1e293b); color: #fff; font-size: 0.7rem; font-weight: 600;
+  padding: 4px 8px; border-radius: 6px; white-space: nowrap; z-index: 30; margin-bottom: 5px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.mcal-info-wrap:hover .mcal-tooltip,
+.mcal-info-wrap:focus-within .mcal-tooltip,
+.mcal-info-wrap.mcal-tooltip-open .mcal-tooltip { display: block; }
 .mcal-empty { font-size: 0.76rem; color: #cbd5e1; }
 .mcal-banner { border-radius: 8px; padding: 8px 4px; margin: 12px 0; }
 .mcal-banner-red { background: #fee2e2; border: 1px solid #fca5a5; }
@@ -82,13 +97,40 @@
         {% else %}
           {% for it in m.entries %}
             <div class="mcal-item">
-              {{ it.emoji }} {{ it.day }}{% if it.year_suffix %}/{{ it.year_suffix }}{% endif %} — {{ it.name }}{% if it.visited %} ✓{% endif %}
+              {{ it.emoji }} {{ it.name }}{% if it.visited %} ✓{% endif %}
+              <span class="mcal-info-wrap">
+                <button type="button" class="mcal-info-btn" aria-label="Fecha esperada: {{ it.date_label }}">ⓘ</button>
+                <span class="mcal-tooltip" role="tooltip">{{ 'Venció el' if it.overdue else 'Vence el' }} {{ it.date_label }}</span>
+              </span>
             </div>
           {% endfor %}
         {% endif %}
       </div>
     {% endfor %}
   </div>
+  <script>
+    (function () {
+      // Click-to-toggle for .mcal-info-btn (CSS :hover/:focus-within already
+      // shows the tooltip for mouse users; this adds tap support on touch
+      // devices, where :hover never fires). Delegated on document + guarded
+      // by a window flag so re-running this script on every htmx swap of
+      // this fragment (e.g. changing "Año") doesn't stack duplicate
+      // listeners (Oscar, 2026-09-28: title-attribute tooltips were
+      // unreliable on hover and did nothing on click — replaced outright).
+      if (window.__mcalTooltipInit) return;
+      window.__mcalTooltipInit = true;
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('.mcal-info-btn');
+        document.querySelectorAll('.mcal-info-wrap.mcal-tooltip-open').forEach(function (w) {
+          if (!btn || w !== btn.parentElement) w.classList.remove('mcal-tooltip-open');
+        });
+        if (btn) {
+          e.preventDefault();
+          btn.parentElement.classList.toggle('mcal-tooltip-open');
+        }
+      });
+    })();
+  </script>
 
   {% if future_cycle %}
     <div class="mcal-banner mcal-banner-green">

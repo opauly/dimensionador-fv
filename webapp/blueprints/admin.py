@@ -76,11 +76,15 @@ def root():
 
 @bp.route("/<section>")
 def index(section):
+    from flask import request
+
     if section not in SECTIONS:
         abort(404)
     sub_list = SECTIONS[section]["sub"]
     default_sub = sub_list[0] if sub_list else None
     panel_html = _render_panel(section, default_sub)
+    if request.headers.get("HX-Request"):
+        return panel_html
     return render_template(
         "admin/page.html",
         sections=SECTION_ORDER, section_meta=SECTIONS, active_section=section,

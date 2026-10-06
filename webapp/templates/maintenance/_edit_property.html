@@ -1,0 +1,55 @@
+{# Inline name/interval edit for one "Propiedades existentes" row (Configurar
+   propiedades). Mirrors _delete_confirm.html's toggle pattern, but touches two
+   separate <td>s (Propiedad, Intervalo) from one "Editar"/"Guardar" action, so
+   this fragment updates them out-of-band (hx-swap-oob) while the main
+   hx-target only swaps the actions-cell edit-slot itself. The name and
+   interval <input>s live inside their own <td>s but submit together via the
+   `form="edit-form-<pid>"` attribute, pointing at one <form> declared in the
+   edit-slot — same association trick _setup.html's merge-form already uses,
+   avoiding an invalid <form> wrapped around non-adjacent table cells.
+
+   The <form> itself carries hx-post/hx-target/hx-swap (not the button) so
+   htmx intercepts its `submit` event — from a click on the type="submit"
+   button below OR from pressing Enter in either input — and never lets a
+   real top-level POST navigation happen. A plain <form method="post"
+   action="..."> here would "work" in a real browser (unlike this session's
+   automated test pane, which never fires the submit event at all — see
+   PLAN notes from the review that added this), but it would navigate the
+   whole tab to this route, which returns a bare unstyled fragment, not a
+   full page (confirmed live, Oscar 2026-09-28: exactly this happened). #}
+<td id="prop-cell-{{ pid }}" hx-swap-oob="true">
+  {% if editing %}
+    <input class="finput" style="font-size:12.5px;padding:4px 6px;" type="text"
+           name="name" value="{{ name }}" form="edit-form-{{ pid }}">
+    {% if location %}<div class="mrow-location">{{ location }} (se edita en el sitio vinculado)</div>{% endif %}
+  {% else %}
+    <div class="mrow-name">{{ name }}</div>
+    {% if location %}<div class="mrow-location">{{ location }}</div>{% endif %}
+  {% endif %}
+</td>
+<td id="interval-cell-{{ pid }}" hx-swap-oob="true">
+  {% if editing %}
+    <input class="finput" style="font-size:12.5px;padding:4px 6px;width:55px;display:inline-block;" type="number"
+           name="interval_months" min="1" step="1" value="{{ interval_months }}" form="edit-form-{{ pid }}"> meses
+  {% else %}
+    {{ interval_months }} meses
+  {% endif %}
+</td>
+<span id="edit-slot-{{ pid }}">
+  {% if editing %}
+    <form id="edit-form-{{ pid }}" style="display:inline;"
+          hx-post="{{ url_for('maintenance.propiedades_editar', pid=pid) }}"
+          hx-target="#edit-slot-{{ pid }}" hx-swap="outerHTML"></form>
+    {% if error %}<div style="color:#B84345;font-size:12px;margin:2px 0;">{{ error }}</div>{% endif %}
+    <button style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:12.5px;"
+            type="submit" form="edit-form-{{ pid }}">Guardar</button>
+    &nbsp;·&nbsp;
+    <button type="button" style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:12.5px;"
+            hx-get="{{ url_for('maintenance.propiedades_editar_form', pid=pid, cancel=1) }}"
+            hx-target="#edit-slot-{{ pid }}" hx-swap="outerHTML">Cancelar</button>
+  {% else %}
+    <button type="button" style="background:none;border:none;color:var(--navy);font-weight:600;cursor:pointer;padding:0;font-family:var(--font);font-size:12.5px;"
+            hx-get="{{ url_for('maintenance.propiedades_editar_form', pid=pid) }}"
+            hx-target="#edit-slot-{{ pid }}" hx-swap="outerHTML">Editar</button>
+  {% endif %}
+</span>

@@ -87,6 +87,32 @@ def create_property(name: str, interval_days: int = 365) -> dict:
     return result.data[0]
 
 
+def update_property(property_id: str, name: str, interval_days: int) -> dict:
+    """Renames a property and/or changes its maintenance cycle length — the two
+    fields `create_property()` sets and nothing else can edit afterward. Location
+    stays derived (see module docstring); edit it on the linked site instead via
+    `update_site_fields()`."""
+    payload = {"name": name, "maintenance_interval_days": interval_days}
+    result = get_client().table("site_properties").update(payload).eq("id", property_id).execute()
+    return result.data[0]
+
+
+def update_site_fields(site_id: str, schema_name: str, *, display_name: str, location: str | None) -> None:
+    """Edits a site's own name/location (the fields a property's location/name
+    display derives from — see `_derive_client_and_location()`). Separate from
+    `link_site_to_property()`, which only ever touches `property_id`."""
+    if schema_name not in ("monitoring", "vrm"):
+        raise ValueError(f"unknown schema_name: {schema_name!r}")
+    (
+        get_client()
+        .schema(schema_name)
+        .table("sites")
+        .update({"display_name": display_name, "location": location})
+        .eq("site_id", site_id)
+        .execute()
+    )
+
+
 def seed_properties_from_unlinked_sites() -> int:
     """Creates one property per currently-unlinked site (either schema) and links it —
     every site already in monitoring.sites/vrm.sites is real installed equipment Oscar

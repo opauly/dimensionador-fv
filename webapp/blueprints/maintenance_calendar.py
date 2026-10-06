@@ -25,7 +25,16 @@ def _month_grid_current_year(this_year_or_overdue: list[dict], current_year: int
     filtered to `next_due_date.year <= <displayed year>` by the caller — a
     future-year date (already visited this cycle, not due again until next
     year) would otherwise look identical to a due-this-year date, which is
-    exactly the ambiguity that prompted this filter (Oscar, 2026-09-08)."""
+    exactly the ambiguity that prompted this filter (Oscar, 2026-09-08).
+
+    A property overdue from a PAST cycle still lands in this month's bucket
+    (it's grouped by month-of-year only, ignoring which year), so its actual
+    due date used to be inlined into the row itself as "day/year — name"
+    (e.g. "15/2021 — Bryan Gutiérrez") whenever the year didn't match the one
+    being displayed. Oscar found that read like a stray date stuck onto the
+    name. It's now an (i) info button per row instead (`date_label`, a full
+    Spanish date for its title attribute/tooltip) — the row itself shows only
+    the name, same as an on-time entry (Oscar, 2026-09-28)."""
     by_month: dict[int, list[dict]] = {m: [] for m in range(1, 13)}
     for p in this_year_or_overdue:
         by_month[p["next_due_date"].month].append(p)
@@ -38,10 +47,13 @@ def _month_grid_current_year(this_year_or_overdue: list[dict], current_year: int
             "entries": [
                 {
                     "emoji": STATUS_EMOJI[p["status"]],
-                    "day": p["next_due_date"].day,
-                    "year_suffix": p["next_due_date"].year if p["next_due_date"].year != current_year else None,
                     "name": p["name"],
                     "visited": p["visited_this_year"],
+                    "overdue": p["status"] == "overdue",
+                    "date_label": (
+                        f"{p['next_due_date'].day} de "
+                        f"{MONTH_NAMES[p['next_due_date'].month - 1].lower()} de {p['next_due_date'].year}"
+                    ),
                 }
                 for p in items
             ],
@@ -79,8 +91,6 @@ def _historical_ctx(rows: list[dict], year: int) -> dict:
 
 
 def _current_year_ctx(rows: list[dict], year: int) -> dict:
-    not_visited = [r for r in rows if not r["visited_this_year"]]
-
     scheduled = [p for p in rows if p["next_due_date"]]
     unscheduled = [p for p in rows if not p["next_due_date"]]
 
@@ -91,6 +101,18 @@ def _current_year_ctx(rows: list[dict], year: int) -> dict:
     # year." Kept out of the grid entirely instead (item 8).
     this_year_or_overdue = [p for p in scheduled if p["next_due_date"].year <= year]
     future_cycle = sorted((p for p in scheduled if p["next_due_date"].year > year), key=lambda p: p["next_due_date"])
+
+    # "Sin mantenimiento en {year}" should flag properties that actually need
+    # attention this year — due/overdue this year, or with no computable due
+    # date at all (unscheduled). A property whose first (or next) cycle isn't
+    # due until a future year (future_cycle, just above) simply isn't due yet
+    # — e.g. a site commissioned partway through this year with a 365-day
+    # interval won't need its first visit until next year, and shouldn't be
+    # lumped in with genuinely-neglected properties just because it has no
+    # visited_this_year flag either (Oscar, 2026-09-28). this_year_or_overdue
+    # and unscheduled can never overlap with future_cycle by construction, so
+    # no extra id-exclusion is needed here.
+    not_visited = [r for r in this_year_or_overdue + unscheduled if not r["visited_this_year"]]
 
     scheduled_for_picker = sorted(scheduled, key=lambda p: p["name"])
 

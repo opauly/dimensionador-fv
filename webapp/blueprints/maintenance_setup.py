@@ -27,6 +27,28 @@ panel refresh (GET .../fusionar/panel) reads the same inputs via
 """
 from flask import abort, redirect, render_template, request, url_for
 
+# The interval is stored as days (`maintenance_interval_days`, read by
+# calculations/maintenance.py:compute_status() and every calendar/status
+# calculation) but entered and displayed as whole months everywhere in the
+# UI (Oscar, 2026-09-28 — a raw-days input invited off-grid values a native
+# <input step="30"> then rejected, e.g. 180 vs. the grid's 151/181). 30 days
+# is this conversion's one convention, used both ways — an existing interval
+# that isn't a multiple of 30 (e.g. a legacy 365-day/annual property) just
+# displays as its nearest whole month and re-saves at that rounded value.
+MONTH_DAYS = 30
+
+
+def _days_to_months(days: int) -> int:
+    return max(1, round(days / MONTH_DAYS))
+
+
+def _months_to_days(months) -> int:
+    try:
+        months = float(months)
+    except (TypeError, ValueError):
+        months = 12
+    return max(1, round(months * MONTH_DAYS))
+
 
 def _client_label(client_id, client_name_by_id) -> str:
     if client_id is None:
@@ -88,7 +110,7 @@ def render_merge_panel(selected_ids: list[str], confirm_diff_client: bool, keep_
 
 
 def render_setup_panel(
-    *, new_name: str = "", new_interval: int = 365, form_error: str | None = None,
+    *, new_name: str = "", new_interval_months: int = 12, form_error: str | None = None,
     created: str | None = None, seeded: str | None = None, merged: str | None = None,
     keep: str | None = None, error: str | None = None,
     selected_ids: list[str] | None = None, confirm_diff_client: bool = False, keep_id: str | None = None,
@@ -105,6 +127,7 @@ def render_setup_panel(
             "id": p["id"], "name": p["name"], "location": p.get("location") or "",
             "client_label": _client_label(p.get("client_id"), client_name_by_id),
             "site_count": p["site_count"],
+            "interval_months": _days_to_months(p["maintenance_interval_days"]),
         }
         for p in properties
     ]
@@ -115,7 +138,7 @@ def render_setup_panel(
         "maintenance/_setup.html",
         unlinked_count=len(unlinked),
         prop_rows=prop_rows,
-        new_name=new_name, new_interval=new_interval, form_error=form_error,
+        new_name=new_name, new_interval_months=new_interval_months, form_error=form_error,
         created=created, seeded=seeded, merged=merged, keep=keep, error=error,
         **merge_ctx,
     )
@@ -128,19 +151,19 @@ def register(bp):
 
         form = request.form
         name = (form.get("name") or "").strip()
-        try:
-            interval = int(float(form.get("interval") or 365))
-        except (TypeError, ValueError):
-            interval = 365
+        months = form.get("interval_months") or 12
+        interval_days = _months_to_days(months)
 
         if not name:
-            return render_setup_panel(form_error="El nombre es obligatorio.", new_name=name, new_interval=interval)
+            return render_setup_panel(
+                form_error="El nombre es obligatorio.", new_name=name, new_interval_months=months,
+            )
 
         try:
-            create_property(name=name, interval_days=interval)
+            create_property(name=name, interval_days=interval_days)
         except Exception as exc:
             return render_setup_panel(
-                form_error=f"Error al crear propiedad: {exc}", new_name=name, new_interval=interval,
+                form_error=f"Error al crear propiedad: {exc}", new_name=name, new_interval_months=months,
             )
 
         return redirect(url_for("maintenance.configurar", created=name), code=303)
@@ -205,6 +228,56 @@ def register(bp):
             return render_setup_panel(form_error=f"Error al fusionar: {exc}")
 
         return redirect(url_for("maintenance.configurar", merged=len(other_ids), keep=keep_label), code=303)
+
+    @bp.route("/propiedades/<pid>/editar")
+    def propiedades_editar_form(pid):
+        from database.site_properties_db import get_property
+
+        prop = get_property(pid)
+        if prop is None:
+            abort(404)
+        editing = request.args.get("cancel") != "1"
+        return render_template(
+            "maintenance/_edit_property.html", pid=pid, editing=editing,
+            name=prop["name"], interval_months=_days_to_months(prop["maintenance_interval_days"]),
+            location=prop.get("location") or "", error=None,
+        )
+
+    @bp.route("/propiedades/<pid>/editar", methods=["POST"])
+    def propiedades_editar(pid):
+        from database.site_properties_db import get_property, update_property
+
+        prop = get_property(pid)
+        if prop is None:
+            abort(404)
+
+        form = request.form
+        name = (form.get("name") or "").strip()
+        months = form.get("interval_months") or _days_to_months(prop["maintenance_interval_days"])
+        interval_days = _months_to_days(months)
+
+        if not name:
+            return render_template(
+                "maintenance/_edit_property.html", pid=pid, editing=True,
+                name=form.get("name") or "", interval_months=months,
+                location=prop.get("location") or "", error="El nombre es obligatorio.",
+            )
+
+        try:
+            update_property(pid, name=name, interval_days=interval_days)
+        except Exception as exc:
+            return render_template(
+                "maintenance/_edit_property.html", pid=pid, editing=True,
+                name=name, interval_months=months,
+                location=prop.get("location") or "", error=f"Error al guardar: {exc}",
+            )
+
+        updated = get_property(pid)
+        return render_template(
+            "maintenance/_edit_property.html", pid=pid, editing=False,
+            name=updated["name"], interval_months=_days_to_months(updated["maintenance_interval_days"]),
+            location=updated.get("location") or "", error=None,
+        )
 
     @bp.route("/propiedades/<pid>/eliminar")
     def propiedades_eliminar_confirmar(pid):
