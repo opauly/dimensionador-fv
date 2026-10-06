@@ -10,7 +10,7 @@
    model). Intro/PDF/lock fragments are the exact same generic templates
    gz_s8_review.html uses (see webapp/blueprints/wizard.py's Step 8 action
    routes' own comment for why they're shared, not duplicated). #}
-<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=8) }}" id="s8-form">
+<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}" id="s8-form">
   {% include "wizard/_s8og_resumen.html" %}
   {% if split_phase_warning %}<p class="wiz-error">⚠️ {{ split_phase_warning }}</p>{% endif %}
   {% include "wizard/_s8_intro.html" %}

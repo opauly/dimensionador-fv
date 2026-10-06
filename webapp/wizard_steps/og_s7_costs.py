@@ -399,7 +399,7 @@ def _items_from_form(blob: dict, form) -> list[dict]:
 
 
 def recompute_table(blob: dict, form) -> dict:
-    """`paso/7/tabla`'s core logic — PLAN §1.5's live-recompute pattern."""
+    """`paso/8/tabla`'s core logic — PLAN §1.5's live-recompute pattern."""
     return _finalize(blob, _items_from_form(blob, form), _margin_from_form(blob, form))
 
 
@@ -421,7 +421,7 @@ def remove_line_row(blob: dict, form) -> dict:
 
 
 def refresh_prices(blob: dict) -> tuple[dict, int]:
-    """`paso/7/refrescar`'s core logic. Returns (new_costs, n_changed). No
+    """`paso/8/refrescar`'s core logic. Returns (new_costs, n_changed). No
     form is submitted for this action, so `_finalize()` keeps whatever
     margin is already persisted on the blob."""
     equipment = blob.get("equipment") or {}

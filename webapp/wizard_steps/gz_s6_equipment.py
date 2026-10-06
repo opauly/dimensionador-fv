@@ -223,7 +223,7 @@ def _scenario_projection(
 
 
 def select_equipment(blob: dict, form) -> dict:
-    """`paso/6/equipo`'s core logic — verbatim port of the
+    """`paso/7/equipo`'s core logic — verbatim port of the
     `equip_key`-changed reset block (wizard/grid_zero.py L728-734).
     Changing panel OR inverter clears scenarios/manual-mode/selection.
     `coverage_ai` (the AI daytime-fraction estimate) is intentionally NOT
@@ -255,7 +255,7 @@ def select_equipment(blob: dict, form) -> dict:
 
 
 def calc_mppt(blob: dict) -> dict:
-    """`paso/6/mppt/calcular`'s core logic — verbatim port of the "Calcular
+    """`paso/7/mppt/calcular`'s core logic — verbatim port of the "Calcular
     configuración MPPT" button (L775-787): AI daytime-fraction estimate
     (now `ai/daytime_fraction.py`, PLAN §1.7) informs `target_kw`, which
     `validate_string_design()` turns into the A/B/C scenarios."""
@@ -293,7 +293,7 @@ def calc_mppt(blob: dict) -> dict:
 
 
 def select_scenario(blob: dict, label: str) -> dict:
-    """`paso/6/escenario/<label>`'s core logic. Only a currently-valid
+    """`paso/7/escenario/<label>`'s core logic. Only a currently-valid
     scenario's selector button renders at all (do-not-drop item 10), and
     this mirrors that server-side: selecting an unknown/invalid label is a
     no-op rather than silently activating an out-of-limits design."""
@@ -309,7 +309,7 @@ def select_scenario(blob: dict, label: str) -> dict:
 
 
 def validate_manual(blob: dict, form) -> dict:
-    """`paso/6/manual/validar`'s core logic — the live, change-triggered
+    """`paso/7/manual/validar`'s core logic — the live, change-triggered
     Voc/Vmp/Imax recompute (PLAN §1.4 pattern 3) as series/parallel are
     edited. Only updates the stored series/parallel; does not touch
     `use_manual` — `build_context()`'s own `_resolve_chosen()` call already
@@ -327,7 +327,7 @@ def validate_manual(blob: dict, form) -> dict:
 
 
 def select_manual(blob: dict) -> dict:
-    """`paso/6/manual`'s core logic — do-not-drop item 14: a manual design
+    """`paso/7/manual`'s core logic — do-not-drop item 14: a manual design
     can only be *selected* (i.e. become the active configuration) when it is
     currently `within_limits`. Rejecting this server-side (not just via a
     disabled button) is do-not-drop item 15's explicit requirement."""

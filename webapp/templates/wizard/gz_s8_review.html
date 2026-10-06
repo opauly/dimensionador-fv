@@ -7,7 +7,7 @@
    hx-post that includes this form's fields via hx-include="#s8-form", so
    the intro text on screen always rides along regardless of which action
    fires. #}
-<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=8) }}" id="s8-form">
+<form method="post" action="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}" id="s8-form">
   {% include "wizard/_s8_resumen.html" %}
   {% include "wizard/_s8_cashflow.html" %}
   {% include "wizard/_s8_intro.html" %}

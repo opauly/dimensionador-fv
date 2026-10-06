@@ -82,7 +82,7 @@ def _pdf_data(blob: dict, vid: str) -> tuple[dict, dict, dict]:
 
 
 def generate_intro_text(blob: dict, vid: str) -> str:
-    """`paso/8/intro/generar`'s core logic — verbatim port of
+    """`paso/9/intro/generar`'s core logic — verbatim port of
     step8_review()'s "Generar con IA" button (`wizard/off_grid.py`
     L2190-2229), sourcing its params from the same `pdf_data`
     `build_context()` itself reads, plus the raw `equipment`/`consumption`

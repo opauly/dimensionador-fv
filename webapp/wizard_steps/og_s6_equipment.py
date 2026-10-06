@@ -23,7 +23,7 @@ panel/charge-controller/battery — `wizard/off_grid.py:step6_equipment()`
 (L997-1003) calls it on EVERY rerun, unconditionally, with no "Calcular"
 button and no scenario caching. This port matches that: `_compute()` (and
 therefore `build_context()`) recomputes `scenarios` fresh on every call,
-and there is deliberately NO `POST …/paso/6/reliability/calcular` route —
+and there is deliberately NO `POST …/paso/7/reliability/calcular` route —
 every existing action (equipment select, scenario select, manual
 select/validate) already re-renders the whole fragment from a fresh
 `build_context()` call, which reproduces the scenario table "just appearing"
@@ -139,7 +139,7 @@ def _resolve_equipment(blob: dict) -> dict:
 
 
 def select_equipment(blob: dict, form) -> dict:
-    """`paso/6/equipo`'s core logic — verbatim port of the `w6og_equip_key`
+    """`paso/7/equipo`'s core logic — verbatim port of the `w6og_equip_key`
     reset block (wizard/off_grid.py L973-982, do-not-drop item 17's sibling
     note / item 11's Off-Grid analogue). Keys on panel + charge controller +
     battery ONLY — confirmed by reading the exact source line
@@ -512,7 +512,7 @@ def _compute(blob: dict, vid: str | None = None) -> dict:
 
 
 def select_scenario(blob: dict, label: str) -> dict:
-    """`paso/6/escenario/<label>`'s core logic — only a currently-valid
+    """`paso/7/escenario/<label>`'s core logic — only a currently-valid
     scenario's selector button renders at all; server-side no-op otherwise,
     mirroring Grid Zero's equivalent (do-not-drop item 10)."""
     c = _compute(blob)
@@ -526,7 +526,7 @@ def select_scenario(blob: dict, label: str) -> dict:
 
 
 def validate_manual(blob: dict, form) -> dict:
-    """`paso/6/manual/validar`'s core logic — the live, change-triggered
+    """`paso/7/manual/validar`'s core logic — the live, change-triggered
     recompute (PLAN §1.4 pattern 3) as series/strings/battery-count are
     edited. Off-Grid's Opción 2 has THREE live inputs (panels-in-series,
     strings-in-parallel, battery count) vs. Grid Zero's two — this is
@@ -545,7 +545,7 @@ def validate_manual(blob: dict, form) -> dict:
 
 
 def select_manual(blob: dict) -> dict:
-    """`paso/6/manual`'s core logic — do-not-drop item 14's Off-Grid
+    """`paso/7/manual`'s core logic — do-not-drop item 14's Off-Grid
     analogue: a manual design can only be *selected* when currently
     `within_limits`, rejected server-side (not just via a disabled button)."""
     c = _compute(blob)

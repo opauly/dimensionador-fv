@@ -330,7 +330,7 @@
 {% endif %}
 
 <div class="wiz-nav">
-  <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=6) }}">← Atrás</button>
+  <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}">← Atrás</button>
   <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
 </div>
 {% if not can_continue %}<p class="wiz-note">Calcula los escenarios MPPT o configura un diseño manual válido para continuar.</p>{% endif %}

@@ -205,7 +205,7 @@ move. A read-only audit of everything that depends on the 1–8 numbering found:
   mechanism for it. After a naive renumber an old draft saved at 7 (Costos) resumes on Equipos, one saved at 8 (Review) resumes on
   Costos, and — because the guard allows `n <= step_reached + 1` — an old step-8 draft can jump straight to the new Review,
   never visiting Objetivos while the breadcrumb marks it done.
-- **~30 routes** for Equipos/Costos/Revisión carry a literal path (`/paso/6/...`, `/paso/7/...`, `/paso/8/...`) **and** a literal
+- **21 routes** for Equipos/Costos/Revisión carry a literal path (`/paso/6/...`, `/paso/7/...`, `/paso/8/...`) **and** a literal
   `_guard(vid, N)`; templates reach them through endpoint names, so the templates mostly survive, but a route moved without its
   guard number silently loses its step-ahead protection. `paso_post` branches on literal `n == 6` / `n == 7`, and the new step needs
   its own branch or it falls through to the generic `else` and never advances.
@@ -306,7 +306,14 @@ loaders reading the calibrated tiers; the existing `generate_design_scenarios*()
 *Validate:* golden test — `generate_design_scenarios*()` output identical before and after for a fixed set of fixtures (including
 the Jorge Ramírez off-grid reference); target functions hand-checked against the same fixtures; Grid Zero "unattainable goal" case.
 
-**Step 2 — The renumber, with a placeholder step (no Objetivos content yet).**
+**Step 2 — The renumber, with a placeholder step (no Objetivos content yet).** **— ✅ done and verified 2026-10-06** (Equipos/Costos/Revisión are now
+7/8/9; Objetivos is a non-gating placeholder at 6. Offline harness in `scripts/validate_phase24.py` — database stubbed in memory, 19
+checks: every old draft saved at steps 1–8 opens exactly what it could before, shifted, and lands on its own content when it asks for
+too much; old drafts convert once on first save and are never lowered; all 21 action routes at steps 7–9 moved and each rejects a
+request one step too far (a deliberately broken guard number is caught); new drafts are stamped; the lockstep check fails loudly in
+both directions; no code under `webapp/` reads the raw stored integer. Live: a real draft saved at old step 8 resumed on Review
+(9), its Costos recompute posts to `/paso/8/tabla`, the placeholder advanced it to Equipos (7) and the database now holds
+`step_reached 9, wizard_rev 2`; the proposals-list "Continuar" link points at `/paso/9`.)
 *Build:* the `meta.wizard_rev` marker + `draft.effective_step_reached()` used at all four read sites, converting old drafts once
 (§1.5); the named step
 constants and the import-time lockstep assertion; Objetivos registered as Step 6 rendering a "próximamente" placeholder that just

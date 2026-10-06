@@ -4,8 +4,14 @@ each step's build_context()/persistence logic — same split as
 webapp/blueprints/admin.py + admin_*.py.
 
 Step numbering follows the *displayed* order (1 Cliente, 2 Tipo e idioma,
-3 Sitio, 4..8) — this port drops pages/02_new_proposal.py's legacy
-step1_system_type()/step2_client() name inversion. Not a behaviour change.
+3 Sitio, 4 Cargas/Distribuidora, 5 Demanda/Consumo, 6 Objetivos, 7 Equipos,
+8 Costos, 9 Revisión) — this port drops pages/02_new_proposal.py's legacy
+step1_system_type()/step2_client() name inversion. Objetivos was inserted as
+Step 6 in Phase 24, moving Equipos/Costos/Revisión from 6/7/8 to 7/8/9; see
+STEP_OBJETIVOS... below and wizard/draft.py's effective_step_reached() for how
+drafts saved under the old numbering are read. Module docstrings elsewhere
+that say "Step 6/7/8" for Equipos/Costos/Revisión predate that renumber and
+refer to the old numbers.
 
 Row creation (§0.3 Q3, revised from the original Streamlit-matching plan —
 deliberate simplification Oscar signed off on, not a bug): Step 1's own POST
@@ -28,7 +34,7 @@ STEP_MODULES/STEP_TEMPLATES are keyed by `{n: {system_type: module}}` with a
 "*" fallback for the shared steps, exactly mirroring PLAN §1.2's "single
 dispatch table keyed on meta.system_type".
 
-Step 8's PDF routes deliberately import from webapp.blueprints.proposals
+Revisión's (Step 9) PDF routes deliberately import from webapp.blueprints.proposals
 (`_generate_pdf_bytes()`, `_signed_url()`) rather than re-implementing PDF
 generation here — PLAN §1.8's whole point is that the wizard and the
 proposals list share exactly one `build_from_wizard_blob()`-based code path,
@@ -47,10 +53,18 @@ from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
     hy_s4_loads, hy_s5_demand,
     og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review,
-    s1_client, s2_type, s3_site,
+    s1_client, s2_type, s3_site, s6_objetivos,
 )
 
 bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
+
+# Steps 1-5 are fixed; Objetivos was inserted as Step 6 in Phase 24 (wizard_rev 2), moving Equipos/Costos/Revisión
+# from 6/7/8 to 7/8/9. Every route path, guard and `n ==` branch below uses these names rather than a literal, and
+# `_check_step_tables()` fails the import if the dispatch tables and the label lists ever drift apart.
+STEP_OBJETIVOS = 6
+STEP_EQUIPOS = 7
+STEP_COSTOS = 8
+STEP_REVISION = 9
 
 STEP_MODULES = {
     1: {"*": s1_client},
@@ -62,9 +76,10 @@ STEP_MODULES = {
     # (not copies) — PLAN's own wording, wizard/hybrid.py L382-397's
     # `step6_equipment()`/`step7_costs()` = `off_grid.step6_equipment()`/
     # `off_grid.step7_costs()` verbatim.
-    6: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment, "hybrid": og_s6_equipment},
-    7: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs, "hybrid": og_s7_costs},
-    8: {"grid_zero": gz_s8_review, "off_grid": og_s8_review, "hybrid": og_s8_review},
+    STEP_OBJETIVOS: {"*": s6_objetivos},
+    STEP_EQUIPOS: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment, "hybrid": og_s6_equipment},
+    STEP_COSTOS: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs, "hybrid": og_s7_costs},
+    STEP_REVISION: {"grid_zero": gz_s8_review, "off_grid": og_s8_review, "hybrid": og_s8_review},
 }
 STEP_TEMPLATES = {
     1: {"*": "wizard/s1_client.html"},
@@ -72,10 +87,33 @@ STEP_TEMPLATES = {
     3: {"*": "wizard/s3_site.html"},
     4: {"grid_zero": "wizard/gz_s4_utility.html", "off_grid": "wizard/og_s4_loads.html", "hybrid": "wizard/hy_s4_loads.html"},
     5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html", "hybrid": "wizard/hy_s5_demand.html"},
-    6: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html", "hybrid": "wizard/og_s6_equipment.html"},
-    7: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html", "hybrid": "wizard/og_s7_costs.html"},
-    8: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html", "hybrid": "wizard/og_s8_review.html"},
+    STEP_OBJETIVOS: {"*": "wizard/s6_objetivos.html"},
+    STEP_EQUIPOS: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html", "hybrid": "wizard/og_s6_equipment.html"},
+    STEP_COSTOS: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html", "hybrid": "wizard/og_s7_costs.html"},
+    STEP_REVISION: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html", "hybrid": "wizard/og_s8_review.html"},
 }
+
+
+def _check_step_tables() -> None:
+    """Import-time lockstep check: for every system type, STEP_MODULES, STEP_TEMPLATES and the breadcrumb labels
+    must describe the same 1..N sequence, and the last step must be STEP_REVISION. A mismatch otherwise shows up as
+    a `not_built.html` page or a breadcrumb that disagrees with the content — in front of a user."""
+    for system_type in ("grid_zero", "off_grid", "hybrid"):
+        steps = list(range(1, len(step_common.step_labels(system_type)) + 1))
+        for name, table in (("STEP_MODULES", STEP_MODULES), ("STEP_TEMPLATES", STEP_TEMPLATES)):
+            missing = [n for n in steps if not (table.get(n, {}).get(system_type) or table.get(n, {}).get("*"))]
+            extra = sorted(set(table) - set(steps))
+            if missing or extra:
+                raise AssertionError(
+                    f"wizard step tables out of lockstep for {system_type}: {name} missing {missing}, extra {extra}"
+                )
+        if steps[-1] != STEP_REVISION:
+            raise AssertionError(
+                f"wizard for {system_type} has {steps[-1]} labelled steps but STEP_REVISION is {STEP_REVISION}"
+            )
+
+
+_check_step_tables()
 
 
 # ── shared helpers ───────────────────────────────────────────────────────
@@ -105,7 +143,7 @@ def shell_ctx(vid: str | None, n: int, blob: dict, **extra) -> dict:
     never drift from what the step itself is showing."""
     meta = blob.get("meta") or {}
     system_type = meta.get("system_type") or step_common.DEFAULT_SYSTEM_TYPE
-    step_reached = meta.get("step_reached", 1) or 1
+    step_reached = draft.effective_step_reached(meta)
     return {
         "vid": vid,
         "n": n,
@@ -145,7 +183,7 @@ def _guard(vid: str, n: int):
         return redirect(url_for("proposals.index", aviso="bloqueada"), code=303)
 
     blob = draft.load(vid)
-    step_reached = (blob.get("meta") or {}).get("step_reached", 1) or 1
+    step_reached = draft.effective_step_reached(blob.get("meta"))
     if n > step_reached + 1:
         return redirect(url_for("wizard.paso", vid=vid, n=step_reached), code=303)
     return None
@@ -216,7 +254,7 @@ def nueva_post():
 
     blob = draft.load(vid)
     blob["client"] = result
-    blob["meta"] = {**blob.get("meta", {}), "step_reached": 1}
+    blob["meta"] = {**blob.get("meta", {}), "step_reached": 1, "wizard_rev": draft.WIZARD_REV}
     draft.save(vid, blob)
     draft.set_step(vid, 2)
 
@@ -269,7 +307,7 @@ def clientes_previas():
 @bp.route("/<vid>/abrir")
 def abrir(vid):
     blob = draft.load(vid)
-    step_reached = (blob.get("meta") or {}).get("step_reached", 1) or 1
+    step_reached = draft.effective_step_reached(blob.get("meta"))
     return redirect(url_for("wizard.paso", vid=vid, n=step_reached), code=303)
 
 
@@ -359,7 +397,12 @@ def paso_post(vid, n):
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
-    elif n == 6 and _step_module(n, blob) is gz_s6_equipment:
+    elif n == STEP_OBJETIVOS:
+        # Placeholder step (Phase 24 Step 2): nothing to persist and no gate yet — falls through to the generic
+        # set_step(n + 1) + redirect below. The real step and its gate arrive in Step 3.
+        pass
+
+    elif n == STEP_EQUIPOS and _step_module(n, blob) is gz_s6_equipment:
         # Do-not-drop item 15's server-side half: save_step() returns None
         # when neither a valid auto scenario nor a valid manual design
         # exists, and that rejection is enforced here regardless of what the
@@ -373,7 +416,7 @@ def paso_post(vid, n):
             )
         blob = draft.patch(vid, "equipment", result)
 
-    elif n == 6 and _step_module(n, blob) is og_s6_equipment:
+    elif n == STEP_EQUIPOS and _step_module(n, blob) is og_s6_equipment:
         # Same server-side rejection as Grid Zero's Step 6, Off-Grid's own
         # do-not-drop item 15 analogue (§1.10 item 15's "Siguiente disabled
         # unless a valid auto scenario or a valid manual design exists").
@@ -385,13 +428,13 @@ def paso_post(vid, n):
             )
         blob = draft.patch(vid, "equipment", result)
 
-    elif n == 7 and _step_module(n, blob) is gz_s7_costs:
+    elif n == STEP_COSTOS and _step_module(n, blob) is gz_s7_costs:
         blob = draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
         ctx = gz_s7_costs.build_context(blob)
         if not ctx["can_continue"]:
             return _render_step(vid, n, blob)
 
-    elif n == 7 and _step_module(n, blob) is og_s7_costs:
+    elif n == STEP_COSTOS and _step_module(n, blob) is og_s7_costs:
         blob = draft.patch(vid, "costs", og_s7_costs.save_step(blob, request.form))
         ctx = og_s7_costs.build_context(blob)
         if not ctx["can_continue"]:
@@ -428,11 +471,11 @@ def paso_atras(vid, n):
         draft.patch(vid, "consumption", og_s5_demand.save_step(blob))
     elif n == 5 and _step_module(n, blob) is hy_s5_demand:
         draft.patch(vid, "consumption", hy_s5_demand.save_step(blob))
-    elif n == 7 and _step_module(n, blob) is gz_s7_costs:
+    elif n == STEP_COSTOS and _step_module(n, blob) is gz_s7_costs:
         draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
-    elif n == 7 and _step_module(n, blob) is og_s7_costs:
+    elif n == STEP_COSTOS and _step_module(n, blob) is og_s7_costs:
         draft.patch(vid, "costs", og_s7_costs.save_step(blob, request.form))
-    elif n == 8 and _step_module(n, blob) in (gz_s8_review, og_s8_review):
+    elif n == STEP_REVISION and _step_module(n, blob) in (gz_s8_review, og_s8_review):
         # Step 8 has no scenario/table to persist — only the intro textarea,
         # which lives in the same wrapping <form> as this Atrás submit.
         intro_text = request.form.get("intro_text")
@@ -1000,16 +1043,16 @@ def paso5_tabla(vid):
 def _s6_render(vid: str, blob: dict, *, error: str | None = None):
     ctx = gz_s6_equipment.build_context(blob)
     ctx["error"] = error
-    return render_template("wizard/_s6_equipos.html", vid=vid, n=6, **ctx)
+    return render_template("wizard/_s6_equipos.html", vid=vid, n=STEP_EQUIPOS, **ctx)
 
 
 def _s6_patch(vid: str, new_s6: dict) -> dict:
     return draft.patch(vid, "scratch", {"s6": new_s6})
 
 
-@bp.route("/<vid>/paso/6/equipo", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/equipo", methods=["POST"])
 def paso6_equipo(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1017,9 +1060,9 @@ def paso6_equipo(vid):
     return _s6_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/mppt/calcular", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/mppt/calcular", methods=["POST"])
 def paso6_mppt_calcular(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1027,9 +1070,9 @@ def paso6_mppt_calcular(vid):
     return _s6_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/escenario/<label>", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/escenario/<label>", methods=["POST"])
 def paso6_escenario(vid, label):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1037,9 +1080,9 @@ def paso6_escenario(vid, label):
     return _s6_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/manual", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/manual", methods=["POST"])
 def paso6_manual(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1047,9 +1090,9 @@ def paso6_manual(vid):
     return _s6_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/manual/validar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/manual/validar", methods=["POST"])
 def paso6_manual_validar(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1071,16 +1114,16 @@ def paso6_manual_validar(vid):
 def _s6og_render(vid: str, blob: dict, *, error: str | None = None):
     ctx = og_s6_equipment.build_context(blob, vid)
     ctx["error"] = error
-    return render_template("wizard/_s6og_equipos.html", vid=vid, n=6, **ctx)
+    return render_template("wizard/_s6og_equipos.html", vid=vid, n=STEP_EQUIPOS, **ctx)
 
 
 def _s6og_patch(vid: str, new_s6: dict) -> dict:
     return draft.patch(vid, "scratch", {og_s6_equipment.DEFAULT_SCRATCH_KEY: new_s6})
 
 
-@bp.route("/<vid>/paso/6/og/equipo", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/equipo", methods=["POST"])
 def paso6og_equipo(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1088,9 +1131,9 @@ def paso6og_equipo(vid):
     return _s6og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/og/escenario/<label>", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/escenario/<label>", methods=["POST"])
 def paso6og_escenario(vid, label):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1098,9 +1141,9 @@ def paso6og_escenario(vid, label):
     return _s6og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/og/manual", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/manual", methods=["POST"])
 def paso6og_manual(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1108,9 +1151,9 @@ def paso6og_manual(vid):
     return _s6og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/6/og/manual/validar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/manual/validar", methods=["POST"])
 def paso6og_manual_validar(vid):
-    guard = _guard(vid, 6)
+    guard = _guard(vid, STEP_EQUIPOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1128,12 +1171,12 @@ def paso6og_manual_validar(vid):
 def _s7_render(vid: str, blob: dict, *, refresh_message: str | None = None):
     ctx = gz_s7_costs.build_context(blob)
     ctx["refresh_message"] = refresh_message
-    return render_template("wizard/_s7_costos.html", vid=vid, n=7, **ctx)
+    return render_template("wizard/_s7_costos.html", vid=vid, n=STEP_COSTOS, **ctx)
 
 
-@bp.route("/<vid>/paso/7/tabla", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/tabla", methods=["POST"])
 def paso7_tabla(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1141,9 +1184,9 @@ def paso7_tabla(vid):
     return _s7_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/fila", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/fila", methods=["POST"])
 def paso7_fila(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1151,9 +1194,9 @@ def paso7_fila(vid):
     return _s7_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/fila/quitar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/fila/quitar", methods=["POST"])
 def paso7_fila_quitar(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1161,9 +1204,9 @@ def paso7_fila_quitar(vid):
     return _s7_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/refrescar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/refrescar", methods=["POST"])
 def paso7_refrescar(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1177,7 +1220,7 @@ def paso7_refrescar(vid):
 # precios. Structural copy of the Grid Zero block above (see
 # og_s7_costs.py's module docstring) — battery bank/charge-controller/
 # mounting-structure/off_grid-filtered-services item set instead. Distinct
-# "/og/" URL segment (not a shared "/paso/7/tabla" dispatching on blob
+# "/og/" URL segment (not a shared "/paso/8/tabla" dispatching on blob
 # system_type) — same convention Step 6's og_* action routes already
 # established (paso6og_equipo vs. paso6_equipo).
 
@@ -1185,12 +1228,12 @@ def paso7_refrescar(vid):
 def _s7og_render(vid: str, blob: dict, *, refresh_message: str | None = None):
     ctx = og_s7_costs.build_context(blob)
     ctx["refresh_message"] = refresh_message
-    return render_template("wizard/_s7og_costos.html", vid=vid, n=7, **ctx)
+    return render_template("wizard/_s7og_costos.html", vid=vid, n=STEP_COSTOS, **ctx)
 
 
-@bp.route("/<vid>/paso/7/og/tabla", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/og/tabla", methods=["POST"])
 def paso7og_tabla(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1198,9 +1241,9 @@ def paso7og_tabla(vid):
     return _s7og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/og/fila", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/og/fila", methods=["POST"])
 def paso7og_fila(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1208,9 +1251,9 @@ def paso7og_fila(vid):
     return _s7og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/og/fila/quitar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/og/fila/quitar", methods=["POST"])
 def paso7og_fila_quitar(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1218,9 +1261,9 @@ def paso7og_fila_quitar(vid):
     return _s7og_render(vid, blob)
 
 
-@bp.route("/<vid>/paso/7/og/refrescar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_COSTOS}/og/refrescar", methods=["POST"])
 def paso7og_refrescar(vid):
-    guard = _guard(vid, 7)
+    guard = _guard(vid, STEP_COSTOS)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1242,7 +1285,7 @@ def paso7og_refrescar(vid):
 # lock_version(), generate_intro()) is already system-type-agnostic — the
 # actual gz_s8_review.py/og_s8_review.py split is only in which
 # build_context()/generate_intro_text() computes the fragment's numbers, so
-# `_step_module(8, blob)` decides that one thing per request rather than a
+# `_step_module(STEP_REVISION, blob)` decides that one thing per request rather than a
 # second copy of every route existing only to make that same one-line
 # choice. _s8_intro.html/_s8_pdf.html/_s8_lock.html are themselves fully
 # generic (proposal_text/pdf_error/pdf_ready/locked/sent/pid/lock_error —
@@ -1279,30 +1322,30 @@ def _with_ac_coupling_note(text: str, language: str) -> str:
     return (text + "\n\n" + note).strip()
 
 
-@bp.route("/<vid>/paso/8/intro/generar", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_REVISION}/intro/generar", methods=["POST"])
 def paso8_intro_generar(vid):
-    guard = _guard(vid, 8)
+    guard = _guard(vid, STEP_REVISION)
     if guard:
         return guard
     blob = draft.load(vid)
-    module = _step_module(8, blob)
+    module = _step_module(STEP_REVISION, blob)
     text = module.generate_intro_text(blob, vid)
     meta = blob.get("meta") or {}
     if meta.get("system_type") == "hybrid":
         text = _with_ac_coupling_note(text, meta.get("language", "es"))
     blob = draft.patch(vid, "proposal_text", text)
     ctx = module.build_context(blob, vid)
-    return render_template("wizard/_s8_intro.html", vid=vid, n=8, **ctx)
+    return render_template("wizard/_s8_intro.html", vid=vid, n=STEP_REVISION, **ctx)
 
 
-@bp.route("/<vid>/paso/8/pdf", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_REVISION}/pdf", methods=["POST"])
 def paso8_pdf(vid):
     """PLAN §1.8 step 1 — build_from_wizard_blob() -> generate_pdf() ->
     upload_pdf() + save_pdf_path(), via the exact same
     webapp.blueprints.proposals._generate_pdf_bytes() helper Step 2's
     list-page "Generar PDF" route uses, so the two are byte-identical by
     construction rather than by two implementations happening to agree."""
-    guard = _guard(vid, 8)
+    guard = _guard(vid, STEP_REVISION)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1328,22 +1371,22 @@ def paso8_pdf(vid):
     except Exception as exc:
         error = f"Error generando PDF: {exc}"
 
-    ctx = _step_module(8, blob).build_context(blob, vid)
+    ctx = _step_module(STEP_REVISION, blob).build_context(blob, vid)
     ctx["pdf_error"] = error
     ctx["pdf_ready"] = error is None
     ctx["pdf_lang_label"] = lang_label
-    return render_template("wizard/_s8_pdf.html", vid=vid, n=8, **ctx)
+    return render_template("wizard/_s8_pdf.html", vid=vid, n=STEP_REVISION, **ctx)
 
 
-@bp.route("/<vid>/paso/8/pdf/descargar", methods=["GET"])
+@bp.route(f"/<vid>/paso/{STEP_REVISION}/pdf/descargar", methods=["GET"])
 def paso8_pdf_descargar(vid):
     """PLAN §1.8 step 2 — signed URL when a pdf_path already exists
     (reusing webapp.blueprints.proposals._signed_url(), same bucket/TTL as
     the list page), otherwise regenerate + send_file(). Guarded like every
-    other paso/8 route: unreachable once locked, which is fine — the
+    other paso/9 route: unreachable once locked, which is fine — the
     post-lock UI never links here (it links to the list page's own PDF
     affordance instead, built in Step 2)."""
-    guard = _guard(vid, 8)
+    guard = _guard(vid, STEP_REVISION)
     if guard:
         return guard
 
@@ -1373,7 +1416,7 @@ def paso8_pdf_descargar(vid):
     return send_file(BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True, download_name=name)
 
 
-@bp.route("/<vid>/paso/8/bloquear", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_REVISION}/bloquear", methods=["POST"])
 def paso8_bloquear(vid):
     """do-not-drop item 21 — locks the version via
     database.proposals_db.lock_version() (the actual Streamlit-side
@@ -1383,7 +1426,7 @@ def paso8_bloquear(vid):
     onward (redirect to the list) — this route only needs to perform the
     lock itself and hand back the post-lock fragment for the current
     (still-live) page."""
-    guard = _guard(vid, 8)
+    guard = _guard(vid, STEP_REVISION)
     if guard:
         return guard
     blob = draft.load(vid)
@@ -1400,6 +1443,6 @@ def paso8_bloquear(vid):
     except Exception as exc:
         error = f"Error bloqueando versión: {exc}"
 
-    ctx = _step_module(8, blob).build_context(blob, vid)
+    ctx = _step_module(STEP_REVISION, blob).build_context(blob, vid)
     ctx["lock_error"] = error
-    return render_template("wizard/_s8_lock.html", vid=vid, n=8, **ctx)
+    return render_template("wizard/_s8_lock.html", vid=vid, n=STEP_REVISION, **ctx)

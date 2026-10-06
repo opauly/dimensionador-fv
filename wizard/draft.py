@@ -9,7 +9,7 @@ keys that autosave() never writes) this module collapses BOTH tiers into the
 single persisted `proposal_versions.data` blob:
 
     {
-      "meta": {..., "step_reached": int},
+      "meta": {..., "step_reached": int, "wizard_rev": int},   # read via effective_step_reached()
       "client": {...}, "site": {...}, "utility": {...},
       "consumption": {...}, "equipment": {...}, "costs": {...},
       "proposal_text": "...",
@@ -52,6 +52,28 @@ this is safe the day a second concurrent editor is introduced.
 from __future__ import annotations
 
 _SECTIONS = ("meta", "client", "site", "utility", "consumption", "equipment", "costs")
+
+# Wizard step numbering revision. Rev 2 (Phase 24) inserted Objetivos as Step 6, so Equipos/Costos/Revisión moved
+# from 6/7/8 to 7/8/9. `meta.wizard_rev` says which numbering a draft's `meta.step_reached` is written in; a draft
+# without the marker predates the insert and is mapped on read by `effective_step_reached()`. Nothing outside this
+# module should read `meta.step_reached` directly.
+WIZARD_REV = 2
+_LEGACY_STEP_TO_REV2 = {6: 7, 7: 8, 8: 9}
+
+
+def effective_step_reached(meta: dict | None) -> int:
+    """The furthest unlocked step, in the CURRENT (rev 2) numbering.
+
+    A draft stamped `wizard_rev == WIZARD_REV` is trusted as stored. One without the stamp was written under the
+    old 1-8 numbering: steps 1-5 are unchanged, and 6/7/8 (Equipos/Costos/Revisión) become 7/8/9, so an old draft
+    resumes on the same CONTENT it was on rather than silently landing on the new step 6, and can only reach the
+    new Review through Costos. The converted value is persisted (with the stamp) the next time `set_step()` runs,
+    so each old draft is converted exactly once."""
+    meta = meta or {}
+    raw = meta.get("step_reached", 1) or 1
+    if meta.get("wizard_rev") == WIZARD_REV:
+        return raw
+    return _LEGACY_STEP_TO_REV2.get(raw, raw)
 
 
 def _empty_blob() -> dict:
@@ -112,10 +134,11 @@ def patch(version_id: str, section: str, values: dict) -> dict:
 def set_step(version_id: str, n: int) -> None:
     """Write meta.step_reached, monotonically — resuming an earlier,
     already-completed step via the breadcrumb must never lower it (PLAN
-    §1.2: completed steps stay clickable)."""
+    §1.2: completed steps stay clickable). Always writes in the current
+    numbering and stamps `wizard_rev`, converting an old draft in place."""
     blob = load(version_id)
-    current = blob.get("meta", {}).get("step_reached", 0) or 0
-    blob["meta"] = {**blob.get("meta", {}), "step_reached": max(current, n)}
+    current = effective_step_reached(blob.get("meta"))
+    blob["meta"] = {**blob.get("meta", {}), "step_reached": max(current, n), "wizard_rev": WIZARD_REV}
     save(version_id, blob)
 
 

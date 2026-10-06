@@ -47,9 +47,9 @@
               <td>{{ row.kwh_day }}</td>
               <td>
                 <input class="finput" type="number" min="0" max="150" step="1" name="line-{{ loop.index0 }}-fd" value="{{ row.factor_pct }}"
-                       title="Fracción de la potencia instalada de esta línea que se considera simultánea (usada en el Paso 6) — usa 'Recalcular con cambios' para aplicarlo.">
+                       title="Fracción de la potencia instalada de esta línea que se considera simultánea (usada en el Paso 7) — usa 'Recalcular con cambios' para aplicarlo.">
               </td>
-              <td title="kWh/día × Factor demanda — la energía diversificada de esta línea, descontando que no toda la potencia instalada se usa a la vez. {{ 'Esta es la base del dimensionamiento de batería/PV en el Paso 6.' if diversified_used_downstream else 'Informativo por ahora: el total de kWh/día (sin diversificar) sigue siendo la base del dimensionamiento en el Paso 6.' }}">
+              <td title="kWh/día × Factor demanda — la energía diversificada de esta línea, descontando que no toda la potencia instalada se usa a la vez. {{ 'Esta es la base del dimensionamiento de batería/PV en el Paso 7.' if diversified_used_downstream else 'Informativo por ahora: el total de kWh/día (sin diversificar) sigue siendo la base del dimensionamiento en el Paso 7.' }}">
                 {{ row.energy_kwh_day }}
               </td>
               <td><span style="color:{{ row.badge_color }};">{{ row.badge }}</span></td>
@@ -76,7 +76,7 @@
       <div class="card-green">
         <b>Consumo diario total estimado</b><br>
         <span class="card-value">{{ '{:,.2f}'.format(total_kwh_day) }} kWh/día</span><br>
-        <span class="card-note-sm">Diversificado (× factor demanda): {{ '{:,.2f}'.format(total_kwh_day_diversified) }} kWh/día — {{ 'usado en el Paso 6 (batería/PV se dimensionan con esta cifra).' if diversified_used_downstream else 'informativo, no usado en el dimensionamiento aún.' }}</span>
+        <span class="card-note-sm">Diversificado (× factor demanda): {{ '{:,.2f}'.format(total_kwh_day_diversified) }} kWh/día — {{ 'usado en el Paso 7 (batería/PV se dimensionan con esta cifra).' if diversified_used_downstream else 'informativo, no usado en el dimensionamiento aún.' }}</span>
       </div>
     </div>
 

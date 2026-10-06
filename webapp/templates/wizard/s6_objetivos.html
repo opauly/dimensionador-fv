@@ -1,0 +1,18 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+{# Placeholder (Phase 24 Step 2) — replaced by the real Objetivos step in Step 3. `n=n` rather than a literal so the
+   form always posts to whatever number this step has. #}
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=n) }}">
+  <div class="card">
+    <p class="card-note" style="margin:0;"><b>Objetivos de diseño</b> — próximamente.</p>
+    <p class="card-note-sm" style="margin-top:6px;">Aquí se definirán las metas del sistema (autonomía, cobertura, margen del inversor, reducción de kWh…) y se mostrará una recomendación antes de elegir equipos. Por ahora este paso solo continúa.</p>
+  </div>
+
+  {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}">← Atrás</button>
+    <button class="btn" type="submit">Siguiente →</button>
+  </div>
+</form>
+{% endblock %}

@@ -265,15 +265,17 @@ def _detail_ctx(proposal: dict, versions: list[dict], versions_error: str | None
     cur_vid = cur_ver.get("id", "")
     cur_vlocked = cur_ver.get("locked", False)
 
-    # "Continuar" resumes wherever the draft was left — load_draft()'s own
-    # fallback (wizard/state.py) is meta.step_reached, defaulting to 1.
+    # "Continuar" resumes wherever the draft was left. Read through
+    # draft.effective_step_reached() — never the raw meta.step_reached — so a
+    # draft saved under the pre-Objetivos numbering resumes on the same content.
     step_reached = 1
     if cur_vid:
         try:
             from database.proposals_db import get_version
+            from wizard.draft import effective_step_reached
 
             full_v = get_version(cur_vid)
-            step_reached = ((full_v or {}).get("data") or {}).get("meta", {}).get("step_reached", 1)
+            step_reached = effective_step_reached(((full_v or {}).get("data") or {}).get("meta"))
         except Exception:
             pass
 

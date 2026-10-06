@@ -9,13 +9,13 @@
   {% if grid_connected %}
   <hr>
   <h4 class="section-title" style="font-size:15px;">Distribuidora y tarifa</h4>
-  <p class="card-note-sm">Necesaria para estimar la factura eléctrica y la reducción esperada (Paso 6).</p>
+  <p class="card-note-sm">Necesaria para estimar la factura eléctrica y la reducción esperada (Paso 7).</p>
   {% include "wizard/_s4h_utility.html" %}
   {% endif %}
 
   <hr>
   <h4 class="section-title" style="font-size:15px;">Cargas críticas (respaldo)</h4>
-  <p class="card-note-sm">Las cargas que este sistema debe mantener energizadas durante un corte — dimensionan la batería y el arreglo para autonomía real, simulada día por día (Paso 6).</p>
+  <p class="card-note-sm">Las cargas que este sistema debe mantener energizadas durante un corte — dimensionan la batería y el arreglo para autonomía real, simulada día por día (Paso 7).</p>
   {% include "wizard/_s4og_cargas.html" %}
 
   {% if grid_connected %}

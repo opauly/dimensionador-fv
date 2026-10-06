@@ -256,6 +256,173 @@ def replace_goal(goals, **changes):
     return replace(goals, **changes)
 
 
+# ── Step 2: the wizard renumber (Equipos/Costos/Revisión 6/7/8 -> 7/8/9) ─────────────────────────────────
+
+def check_wizard_numbering() -> int:
+    """Offline: the database is replaced by an in-memory store, and step rendering by a marker string, so this tests
+    exactly the routing, guards, progress conversion and lockstep check the renumber touched."""
+    import re
+    from unittest import mock
+
+    from database import proposals_db
+    from webapp import create_app
+    import webapp.blueprints.wizard as wz
+    from wizard import draft
+
+    failures = 0
+
+    def expect(label: str, ok: bool, detail: str = "") -> None:
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  [{detail}]" if detail and not ok else ""))
+        failures += 0 if ok else 1
+
+    store: dict = {}
+
+    def fake_get_version(vid):
+        v = store.get(vid)
+        return None if v is None else {"id": vid, "data": v["data"], "locked": v.get("locked", False)}
+
+    def fake_upsert(vid, blob, total_usd):
+        store[vid]["data"] = json.loads(json.dumps(blob))
+
+    def fake_create_proposal(**kw):
+        store["new1"] = {"data": {}}
+        return {"id": "new1"}
+
+    def mk(meta: dict) -> str:
+        vid = f"d{len(store)}"
+        store[vid] = {"data": {"meta": {"system_type": "off_grid", **meta}, "client": {"name": "x"}}}
+        return vid
+
+    base = "/cotizaciones/asistente"
+    with mock.patch.object(proposals_db, "get_version", fake_get_version), \
+            mock.patch.object(proposals_db, "upsert_version", fake_upsert), \
+            mock.patch.object(proposals_db, "create_proposal", fake_create_proposal), \
+            mock.patch.object(wz, "_get_version", fake_get_version), \
+            mock.patch.object(wz, "_render_step", lambda vid, n, blob, **kw: (f"RENDER {n}", 200)), \
+            mock.patch("webapp.wizard_steps.s1_client.resolve_client", lambda r: r):
+        client = create_app().test_client()
+
+        def get(path):
+            return client.get(path, follow_redirects=False)
+
+        def target(resp) -> str:
+            return resp.headers.get("Location", "").rsplit("/paso/", 1)[-1]
+
+        # ── effective_step_reached(): the one place that interprets the stored integer ──
+        eff = draft.effective_step_reached
+        expect("old drafts (no marker): 1-5 unchanged, 6/7/8 -> 7/8/9",
+               [eff({"step_reached": r}) for r in range(1, 9)] == [1, 2, 3, 4, 5, 7, 8, 9])
+        expect("marked drafts are trusted as stored; missing meta defaults to 1",
+               eff({"step_reached": 6, "wizard_rev": 2}) == 6 and eff({"step_reached": 9, "wizard_rev": 2}) == 9
+               and eff(None) == 1 and eff({}) == 1)
+
+        # ── guard on a draft saved under the OLD numbering ──
+        max_allowed = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 8, 7: 9, 8: 9}   # highest step each old draft may open now
+        resume_on = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 7, 7: 8, 8: 9}      # where its redirect sends a too-far request
+        bad = []
+        for r in range(1, 9):
+            vid = mk({"step_reached": r})
+            for n in range(1, 10):
+                resp = get(f"{base}/{vid}/paso/{n}")
+                if n <= max_allowed[r]:
+                    if resp.status_code != 200:
+                        bad.append(f"old r={r} step {n} should open, got {resp.status_code}")
+                elif not (resp.status_code == 303 and target(resp) == str(resume_on[r])):
+                    bad.append(f"old r={r} step {n} should redirect to {resume_on[r]}, got {resp.status_code} {target(resp)}")
+        expect("every old draft (saved at 1-8): opens exactly what it could before, shifted; too-far requests land on its own content", not bad, "; ".join(bad[:3]))
+
+        old7 = mk({"step_reached": 7})
+        expect("old draft at Costos (7) is on new Costos (8) and may open Review (9)",
+               get(f"{base}/{old7}/paso/9").status_code == 200 and target(get(f"{base}/{old7}/abrir")) == "8")
+        old5 = mk({"step_reached": 5})
+        expect("old draft at step 5 must pass through Objetivos: it can open 6 but not Equipos (7)",
+               get(f"{base}/{old5}/paso/6").status_code == 200 and get(f"{base}/{old5}/paso/7").status_code == 303)
+        newd = mk({"step_reached": 6, "wizard_rev": 2})
+        expect("marked draft at Objetivos (6) may open 7 but not 8", get(f"{base}/{newd}/paso/7").status_code == 200
+               and get(f"{base}/{newd}/paso/8").status_code == 303)
+        expect("abrir resumes on the effective step (marked 6 -> 6)", target(get(f"{base}/{newd}/abrir")) == "6")
+
+        # ── placeholder Objetivos: advances, converts, never lowers ──
+        d = mk({"step_reached": 6, "wizard_rev": 2})
+        resp = client.post(f"{base}/{d}/paso/6")
+        meta = store[d]["data"]["meta"]
+        expect("Objetivos placeholder POST advances to Equipos (7) and records it",
+               resp.status_code == 303 and target(resp) == "7" and meta["step_reached"] == 7)
+        d = mk({"step_reached": 5})
+        client.post(f"{base}/{d}/paso/6")
+        meta = store[d]["data"]["meta"]
+        expect("an old draft at 5 is converted on first save (step 7, wizard_rev 2)", meta["step_reached"] == 7 and meta["wizard_rev"] == 2)
+        d = mk({"step_reached": 7})
+        client.post(f"{base}/{d}/paso/6")
+        meta = store[d]["data"]["meta"]
+        expect("revisiting Objetivos on an old Costos draft converts it to 8 and never lowers it", meta["step_reached"] == 8 and meta["wizard_rev"] == 2)
+        d = mk({"step_reached": 7, "wizard_rev": 2})
+        resp = client.post(f"{base}/{d}/paso/7/atras")
+        expect("Atrás from Equipos (7) goes to Objetivos (6)", resp.status_code == 303 and target(resp) == "6")
+
+        # ── nueva stamps new drafts ──
+        resp = client.post(f"{base}/nueva", data={"name": "Cliente QA"})
+        meta = store.get("new1", {}).get("data", {}).get("meta", {})
+        expect("a new draft is stamped wizard_rev 2 at step 2", resp.status_code == 303 and meta.get("wizard_rev") == 2 and meta.get("step_reached") == 2)
+
+        # ── routes: every former Equipos/Costos/Revisión route moved, none left behind, each guard matches ──
+        rules = [(r.rule, r.methods) for r in create_app().url_map.iter_rules() if "/paso/" in r.rule]
+        literal = [(rule, m) for rule, m in rules if re.search(r"/paso/\d+/", rule)]
+        numbers = {int(re.search(r"/paso/(\d+)/", rule).group(1)) for rule, _ in literal}
+        paths = {rule for rule, _ in literal}
+        expect("action routes exist at the new numbers",
+               {f"{base}/<vid>/paso/7/equipo", f"{base}/<vid>/paso/7/og/manual", f"{base}/<vid>/paso/8/tabla",
+                f"{base}/<vid>/paso/8/og/refrescar", f"{base}/<vid>/paso/9/bloquear", f"{base}/<vid>/paso/9/pdf/descargar"} <= paths)
+        expect("no action route is left at an old number (6, or 7/8 for the old Costos/Revisión paths)",
+               not ({f"{base}/<vid>/paso/6/equipo", f"{base}/<vid>/paso/7/tabla", f"{base}/<vid>/paso/8/bloquear",
+                     f"{base}/<vid>/paso/8/pdf"} & paths) and 6 not in numbers)
+        bad, guarded = [], 0
+        for rule, methods in sorted(literal):
+            n = int(re.search(r"/paso/(\d+)/", rule).group(1))
+            if n < 7:
+                continue
+            guarded += 1
+            vid = mk({"step_reached": n - 2, "wizard_rev": 2})
+            path = re.sub(r"<[^>]+>", "A", rule.replace("<vid>", vid))
+            resp = client.post(path) if "POST" in methods else get(path)
+            if not (resp.status_code == 303 and target(resp) == str(n - 2)):
+                bad.append(f"{rule} -> {resp.status_code} {target(resp)}")
+        expect(f"all {guarded} routes at steps 7-9 reject a request one step too far (guard number matches the path)",
+               guarded == 21 and not bad, "; ".join(bad[:3]) or f"expected 21 routes (Equipos 5+4, Costos 4+4, Revisión 4), found {guarded}")
+
+        # ── lockstep check fails loudly ──
+        saved = wz.STEP_MODULES.pop(wz.STEP_OBJETIVOS)
+        try:
+            wz._check_step_tables()
+            raised = False
+        except AssertionError:
+            raised = True
+        finally:
+            wz.STEP_MODULES[wz.STEP_OBJETIVOS] = saved
+        expect("lockstep check raises when a step is missing from STEP_MODULES", raised)
+        wz.step_common.STEP_LABELS_OFF_GRID.append("Extra")
+        try:
+            wz._check_step_tables()
+            raised = False
+        except AssertionError:
+            raised = True
+        finally:
+            wz.step_common.STEP_LABELS_OFF_GRID.pop()
+        expect("lockstep check raises when a label has no step behind it", raised)
+        wz._check_step_tables()
+        expect("lockstep check passes on the real tables", True)
+
+    # ── nothing reads the raw stored integer any more ──
+    raw = []
+    for path in sorted((ROOT / "webapp").rglob("*.py")):
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"""get\(["']step_reached["']""", line):
+                raw.append(f"{path.relative_to(ROOT)}:{i}")
+    expect("no code under webapp/ reads meta.step_reached directly (all go through effective_step_reached)", not raw, ", ".join(raw))
+    return failures
+
+
 def main() -> int:
     if "--capture" in sys.argv:
         capture()
@@ -264,6 +431,8 @@ def main() -> int:
     failures = check_golden()
     print("Targets — equipment-free sizing functions")
     failures += check_targets()
+    print("Step 2 — wizard renumber")
+    failures += check_wizard_numbering()
     print("\nALL PASSED" if failures == 0 else f"\n{failures} FAILED")
     return 1 if failures else 0
 
