@@ -149,20 +149,25 @@ fixed presets, so a customised goal can never put the sweet spot outside its own
 met; above the Techo you are over-building". Formulas are the ones in `generate_design_scenarios*()`, minus the "fit to the
 chosen equipment" part:
 
-- **Off-Grid** — PV kWp = daily kWh × PV factor ÷ daily specific yield (average or worst month, per goal; PVGIS losses already
-  baked in, no extra derating) · battery nominal kWh = daily kWh × autonomy days ÷ (usable window × round-trip η × inverter η),
-  usable window = 100 − reserve SoC · inverter kW = peak demand × (1 + growth peak) ÷ loading ceiling.
+- **Off-Grid** — PV kWp = daily kWh × PV factor ÷ (**annual-average** daily yield × healthy-array PR 0.88) — the factors were
+  measured that way, so the solar-resource basis (average / worst month) is an adequacy *gate*, not the sizing basis ·
+  battery nominal kWh = daily kWh × autonomy days ÷ (usable window × round-trip η 0.95 × inverter η 0.96), usable window =
+  min(100 − reserve SoC, **reference DoD 80%**) · inverter kW = peak demand ÷ loading ceiling. Growth is *not* folded into the
+  equipment size — consistent with the calibrated generators it is reported as expansion readiness.
+  *(Corrected 2026-10-06 against the code: the first draft had the worst-month basis, no PR, and a growth-inflated inverter.)*
 - **Hybrid** — battery from backup/cycling nights × night-load basis; PV from the coverage target × healthy-array PR; inverter from
   the islanded loading ceiling — as `generate_design_scenarios_hybrid()`.
-- **Grid Zero (new — no existing function)** — smallest kWp whose annual-average monthly **kWh reduction** meets the goal under the
-  zero-export rule: each month's useful generation is capped by that month's daytime consumption (monthly kWh × the daytime
-  fraction, computed on first view of Objetivos and cached, Q6); reduction % = Σ useful generation ÷ Σ monthly consumption.
-  Inverter kW = kWp ÷ max DC/AC ratio. No tariff is involved. If the goal exceeds what daytime consumption can absorb without
+- **Grid Zero (new — no existing function)** — smallest kWp whose **kWh reduction** meets the goal under the **same average-month
+  zero-export model Step 6 already uses** (`gen = kWp × average monthly kWh/kWp`; useful = min(gen, average monthly kWh ×
+  daytime fraction)), so the sweet spot and Step 6's numbers can never diverge. kWp = goal % × average monthly kWh ÷ average
+  monthly kWh/kWp; the attainable ceiling is simply the daytime fraction. The daytime fraction is computed on first view of
+  Objetivos and cached (Q6). Inverter kW = kWp ÷ max DC/AC ratio. No tariff is involved. If the goal exceeds what daytime consumption can absorb without
   storage, the block says so ("techo alcanzable sin baterías: X %") instead of returning an impossible kWp — and the step will
   not confirm such a goal without the user acknowledging it (§1.8).
 
-Each figure is displayed as "target ≈ N" with the assumption it rests on visible beside it (e.g. "cobertura 3.25× · peor mes").
-Battery capacity is shown as nominal kWh *assuming only the reserve window* — the chemistry's DoD cap is applied in the check.
+Each figure is displayed as "target ≈ N" with the assumption it rests on visible beside it (e.g. "cobertura 3.25×"). The
+chemistry's real depth of discharge is unknown before equipment is chosen, so the battery figure assumes the generators' own
+**80% reference DoD**, stated beside the number; the actual rating is applied in the check strip.
 
 ### 1.3 One set of formulas
 
@@ -288,7 +293,14 @@ Oscar's rule: the app does not let a draft go into the next step without proper 
 
 ## 2. Build steps
 
-**Step 1 — Formula core + goal defaults (no UI).**
+**Step 1 — Formula core + goal defaults (no UI). — ✅ done and verified 2026-10-06** (`calculations/design_targets.py`; the two
+generators now call its shared formulas. Golden outputs captured from the **pre-refactor** generators on 8 fixtures — three
+Off-Grid, three Hybrid and a custom tier each, spanning both meets-limits and misses-limits outcomes — are byte-identical after the
+lift (`python -m scripts.validate_phase24`, offline); a mutation check confirmed the golden comparison fails when a lifted formula is
+altered. 32 hand-derived checks cover the targets, the bands, Grid Zero's ceiling/cap behaviour and goal validation. Provisional
+values flagged in the code for confirmation when the form is built: the per-field `GOAL_RANGES`, Grid Zero's pre-fill rule and its
+±10-point band spacing — Grid Zero has no calibrated tiers to read them from.)
+*Original scope:*
 *Build:* `calculations/design_targets.py` — the lifted Off-Grid and Hybrid formulas, the new Grid Zero target function, and goal-default
 loaders reading the calibrated tiers; the existing `generate_design_scenarios*()` rewired to call the shared functions.
 *Validate:* golden test — `generate_design_scenarios*()` output identical before and after for a fixed set of fixtures (including

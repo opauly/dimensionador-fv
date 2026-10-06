@@ -1183,13 +1183,14 @@ def generate_design_scenarios(
     static input, a derived design number, or a pass/fail against this
     tier's own policy ceiling.
     """
+    from calculations import design_targets as dt
     from calculations.mppt import find_array_for_target_kw
 
     defs = tiers or _OFF_GRID_DESIGN_TIERS
-    daily_yields = _monthly_to_daily_specific_yield(monthly_kwh_kwp)
-    avg_daily_yield = sum(daily_yields) / len(daily_yields)
-    worst_month_idx = min(range(len(daily_yields)), key=lambda i: daily_yields[i])
-    worst_daily_yield = daily_yields[worst_month_idx]
+    ys = dt.daily_yield_stats(monthly_kwh_kwp)
+    avg_daily_yield = ys.avg_daily_yield
+    worst_month_idx = ys.worst_month_idx
+    worst_daily_yield = ys.worst_daily_yield
 
     battery_dod_pct = float(battery.get("dod_pct") or 80)
     battery_capacity_kwh = float(battery["capacity_kwh"])
@@ -1199,10 +1200,8 @@ def generate_design_scenarios(
     for tier in defs:
         # ── 1. Battery ──────────────────────────────────────────────────
         dod_usable_pct = min(100.0 - tier.reserve_soc_pct, battery_dod_pct)
-        usable_kwh_needed = daily_kwh_consumption * tier.autonomy_days
-        nominal_kwh_needed = usable_kwh_needed / (
-            (dod_usable_pct / 100.0) * battery_round_trip_eff * inverter_eff
-        )
+        usable_kwh_needed, nominal_kwh_needed = dt.offgrid_battery_nominal_kwh(
+            daily_kwh_consumption, tier.autonomy_days, dod_usable_pct, battery_round_trip_eff, inverter_eff)
         battery_count = max(1, math.ceil(nominal_kwh_needed / battery_capacity_kwh))
         total_kwh_installed = round(battery_count * battery_capacity_kwh, 2)
         battery_bank = {
@@ -1224,10 +1223,8 @@ def generate_design_scenarios(
         # Worst month is still checked below, but as an adequacy GATE (does
         # the weakest month still cover daily consumption?) rather than as the
         # sizing basis.
-        target_daily_kwh = daily_kwh_consumption * tier.pv_design_factor
-        deliverable_per_kw = avg_daily_yield * _HEALTHY_ARRAY_PR
-        target_system_kw = (target_daily_kwh / deliverable_per_kw
-                            if deliverable_per_kw > 0 else 0.0)
+        target_daily_kwh, deliverable_per_kw, target_system_kw = dt.pv_sizing(
+            daily_kwh_consumption, tier.pv_design_factor, avg_daily_yield)
 
         array = find_array_for_target_kw(panel, charge_controller, target_system_kw, max_cc=max_cc)
         if array is None:
@@ -1270,10 +1267,8 @@ def generate_design_scenarios(
         available_kw = inverter_kw * inverter_qty
         loading_pct = round(peak_demand_kw / available_kw * 100, 1) if available_kw > 0 else None
         within_inverter_target = loading_pct is not None and loading_pct <= tier.inverter_loading_target_pct
-        inverter_qty_recommended = (
-            math.ceil(peak_demand_kw / (inverter_kw * tier.inverter_loading_target_pct / 100.0))
-            if inverter_kw > 0 else None
-        )
+        inverter_qty_recommended = dt.inverter_qty_recommended(
+            peak_demand_kw, inverter_kw, tier.inverter_loading_target_pct)
         inverter_check = {
             "inverter_qty": inverter_qty,
             "available_kw": round(available_kw, 2),
@@ -1399,13 +1394,14 @@ def generate_design_scenarios_hybrid(
     selection UI that doesn't exist yet; tracked as a follow-up, not silently
     approximated here.
     """
+    from calculations import design_targets as dt
     from calculations.mppt import find_array_for_target_kw
 
     defs = tiers or _HYBRID_DESIGN_TIERS
-    daily_yields = _monthly_to_daily_specific_yield(monthly_kwh_kwp)
-    avg_daily_yield = sum(daily_yields) / len(daily_yields)
-    worst_month_idx = min(range(len(daily_yields)), key=lambda i: daily_yields[i])
-    worst_daily_yield = daily_yields[worst_month_idx]
+    ys = dt.daily_yield_stats(monthly_kwh_kwp)
+    avg_daily_yield = ys.avg_daily_yield
+    worst_month_idx = ys.worst_month_idx
+    worst_daily_yield = ys.worst_daily_yield
 
     battery_dod_pct = float(battery.get("dod_pct") or 80)
     battery_capacity_kwh = float(battery["capacity_kwh"])
@@ -1413,14 +1409,10 @@ def generate_design_scenarios_hybrid(
     abs_floor_pct = 100.0 - battery_dod_pct
 
     if shiftable_daily_kwh is None:
-        non_critical_daily_kwh = max(0.0, whole_home_daily_kwh - critical_daily_kwh)
-        shiftable_daily_kwh = non_critical_daily_kwh * (1.0 - daytime_fraction)
+        shiftable_daily_kwh = dt.hybrid_shiftable_kwh(whole_home_daily_kwh, critical_daily_kwh, daytime_fraction)
 
-    night_frac = (_NIGHT_LOAD_FRACTION_DEFAULT if night_load_fraction is None
-                  else float(night_load_fraction))
-    night_frac = min(max(night_frac, 0.05), 0.95)
     # One night of the backed-up load — the real backup design case.
-    critical_night_kwh = critical_daily_kwh * night_frac
+    night_frac, critical_night_kwh = dt.hybrid_night_load(critical_daily_kwh, night_load_fraction)
 
     results = []
     prev_battery_count = 0
@@ -1443,29 +1435,25 @@ def generate_design_scenarios_hybrid(
         backup_usable_pct = float(battery_dod_pct)
         # Daily cycling happens above the reserve line — that window is what
         # has to absorb the shiftable load without touching the reserve.
-        self_consumption_usable_pct = max(0.0, 100.0 - tier.reserve_soc_pct)
-
-        energy_critical_during_outage = critical_night_kwh * tier.backup_nights
+        # The two layer formulas live in design_targets.hybrid_battery_layers()
+        # (shared with the equipment-free target block, Phase 24 plan §1.3).
         eff = battery_round_trip_eff * inverter_eff
-
-        backup_infeasible = backup_usable_pct <= 0.0
-        c_backup = (
-            energy_critical_during_outage / ((backup_usable_pct / 100.0) * eff)
-            if not backup_infeasible else None
-        )
+        layers = dt.hybrid_battery_layers(
+            critical_night_kwh, shiftable_daily_kwh, backup_nights=tier.backup_nights,
+            cycling_nights=tier.cycling_nights, reserve_soc_pct=tier.reserve_soc_pct,
+            backup_usable_pct=backup_usable_pct, battery_round_trip_eff=battery_round_trip_eff,
+            inverter_eff=inverter_eff)
+        self_consumption_usable_pct = layers["self_consumption_usable_pct"]
+        backup_infeasible = layers["backup_infeasible"]
+        c_backup = layers.get("c_backup")
         # The nightly cycling layer serves the WHOLE backed-up night, not just
         # the non-critical shiftable part: with the grid present the critical
         # loads still draw from the battery overnight. Sizing this off
         # shiftable_daily_kwh alone under-counted the real nightly draw.
-        served_night_kwh = critical_night_kwh + shiftable_daily_kwh
-        c_daily_shift = (
-            (tier.cycling_nights * served_night_kwh)
-            / ((self_consumption_usable_pct / 100.0) * eff)
-            if self_consumption_usable_pct > 0 else None
-        )
+        served_night_kwh = layers["served_night_kwh"]
+        c_daily_shift = layers.get("c_daily_shift")
 
-        candidates = [c for c in (c_backup, c_daily_shift) if c is not None]
-        if not candidates:
+        if layers["c_selected_nominal"] is None:
             results.append({
                 "scenario": tier.key,
                 "label": tier.label,
@@ -1473,8 +1461,8 @@ def generate_design_scenarios_hybrid(
             })
             continue
 
-        c_selected_nominal = max(candidates)
-        driven_by = "backup" if c_backup is not None and c_backup >= (c_daily_shift or 0) else "daily_shift"
+        c_selected_nominal = layers["c_selected_nominal"]
+        driven_by = layers["driven_by"]
         battery_count = max(1, math.ceil(c_selected_nominal / battery_capacity_kwh))
         total_kwh_installed = round(battery_count * battery_capacity_kwh, 2)
         # A lower tier's thinner reserve_soc_pct eats into backup_usable_pct's
@@ -1515,10 +1503,8 @@ def generate_design_scenarios_hybrid(
         # (critical + shiftable), converted to kW through the healthy-array PR
         # rather than assuming the array delivers PVGIS in full.
         baseline_daily_kwh = critical_daily_kwh + shiftable_daily_kwh
-        target_daily_kwh = baseline_daily_kwh * tier.pv_coverage
-        deliverable_per_kw = avg_daily_yield * _HEALTHY_ARRAY_PR
-        target_system_kw = (target_daily_kwh / deliverable_per_kw
-                            if deliverable_per_kw > 0 else 0.0)
+        target_daily_kwh, deliverable_per_kw, target_system_kw = dt.pv_sizing(
+            baseline_daily_kwh, tier.pv_coverage, avg_daily_yield)
 
         array = find_array_for_target_kw(panel, charge_controller, target_system_kw, max_cc=max_cc)
         if array is None:
@@ -1590,10 +1576,8 @@ def generate_design_scenarios_hybrid(
             islanded_loading_pct is not None
             and islanded_loading_pct <= tier.inverter_islanded_loading_target_pct
         )
-        islanded_qty_recommended = (
-            math.ceil(critical_peak_kw / (inverter_kw * tier.inverter_islanded_loading_target_pct / 100.0))
-            if inverter_kw > 0 else None
-        )
+        islanded_qty_recommended = dt.inverter_qty_recommended(
+            critical_peak_kw, inverter_kw, tier.inverter_islanded_loading_target_pct)
 
         rated_passthrough_a = inverter.get("ac_input_current_max_a")
         grid_connected_check = {"validated": False}
