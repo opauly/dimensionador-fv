@@ -11,7 +11,7 @@ single persisted `proposal_versions.data` blob:
     {
       "meta": {..., "step_reached": int, "wizard_rev": int},   # read via effective_step_reached()
       "client": {...}, "site": {...}, "utility": {...},
-      "consumption": {...}, "equipment": {...}, "costs": {...},
+      "consumption": {...}, "equipment": {...}, "costs": {...}, "objectives": {...},
       "proposal_text": "...",
       "scratch": {"s5": {...}, "s6": {...}, ...},   # Flask-only, see below
     }
@@ -51,7 +51,9 @@ this is safe the day a second concurrent editor is introduced.
 """
 from __future__ import annotations
 
-_SECTIONS = ("meta", "client", "site", "utility", "consumption", "equipment", "costs")
+_SECTIONS = ("meta", "client", "site", "utility", "consumption", "equipment", "costs", "objectives")
+# "objectives" (Phase 24) is an additive eighth section: the design goals confirmed in the Objetivos step. Nothing
+# else reads it (proposals/generator.py only reads the original seven), so goals never reach the client PDF.
 
 # Wizard step numbering revision. Rev 2 (Phase 24) inserted Objetivos as Step 6, so Equipos/Costos/Revisión moved
 # from 6/7/8 to 7/8/9. `meta.wizard_rev` says which numbering a draft's `meta.step_reached` is written in; a draft

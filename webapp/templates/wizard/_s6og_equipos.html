@@ -244,7 +244,7 @@
           {% if c.inverter_growth_added %}<span style="color:#1d4ed8;">🔌➕ Inversores duplicados — carga actual usa el {{ '%.0f'|format(c.inverter_load_ratio_pct) }}% de un solo juego, sin margen para crecer</span><br>{% endif %}
         </div>
         {% if c.bank.driven_by == "autonomy_floor" %}
-          <div class="s6og-note">ℹ️ Banco dimensionado por los días de autonomía (Paso 4), no por el SoC objetivo — la autonomía configurada exige más batería que el objetivo de este escenario.</div>
+          <div class="s6og-note">ℹ️ Banco dimensionado por los días de autonomía (Paso 6, Objetivos), no por el SoC objetivo — la autonomía configurada exige más batería que el objetivo de este escenario.</div>
         {% endif %}
         {% if c.bank.unmet_load_days == 0 and c.bank.longest_low_soc_streak_days > 5 %}
           <div class="s6og-note">ℹ️ Hasta {{ c.bank.longest_low_soc_streak_days }} días seguidos por debajo del SoC objetivo en el año simulado — no implica falla, pero es ciclado más profundo/prolongado de lo ideal.</div>

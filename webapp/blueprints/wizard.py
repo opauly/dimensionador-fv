@@ -186,6 +186,10 @@ def _guard(vid: str, n: int):
     step_reached = draft.effective_step_reached(blob.get("meta"))
     if n > step_reached + 1:
         return redirect(url_for("wizard.paso", vid=vid, n=step_reached), code=303)
+    # Objetivos is mandatory (plan §1.8): Equipos and everything after stay closed — every page and every htmx
+    # action route, including a direct URL — until the goals are confirmed (or the draft predates objectives).
+    if n >= STEP_EQUIPOS and not s6_objetivos.is_ready(blob):
+        return redirect(url_for("wizard.paso", vid=vid, n=STEP_OBJETIVOS), code=303)
     return None
 
 
@@ -202,7 +206,7 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
     # quote-number/pdf_path live on the proposal_versions ROW; og_s6_equipment:
     # the lazy daily-PVGIS-series backfill needs `vid` to persist what it
     # fetches). Every other step's build_context() is blob-only.
-    if module in (gz_s8_review, og_s6_equipment, og_s8_review):
+    if module in (gz_s8_review, og_s6_equipment, og_s8_review, s6_objetivos):
         ctx = module.build_context(blob, vid)
     else:
         ctx = module.build_context(blob)
@@ -398,9 +402,15 @@ def paso_post(vid, n):
             return _render_step(vid, n, blob)
 
     elif n == STEP_OBJETIVOS:
-        # Placeholder step (Phase 24 Step 2): nothing to persist and no gate yet — falls through to the generic
-        # set_step(n + 1) + redirect below. The real step and its gate arrive in Step 3.
-        pass
+        # Always persist what was typed (so nothing is lost on an error); advance only when the goals are confirmed.
+        objectives, errors = s6_objetivos.save_step(blob, request.form, vid)
+        blob = draft.patch(vid, "objectives", objectives)
+        if errors:
+            return _render_step(vid, n, blob, error="Corrige los objetivos para continuar: " + "; ".join(
+                e.split(":", 1)[-1].strip() for e in errors))
+        mirror = s6_objetivos.mirror_consumption(objectives)
+        if mirror:
+            blob = draft.patch(vid, "consumption", mirror)
 
     elif n == STEP_EQUIPOS and _step_module(n, blob) is gz_s6_equipment:
         # Do-not-drop item 15's server-side half: save_step() returns None
@@ -459,6 +469,8 @@ def paso_atras(vid, n):
         draft.patch(vid, "meta", values)
     elif n == 3:
         draft.patch(vid, "site", s3_site.save_step(request.form))
+    elif n == STEP_OBJETIVOS:
+        draft.patch(vid, "objectives", s6_objetivos.recalc(blob, request.form, vid))
     elif n == 4 and _step_module(n, blob) is gz_s4_utility:
         draft.patch(vid, "utility", gz_s4_utility.save_step(request.form))
     elif n == 4 and _step_module(n, blob) is og_s4_loads:
@@ -1159,6 +1171,25 @@ def paso6og_manual_validar(vid):
     blob = draft.load(vid)
     blob = _s6og_patch(vid, og_s6_equipment.validate_manual(blob, request.form))
     return _s6og_render(vid, blob)
+
+
+# ── Step 6 (Objetivos) live recompute — one route for every system type ──────
+
+
+def _s6_obj_render(vid: str, blob: dict):
+    ctx = s6_objetivos.build_context(blob, vid)
+    ctx.setdefault("error", None)
+    return render_template("wizard/_s6_objetivos.html", vid=vid, n=STEP_OBJETIVOS, **ctx)
+
+
+@bp.route(f"/<vid>/paso/{STEP_OBJETIVOS}/recalcular", methods=["POST"])
+def paso6_objetivos_recalcular(vid):
+    guard = _guard(vid, STEP_OBJETIVOS)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = draft.patch(vid, "objectives", s6_objetivos.recalc(blob, request.form, vid))
+    return _s6_obj_render(vid, blob)
 
 
 # ── Step 7 (Grid Zero) actions — row edit, +Fila, quitar fila, Refrescar

@@ -216,12 +216,13 @@ def save_step(form) -> dict:
     rows = parse_rows(form, "row", _ROW_FIELDS)
     loads_display = _rows_to_display(rows)
 
-    autonomy_days = to_float(form.get("autonomy_days"), 1.0) or 1.0
-    autonomy_days = min(7.0, max(0.5, round(autonomy_days * 2) / 2))
+    # `autonomy_days` is no longer entered here (Phase 24: Objetivos, Step 6, is the only place design goals are
+    # set). It is deliberately absent from this dict: draft.patch() shallow-merges, so a draft saved before the
+    # move keeps the value it already has, and Objetivos writes the confirmed goal back to `consumption` for the
+    # unchanged Equipos step to read.
     voltage_v = 240 if form.get("voltage") == "240" else 120
 
     return {
-        "autonomy_days": float(autonomy_days),
         "voltage_v": voltage_v,
         "loads_display": loads_display,   # keeps the Categoría column round-trippable (do-not-drop item 9)
         "loads": _loads_to_taxonomy_list(loads_display),
@@ -236,12 +237,10 @@ def build_context(blob: dict, scratch_key: str = DEFAULT_SCRATCH_KEY) -> dict:
     consumption = blob.get("consumption") or {}
 
     loads_data = _current_loads_display(blob, scratch_key)
-    autonomy_days = float(consumption.get("autonomy_days") or 1.0)
     voltage_v = consumption.get("voltage_v") or 120
 
     return {
         "scratch_key": scratch_key,
-        "autonomy_days": autonomy_days,
         "voltage_v": voltage_v,
         "catalog_options": list(CATALOG_OPTIONS.keys()),
         "category_options": CATEGORY_SELECT_OPTIONS,

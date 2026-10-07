@@ -1,0 +1,146 @@
+{# Objetivos (Phase 24 Step 3). Root id must stay "s6-obj": every change re-renders this WHOLE fragment from a fresh
+   s6_objetivos.build_context() call (same live-recompute pattern as Costos), so the goal fields, the sweet-spot
+   block and the Siguiente state can never drift apart. The nav buttons live inside the fragment on purpose — their
+   disabled state has to follow the goals. #}
+<div id="s6-obj"
+     hx-post="{{ url_for('wizard.paso6_objetivos_recalcular', vid=vid) }}" hx-trigger="change delay:400ms"
+     hx-include="#s6-obj input, #s6-obj select" hx-target="#s6-obj" hx-swap="outerHTML">
+<style>
+.obj-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px 18px; margin:12px 0; }
+.obj-field .flabel { margin-bottom:3px; }
+.obj-field .obj-input { display:flex; align-items:center; gap:6px; }
+.obj-field .obj-input input, .obj-field .obj-input select { max-width:150px; }
+.obj-unit { font-size:0.78rem; color:#6b7280; }
+.obj-help { font-size:0.72rem; color:#9ca3af; margin-top:2px; line-height:1.3; }
+.obj-err { font-size:0.74rem; color:#b84345; margin-top:2px; }
+.obj-presets { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+.obj-presets .btn.active { background:var(--navy); color:#fff; }
+.obj-spot { margin-top:16px; }
+.obj-spot table { border-collapse:collapse; width:100%; font-size:0.9rem; }
+.obj-spot th { text-align:right; font-size:0.74rem; text-transform:uppercase; letter-spacing:0.04em; color:#6b7280; padding:6px 12px; border-bottom:2px solid #e5e7eb; }
+.obj-spot th:first-child, .obj-spot td:first-child { text-align:left; }
+.obj-spot td { padding:8px 12px; border-bottom:1px solid #eef0f3; text-align:right; white-space:nowrap; }
+.obj-spot td.mid { font-weight:700; color:#166534; background:#f0fdf4; }
+.obj-spot .u { color:#9ca3af; font-size:0.78rem; margin-left:3px; }
+.obj-note { font-size:0.78rem; color:#6b7280; margin:3px 0; }
+.obj-warn { font-size:0.82rem; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:7px 10px; margin:10px 0; }
+.obj-ok { font-size:0.8rem; color:#166534; }
+</style>
+
+<p class="card-note" style="margin:0 0 4px;"><b>Objetivos de diseño</b></p>
+<p class="card-note-sm" style="margin:0 0 6px;">
+  Define qué debe lograr el sistema. Abajo verás una recomendación sin equipo elegido (el «punto óptimo» para estas metas y estas
+  cargas, con un piso y un techo); en el paso de Equipos se compara lo que elijas contra ella. Este paso es obligatorio.
+</p>
+
+{% if from_default and not confirmed %}
+  <div class="obj-warn">Se muestran los objetivos sugeridos por defecto. Confírmalos o ajústalos para continuar.</div>
+{% endif %}
+
+{% if presets %}
+<div class="obj-presets">
+  <span class="obj-unit">Punto de partida:</span>
+  {% for p in presets %}
+    <button type="button" class="btn btn-outline {{ 'active' if p.active else '' }}"
+            hx-post="{{ url_for('wizard.paso6_objetivos_recalcular', vid=vid) }}" hx-vals='{"apply_preset": "{{ p.key }}"}'
+            hx-include="#s6-obj input, #s6-obj select" hx-target="#s6-obj" hx-swap="outerHTML">{{ p.label }}</button>
+  {% endfor %}
+  {% if preset == 'personalizado' %}<span class="obj-unit">· Personalizado</span>{% endif %}
+</div>
+{% elif system_type == 'grid_zero' %}
+<div class="obj-presets">
+  <button type="button" class="btn btn-outline"
+          hx-post="{{ url_for('wizard.paso6_objetivos_recalcular', vid=vid) }}" hx-vals='{"apply_preset": "sugerido"}'
+          hx-include="#s6-obj input, #s6-obj select" hx-target="#s6-obj" hx-swap="outerHTML">Restablecer el valor sugerido</button>
+</div>
+{% endif %}
+
+<div class="obj-grid">
+  {% for f in fields %}
+  <div class="obj-field">
+    <label class="flabel">{{ f.label }}</label>
+    <div class="obj-input">
+      {% if f.kind == 'select' %}
+        <select class="finput" name="g_{{ f.name }}">
+          {% for val, label in f.options %}<option value="{{ val }}" {{ 'selected' if val == f.value else '' }}>{{ label }}</option>{% endfor %}
+        </select>
+      {% else %}
+        <input class="finput" type="number" name="g_{{ f.name }}" step="{{ f.step }}"
+               {% if f.min is not none %}min="{{ f.min }}"{% endif %} {% if f.max is not none %}max="{{ f.max }}"{% endif %}
+               value="{{ f.value if f.value is not none else '' }}" {{ 'placeholder=—' if f.optional else '' }}>
+      {% endif %}
+      <span class="obj-unit">{{ f.unit }}</span>
+    </div>
+    {% if f.error %}<div class="obj-err">{{ f.error }}</div>{% endif %}
+    {% if f.help %}<div class="obj-help">{{ f.help }}</div>{% endif %}
+  </div>
+  {% endfor %}
+
+  {% if system_type == 'hybrid' %}
+  <div class="obj-field">
+    <label class="flabel">Carga nocturna (18:00–06:00)</label>
+    <div class="obj-input">
+      <input class="finput" type="number" name="a_night_load_pct" step="5" min="5" max="95" value="{{ night_load_pct if night_load_pct is not none else '' }}">
+      <span class="obj-unit">% del día</span>
+    </div>
+    <div class="obj-help">El dato que más pesa en la batería. 40% es la mediana de 9 sitios monitoreados (rango real 17–54%).</div>
+  </div>
+  <div class="obj-field">
+    <label class="flabel">Exportación de excedentes</label>
+    <label style="font-size:13px;"><input type="checkbox" name="a_site_exports" {{ 'checked' if assumptions.site_exports_to_grid else '' }}> El sitio puede exportar</label>
+    <div class="obj-help">Si no exporta, el FV sobre ~1.75× la carga no se aprovecha.</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if system_type == 'grid_zero' %}
+  <p class="obj-note">Fracción de consumo diurno estimada: <b>{{ daytime_fraction_pct }}%</b>{% if daytime_note %} — {{ daytime_note[:230] }}{{ '…' if daytime_note|length > 230 else '' }}{% endif %}.
+     Techo alcanzable sin baterías: <b>{{ '%.1f'|format(ceiling_pct) }}%</b>.</p>
+{% endif %}
+
+{% if needs_ack %}
+  <div class="obj-warn">
+    La meta de reducción de kWh ({{ '%.0f'|format(ceiling_pct) }}% es lo alcanzable sin baterías) supera lo que el consumo diurno puede absorber.
+    <label style="display:block;margin-top:6px;font-size:13px;"><input type="checkbox" name="ack_unattainable" {{ 'checked' if ack_checked else '' }}>
+      Entiendo que requiere baterías o excede el consumo diurno, y quiero usarla de todos modos.</label>
+  </div>
+{% endif %}
+
+<div class="obj-spot card">
+  <p class="card-note" style="margin:0 0 6px;"><b>Recomendación sin equipo</b> <span class="obj-unit">— lo mejor para estas metas y estas cargas</span></p>
+  {% if inputs_missing %}
+    {% for m in inputs_missing %}<p class="wiz-error" style="margin:4px 0;">{{ m }}</p>{% endfor %}
+  {% elif block %}
+    <table>
+      <thead><tr><th></th><th>Piso</th><th>Punto óptimo</th><th>Techo</th></tr></thead>
+      <tbody>
+        {% for r in block.rows %}
+        <tr>
+          <td>{{ r.label }}</td>
+          <td>{{ r["values"][0] }}<span class="u">{{ r.unit }}</span></td>
+          <td class="mid">{{ r["values"][1] }}<span class="u">{{ r.unit }}</span></td>
+          <td>{{ r["values"][2] }}<span class="u">{{ r.unit }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="obj-note" style="margin-top:8px;">Bajo el <b>piso</b> las metas no se cumplen; sobre el <b>techo</b> el equipo adicional ya es sobredimensionamiento.</p>
+    {% for n in block.notes %}<p class="obj-note">{{ n }}</p>{% endfor %}
+  {% else %}
+    <p class="obj-note">Corrige los objetivos marcados para ver la recomendación.</p>
+  {% endif %}
+</div>
+
+{% if errors %}
+  <div class="wiz-error" style="margin-top:12px;">
+    {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+  </div>
+{% endif %}
+{% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+
+<div class="wiz-nav">
+  <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}">← Atrás</button>
+  <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Confirmar y continuar →</button>
+</div>
+{% if confirmed %}<p class="obj-ok">✓ Objetivos confirmados.</p>{% endif %}
+</div>

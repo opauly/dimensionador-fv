@@ -36,6 +36,7 @@ from calculations.sizing_off_grid import (
     _HYBRID_DESIGN_TIERS,
     _INVERTER_CONVERSION_EFF_DEFAULT,
     _NIGHT_LOAD_FRACTION_DEFAULT,
+    _NON_EXPORTING_COVERAGE_CEILING,
     _OFF_GRID_DESIGN_TIERS,
     _monthly_to_daily_specific_yield,
     HybridDesignTier,
@@ -43,6 +44,8 @@ from calculations.sizing_off_grid import (
 )
 
 REFERENCE_BATTERY_DOD_PCT = 80.0
+# PV above this multiple of the served load is not harvested by a site that cannot export (calibration doc §3).
+NON_EXPORTING_COVERAGE_CEILING = _NON_EXPORTING_COVERAGE_CEILING
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. Shared formulas (lifted from the tier generators — do not "simplify")
@@ -164,20 +167,32 @@ def hybrid_battery_layers(
 # 2. Goal presets, ranges and validation
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Valid range per goal field, used both to validate the Objetivos form and to clamp the Piso/Techo band.
-# PROVISIONAL: chosen to bracket the calibrated tiers with generous room; to be confirmed with Oscar when the
-# Objetivos form is built (Step 3). Autonomy's 0.5-7 matches the field it replaces in Off-Grid Step 4.
+# Valid range per goal field: HARD limits — the Objetivos form rejects a value outside them, and the Piso/Techo band
+# is clamped to them. Defined with Oscar 2026-10-06 from the calibration doc's fleet evidence
+# (docs/design-calibration-2026-08.md §3): off-grid PV factor ≥1.5 because below it a low-sun run leaves a real
+# deficit; hybrid coverage ≥1.0 (below it the array cannot even cover the load) and ≤2.5 (installed 1.32-2.14, and
+# above ~1.75 a non-exporting site cannot absorb it); inverter loading ceilings 50-95% (below 50% is absurdly
+# oversized, 100% leaves no headroom at all). Autonomy's 0.5-7 days is the range of the Off-Grid Step 4 field it
+# replaces.
 GOAL_RANGES: dict[str, dict[str, tuple[float, float]]] = {
     "off_grid": {
-        "reserve_soc_pct": (10.0, 60.0), "autonomy_days": (0.5, 7.0), "pv_design_factor": (1.0, 5.0),
-        "inverter_loading_target_pct": (40.0, 100.0), "growth_energy_pct": (0.0, 50.0), "growth_peak_pct": (0.0, 50.0),
+        "reserve_soc_pct": (10.0, 60.0), "autonomy_days": (0.5, 7.0), "pv_design_factor": (1.5, 5.0),
+        "inverter_loading_target_pct": (50.0, 95.0), "growth_energy_pct": (0.0, 50.0), "growth_peak_pct": (0.0, 50.0),
     },
     "hybrid": {
         "reserve_soc_pct": (10.0, 60.0), "backup_nights": (0.5, 4.0), "cycling_nights": (0.5, 3.0),
-        "pv_coverage": (0.8, 2.5), "inverter_islanded_loading_target_pct": (40.0, 100.0),
+        "pv_coverage": (1.0, 2.5), "inverter_islanded_loading_target_pct": (50.0, 95.0),
         "growth_energy_pct": (0.0, 50.0), "growth_peak_pct": (0.0, 50.0),
     },
+    "grid_zero": {
+        "reduction_target_pct": (5.0, 100.0), "max_dc_ac_ratio": (1.0, 1.5),
+    },
 }
+
+# Hybrid sizing inputs that are not tier policy but that the equipment-free block needs (the dominant battery input
+# and whether surplus PV can be exported). Same defaults the test page and the generator use.
+HYBRID_ASSUMPTION_DEFAULTS = {"night_load_fraction": 0.40, "site_exports_to_grid": False, "daytime_fraction": 0.45}
+NIGHT_LOAD_FRACTION_RANGE = (0.05, 0.95)
 
 _EXPANSION_ORDER = ["none", "one", "two"]
 _OFF_GRID_BASES = ("average_month", "worst_month")
@@ -266,10 +281,16 @@ def hybrid_targets(
     goals: HybridDesignTier, *, critical_daily_kwh: float, critical_peak_kw: float, whole_home_daily_kwh: float,
     whole_home_peak_kw: float, monthly_kwh_kwp: list[float], daytime_fraction: float = 0.45,
     shiftable_daily_kwh: float | None = None, night_load_fraction: float | None = None, ac_output_v: float = 240.0,
+    reduction_target_pct: float | None = None, whole_home_avg_kwh_month: float | None = None,
     reference_dod_pct: float = REFERENCE_BATTERY_DOD_PCT,
     battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT, inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
 ) -> dict:
-    """Hybrid sweet spot: PV kWp, battery kWh and islanded inverter kW — no equipment chosen."""
+    """Hybrid sweet spot: PV kWp, battery kWh and islanded inverter kW — no equipment chosen.
+
+    PV is the LARGER of two independent sizings: the tier's coverage factor, and — only when the user set a kWh
+    reduction goal — the array that makes the zero-export self-consumption model deliver that reduction on top of
+    serving the critical loads (the same daily split `estimate_hybrid_savings_pct()` uses, on energy instead of
+    colones). `pv_driven_by` says which one bound."""
     ys = daily_yield_stats(monthly_kwh_kwp)
 
     if shiftable_daily_kwh is None:
@@ -283,11 +304,29 @@ def hybrid_targets(
         inverter_eff=inverter_eff)
 
     baseline_daily_kwh = critical_daily_kwh + shiftable_daily_kwh
-    target_daily_kwh, _deliverable, system_kw = pv_sizing(baseline_daily_kwh, goals.pv_coverage, ys.avg_daily_yield)
+    target_daily_kwh, deliverable, coverage_kw = pv_sizing(baseline_daily_kwh, goals.pv_coverage, ys.avg_daily_yield)
+
+    if whole_home_avg_kwh_month is None:
+        whole_home_avg_kwh_month = whole_home_daily_kwh * 30.4
+    ceiling_pct = grid_zero_ceiling_pct(daytime_fraction)
+    system_kw, pv_driven_by = coverage_kw, "coverage"
+    if reduction_target_pct is not None and deliverable > 0:
+        offset_daily_kwh = min(reduction_target_pct, ceiling_pct) / 100.0 * whole_home_avg_kwh_month / 30.4
+        reduction_kw = (critical_daily_kwh + offset_daily_kwh) / deliverable
+        if reduction_kw > coverage_kw:
+            system_kw, pv_driven_by = reduction_kw, "kwh_reduction"
+    # kWh reduction the final array delivers (generation left after the critical loads, capped by daytime use).
+    gen_available_month = max(0.0, system_kw * deliverable - critical_daily_kwh) * 30.4
+    self_consumed = min(gen_available_month, whole_home_avg_kwh_month * daytime_fraction)
+    reduction_pct_at_size = self_consumed / whole_home_avg_kwh_month * 100.0 if whole_home_avg_kwh_month > 0 else 0.0
 
     return {
         "system_type": "hybrid",
         "system_kw": system_kw,
+        "pv_driven_by": pv_driven_by,
+        "pv_coverage_kw": coverage_kw,
+        "kwh_reduction_pct_at_size": reduction_pct_at_size,
+        "kwh_reduction_ceiling_pct": ceiling_pct,
         "battery_nominal_kwh": layers["c_selected_nominal"],
         "battery_driven_by": layers.get("driven_by"),
         "battery_c_backup_kwh": layers.get("c_backup"),
@@ -327,10 +366,30 @@ def grid_zero_ceiling_pct(daytime_fraction: float) -> float:
 
 
 def grid_zero_default_goals(daytime_fraction: float) -> GridZeroGoals:
-    """Pre-fill: 90% of the attainable ceiling, rounded down to a 5-point step. PROVISIONAL — Grid Zero has no
-    calibrated tiers to read a default from; it is a pre-fill only (the step is mandatory, plan §1.8)."""
+    """Pre-fill: the attainable ceiling rounded down to a 5-point step (defined with Oscar 2026-10-06). That is
+    today's practice — Step 6 centers its scenario B on 100% of daytime consumption — so the Objetivos pre-fill and
+    Step 6 start from the same place. A pre-fill only: the step is mandatory, so it never counts as "set" until the
+    user confirms it (plan §1.8)."""
     ceiling = grid_zero_ceiling_pct(daytime_fraction)
-    return GridZeroGoals(reduction_target_pct=float(max(5, math.floor(ceiling * 0.9 / 5.0) * 5)))
+    return GridZeroGoals(reduction_target_pct=float(max(5, math.floor(ceiling / 5.0) * 5)))
+
+
+def grid_zero_goal_status(goals: GridZeroGoals, daytime_fraction: float) -> dict:
+    """Validation of a Grid Zero goal set: hard-range `errors`, plus whether the reduction goal is above the
+    attainable ceiling (`needs_acknowledgement` — allowed, but only after the user explicitly says so, plan §1.8)."""
+    errors: list[str] = []
+    for fname, (lo, hi) in GOAL_RANGES["grid_zero"].items():
+        value = getattr(goals, fname, None)
+        if value is None or isinstance(value, bool) or not isinstance(value, (int, float)):
+            errors.append(f"{fname}: falta un valor numérico")
+        elif not (lo <= float(value) <= hi):
+            errors.append(f"{fname}: debe estar entre {lo:g} y {hi:g} (recibido {value:g})")
+    cap = goals.max_system_kwp
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0):
+        errors.append("max_system_kwp: debe ser mayor que 0 o quedar vacío")
+    ceiling = grid_zero_ceiling_pct(daytime_fraction)
+    over = not errors and goals.reduction_target_pct > ceiling + 1e-9
+    return {"errors": errors, "ceiling_pct": ceiling, "needs_acknowledgement": over}
 
 
 def grid_zero_targets(
@@ -379,6 +438,12 @@ def grid_zero_targets(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+# Grid Zero has no calibrated tiers to read step sizes from; the spacing was defined with Oscar (2026-10-06): ±10
+# points, with the Techo never above the attainable ceiling (above it solar is only curtailed). Also used for the
+# optional Hybrid kWh reduction goal.
+_GRID_ZERO_BAND_STEP_PTS = 10.0
+
+
 def _clamp(value: float, lo: float, hi: float) -> float:
     return min(max(value, lo), hi)
 
@@ -410,23 +475,32 @@ def offgrid_target_band(goals: OffGridDesignTier, **kwargs) -> dict:
     }
 
 
-def hybrid_target_band(goals: HybridDesignTier, **kwargs) -> dict:
+def hybrid_target_band(goals: HybridDesignTier, reduction_target_pct: float | None = None, **kwargs) -> dict:
+    """Hybrid band. A kWh reduction goal, when set, shifts ±10 points like Grid Zero's (Techo never above the
+    ceiling; Piso never below the range floor)."""
+    ceiling = grid_zero_ceiling_pct(kwargs.get("daytime_fraction", 0.45))
+    lo = GOAL_RANGES["grid_zero"]["reduction_target_pct"][0]
+    r_piso = r_techo = None
+    if reduction_target_pct is not None:
+        r_piso = max(lo, reduction_target_pct - _GRID_ZERO_BAND_STEP_PTS)
+        r_techo = max(reduction_target_pct, min(ceiling, reduction_target_pct + _GRID_ZERO_BAND_STEP_PTS))
     return {
-        "piso": hybrid_targets(_shift_tier(goals, "hybrid", -1), **kwargs),
-        "optimo": hybrid_targets(goals, **kwargs),
-        "techo": hybrid_targets(_shift_tier(goals, "hybrid", +1), **kwargs),
+        "piso": hybrid_targets(_shift_tier(goals, "hybrid", -1), reduction_target_pct=r_piso, **kwargs),
+        "optimo": hybrid_targets(goals, reduction_target_pct=reduction_target_pct, **kwargs),
+        "techo": hybrid_targets(_shift_tier(goals, "hybrid", +1), reduction_target_pct=r_techo, **kwargs),
     }
 
 
-# Grid Zero has no calibrated tiers to read step sizes from; this spacing is PROVISIONAL (to be set with Oscar).
-_GRID_ZERO_BAND_STEP_PTS = 10.0
 
 
 def grid_zero_target_band(goals: GridZeroGoals, **kwargs) -> dict:
     daytime_fraction = kwargs["daytime_fraction"]
     ceiling = grid_zero_ceiling_pct(daytime_fraction)
-    piso = replace(goals, reduction_target_pct=max(5.0, goals.reduction_target_pct - _GRID_ZERO_BAND_STEP_PTS))
-    techo = replace(goals, reduction_target_pct=min(ceiling, goals.reduction_target_pct + _GRID_ZERO_BAND_STEP_PTS))
+    piso = replace(goals, reduction_target_pct=max(
+        GOAL_RANGES["grid_zero"]["reduction_target_pct"][0], goals.reduction_target_pct - _GRID_ZERO_BAND_STEP_PTS))
+    # max(goal, ...) keeps piso <= optimo <= techo even for an acknowledged goal that is already above the ceiling.
+    techo = replace(goals, reduction_target_pct=max(
+        goals.reduction_target_pct, min(ceiling, goals.reduction_target_pct + _GRID_ZERO_BAND_STEP_PTS)))
     return {
         "piso": grid_zero_targets(piso, **kwargs),
         "optimo": grid_zero_targets(goals, **kwargs),

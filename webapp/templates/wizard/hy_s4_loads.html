@@ -5,13 +5,6 @@
 
   <div class="fgrid">
     <div>
-      <label class="flabel">Días de autonomía: <span id="s4h-autonomy-val">{{ autonomy_days }}</span> días</label>
-      <input type="range" min="0.5" max="7" step="0.5" name="autonomy_days" value="{{ autonomy_days }}"
-             style="width:100%;"
-             oninput="document.getElementById('s4h-autonomy-val').textContent=this.value"
-             title="Días que el banco de baterías debe cubrir sin generación solar. Acepta medios días (p. ej. 0.5 para una cabaña de uso ocasional).">
-    </div>
-    <div>
       <label class="flabel">Voltaje de salida requerido</label>
       <div style="display:flex;gap:14px;margin-top:6px;">
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;">

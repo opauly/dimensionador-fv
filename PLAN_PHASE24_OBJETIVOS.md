@@ -1,7 +1,8 @@
 # Phase 24 — Objetivos: a goals step that produces an equipment-free "sweet spot" recommendation, then checks the chosen design against it
 
-**Status:** plan revised 2026-10-06 — every open question from the first draft is now answered (§0.3, §0.5) except one design
-detail Oscar asked to have explained first: the shape of the range around the sweet spot (§0.5 Q9, §1.2). Ready to build Steps 1–2.
+**Status:** Steps 1–3 built and verified (2026-10-06); Steps 4 (goals-vs-design check strip), 5 (AI note) and 6 (rollout)
+remain. All open questions answered, including the three provisional values (§0.3 item 13); Q9 (the Piso/Techo shape) was built
+as proposed.
 The renumber in §1.5 is still the riskiest part of the phase and is isolated as its own verified Step 2.
 **Author:** architect pass (this session), 2026-10-04, revised 2026-10-05 and 2026-10-06
 **Branch:** `main_jinja` (worktree `Claude-main_jinja`)
@@ -87,6 +88,19 @@ so the strip states that plainly rather than hiding it (§1.4).
 11. *(2026-10-06)* **Grid Zero's daytime fraction is computed on first view of Objetivos** (Q6), and cached so it is not recomputed
     on every visit.
 12. *(2026-10-06)* **Drafts already past Step 5 when this ships open with default goals** (Q7) and are not blocked (§1.8).
+13. *(2026-10-06)* **The three provisional values from Step 1 are defined.** Goal ranges (hard limits, also used to clamp the
+    band): Off-Grid autonomy 0.5–7 days, reserve 10–60%, PV factor **1.5**–5.0, inverter ceiling **50–95%**, growth 0–50%;
+    Hybrid reserve 10–60%, backup nights 0.5–4, cycling nights 0.5–3, PV coverage **1.0–2.5**, islanded ceiling **50–95%**;
+    Grid Zero kWh reduction 5–100%, DC/AC **1.0–1.5**. Grid Zero's pre-fill is **the attainable ceiling rounded down to 5
+    points** (today's practice: Step 6 centers scenario B on 100% of daytime consumption), and its band is **±10 points**
+    with the Techo never above the ceiling.
+14. *(2026-10-06, architect's call — flagged)* **Hybrid also gets an optional kWh-reduction goal** (blank = coverage only) and two
+    sizing assumptions the generator needs (night-load fraction, default 40%; whether the site exports). When the reduction
+    goal is set, Hybrid PV is the larger of the coverage sizing and the array that delivers that reduction on top of the
+    critical loads. Confirming Objetivos **mirrors the autonomy goal into `consumption.autonomy_days`** for the unchanged
+    Equipos step — Off-Grid's `autonomy_days`, Hybrid's `backup_nights` (its closest equivalent; Hybrid had the same Step 4
+    slider and has no autonomy goal of its own). Net effect on new drafts: Equipos' legacy scenarios now start from the
+    confirmed goal (2.25 days at the Recomendado preset) instead of Step 4's old default of 1.0.
 
 ### 0.4 Working assumptions
 
@@ -297,9 +311,9 @@ Oscar's rule: the app does not let a draft go into the next step without proper 
 generators now call its shared formulas. Golden outputs captured from the **pre-refactor** generators on 8 fixtures — three
 Off-Grid, three Hybrid and a custom tier each, spanning both meets-limits and misses-limits outcomes — are byte-identical after the
 lift (`python -m scripts.validate_phase24`, offline); a mutation check confirmed the golden comparison fails when a lifted formula is
-altered. 32 hand-derived checks cover the targets, the bands, Grid Zero's ceiling/cap behaviour and goal validation. Provisional
-values flagged in the code for confirmation when the form is built: the per-field `GOAL_RANGES`, Grid Zero's pre-fill rule and its
-±10-point band spacing — Grid Zero has no calibrated tiers to read them from.)
+altered. 32 hand-derived checks cover the targets, the bands, Grid Zero's ceiling/cap behaviour and goal validation. The three
+values it left provisional — the per-field ranges, Grid Zero's pre-fill and its band spacing — were defined with Oscar on
+2026-10-06 (§0.3 item 13).)
 *Original scope:*
 *Build:* `calculations/design_targets.py` — the lifted Off-Grid and Hybrid formulas, the new Grid Zero target function, and goal-default
 loaders reading the calibrated tiers; the existing `generate_design_scenarios*()` rewired to call the shared functions.
@@ -324,7 +338,18 @@ Costos, Review) with the breadcrumb right; an old step-7 draft reaches Review on
 converted twice; a full fresh quote of each system type runs 1→9 end to end including the PDF and lock; every moved route's
 guard rejects a step-ahead request.
 
-**Step 3 — The Objetivos step (inputs + sweet-spot block).**
+**Step 3 — The Objetivos step (inputs + sweet-spot block). — ✅ built and verified 2026-10-06** (`webapp/wizard_steps/s6_objetivos.py`,
+`s6_objetivos.html` + the `_s6_objetivos.html` fragment, one live-recompute route `/paso/6/recalcular`; `objectives` is a new
+durable blob section; Off-Grid/Hybrid Step 4 no longer has the autonomy field. The gate is enforced in `_guard()` for every page
+and htmx route from Equipos on, not just by the button; a POST that lacks the goal fields cannot confirm the pre-filled defaults.
+Harness: 114 checks pass offline — hand-derived sweet-spot figures for all three system types, preset/edit/confirmation
+lifecycle, range rejection, the acknowledgement flow for goals above the ceiling, `is_ready()` incl. grandfathering, the gate on
+5 direct action URLs at step 9, mirroring, and the daytime-fraction cache. Live: an Off-Grid draft was blocked from Equipos until
+confirmed, the recompute changed the battery 14.2→19.0 kWh when autonomy went 2.25→3, confirming advanced it and mirrored the
+goal; a Grid Zero draft got a real AI daytime fraction (65%) with its ceiling, pre-fill and a Piso/Óptimo/Techo of 55/65/65%.
+The test drafts were restored afterwards (Off-Grid's `consumption.autonomy_days` set back to 1.0 — its true prior value was
+overwritten by the test and not recorded, 1.0 being Step 4's default.) The harness also caught one real bug while being written
+(a missing constant import in the Hybrid block).) *Original scope:*
 *Build:* per-system-type step module + template replacing the placeholder, preset selector, per-field range validation, live
 recompute of the sweet-spot block (same htmx pattern as the other steps), `objectives` added to `_SECTIONS`, Step 4's autonomy field
 retired per Q2, the gating and grandfathering of §1.8 (including the server-side guard on Step 7+), Grid Zero's daytime fraction
