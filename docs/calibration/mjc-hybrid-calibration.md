@@ -174,7 +174,7 @@ declarados difieren ~2.3×–2.4× (16.68 vs. 39.43). Es decir: el hardware coin
 | Registro | Id | Estado |
 |---|---|---|
 | Gemelo W — PC-2026-021 | propuesta `6afa2ef1-b210-43e1-a77b-32a4a27a1d63` · versión `18dcd308-bb53-4b8e-83e6-8836f17425f9` | bloqueada, **no enviada**, nunca ganada/promovida |
-| Registro real (v5 tal como se vendió) — PC-2026-022 | propuesta `c3610166-cd26-47a2-aa67-2cff1a6e0622` · versión `20170855-6aa6-43f7-851a-22241eaacabd` · prospecto `7396ea36-6156-4058-801e-7a0370e82132` | en curso (ver §9); ciclo de vida completo se registra aquí |
+| Registro real (v5 tal como se vendió) — PC-2026-022 | propuesta `c3610166-cd26-47a2-aa67-2cff1a6e0622` · versión `20170855-6aa6-43f7-851a-22241eaacabd` · prospecto `7396ea36-6156-4058-801e-7a0370e82132` | bloqueada → PDF generado → enviada → **ganada** (2026-10-16) → promovida a proyecto `88cec95d-cc3a-4347-9a55-6a80b59daeb9` (contrato $25 830, pagos 80/20 = $20 664 + $5 166, presupuesto = costo real Sheet12 $21 648.40) |
 | Prospecto original de PC-2026-010 | `7a628f04-1d76-47a4-bbe2-36229d5e48e7` | borrador viejo de ago-2026 |
 
 ## 9. Calibración de precio — hoja `Sheet12` vs. wizard (añadido 2026-10-16, no forma parte de las predicciones congeladas)
@@ -195,3 +195,8 @@ Hallazgos:
 3. Para reproducir la hoja hubo que **editar a mano** 11 de 15 líneas: catálogo de baterías $1 100 (hoja $1 150), monitoreo $500 (hoja $565), "Diseño $300 @13 %" y "Permiso de interconexión $1 000" sembrados que la hoja no tiene, y 4 líneas inexistentes en el wizard (Fronius on-grid, accesorios, mueble de baterías, estadía).
 4. **Topología AC-acoplada no soportada:** el v5 vendido es MultiPlus + Fronius on-grid en la salida AC de cargas críticas; el wizard solo modela FV por controladores MPPT DC (exige 2 MPPT aunque v5 no lleva ninguno) y marca «Reducción estimada ~0 %» al ser paquete de cargas críticas.
 5. Los precios de catálogo de paneles ($110 × 16) y MultiPlus ($900 × 2) ya coinciden con la hoja.
+
+Notas del paso a proyecto (2026-10-16):
+6. El quote del wizard cierra en **$25 761.59** pero el contrato real es **$25 830**: se capturó el contrato real en «Mover a Proyecto» (campo editable).
+7. «Mover a Proyecto» pre-llena el presupuesto por rubro con los **precios mostrados** (con margen), así que la suma del presupuesto = el contrato ($25 761.59) y la utilidad proyectada sale 100 %. Para que el seguimiento de gastos sea útil se sustituyó por el costo real (Sheet12). Debería pre-llenarse con `costo_real`.
+8. Con el wizard, un clic en «Generar PDF» del paso 9 (bloqueada) navega a la lista en vez de mostrar el enlace (el PDF se generó bien desde la lista).
