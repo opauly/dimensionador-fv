@@ -174,5 +174,24 @@ declarados difieren ~2.3×–2.4× (16.68 vs. 39.43). Es decir: el hardware coin
 | Registro | Id | Estado |
 |---|---|---|
 | Gemelo W — PC-2026-021 | propuesta `6afa2ef1-b210-43e1-a77b-32a4a27a1d63` · versión `18dcd308-bb53-4b8e-83e6-8836f17425f9` | bloqueada, **no enviada**, nunca ganada/promovida |
-| Registro real (v5 tal como se vendió) | — | pendiente |
+| Registro real (v5 tal como se vendió) — PC-2026-022 | propuesta `c3610166-cd26-47a2-aa67-2cff1a6e0622` · versión `20170855-6aa6-43f7-851a-22241eaacabd` · prospecto `7396ea36-6156-4058-801e-7a0370e82132` | en curso (ver §9); ciclo de vida completo se registra aquí |
 | Prospecto original de PC-2026-010 | `7a628f04-1d76-47a4-bbe2-36229d5e48e7` | borrador viejo de ago-2026 |
+
+## 9. Calibración de precio — hoja `Sheet12` vs. wizard (añadido 2026-10-16, no forma parte de las predicciones congeladas)
+
+Objetivo (Oscar): que el wizard se acerque a **$25 770** (precio de la hoja "Dimensionamiento paneles y baterías (HCG) – Oscar", C35). El PDF v5 ($25 830) lleva ajustes de conversación con la clienta; la hoja es la referencia.
+
+**Costo real (C17:C32): $21 648.40** — paneles 1 760 · baterías 4 600 · monitoreo Victron 565 · inversor off-grid 1 800 · inversor on-grid Fronius 3 220.50 · accesorios 1 502.90 · estructura 800 · mueble baterías 300 · materiales 1 500 · mano de obra 3 500 · transporte 600 · estadía 1 500 · controladores/diseño/autotransformador 0. IVA 0 % en todas las líneas (D34 = 0).
+
+| Convención | Fórmula | Resultado |
+|---|---|---|
+| Hoja (utilidad 16 % **sobre precio**) | `MROUND(costo ÷ (1 − 0.16), 10)` | **$25 770** |
+| Wizard, margen 16 % (**sobre costo**) | `costo × 1.16` | $25 112 |
+| Wizard, margen 19 % (el paso de 0.5 impide 19.04) | `costo × 1.19` | **$25 761.59** (−$8 vs. hoja, −$68 vs. v5) |
+
+Hallazgos:
+1. La "utilidad 16 %" de la hoja equivale a **19.04 % de recargo sobre costo**; el wizard (Phase 23) usa recargo sobre costo. Con la misma cifra nominal el wizard queda ~$660 por debajo. Decisión pendiente: etiquetar claramente la convención o ofrecer "margen sobre precio".
+2. El campo de margen tiene `step=0.5`: no permite el 19.04 exacto.
+3. Para reproducir la hoja hubo que **editar a mano** 11 de 15 líneas: catálogo de baterías $1 100 (hoja $1 150), monitoreo $500 (hoja $565), "Diseño $300 @13 %" y "Permiso de interconexión $1 000" sembrados que la hoja no tiene, y 4 líneas inexistentes en el wizard (Fronius on-grid, accesorios, mueble de baterías, estadía).
+4. **Topología AC-acoplada no soportada:** el v5 vendido es MultiPlus + Fronius on-grid en la salida AC de cargas críticas; el wizard solo modela FV por controladores MPPT DC (exige 2 MPPT aunque v5 no lleva ninguno) y marca «Reducción estimada ~0 %» al ser paquete de cargas críticas.
+5. Los precios de catálogo de paneles ($110 × 16) y MultiPlus ($900 × 2) ya coinciden con la hoja.
