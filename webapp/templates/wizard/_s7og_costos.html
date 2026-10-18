@@ -25,7 +25,9 @@
 .s7-pct-total { text-align:right; white-space:nowrap; color:#6b7280; font-size:0.85rem; }
 </style>
 
-<div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+<div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px;">
+  <a class="btn btn-outline" href="{{ url_for('pricing.importar', vid=vid) }}"
+     title="Sube una proforma de tu proveedor en PDF para actualizar los precios guardados (con su fecha de actualización).">📄 Importar proforma</a>
   <button class="btn btn-outline" type="button"
           hx-post="{{ url_for('wizard.paso7og_refrescar', vid=vid) }}"
           hx-target="#s7og-costos" hx-swap="outerHTML"
@@ -58,7 +60,9 @@
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item" value="{{ row.item }}"></td>
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item_en" value="{{ row.item_en }}"></td>
           <td><input class="finput" type="number" min="0" step="1" name="r-{{ loop.index0 }}-qty" value="{{ row.qty if row.qty is not none else '' }}"></td>
-          <td><input class="finput" type="number" min="0" step="0.01" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}"></td>
+          <td><input class="finput" type="number" min="0" step="0.01" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}">
+            {% if row.price_note %}<div class="s7-no-margin" style="{{ 'color:#a15c1b;' if row.price_stale else '' }}max-width:230px;" title="Fecha y fuente del precio guardado en el catálogo">{{ '⚠ ' if row.price_stale else '' }}{{ row.price_note }}</div>{% endif %}
+          </td>
           <td class="s7-price-shown">
             ${{ '{:,.2f}'.format(row.unit_price_shown) }}
             {% if not row.markup_eligible %}<div class="s7-no-margin">sin margen</div>{% endif %}

@@ -134,35 +134,44 @@ def _load_service_defaults(system_type: str = "off_grid") -> list[dict]:
 
 def _get_current_prices(
     panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
-    system_type: str = "off_grid",
-) -> dict[str, float]:
+    system_type: str = "off_grid", kwp: float = 0.0,
+) -> dict:
     """Fetch live prices from DB for equipment + service defaults, falling
     back to each dict's own (possibly stale) `cost_usd` if the DB call
     fails — Off-Grid analogue of `gz_s7_costs.py`'s own helper, extended
     with battery + charge controller (see this module's own "KEY FINDING"
-    docstring note for why this mechanism exists at all here)."""
-    prices: dict[str, float] = {}
+    docstring note for why this mechanism exists at all here).
+
+    Per-Wp service rates scale with `kwp`; "<line>::note" keys carry the
+    "last updated" note — see gz_s7_costs.py's docstring, not repeated."""
+    from pricing.service_rates import price_note, service_unit_cost
+
+    prices: dict = {}
     try:
         from database.equipment_db import get_battery, get_charge_controller, get_inverter, get_panel
 
         if panel and panel.get("id"):
             fresh = get_panel(panel["id"])
             prices["Paneles solares"] = round(float((fresh or panel).get("cost_usd") or 0), 2)
+            prices["Paneles solares::note"] = price_note((fresh or {}).get("price_updated_at"), (fresh or {}).get("price_source"))
         elif panel:
             prices["Paneles solares"] = round(float(panel.get("cost_usd") or 0), 2)
         if inverter and inverter.get("id"):
             fresh = get_inverter(inverter["id"])
             prices["Inversor/cargador"] = round(float((fresh or inverter).get("cost_usd") or 0), 2)
+            prices["Inversor/cargador::note"] = price_note((fresh or {}).get("price_updated_at"), (fresh or {}).get("price_source"))
         elif inverter:
             prices["Inversor/cargador"] = round(float(inverter.get("cost_usd") or 0), 2)
         if battery and battery.get("id"):
             fresh = get_battery(battery["id"])
             prices["Baterías"] = round(float((fresh or battery).get("cost_usd") or 0), 2)
+            prices["Baterías::note"] = price_note((fresh or {}).get("price_updated_at"), (fresh or {}).get("price_source"))
         elif battery:
             prices["Baterías"] = round(float(battery.get("cost_usd") or 0), 2)
         if cc and cc.get("id"):
             fresh = get_charge_controller(cc["id"])
             prices["Controlador de carga"] = round(float((fresh or cc).get("cost_usd") or 0), 2)
+            prices["Controlador de carga::note"] = price_note((fresh or {}).get("price_updated_at"), (fresh or {}).get("price_source"))
         elif cc:
             prices["Controlador de carga"] = round(float(cc.get("cost_usd") or 0), 2)
     except Exception:
@@ -177,27 +186,33 @@ def _get_current_prices(
             from database.supabase_client import get_client
 
             r = (get_client().table("monitoring_devices")
-                 .select("cost_usd").eq("id", monitoring["id"]).single().execute())
+                 .select("cost_usd, price_updated_at, price_source").eq("id", monitoring["id"]).single().execute())
             prices["Monitoreo"] = round(float((r.data or {}).get("cost_usd") or 0), 2)
+            prices["Monitoreo::note"] = price_note((r.data or {}).get("price_updated_at"), (r.data or {}).get("price_source"))
         except Exception:
             prices["Monitoreo"] = round(float(monitoring.get("cost_usd") or 0), 2)
     for svc in _load_service_defaults(system_type):
-        prices[svc["item"]] = round(float(svc.get("unit_cost_usd") or 0), 2)
+        prices[svc["item"]] = service_unit_cost(svc, kwp)
+        if svc.get("price_updated_at"):
+            prices[svc["item"] + "::note"] = price_note(svc.get("price_updated_at"), svc.get("price_source"))
     return prices
 
 
 def _refresh_prices_core(
     line_items: list[dict], panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
-    system_type: str = "off_grid",
+    system_type: str = "off_grid", kwp: float = 0.0,
 ) -> tuple[list[dict], int]:
     """(updated_line_items, n_changed) — do-not-drop item 25: ONLY
     `unit_cost` is touched; qty, iva_pct, specs and custom (non-catalog)
     rows are returned untouched."""
-    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type)
+    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp)
     updated, changes = [], 0
     for li in line_items:
         new_li = dict(li)
         if li.get("item") in price_map:
+            note = price_map.get(li["item"] + "::note")
+            if note:
+                new_li["price_note"], new_li["price_stale"] = note
             new_price = price_map[li["item"]]
             if abs(new_price - float(li.get("unit_cost") or 0)) > 0.001:
                 new_li["unit_cost"] = new_price
@@ -233,7 +248,9 @@ def _seed_line_items(blob: dict) -> list[dict]:
     inverter_qty = equipment.get("inverter_qty") or (2 if split_phase.get("requires_split_phase") else 1)
     system_type = _system_type(blob)
 
-    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type)
+    from pricing.service_rates import kwp_from_blob
+
+    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp_from_blob(blob))
     items: list[dict] = []
 
     if panel:
@@ -300,6 +317,9 @@ def _seed_line_items(blob: dict) -> list[dict]:
         })
 
     for it in items:
+        note = live_prices.get((it.get("item") or "") + "::note")
+        if note:
+            it["price_note"], it["price_stale"] = note
         it["total"] = _row_subtotal(it.get("qty"), it.get("unit_cost"))
     return items
 
@@ -392,6 +412,8 @@ def _items_from_form(blob: dict, form) -> list[dict]:
             "iva_pct": _iva_float(row.get("iva")),
             "specs": row.get("specs") or "",
             "specs_en": orig.get("specs_en", row.get("specs") or ""),
+            "price_note": orig.get("price_note"),
+            "price_stale": bool(orig.get("price_stale")),
         })
     return items
 
@@ -432,7 +454,9 @@ def refresh_prices(blob: dict) -> tuple[dict, int]:
     cc = equipment.get("charge_controller") or {}
     monitoring = equipment.get("monitoring")
     current = blob.get("costs", {}).get("line_items") or _seed_line_items(blob)
-    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring, _system_type(blob))
+    from pricing.service_rates import kwp_from_blob
+
+    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring, _system_type(blob), kwp_from_blob(blob))
     return _finalize(blob, updated), n_changed
 
 

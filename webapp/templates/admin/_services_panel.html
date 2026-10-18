@@ -15,7 +15,10 @@
       <div class="fgrid">
         <div><label class="flabel">Nombre (ES) *</label><input class="finput" type="text" name="item" value="{{ existing.item or '' }}"></div>
         <div><label class="flabel">Nombre (EN)</label><input class="finput" type="text" name="item_en" value="{{ existing.item_en or '' }}"></div>
-        <div><label class="flabel">Precio default (USD)</label><input class="finput" type="number" step="0.01" name="unit_cost_usd" value="{{ existing.unit_cost_usd or 0 }}"></div>
+        <div><label class="flabel">Precio default fijo (USD)</label><input class="finput" type="number" step="0.01" name="unit_cost_usd" value="{{ existing.unit_cost_usd or 0 }}"></div>
+        <div><label class="flabel">Costo por Wp cotizado (USD/Wp) — opcional</label>
+          <input class="finput" type="number" step="0.0001" min="0" name="cost_per_wp" value="{{ existing.cost_per_wp if existing.cost_per_wp is not none else '' }}">
+          <div class="card-note-sm">Si lo llenas, el Paso 8 pre-llena esta línea como costo/Wp × kWp cotizados, en lugar del precio fijo.</div></div>
         <div>
           <label class="flabel">IVA</label>
           <select class="finput" name="iva_pct">
@@ -53,6 +56,8 @@
   <div style="margin-bottom:12px;">
     <a class="btn" hx-get="{{ url_for('admin.index', section='servicios') }}?add=1" hx-target="#subpanel" hx-push-url="true"
        href="{{ url_for('admin.index', section='servicios') }}?add=1">Agregar servicio</a>
+    <a class="btn btn-outline" href="{{ url_for('pricing.importar') }}" style="margin-left:8px;"
+       title="Actualiza estructura y accesorios (y precios de equipos) desde una proforma de proveedor en PDF">📄 Importar proforma</a>
   </div>
 
   {% if rows %}
@@ -62,7 +67,7 @@
   <form id="services_batch" hx-post="{{ url_for('admin.services_batch_save') }}" hx-target="#subpanel"></form>
   <div class="dtable-wrap">
     <table class="dtable">
-      <thead><tr><td>Servicio</td><td>Precio (USD)</td><td>IVA</td><td>Habilitado</td><td title="Si está marcado, el margen de utilidad de la cotización se aplica sobre el costo real de este ítem.">Con margen</td><td></td></tr></thead>
+      <thead><tr><td>Servicio</td><td>Precio fijo (USD)</td><td title="Si tiene valor, el Paso 8 usa costo/Wp × kWp cotizados">USD/Wp</td><td>IVA</td><td>Habilitado</td><td title="Si está marcado, el margen de utilidad de la cotización se aplica sobre el costo real de este ítem.">Con margen</td><td></td></tr></thead>
       <tbody>
         {% for r in rows %}
           <tr>
@@ -72,6 +77,10 @@
               {% if r.system_types %}<div class="card-note-sm">Solo: {{ r.system_types|join(', ') }}</div>{% endif %}
             </td>
             <td><input class="finput" form="services_batch" type="number" step="10" name="price_{{ r.id }}" value="{{ r.unit_cost_usd or 0 }}"></td>
+            <td>
+              <input class="finput" form="services_batch" type="number" step="0.0001" min="0" name="rate_{{ r.id }}" value="{{ r.cost_per_wp if r.cost_per_wp is not none else '' }}" style="width:96px;">
+              {% if r.price_updated_at %}<div class="card-note-sm" title="{{ r.price_source or '' }}">Actualizado {{ r.price_updated_at[:10] }}</div>{% endif %}
+            </td>
             <td>
               <select class="finput" form="services_batch" name="iva_{{ r.id }}">
                 {% for val, label in iva_options %}<option value="{{ val }}" {{ 'selected' if val == (r.iva_pct or 0) else '' }}>{{ label }}</option>{% endfor %}

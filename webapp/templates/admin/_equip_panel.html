@@ -77,6 +77,8 @@
   <div style="margin-bottom:12px;">
     <a class="btn" hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1" hx-target="#subpanel" hx-push-url="true"
        href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1">Agregar {{ kind_label }}</a>
+    <a class="btn btn-outline" href="{{ url_for('pricing.importar') }}" style="margin-left:8px;"
+       title="Actualiza precios desde una proforma de proveedor en PDF">📄 Importar proforma</a>
   </div>
 
   {% if items %}

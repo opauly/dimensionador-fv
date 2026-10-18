@@ -20,16 +20,26 @@ def _pct(v):
     return f"{v * 100:.0f}%" if isinstance(v, (int, float)) else "—"
 
 
+def _day(v):
+    return str(v)[:10] if v else "—"
+
+
+def _src(v):
+    return (v[:34] + "…") if isinstance(v, str) and len(v) > 35 else (v or "—")
+
+
+_PRICE_COLS = [("price_updated_at", "Actualizado", _day), ("price_source", "Fuente del precio", _src)]
+
 PANEL_COLS = [("wp", "Wp", None), ("voc", "Voc", None), ("vmp", "Vmp", None),
-              ("isc", "Isc", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
+              ("isc", "Isc", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)] + _PRICE_COLS
 INVERTER_COLS = [("kw", "kW", None), ("type", "Tipo", None), ("phase", "Fase", None),
-                  ("mppt_channels", "MPPT", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
+                  ("mppt_channels", "MPPT", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)] + _PRICE_COLS
 BATTERY_COLS = [("chemistry", "Química", None), ("capacity_kwh", "kWh", None), ("voltage_v", "V", None),
-                ("cycles", "Ciclos", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
+                ("cycles", "Ciclos", None), ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)] + _PRICE_COLS
 CC_COLS = [("type", "Tipo", None), ("vin_max", "Vin máx", None), ("imax_out", "Imax salida", None),
-           ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
+           ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)] + _PRICE_COLS
 MONITORING_COLS = [("compatible_with", "Compatible con", None),
-                    ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)]
+                    ("cost_usd", "Costo", _usd), ("cost_iva_rate", "IVA", _pct)] + _PRICE_COLS
 
 
 def _f(form, key, default=None):
@@ -329,6 +339,15 @@ def register(bp):
                            error=None, dup=dup, pending_form=form)
         if dup and confirm_overwrite:
             payload["id"] = dup["id"]
+
+        # A hand-edited price restarts the "last updated" clock (proforma
+        # imports stamp their own date + source in pricing/apply.py).
+        old = next((it for it in spec["list_fn"]() if it["id"] == payload.get("id")), None)
+        if old is None or old.get("cost_usd") != payload["cost_usd"]:
+            from datetime import date
+
+            payload["price_updated_at"] = date.today().isoformat()
+            payload["price_source"] = "Manual (Admin)"
 
         spec["upsert_fn"](payload)
         return redirect(url_for("admin.sub_view", section="equipos", sub=sub))

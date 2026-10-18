@@ -7,7 +7,7 @@ def list_panels() -> list[dict]:
     result = (
         get_client()
         .table("panels")
-        .select("id, brand, model, wp, voc, vmp, isc, imp, temp_coeff_pmax, width_m, height_m, warranty_product_yr, warranty_power_yr, cost_usd, cost_iva_rate, notes")
+        .select("id, brand, model, wp, voc, vmp, isc, imp, temp_coeff_pmax, width_m, height_m, warranty_product_yr, warranty_power_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -44,7 +44,7 @@ def list_inverters() -> list[dict]:
     result = (
         get_client()
         .table("inverters")
-        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, warranty_yr, cost_usd, cost_iva_rate, notes")
+        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -81,7 +81,7 @@ def list_batteries() -> list[dict]:
     result = (
         get_client()
         .table("batteries")
-        .select("id, brand, model, chemistry, capacity_kwh, capacity_ah, voltage_v, dod_pct, cycles, warranty_yr, cost_usd, cost_iva_rate, notes")
+        .select("id, brand, model, chemistry, capacity_kwh, capacity_ah, voltage_v, dod_pct, cycles, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -118,7 +118,7 @@ def list_charge_controllers() -> list[dict]:
     result = (
         get_client()
         .table("charge_controllers")
-        .select("id, brand, model, type, vin_max, vout, imax_in, imax_out, cost_usd, cost_iva_rate, notes")
+        .select("id, brand, model, type, vin_max, vout, imax_in, imax_out, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -155,7 +155,7 @@ def list_monitoring_devices() -> list[dict]:
     result = (
         get_client()
         .table("monitoring_devices")
-        .select("id, brand, model, compatible_with, cost_usd, cost_iva_rate, notes")
+        .select("id, brand, model, compatible_with, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -195,7 +195,7 @@ def list_service_defaults() -> list[dict]:
         get_client()
         .table("service_defaults")
         .select("id, item, item_en, unit_cost_usd, iva_pct, specs, specs_en, enabled, sort_order, "
-                "system_types, markup_eligible")
+                "system_types, markup_eligible, cost_per_wp, price_updated_at, price_source")
         .order("sort_order")
         .execute()
     )
@@ -205,6 +205,9 @@ def list_service_defaults() -> list[dict]:
 def upsert_service_default(data: dict) -> dict:
     """Insert or update a service default. Include 'id' to update an existing row.
 
+    `cost_per_wp` is exempt for the same reason — None means "no per-Wp rate,
+    use the flat price", and clearing it must actually reach the UPDATE.
+
     `system_types` is exempt from the "drop None values" filter below — for every
     other field None means "not provided, leave it alone," but for `system_types`
     None is a real, meaningful value ("applies to every system type") that must
@@ -213,7 +216,7 @@ def upsert_service_default(data: dict) -> dict:
     """
     row = {
         k: v for k, v in data.items()
-        if k != "id" and (v is not None or k == "system_types")
+        if k != "id" and (v is not None or k in ("system_types", "cost_per_wp"))
     }
     if data.get("id"):
         result = get_client().table("service_defaults").update(row).eq("id", data["id"]).execute()

@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Importar proforma — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.pf-card { background:#fff; border:1px solid var(--border); border-radius:8px; padding:16px 18px; margin-bottom:14px; }
+.pf-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+.pf-label { display:block; font-size:12px; color:var(--muted-2); margin-bottom:4px; }
+.pf-input { width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:6px; font-family:var(--font); font-size:13px; box-sizing:border-box; }
+.pf-banner { font-size:13px; border-radius:6px; padding:8px 12px; margin:10px 0; }
+.pf-ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; }
+.pf-warn { background:#FBF0DF; border:1px solid #f1d6a8; color:#a15c1b; }
+.pf-err { background:#fdecea; border:1px solid #f5c2c0; color:#B84345; }
+.pf-table { width:100%; border-collapse:collapse; font-size:13px; }
+.pf-table th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); padding:6px 6px; border-bottom:1px solid var(--border); }
+.pf-table td { padding:6px; border-bottom:1px solid #eef0f3; vertical-align:top; }
+.pf-table td:first-child { min-width:200px; }
+.pf-table input[type=number] { width:88px; }
+.pf-table select.target { min-width:230px; }
+.pf-cur { font-size:12px; color:var(--muted); white-space:nowrap; }
+.pf-delta-up { color:#B84345; } .pf-delta-down { color:#166534; }
+.pf-note { font-size:12px; color:var(--muted); margin:4px 0 0; }
+.pf-skip td { opacity:.55; }
+</style>
+
+<p class="section-title">Importar proforma de proveedor</p>
+{% if back_url %}<p style="margin:0 0 12px;"><a href="{{ back_url }}">← Volver a Costos de la cotización</a></p>{% endif %}
+
+{% if stage == 'upload' %}
+  <div class="pf-card">
+    <p class="card-note" style="margin:0 0 10px;">Sube el PDF de la proforma de tu proveedor. Leo cantidades, precios unitarios (sin IVA) y la condición de IVA de cada línea, te los muestro para revisar y, solo cuando confirmes, actualizo los precios guardados con la fecha de la proforma.</p>
+    {% if error %}<div class="pf-banner pf-err">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('pricing.leer') }}" enctype="multipart/form-data">
+      {% if vid %}<input type="hidden" name="vid" value="{{ vid }}">{% endif %}
+      <input type="file" name="pdf" accept="application/pdf,.pdf" required>
+      <button class="btn" type="submit" style="margin-left:10px;">Leer proforma</button>
+    </form>
+  </div>
+
+{% elif stage == 'review' %}
+  <form method="post" action="{{ url_for('pricing.aplicar') }}" id="pf-form">
+    {% if vid %}<input type="hidden" name="vid" value="{{ vid }}">{% endif %}
+    <input type="hidden" name="n_lines" value="{{ rows|length }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="storage_path" value="{{ storage_path }}">
+    <input type="hidden" name="subtotal" value="{{ parsed.totals.get('subtotal', '') }}">
+    <input type="hidden" name="descuento" value="{{ parsed.totals.get('descuento', '') }}">
+
+    <div class="pf-card">
+      <div class="pf-grid">
+        <div><label class="pf-label">Proveedor</label><input class="pf-input" type="text" name="supplier" value="{{ parsed.supplier }}"></div>
+        <div><label class="pf-label">N.º de proforma</label><input class="pf-input" type="text" name="doc_number" value="{{ parsed.doc_number }}"></div>
+        <div><label class="pf-label">Fecha de la proforma</label><input class="pf-input" type="date" name="doc_date" value="{{ parsed.doc_date or '' }}"></div>
+        <div><label class="pf-label">kWp del proyecto (para el costo de estructura por Wp)</label>
+          <input class="pf-input" type="number" step="0.01" min="0" name="kwp" value="{{ '%.2f'|format(kwp) if kwp else '' }}"></div>
+      </div>
+      {% if parsed.validation.ok %}
+        <div class="pf-banner pf-ok">✓ Las {{ rows|length }} líneas suman ${{ '{:,.2f}'.format(parsed.validation.sum_lines) }}, igual al subtotal impreso.</div>
+      {% endif %}
+      {% for w in parsed.warnings %}<div class="pf-banner pf-warn">⚠ {{ w }}</div>{% endfor %}
+      {% if disc_pct %}
+        <label style="font-size:13px;display:block;margin-top:6px;">
+          <input type="checkbox" name="apply_discount">
+          Aplicar el descuento de la proforma ({{ disc_pct }} %) a los precios guardados
+        </label>
+        <p class="pf-note">La proforma muestra precios de lista y un descuento de ${{ '{:,.2f}'.format(parsed.totals.descuento) }}. Déjalo sin marcar si el descuento fue puntual.</p>
+      {% endif %}
+    </div>
+
+    <div class="pf-card" style="padding:8px 12px;overflow-x:auto;">
+      <table class="pf-table" style="min-width:760px;">
+        <thead><tr><th>Descripción</th><th>Qty</th><th>Unitario (sin IVA)</th><th>IVA</th><th>Destino</th><th>Precio actual</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr id="pf-row-{{ r.i }}" class="{{ 'pf-skip' if r.target == 'skip' else '' }}">
+            <td>{{ r.description }}<input type="hidden" name="desc_{{ r.i }}" value="{{ r.description }}">
+              <div class="pf-note">{{ r.tax_label }}</div></td>
+            <td><input class="pf-input" type="number" step="0.01" name="qty_{{ r.i }}" value="{{ r.qty }}"></td>
+            <td><input class="pf-input" type="number" step="0.01" name="unit_{{ r.i }}" value="{{ r.unit_usd }}"></td>
+            <td>
+              <select class="pf-input" name="iva_{{ r.i }}" style="width:76px;">
+                <option value="0" {{ 'selected' if not r.iva_rate }}>0 %</option>
+                <option value="13" {{ 'selected' if r.iva_rate and r.iva_rate > 0 }}>13 %</option>
+              </select>
+            </td>
+            <td>
+              <select class="pf-input target" name="target_{{ r.i }}" data-row="{{ r.i }}">
+                {% for val, label in options %}
+                  <option value="{{ val }}" {{ 'selected' if val == r.target }}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              {% if r.target == 'skip' %}<div class="pf-note">Sin coincidencia en el catálogo — elige un destino o ignórala.</div>{% endif %}
+            </td>
+            <td class="pf-cur" id="pf-cur-{{ r.i }}"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pf-card">
+      <p class="card-note" style="margin:0 0 8px;"><b>Qué se actualiza al aplicar</b></p>
+      <ul class="pf-note" style="margin:0;padding-left:18px;font-size:13px;">
+        <li>Líneas con un equipo del catálogo: su costo, su condición de IVA y la fecha/fuente de actualización.</li>
+        <li>«Estructura de montaje»: la suma de esas líneas ÷ los kWp del proyecto, guardada como costo por Wp.</li>
+        <li>«Accesorios»: la suma de esas líneas como monto fijo por sistema.</li>
+        <li>Las cotizaciones ya bloqueadas no cambian; los borradores toman los precios con «Refrescar precios».</li>
+      </ul>
+      <div style="margin-top:14px;">
+        <button class="btn" type="submit">Aplicar precios</button>
+        <a href="{{ url_for('pricing.importar', vid=vid) if vid else url_for('pricing.importar') }}" style="margin-left:12px;color:var(--muted);">Cancelar</a>
+      </div>
+    </div>
+  </form>
+
+  <script>
+  (function () {
+    var prices = {{ catalog_prices|tojson }};
+    var services = {{ services|tojson }};
+    function fmt(n) { return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+    function refresh(i) {
+      var sel = document.querySelector('[name="target_' + i + '"]');
+      var cell = document.getElementById('pf-cur-' + i);
+      var row = document.getElementById('pf-row-' + i);
+      var unit = parseFloat(document.querySelector('[name="unit_' + i + '"]').value) || 0;
+      var t = sel.value, html = '';
+      if (prices[t] && prices[t].cost != null) {
+        var cur = prices[t].cost, d = cur ? (unit - cur) / cur * 100 : null;
+        html = fmt(cur) + (prices[t].date ? ' <span title="Última actualización">· ' + prices[t].date + '</span>' : ' · sin fecha');
+        if (d !== null && Math.abs(d) >= 0.05)
+          html += ' <b class="' + (d > 0 ? 'pf-delta-up' : 'pf-delta-down') + '">' + (d > 0 ? '+' : '') + d.toFixed(1) + '%</b>';
+      } else if (t === 'service:estructura' || t === 'service:accesorios') {
+        var s = services[t === 'service:estructura' ? 'Estructura de montaje' : 'Accesorios'];
+        if (s) html = t === 'service:estructura'
+          ? (s.cost_per_wp != null ? '$' + Number(s.cost_per_wp).toFixed(4) + '/Wp' : 'sin tarifa')
+          : fmt(s.unit_cost_usd || 0);
+        if (s && s.price_updated_at) html += ' <span>· ' + s.price_updated_at.slice(0, 10) + '</span>';
+      } else if (t !== 'skip') { html = 'sin precio'; }
+      cell.innerHTML = html;
+      row.classList.toggle('pf-skip', t === 'skip');
+    }
+    document.querySelectorAll('select.target').forEach(function (s) {
+      refresh(s.dataset.row);
+      s.addEventListener('change', function () { refresh(s.dataset.row); });
+    });
+    document.querySelectorAll('[name^="unit_"]').forEach(function (inp) {
+      inp.addEventListener('input', function () { refresh(inp.name.slice(5)); });
+    });
+  })();
+  </script>
+
+{% elif stage == 'done' %}
+  <div class="pf-card">
+    {% if result.errors %}
+      {% for e in result.errors %}<div class="pf-banner pf-err">{{ e }}</div>{% endfor %}
+      <p class="pf-note">No se guardó nada. Usa «Atrás» del navegador, corrige y vuelve a aplicar.</p>
+    {% else %}
+      <div class="pf-banner pf-ok">✓ {{ result.changes|length }} precio(s) actualizado(s).</div>
+      <table class="pf-table">
+        <thead><tr><th>Elemento</th><th>Antes</th><th>Ahora</th><th>IVA</th></tr></thead>
+        <tbody>
+        {% for c in result.changes %}
+          <tr><td>{{ c.label }}</td>
+              <td>{{ '$%.4f'|format(c.old) if c.old is not none and 'Wp' in c.label else ('$%.2f'|format(c.old) if c.old is not none else '—') }}</td>
+              <td><b>{{ '$%.4f'|format(c.new) if 'Wp' in c.label else '$%.2f'|format(c.new) }}</b></td>
+              <td>{{ '13 %' if c.iva else 'exento' }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        {% if vid %}
+          <form method="post" action="{{ url_for('pricing.refrescar') }}">
+            <input type="hidden" name="vid" value="{{ vid }}">
+            <button class="btn" type="submit">Volver a Costos y refrescar precios</button>
+          </form>
+        {% endif %}
+        <a class="btn btn-outline" href="{{ url_for('pricing.importar', vid=vid) if vid else url_for('pricing.importar') }}">Importar otra proforma</a>
+        <a href="{{ url_for('admin.index', section='equipos') }}" style="color:var(--muted);">Ver Admin → Equipos</a>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

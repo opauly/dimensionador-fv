@@ -7,6 +7,18 @@ SYSTEM_TYPE_LABELS = [("grid_zero", "Grid Zero"), ("off_grid", "Off-Grid"), ("hy
 IVA_OPTIONS = [(0.0, "0%"), (0.13, "13%")]
 
 
+def _opt_float(v):
+    """Blank -> None (no per-Wp rate); anything else -> float."""
+    v = (v or "").strip()
+    return float(v) if v else None
+
+
+def _stamp_manual():
+    from datetime import date
+
+    return {"price_updated_at": date.today().isoformat(), "price_source": "Manual (Admin)"}
+
+
 def _bool(form, key):
     return form.get(key) == "on"
 
@@ -18,6 +30,7 @@ def _payload_from_form(form):
         "item": form.get("item", "").strip(),
         "item_en": form.get("item_en", "").strip(),
         "unit_cost_usd": float(form.get("unit_cost_usd") or 0),
+        "cost_per_wp": _opt_float(form.get("cost_per_wp")),
         "iva_pct": float(form.get("iva_pct") or 0),
         "enabled": _bool(form, "enabled"),
         "specs": form.get("specs", "").strip(),
@@ -72,6 +85,12 @@ def register(bp):
 
         if edit_id:
             payload["id"] = edit_id
+            old = next((r for r in list_service_defaults() if r["id"] == edit_id), None) or {}
+            if (abs(float(old.get("unit_cost_usd") or 0) - payload["unit_cost_usd"]) > 0.001
+                    or old.get("cost_per_wp") != payload["cost_per_wp"]):
+                payload.update(_stamp_manual())
+        else:
+            payload.update(_stamp_manual())
         upsert_service_default(payload)
         return redirect(url_for("admin.index", section="servicios"))
 
@@ -106,11 +125,18 @@ def register(bp):
             old_iva = float(r.get("iva_pct") or 0)
             old_enabled = bool(r.get("enabled", True))
             old_markup = bool(r.get("markup_eligible", True))
+            new_rate = _opt_float(form.get(f"rate_{r['id']}")) if f"rate_{r['id']}" in form else r.get("cost_per_wp")
+            old_rate = r.get("cost_per_wp")
+            rate_changed = (new_rate is None) != (old_rate is None) or (
+                new_rate is not None and abs(new_rate - float(old_rate)) > 1e-9)
             if (abs(new_price - old_price) > 0.001 or abs(new_iva - old_iva) > 0.001
-                    or new_enabled != old_enabled or new_markup != old_markup):
-                upsert_service_default({
+                    or new_enabled != old_enabled or new_markup != old_markup or rate_changed):
+                row = {
                     "id": r["id"], "item": r["item"],
                     "unit_cost_usd": new_price, "iva_pct": new_iva, "enabled": new_enabled,
-                    "markup_eligible": new_markup,
-                })
+                    "markup_eligible": new_markup, "cost_per_wp": new_rate,
+                }
+                if abs(new_price - old_price) > 0.001 or rate_changed:
+                    row.update(_stamp_manual())
+                upsert_service_default(row)
         return redirect(url_for("admin.index", section="servicios"))
