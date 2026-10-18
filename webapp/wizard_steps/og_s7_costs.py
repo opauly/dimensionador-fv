@@ -51,6 +51,7 @@ from __future__ import annotations
 
 from webapp.wizard_steps.gz_s7_costs import (
     _IVA_OPTIONS,
+    _catalog_iva,
     _iva_float,
     _iva_str,
     _margin_from_form,
@@ -240,7 +241,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Paneles solares", "item_en": "Solar panels",
             "qty": panel_count,
             "unit_cost": live_prices.get("Paneles solares", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(panel),
             "specs": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
             "specs_en": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
         })
@@ -249,7 +250,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Inversor/cargador", "item_en": "Inverter/charger",
             "qty": inverter_qty,
             "unit_cost": live_prices.get("Inversor/cargador", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(inverter),
             "specs": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
             "specs_en": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
         })
@@ -258,7 +259,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Baterías", "item_en": "Batteries",
             "qty": battery_count,
             "unit_cost": live_prices.get("Baterías", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(battery),
             "specs": f"{battery.get('brand','')} {battery.get('model','')} {battery.get('capacity_kwh','')}kWh".strip(),
             "specs_en": f"{battery.get('brand','')} {battery.get('model','')} {battery.get('capacity_kwh','')}kWh".strip(),
         })
@@ -267,7 +268,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Controlador de carga", "item_en": "Charge controller",
             "qty": cc_qty,
             "unit_cost": live_prices.get("Controlador de carga", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(cc),
             "specs": f"{cc.get('brand','')} {cc.get('model','')}".strip(),
             "specs_en": f"{cc.get('brand','')} {cc.get('model','')}".strip(),
         })
@@ -276,7 +277,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Monitoreo", "item_en": "Monitoring",
             "qty": 1,
             "unit_cost": live_prices.get("Monitoreo", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(monitoring),
             "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
             "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
         })

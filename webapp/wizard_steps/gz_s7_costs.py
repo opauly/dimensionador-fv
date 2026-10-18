@@ -65,6 +65,14 @@ def _iva_float(s: str) -> float:
     return 0.13 if "13" in str(s or "") else 0.0
 
 
+def _catalog_iva(item: dict | None) -> float:
+    """Sale-line IVA default for a catalog equipment item: the item's own tax
+    status (`cost_iva_rate`, from the supplier proforma — panels/batteries
+    exempt, string inverters/monitoring 13 %). The step's IVA selector only
+    offers 0 % / 13 %, so any positive rate maps to 13 %."""
+    return 0.13 if float((item or {}).get("cost_iva_rate") or 0) > 0 else 0.0
+
+
 def _row_subtotal(qty, unit_cost) -> float:
     """qty is None (blank) => treat as 1 — verbatim port of
     step7_costs()'s own `_row_subtotal()`."""
@@ -190,7 +198,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Paneles solares", "item_en": "Solar panels",
             "qty": panel_count,
             "unit_cost": live_prices.get("Paneles solares", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(panel),
             "specs": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
             "specs_en": f"{panel.get('brand','')} {panel.get('model','')} {panel.get('wp','')}W".strip(),
         })
@@ -199,7 +207,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Inversores", "item_en": "Inverters",
             "qty": 1,
             "unit_cost": live_prices.get("Inversores", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(inverter),
             "specs": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
             "specs_en": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
         })
@@ -227,7 +235,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "item": "Sistema de monitoreo remoto", "item_en": "Remote monitoring system",
             "qty": 1,
             "unit_cost": live_prices.get("Sistema de monitoreo remoto", 0.0),
-            "iva_pct": 0.0,
+            "iva_pct": _catalog_iva(monitoring),
             "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
             "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
         })

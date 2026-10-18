@@ -200,3 +200,13 @@ Notas del paso a proyecto (2026-10-16):
 6. El quote del wizard cierra en **$25 761.59** pero el contrato real es **$25 830**: se capturó el contrato real en «Mover a Proyecto» (campo editable).
 7. «Mover a Proyecto» pre-llena el presupuesto por rubro con los **precios mostrados** (con margen), así que la suma del presupuesto = el contrato ($25 761.59) y la utilidad proyectada sale 100 %. Para que el seguimiento de gastos sea útil se sustituyó por el costo real (Sheet12). Debería pre-llenarse con `costo_real`.
 8. Con el wizard, un clic en «Generar PDF» del paso 9 (bloqueada) navega a la lista en vez de mostrar el enlace (el PDF se generó bien desde la lista).
+
+## 10. v2 — cotización con costos de catálogo y proformas (añadido 2026-10-17)
+
+La hoja Excel/PDF deja de ser la referencia: el objetivo es que el **wizard** sea la cifra oficial y el proyecto real la contraste. Pasos:
+
+1. **Catálogo corregido** a costo neto de proforma + condición de IVA: JA Solar 620 $110 (exento) · MultiPlus-II 48/5000 $900 (exento) · Pylontech Fidus $1 150 (exento; antes $1 100) · Fronius Primo 10.0-1 $2 850 + 13 % (antes $3 350 sin IVA) · Ekrano GX $550 + 13 % (antes $500). Panel realmente comprado añadido: Sunergy SUN600-66MDH12RS (600 W, Voc 48.15 · Vmp 40.46 · Isc 15.86 · Imp 14.95 V/A, −0.30 %/°C, 2.382 × 1.134 m, 33 kg), $110 exento. Fuentes: HCG proforma 180-2026 (2026-08-18), Nundi N021-2026 (2026-07-14).
+2. **Wizard:** las líneas de equipo de Costos (Off-Grid/Híbrido y Grid Zero) toman ahora su IVA por defecto de `cost_iva_rate` del catálogo (antes fijo en 0 %).
+3. **v2 de PC-2026-022** (versión `1fe000a1-4d1e-46c6-bacc-7aebc8fa75c8`, bloqueada): 16 × SUN600 (9.60 kW), 2 × MultiPlus-II, 4 × Fidus, Ekrano, Fronius como fila personalizada; estructura $529.50 y accesorios $910 tomados de la proforma HCG; resto de líneas sin proforma (mano de obra 3 500, materiales 1 500, transporte 600, estadía 1 500, mueble 300) = **marcadores de posición de Sheet12** hasta reemplazarlos por gastos reales. Margen 19 %. Resultado: subtotal **$24 275.41** + IVA $748.68 = **$25 024.09** (v1: $25 761.59; contrato real: $25 830).
+4. Supuestos a vigilar: sin línea de permiso de interconexión (wizard la sembraría con $1 000); sin diseño ($300 por defecto); servicios con IVA 0 % como en el contrato; 2 controladores MPPT forzados por el wizard con costo 0 (el v5 es AC-acoplado); el estimado de generación del wizard cae de 32.85 a 31.79 kWh/día por pasar de 620 a 600 W.
+5. **Lectura:** las líneas de servicio estándar del wizard (estructura, mano de obra, materiales, transporte) están en $0 por defecto — la cotización «pura» del wizard no se puede costear hasta que esos valores se estandaricen con datos reales (ver importador de proformas, pendiente).
