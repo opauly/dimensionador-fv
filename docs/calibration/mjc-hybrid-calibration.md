@@ -217,3 +217,21 @@ La hoja Excel/PDF deja de ser la referencia: el objetivo es que el **wizard** se
 - **Importador** (`/proformas/importar`, desde Admin → Equipos/Servicios y desde el paso Costos): lee el PDF (cantidad, unitario sin IVA, etiqueta EXEV / IVA 13), valida que las líneas sumen el subtotal impreso, sugiere destino por línea (equipo del catálogo, «Estructura de montaje», «Accesorios», ignorar) y solo escribe tras confirmar. Probado con HCG 180-2026 y Nundi N021-2026.
 - **Tarifas por Wp** que pre-llena el paso Costos (× kWp cotizados): estructura **$0.0552/Wp** (proforma HCG, $529.50 / 9.6 kWp), mano de obra **$0.3528/Wp** y materiales **$0.1512/Wp** (marcadores de la hoja de María José: $3 500 y $1 500 a 9.92 kWp). Accesorios $910 fijo (proforma HCG). Transporte, estadía y mueble de baterías en $0 (opcionales).
 - Las dos tarifas de mano de obra/materiales son un solo punto de dato. Se corrigen en Admin → Servicios (campo USD/Wp) cuando haya gastos reales de proyectos cerrados.
+
+## 12. Ciclo de vida real: pagos y gastos (añadido 2026-10-18)
+
+**Cobros** (proyecto `88cec95d-…`): $10 000 (2026-08-16) + $10 000 (08-17) + $664 (08-18) = **$20 664 = el 80 %**, transferencia a BAC USD; pendiente $5 166 (20 % contra entrega).
+
+**Gastos reales** (de los comprobantes de transferencia, no de las proformas):
+
+| Proveedor | Pagado | Fecha | Detalle |
+|---|---|---|---|
+| HCG 180-2026 | **$9 991.81** | 2026-08-31 | lista $10 149.50 − descuento $416.33 + IVA $258.64 (sobre lista) |
+| Nundi N021-2026 | $5 700.00 (+$3 comisión) | 2026-07-14 | 2 × Fronius **sin IVA** (sin factura electrónica); 1 aplicado aquí ($2 850), el otro reservado para el proyecto de Juan Diego Castro |
+
+Presupuesto (costo Sheet12) vs. real a la fecha, sin IVA: Equipo $12 245.50 → $11 143.67 · Materiales $3 802.90 → $1 439.50 (solo estructura y accesorios; faltan materiales eléctricos) · Mano de obra, viáticos aún sin gasto. El panel real (SUN600, $110) coincide con el precio de catálogo del JA Solar; la diferencia fuerte es el Fronius ($2 850 real vs. $3 220.50 presupuestado con IVA) y los accesorios/estructura ($1 439.50 reales vs. $2 302.90 presupuestados).
+
+Hallazgos:
+1. El Fronius figura en catálogo con IVA 13 % (la proforma lo etiqueta así) pero la compra real se hizo **sin factura → sin IVA**. El indicador de catálogo refleja la etiqueta de la proforma, no si se pidió factura.
+2. El descuento global de HCG no cabe en una línea: se registró como gasto negativo «Descuento HCG» para que el total cuadre con la transferencia.
+3. La comisión SINPE ($3 por transferencia) no se carga a ningún proyecto.
