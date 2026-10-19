@@ -85,8 +85,8 @@ blueprint, not here.
 from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from webapp.blueprints import (
-    projects_budget, projects_invoicing, projects_ledger, projects_labor, projects_payments,
-    projects_promote,
+    projects_adjust, projects_budget, projects_invoicing, projects_ledger, projects_labor,
+    projects_payments, projects_promote,
 )
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
@@ -99,6 +99,7 @@ projects_labor.register(bp)
 projects_invoicing.register(bp)
 projects_payments.register(bp)
 projects_promote.register(bp)
+projects_adjust.register(bp)
 
 
 def _parse_money(value) -> float:

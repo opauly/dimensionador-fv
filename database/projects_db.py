@@ -178,8 +178,15 @@ def promote_to_project(
     budget_rows: list[dict] | None = None,
     payment_schedule: list[dict] | None = None,
     dry_run: bool = False,
+    price_adjustment_reason: str | None = None,
 ) -> dict:
     """Promote a won proposal to a project.
+
+    The quote total the project is promoted from is snapshotted into
+    `projects.quoted_usd`; `contract_usd` is the FINAL agreed price. When the
+    two differ the gap is the negotiated discount (or premium) — derived, never
+    stored — and `price_adjustment_reason` says why. Quote lines/versions are
+    never edited to absorb it.
 
     `contract_usd` is required (the plan's exact signature) — pass the
     value derived via `derive_contract_terms()` (edited or not) to keep the
@@ -229,6 +236,7 @@ def promote_to_project(
             "client_name": proposal.get("client_name"),
             "system_type": proposal.get("system_type"),
             "contract_usd": resolved_contract_usd,
+            "quoted_usd": float(derived["contract_usd"]),
             "contract_iva_rate": resolved_iva_rate,
             "contract_iva_usd": resolved_iva_usd,
             "budget_rows": budget_rows,
@@ -256,6 +264,8 @@ def promote_to_project(
         "system_type": proposal.get("system_type"),
         "status": "active",
         "contract_usd": round(resolved_contract_usd, 2),
+        "quoted_usd": round(float(derived["contract_usd"]), 2),
+        "price_adjustment_reason": (price_adjustment_reason or "").strip() or None,
         "contract_iva_rate": resolved_iva_rate,
         "contract_iva_usd": round(resolved_iva_usd, 2),
     })
@@ -290,6 +300,20 @@ def promote_to_project(
         db.table("project_payments").insert(payment_payloads).execute()
 
     return project
+
+
+def update_price_adjustment(project_id: str, quoted_usd: float | None, reason: str | None) -> dict:
+    """Set (or clear, with `quoted_usd=None`) a project's quoted-price baseline and the
+    reason the final price differs. The final price itself is `contract_usd` and is not
+    touched here — payments and profit already follow it."""
+    from datetime import datetime, timezone
+
+    payload = {
+        "quoted_usd": None if quoted_usd is None else round(float(quoted_usd), 2),
+        "price_adjustment_reason": (reason or "").strip() or None,
+        "price_adjusted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return get_client().table("projects").update(payload).eq("id", project_id).execute().data[0]
 
 
 def create_project_manual(

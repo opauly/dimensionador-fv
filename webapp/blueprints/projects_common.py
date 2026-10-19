@@ -259,6 +259,33 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
     }
 
 
+def price_adjustment_info(project: dict, result: dict | None = None) -> dict | None:
+    """Quote-vs-final price summary for the header and Utilidad box, or None when
+    the project has no recorded quote baseline (manual projects, or never set).
+
+    The discount is always derived — `quoted_usd - contract_usd` — never stored:
+    positive = discount, negative = the final price is above the quote. The quote
+    lines are untouched; payments/profit already follow `contract_usd`."""
+    quoted = project.get("quoted_usd")
+    if quoted is None:
+        return None
+    quoted = float(quoted)
+    final = float(project.get("contract_usd") or 0)
+    discount = round(quoted - final, 2)
+    pct = (discount / quoted * 100) if quoted else 0.0
+    info = {
+        "quoted": quoted, "final": final, "discount": discount, "pct": pct,
+        "differs": abs(discount) >= 0.005,
+        "reason": project.get("price_adjustment_reason") or "",
+        "quoted_str": fmt_usd(quoted), "final_str": fmt_usd(final),
+        "discount_str": fmt_usd(abs(discount)), "pct_str": fmt_pct(abs(pct)),
+        "kind": "Descuento" if discount > 0 else "Ajuste al alza",
+    }
+    if result is not None and info["differs"]:
+        info["bruta_sin_ajuste_str"] = fmt_usd(result["utilidad_bruta"] + discount)
+    return info
+
+
 def detail_ctx(project_id: str, active_tab: str = "presupuesto") -> dict | None:
     """The one function every Proyectos detail-page route renders from,
     including after a mutation (plan §1.3): one `get_project_bundle()` call,
@@ -303,6 +330,7 @@ def detail_ctx(project_id: str, active_tab: str = "presupuesto") -> dict | None:
             f"Promovido desde cotización — proposal_id {project['proposal_id']}"
             if project.get("proposal_id") else None
         ),
+        "price_adjustment": price_adjustment_info(project, result),
         "active_tab": active_tab,
         "tabs": [{"key": t["key"], "label": t["label"], "url": tab_url(project_id, t["key"])} for t in TAB_SPECS],
     }

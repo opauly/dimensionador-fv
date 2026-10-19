@@ -104,6 +104,7 @@ def render_panel(
     pid: str, vid: str, *,
     contract_usd, contract_iva_usd, budget_rows: list[dict], preset: str,
     schedule_rows: list[dict], error: str | None = None,
+    quoted_usd=None, reason: str | None = None,
 ) -> str:
     """Renders `projects/_promote.html` — the one place this form's state
     becomes HTML, shared by all three routes below (plan §1.3's discipline,
@@ -119,6 +120,19 @@ def render_panel(
     from webapp.blueprints.projects_common import RUBRO_LABELS, fmt_usd
 
     contract_total = _parse_money(contract_usd)
+    # Quote vs final price: the quote lines are never edited to absorb a
+    # negotiated discount — the gap is shown here and recorded on the project
+    # (quoted_usd snapshot + reason), derived again wherever it is displayed.
+    quoted_total = _parse_money(quoted_usd)
+    discount = round(quoted_total - contract_total, 2)
+    if quoted_total and abs(discount) >= 0.005:
+        adjust_line = (
+            f"Precio final {fmt_usd(contract_total)}: "
+            f"{'descuento' if discount > 0 else 'ajuste al alza'} de {fmt_usd(abs(discount))} "
+            f"({abs(discount) / quoted_total * 100:.2f} %)."
+        )
+    else:
+        adjust_line = None
     budget_total = sum(_parse_money(r.get("budgeted_str")) for r in budget_rows)
 
     # ⚠ plan item 51: verbatim from pages/01_proposals.py L513-518. The two
@@ -160,6 +174,7 @@ def render_panel(
         "projects/_promote.html",
         pid=pid, vid=vid,
         contract_usd=f"{contract_total:.2f}",
+        quoted_usd=f"{quoted_total:.2f}", adjust_line=adjust_line, reason=reason or "",
         contract_iva_usd=f"{_parse_money(contract_iva_usd):.2f}",
         budget_rows=budget_rows,
         category_options=[(cat, RUBRO_LABELS.get(cat, cat)) for cat in EXPENSE_CATEGORIES],
@@ -203,6 +218,7 @@ def register(bp):
             pid, vid,
             contract_usd=derived["contract_usd"], contract_iva_usd=derived["contract_iva_usd"],
             budget_rows=budget_rows, preset="70/30", schedule_rows=[],
+            quoted_usd=derived["contract_usd"], reason="",
         )
 
     @bp.route("/promover/<pid>/<vid>/tabla", methods=["POST"])
@@ -232,6 +248,7 @@ def register(bp):
             contract_usd=form.get("contract_usd"), contract_iva_usd=form.get("contract_iva_usd"),
             budget_rows=_budget_display(pending_budget), preset=preset,
             schedule_rows=_schedule_display(pending_schedule) if preset == "Personalizado" else [],
+            quoted_usd=form.get("quoted_usd"), reason=form.get("price_adjustment_reason"),
         )
 
     @bp.route("/promover/<pid>/<vid>", methods=["POST"])
@@ -291,6 +308,7 @@ def register(bp):
                 contract_iva_usd=contract_iva_usd,
                 budget_rows=budget_rows,
                 payment_schedule=payment_schedule,
+                price_adjustment_reason=form.get("price_adjustment_reason"),
             )
         except Exception as exc:
             return render_panel(
@@ -299,6 +317,7 @@ def register(bp):
                 budget_rows=_budget_display(pending_budget), preset=preset,
                 schedule_rows=_schedule_display(pending_schedule) if preset == "Personalizado" else [],
                 error=f"Error: {exc}",
+                quoted_usd=form.get("quoted_usd"), reason=form.get("price_adjustment_reason"),
             )
 
         return redirect(url_for("projects.detalle", pid=project["id"]), code=303)

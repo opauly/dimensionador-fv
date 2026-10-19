@@ -235,3 +235,7 @@ Hallazgos:
 1. El Fronius figura en catálogo con IVA 13 % (la proforma lo etiqueta así) pero la compra real se hizo **sin factura → sin IVA**. El indicador de catálogo refleja la etiqueta de la proforma, no si se pidió factura.
 2. El descuento global de HCG no cabe en una línea: se registró como gasto negativo «Descuento HCG» para que el total cuadre con la transferencia.
 3. La comisión SINPE ($3 por transferencia) no se carga a ningún proyecto.
+
+## 13. Precio final vs. cotizado (añadido 2026-10-18)
+
+El precio vendido ($25 830) no es el de ninguna cotización de la herramienta: salió de v4 ($26 130, primera oferta a la clienta) menos **$300** de precio especial tomados de materiales eléctricos (v5). Para no tener que decidir *qué línea* cambiar cuando un cliente negocia, el proyecto ahora guarda la cotización de referencia (`projects.quoted_usd`) y el motivo (`price_adjustment_reason`, migración 051); el descuento ($ y %) se deriva siempre de `quoted_usd − contract_usd` y las líneas/versiones de la cotización no se tocan. «Mover a Proyecto» muestra el descuento en vivo y el proyecto lo muestra en el encabezado y bajo Utilidad; se puede editar después en «Ajuste de precio». Este proyecto: cotizado $26 130 → final $25 830 (−1.15 %); utilidad bruta sin el descuento sería $13 546.83 frente a $13 246.83 con él (a la fecha de registro, con costos parciales).

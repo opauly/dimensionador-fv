@@ -64,7 +64,7 @@
 
     <div class="promo-grid2">
       <div>
-        <label class="promo-label">Monto del contrato (USD, según cotización)</label>
+        <label class="promo-label">Precio final acordado / monto del contrato (USD)</label>
         <input type="number" class="promo-input" name="contract_usd" value="{{ contract_usd }}" min="0" step="10"
                title="El total cotizado — ya incluye el IVA de cada renglón que corresponde (equipos exentos, mano de obra/materiales/servicios al 13%, etc.). El desglose por renglón se factura en la pestaña Facturación del proyecto.">
       </div>
@@ -73,6 +73,18 @@
         <input type="number" class="promo-input" name="contract_iva_usd" value="{{ contract_iva_usd }}" min="0" step="10"
                title="Monto de IVA ya incluido en el total de arriba (tomado de los renglones de la cotización con IVA — equipos suelen ser exentos, mano de obra/materiales/servicios suelen llevar 13%). Se usa para calcular la utilidad neta sin IVA en el Presupuesto del proyecto — no cambia el monto del contrato ni el esquema de pagos.">
       </div>
+    </div>
+
+    <input type="hidden" name="quoted_usd" value="{{ quoted_usd }}">
+    <div style="margin:0 0 12px;">
+      <label class="promo-label">Motivo del ajuste de precio (opcional — queda registrado en el proyecto)</label>
+      <input type="text" class="promo-input" name="price_adjustment_reason" value="{{ reason }}" maxlength="200"
+             placeholder="Ej.: precio especial, −$300 en materiales eléctricos">
+      <p class="promo-caption" style="margin:6px 0 0;">
+        Cotizado: <b>${{ '{:,.2f}'.format(quoted_usd|float) }}</b>.
+        {% if adjust_line %}<span style="color:#a15c1b;font-weight:600;">{{ adjust_line }}</span>
+        {% else %}El precio final coincide con la cotización.{% endif %}
+        Las líneas de la cotización no se modifican.</p>
     </div>
 
     <p class="promo-caption">Mapeo de presupuesto por rubro — editable antes de confirmar</p>
