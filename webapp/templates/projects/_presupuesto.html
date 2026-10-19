@@ -124,7 +124,7 @@
 {% if price_adjustment and price_adjustment.differs %}
   <p class="card-note-sm" style="margin-top:8px;">
     Incluye un {{ price_adjustment.kind|lower }} de {{ price_adjustment.discount_str }} ({{ price_adjustment.pct_str }})
-    sobre la cotización de {{ price_adjustment.quoted_str }}{% if price_adjustment.reason %} — {{ price_adjustment.reason }}{% endif %}.
+    sobre la cotización de {{ price_adjustment.quoted_str }}{% if price_adjustment.reason %} — {{ price_adjustment.reason|trim('.') }}{% endif %}.
     Sin ese ajuste, la utilidad bruta sería {{ price_adjustment.bruta_sin_ajuste_str }}.
   </p>
 {% endif %}
