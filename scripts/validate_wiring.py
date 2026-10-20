@@ -67,5 +67,21 @@ b = W.size_branch("t", kind="dc", qty=1, current_a=31.72, factor=1.5625, v_ref=1
 check("size_branch PV (2 strings of 600 W panels): UGC", b["ugc"], "8")
 check("size_branch PV: conduit trade size", b["conduit"]["trade"], "3/4")
 
+# ── BOM assembly (calculations/bom.py) on a hand-checkable branch ──────────────
+from calculations import bom as B  # noqa: E402
+
+br = [{"label": "x", "kind": "dc", "qty": 2, "length_m": 10.0, "ocpd_a": 50,
+       "conductors": [{"role": "UGC", "gauge": "8", "count": 2}, {"role": "EGC", "gauge": "8", "count": 1}],
+       "conduit": {"trade": "3/4"}}]
+cr = {r["item"]: r for r in B.conductor_rows(br, "RHW-2")}
+check("BOM live 8 AWG metres (2 conductors x 2 runs x 10 m)", cr["Conductor Cu RHW-2 8 AWG — activos / neutro"]["meters"], 40.0)
+check("BOM ground 8 AWG metres (1 x 2 x 10 m)", cr["Conductor Cu RHW-2 8 AWG — tierra (EGC)"]["meters"], 20.0)
+check("BOM live metres with 10 % waste", cr["Conductor Cu RHW-2 8 AWG — activos / neutro"]["with_waste"], 44)
+co = B.conduit_rows(br, "PVC A")[0]
+check("BOM conduit run (2 runs x 10 m)", co["meters"], 20.0)
+check("BOM conduit 3 m tubes with waste: ceil(22/3)", co["tubes"], 8)
+pr = B.protection_rows(br)[0]
+check("BOM protection qty + poles", (pr["qty"], "2 polos" in pr["item"]), (2, True))
+
 print("\n" + ("ALL WIRING CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -1,0 +1,89 @@
+{# Técnico tab — equipment, technical data, wiring/breaker/conduit sizing and a preliminary BOM,
+   read from a saved quote version (see projects_tech.py). Root id "tech-panel" is what the
+   design-version select and the cable-length inputs swap (outerHTML). #}
+<div id="tech-panel">
+<style>
+.tc-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 6px; }
+.tc-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 18px; margin: 8px 0 4px; }
+.tc-fact { font-size: 13px; } .tc-fact b { display: block; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.tc-table td { font-size: 13px; vertical-align: top; }
+.tc-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tc-sub { font-size: 11.5px; color: #6b7280; }
+.tc-select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); min-width: 320px; }
+</style>
+
+{% if empty %}
+  <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
+{% else %}
+  <p class="tc-h" style="margin-top:6px;">Diseño de referencia</p>
+  <form hx-post="{{ url_for('projects.tecnico_guardar', pid=pid) }}" hx-trigger="change" hx-target="#tech-panel" hx-swap="outerHTML">
+    <select class="tc-select" name="version_id">
+      {% for v in versions %}<option value="{{ v.id }}" {{ 'selected' if v.id == chosen.id else '' }}>{{ v.label }}</option>{% endfor %}
+    </select>
+    <span class="tc-sub" style="margin-left:8px;">Equipos, datos técnicos y cableado se leen de esta versión de la cotización (por defecto, la última bloqueada).</span>
+  </form>
+
+  <p class="tc-h">Datos del sistema</p>
+  <div class="tc-facts">
+    {% for k, v in facts %}<div class="tc-fact"><b>{{ k }}</b>{{ v }}</div>{% endfor %}
+  </div>
+
+  <p class="tc-h">Equipos elegidos</p>
+  <div class="dtable-wrap"><table class="dtable tc-table">
+    <thead><tr><td>Categoría</td><td>Modelo</td><td class="tc-num">Cant.</td><td>Especificaciones (datasheet)</td></tr></thead>
+    <tbody>
+      {% for r in bom.equipment %}
+        <tr><td><b>{{ r.category }}</b></td><td>{{ r.model }}</td><td class="tc-num"><b>{{ r.qty }}</b></td><td class="tc-sub">{{ r.specs }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+
+  {# Wiring / breaker / conduit table + editable runs (shared fragment with the wizard) #}
+  {% with ready=wiring.ready, reason=wiring.reason, branches=wiring.branches, lengths=wiring.lengths, length_labels=wiring.length_labels,
+          insulation=wiring.insulation, conduit_type=wiring.conduit_type, vd_limit=wiring.vd_limit, terminal_temp=wiring.terminal_temp,
+          show_ac_in=wiring.show_ac_in, meter_rows=wiring.meter_rows, ac_missing=wiring.ac_missing,
+          post_url=wiring.post_url, form_target=wiring.form_target, form_swap=wiring.form_swap, vid=chosen.id %}
+    {% include "wizard/_wiring.html" %}
+  {% endwith %}
+  {% if custom_lengths %}<p class="tc-sub">Largos de obra guardados en este proyecto.</p>{% elif wiring.ready %}
+    <p class="tc-sub">⚠️ Largos por defecto: ajústalos a las distancias reales de la obra para que calibres y materiales sean los correctos.</p>{% endif %}
+
+  <p class="tc-h">Lista de materiales preliminar</p>
+  <p class="card-note-sm">Derivada del diseño y del dimensionamiento de arriba; no es una lista de compra cerrada. Conductores y tubería incluyen {{ bom.waste_pct }} % de desperdicio; la tubería PVC se cuenta en tubos estándar de {{ '%g'|format(bom.tube_m) }} m.</p>
+
+  {% if bom.wiring_ready %}
+    <div class="dtable-wrap"><table class="dtable tc-table">
+      <thead><tr><td>Protecciones</td><td class="tc-num">Cant.</td><td>Se usa en</td></tr></thead>
+      <tbody>
+        {% for r in bom.protections %}<tr><td>{{ r.item }}</td><td class="tc-num"><b>{{ r.qty }}</b></td><td class="tc-sub">{{ r.used_in }}</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+
+    <div class="dtable-wrap"><table class="dtable tc-table">
+      <thead><tr><td>Conductores</td><td class="tc-num">Calculado (m)</td><td class="tc-num">Con desperdicio (m)</td></tr></thead>
+      <tbody>
+        {% for r in bom.conductors %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.meters) }}</td><td class="tc-num"><b>{{ r.with_waste }}</b></td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+
+    <div class="dtable-wrap"><table class="dtable tc-table">
+      <thead><tr><td>Canalización</td><td class="tc-num">Recorrido (m)</td><td class="tc-num">Tubos de {{ '%g'|format(bom.tube_m) }} m</td></tr></thead>
+      <tbody>
+        {% for r in bom.conduit %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.meters) }}</td><td class="tc-num"><b>{{ r.tubes }}</b></td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  {% else %}
+    <p class="card-note-sm">Protecciones, conductores y canalización aparecen cuando el cableado se puede dimensionar.</p>
+  {% endif %}
+
+  {% if other_lines %}
+    <div class="dtable-wrap"><table class="dtable tc-table">
+      <thead><tr><td>Otros renglones de la cotización (aún sin desglosar)</td><td class="tc-num">Cant.</td><td>Especificaciones</td></tr></thead>
+      <tbody>
+        {% for r in other_lines %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.qty) if r.qty else '—' }}</td><td class="tc-sub">{{ r.specs }}</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+    <p class="card-note-sm">Estructura, accesorios y materiales eléctricos están hoy como una sola línea de costo; el desglose por pieza (rieles, cajas, conectores, tornillería) es lo que falta para cerrar la lista de materiales.</p>
+  {% endif %}
+{% endif %}
+</div>

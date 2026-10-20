@@ -40,8 +40,9 @@ LENGTH_LABELS = {
 }
 
 
-def lengths(blob: dict) -> dict[str, float]:
-    saved = ((blob or {}).get("scratch") or {}).get(SCRATCH_KEY) or {}
+def clean_lengths(saved: dict | None) -> dict[str, float]:
+    """Defaults overlaid with any positive saved values (also used for a project's own lengths)."""
+    saved = saved or {}
     out = dict(DEFAULT_LENGTHS)
     for key in DEFAULT_LENGTHS:
         try:
@@ -51,6 +52,10 @@ def lengths(blob: dict) -> dict[str, float]:
         except (TypeError, ValueError):
             pass
     return out
+
+
+def lengths(blob: dict) -> dict[str, float]:
+    return clean_lengths(((blob or {}).get("scratch") or {}).get(SCRATCH_KEY))
 
 
 def lengths_from_form(form) -> dict[str, float]:
@@ -91,14 +96,18 @@ def _ac_summary(blob: dict, inverter_qty: int):
     return summary, design_v, split
 
 
-def build_context(blob: dict) -> dict:
-    """{'ready': bool, 'reason': str|None, 'branches': [...], 'lengths': {...}, ...}"""
+def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
+    """{'ready': bool, 'reason': str|None, 'branches': [...], 'lengths': {...}, ...}
+
+    `lengths_override` lets a caller that owns the lengths elsewhere (a project's tech_spec)
+    size the same saved design with its own cable runs."""
     blob = blob or {}
     eq = blob.get("equipment") or {}
     panel, cc = eq.get("panel") or {}, eq.get("charge_controller") or {}
     battery, inverter = eq.get("battery") or {}, eq.get("inverter") or {}
     ctx = {
-        "ready": False, "reason": None, "branches": [], "lengths": lengths(blob),
+        "ready": False, "reason": None, "branches": [],
+        "lengths": clean_lengths(lengths_override) if lengths_override is not None else lengths(blob),
         "length_labels": LENGTH_LABELS, "meters": {}, "insulation": W.DEFAULT_INSULATION,
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
         "show_ac_in": False,

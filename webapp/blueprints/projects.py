@@ -86,7 +86,7 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from webapp.blueprints import (
     projects_adjust, projects_budget, projects_invoicing, projects_ledger, projects_labor,
-    projects_payments, projects_promote,
+    projects_payments, projects_promote, projects_tech,
 )
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
@@ -100,6 +100,7 @@ projects_invoicing.register(bp)
 projects_payments.register(bp)
 projects_promote.register(bp)
 projects_adjust.register(bp)
+projects_tech.register(bp)
 
 
 def _parse_money(value) -> float:
@@ -293,6 +294,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return projects_invoicing.render_panel(ctx)
     if tab == "pagos":
         return projects_payments.render_panel(ctx)
+    if tab == "tecnico":
+        return projects_tech.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 
@@ -347,6 +350,11 @@ def facturacion(pid):
 @bp.route("/<pid>/pagos")
 def pagos(pid):
     return _project_page(pid, "pagos")
+
+
+@bp.route("/<pid>/tecnico")
+def tecnico(pid):
+    return _project_page(pid, "tecnico")
 
 
 @bp.route("/<pid>/estado", methods=["POST"])

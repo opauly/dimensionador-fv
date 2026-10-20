@@ -23,8 +23,10 @@
     Calibres, protecciones y áreas de conducto según las tablas NEC de la hoja «Dimensionador CCC + FV». El largo de cada tramo es de obra: ajústalo y se recalcula.
   </p>
 
-  <form id="wr-form" hx-post="{{ url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change delay:400ms"
-        hx-target="#wiring-panel" hx-swap="outerHTML">
+  {# post_url / form_target / form_swap let the project's Técnico tab reuse this fragment and
+     re-render its whole panel (BOM included) when a length changes; the wizard keeps the defaults. #}
+  <form id="wr-form" hx-post="{{ post_url or url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change delay:400ms"
+        hx-target="{{ form_target or '#wiring-panel' }}" hx-swap="{{ form_swap or 'outerHTML' }}">
     <div class="wr-lengths">
       {% for key, label in length_labels.items() %}
         {% if key != 'ac_in_m' or show_ac_in %}

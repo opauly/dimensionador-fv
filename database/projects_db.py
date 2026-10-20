@@ -302,6 +302,11 @@ def promote_to_project(
     return project
 
 
+def update_tech_spec(project_id: str, tech_spec: dict) -> dict:
+    """Replace a project's `tech_spec` (design version + site-measured wiring lengths)."""
+    return get_client().table("projects").update({"tech_spec": tech_spec or {}}).eq("id", project_id).execute().data[0]
+
+
 def update_price_adjustment(project_id: str, quoted_usd: float | None, reason: str | None) -> dict:
     """Set (or clear, with `quoted_usd=None`) a project's quoted-price baseline and the
     reason the final price differs. The final price itself is `contract_usd` and is not
