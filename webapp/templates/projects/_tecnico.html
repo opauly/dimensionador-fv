@@ -42,7 +42,7 @@
   {% with ready=wiring.ready, reason=wiring.reason, branches=wiring.branches, lengths=wiring.lengths, length_labels=wiring.length_labels,
           insulation=wiring.insulation, conduit_type=wiring.conduit_type, vd_limit=wiring.vd_limit, terminal_temp=wiring.terminal_temp,
           show_ac_in=wiring.show_ac_in, meter_rows=wiring.meter_rows, ac_missing=wiring.ac_missing,
-          post_url=wiring.post_url, form_target=wiring.form_target, form_swap=wiring.form_swap, vid=chosen.id %}
+          post_url=wiring.post_url, form_target=wiring.form_target, form_swap=wiring.form_swap, vid=chosen.id, hide_meters=true %}
     {% include "wizard/_wiring.html" %}
   {% endwith %}
   {% if custom_lengths %}<p class="tc-sub">Largos de obra guardados en este proyecto.</p>{% elif wiring.ready %}

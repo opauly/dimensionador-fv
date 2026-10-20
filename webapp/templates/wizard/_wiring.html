@@ -1,27 +1,29 @@
-{# Wiring summary fragment for the Off-Grid / Hybrid Equipos step. Loaded lazily by
-   _s6og_equipos.html (hx-trigger="load") and re-rendered by the length inputs below.
-   Root id must stay "wiring-panel" — both the load and the change handlers swap outerHTML. #}
+{# Wiring summary fragment for the Off-Grid / Hybrid Equipos step and the project's Técnico tab.
+   Loaded lazily by _s6og_equipos.html (hx-trigger="load") and re-rendered by the length inputs below.
+   Root id must stay "wiring-panel" — the load and change handlers swap outerHTML.
+   Kept deliberately lean: one row per branch; explanations and assumptions live in the collapsed
+   "Notas y supuestos" block. #}
 <div id="wiring-panel">
 <style>
-.wr-lengths { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:8px 0 12px; }
-.wr-lengths label { display:block; font-size:12px; color:var(--muted-2); margin-bottom:3px; }
-.wr-lengths input { width:100%; box-sizing:border-box; padding:5px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; font-family:var(--font); }
-.wr-table td { vertical-align:top; font-size:13px; }
+.wr-lengths { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin:6px 0 10px; }
+.wr-lengths label { display:block; font-size:11.5px; color:var(--muted-2); margin-bottom:2px; }
+.wr-lengths input { width:100%; box-sizing:border-box; padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; font-family:var(--font); }
+.wr-table td { vertical-align:middle; font-size:13px; padding-top:9px; padding-bottom:9px; }
 .wr-big { font-weight:700; white-space:nowrap; }
 .wr-sub { font-size:11.5px; color:#6b7280; }
 .wr-bad { color:#B84345; font-weight:600; }
-.wr-warn { color:#92400e; }
-.wr-notes { font-size:12px; color:#6b7280; margin:6px 0 0; padding-left:18px; }
+.wr-flag { color:#92400e; cursor:help; margin-left:4px; }
+.wr-details { margin:8px 0 0; font-size:12.5px; color:#6b7280; }
+.wr-details summary { cursor:pointer; color:var(--navy); font-weight:600; }
+.wr-details ul { margin:6px 0 0; padding-left:18px; }
+.wr-details li { margin:2px 0; }
 </style>
 
 <h5 style="font-size:13px;margin:14px 0 2px;">Cableado y canalizaciones</h5>
 {% if not ready %}
   <p class="card-note-sm">{{ reason }}</p>
 {% else %}
-  <p class="card-note-sm">
-    Conductor de cobre {{ insulation }} en tubería PVC ({{ conduit_type }}), terminales a {{ terminal_temp }} °C, caída de tensión máxima {{ vd_limit|int }} %.
-    Calibres, protecciones y áreas de conducto según las tablas NEC de la hoja «Dimensionador CCC + FV». El largo de cada tramo es de obra: ajústalo y se recalcula.
-  </p>
+  <p class="card-note-sm">Cobre {{ insulation }} en tubería PVC, terminales a {{ terminal_temp }} °C, caída máx. {{ vd_limit|int }} %. Ajusta los largos de obra y se recalcula.</p>
 
   {# post_url / form_target / form_swap let the project's Técnico tab reuse this fragment and
      re-render its whole panel (BOM included) when a length changes; the wizard keeps the defaults. #}
@@ -42,31 +44,26 @@
   <div class="dtable-wrap">
     <table class="dtable wr-table">
       <thead><tr>
-        <td>Rama</td><td>Cant.</td><td>Corriente (A)</td><td>Protección</td><td>Conductor · tierra</td><td>Caída</td><td>Conducto PVC</td>
+        <td>Rama</td><td>Cant.</td><td>Corriente</td><td>Protección</td><td>Conductor</td><td>Caída</td><td>Conducto PVC</td>
       </tr></thead>
       <tbody>
       {% for b in branches %}
+        {% set flags = (b.notes[1:] if b.notes else []) %}
         <tr>
-          <td><b>{{ b.label }}</b><div class="wr-sub">{{ b.length_m|round(1) }} m · {{ b.v_ref|round(0)|int }} V {{ 'CC' if b.kind == 'dc' else 'CA' }}</div></td>
+          <td><b>{{ b.label }}</b>{% if flags or not b.ok %}<span class="wr-flag" title="{{ (flags + (['Revisar: no se pudo dimensionar completamente.'] if not b.ok else []))|join(' · ') }}">⚠</span>{% endif %}
+            <div class="wr-sub">{{ b.length_m|round(1) }} m · {{ b.v_ref|round(0)|int }} V {{ 'CC' if b.kind == 'dc' else 'CA' }}</div></td>
           <td>{{ b.qty }}</td>
-          <td>{{ '%.1f'|format(b.current_a) }}<div class="wr-sub">diseño {{ '%.1f'|format(b.design_a) }}</div></td>
+          <td title="Corriente de diseño {{ '%.1f'|format(b.design_a) }} A">{{ '%.1f'|format(b.current_a) }} A</td>
           <td class="wr-big">{{ b.ocpd_a if b.ocpd_a else '—' }} A</td>
           {% if b.ugc %}
-            <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %} <span class="wr-sub">(subido de {{ b.ugc_initial }} por caída)</span>{% endif %}
-              <div class="wr-sub">Tierra {{ b.egc_label }} · {% for r in b.conductors %}{{ r.count }}×{{ r.label.replace(' AWG','').replace(' kcmil','k') }}{{ ' + ' if not loop.last }}{% endfor %}</div></td>
-            <td class="{{ 'wr-bad' if b.vd_pct > vd_limit else '' }}">{{ '%.2f'|format(b.vd_pct) }} %<div class="wr-sub">{{ '%.2f'|format(b.vd_v) }} V</div></td>
-            <td class="wr-big">{% if b.conduit %}{{ b.conduit.trade }}″<div class="wr-sub">Ø{{ b.conduit.metric }} mm · {{ b.total_mm2 }} mm² · relleno {{ b.conduit.fill_pct }} %</div>{% else %}<span class="wr-bad">sin tamaño</span>{% endif %}</td>
+            <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %}<span class="wr-flag" title="Subido de {{ b.ugc_initial }} AWG por caída de tensión">↑</span>{% endif %}
+              <div class="wr-sub">tierra {{ b.egc_label }}</div></td>
+            <td class="{{ 'wr-bad' if b.vd_pct > vd_limit else '' }}">{{ '%.1f'|format(b.vd_pct) }} %</td>
+            <td>{% if b.conduit %}<span class="wr-big">{{ b.conduit.trade }}″</span><div class="wr-sub">relleno {{ b.conduit.fill_pct|round|int }} %</div>{% else %}<span class="wr-bad">sin tamaño</span>{% endif %}</td>
           {% else %}
             <td colspan="3" class="wr-bad">Fuera de tabla</td>
           {% endif %}
         </tr>
-        {% if b.notes %}
-          <tr><td colspan="7" style="padding-top:0;border-top:none;">
-            <ul class="wr-notes">
-              {% for n in b.notes %}<li class="{{ 'wr-warn' if loop.index0 > 0 else '' }}">{{ n }}</li>{% endfor %}
-            </ul>
-          </td></tr>
-        {% endif %}
       {% endfor %}
       </tbody>
     </table>
@@ -76,14 +73,19 @@
     <p class="card-note-sm">Sin líneas de carga del Paso 4/5 no se puede dimensionar la rama AC.</p>
   {% endif %}
 
-  {% if meter_rows %}
-    <p class="card-note-sm" style="margin-top:10px;"><b>Conductor total por calibre</b> (todas las ramas y cantidades, incluye tierra):
-      {% for label, m in meter_rows %}{{ label }}: {{ m|round(1) }} m{{ ' · ' if not loop.last }}{% endfor %}.</p>
-  {% endif %}
-  <p class="card-note-sm">
-    Simplificaciones: sin derating por temperatura ambiente ni por más de 3 conductores en el conducto, sin caja combinadora de varios pares por controlador,
-    eficiencia del inversor 95 % (no está en el catálogo). La tierra (EGC) sigue la hoja de Excel: T250.66 sobre el calibre inicial, agrandada en proporción si el conductor sube por caída de tensión.
-    Es una guía de diseño; el calibre final lo confirma el ingeniero responsable.
-  </p>
+  <details class="wr-details">
+    <summary>Notas y supuestos</summary>
+    <ul>
+      {% for b in branches %}
+        {% for n in b.notes %}<li><b>{{ b.label }}:</b> {{ n }}</li>{% endfor %}
+      {% endfor %}
+      {% if meter_rows and not hide_meters %}
+        <li><b>Conductor total por calibre</b> (todas las ramas, incluye tierra): {% for label, m in meter_rows %}{{ label }} {{ m|round(1) }} m{{ ' · ' if not loop.last }}{% endfor %}.</li>
+      {% endif %}
+      <li>Sin derating por temperatura ambiente ni por más de 3 conductores en el conducto; sin caja combinadora de varios pares por controlador; eficiencia del inversor 95 % (no está en el catálogo).</li>
+      <li>La tierra (EGC) sigue la hoja de Excel: T250.66 sobre el calibre inicial, agrandada en proporción si el conductor sube por caída de tensión.</li>
+      <li>Guía de diseño: el calibre final lo confirma el ingeniero responsable.</li>
+    </ul>
+  </details>
 {% endif %}
 </div>

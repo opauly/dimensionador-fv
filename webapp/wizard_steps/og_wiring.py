@@ -174,15 +174,18 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         if ac_in:
             ctx["show_ac_in"] = True
             per_leg_a = ac_in["design_current_a"] / inv_qty if split and inv_qty > 1 else None
-            branches.append(W.size_branch(
+            ac_in_branch = W.size_branch(
                 "Red → entrada AC del inversor", kind="ac", qty=1,
                 current_a=ac_in["design_current_a"], factor=1.0,
                 v_ref=design_v, length_m=L["ac_in_m"], hot=2 if split else 1, neutral=1,
                 ocpd_override=ac_in["breaker_a"], insulation=ins, conduit_type=conduit,
-                note="Se dimensiona con la misma corriente y breaker del resumen de arriba (passthrough del inversor × cantidad, sin otro 1.25)."
-                     + (f" ⚠️ Con {inv_qty} inversores de 120 V en split-phase, cada uno va en una fase: por fase circularían ~{per_leg_a:.0f} A, "
-                        "no la suma — el resumen actual es conservador." if per_leg_a else ""),
-            ))
+                note="Se dimensiona con la misma corriente y breaker del resumen de arriba (passthrough del inversor × cantidad, sin otro 1.25).",
+            )
+            if per_leg_a:  # a separate note so the table flags this branch
+                ac_in_branch["notes"].append(
+                    f"Con {inv_qty} inversores de 120 V en split-phase, cada uno va en una fase: por fase circularían ~{per_leg_a:.0f} A, "
+                    "no la suma — el resumen actual es conservador.")
+            branches.append(ac_in_branch)
     else:
         ctx["ac_missing"] = True
 
