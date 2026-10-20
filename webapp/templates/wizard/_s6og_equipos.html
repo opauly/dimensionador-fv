@@ -457,6 +457,9 @@
   <p class="card-note-sm">No hay líneas de carga del Paso 4/5 para calcular la demanda eléctrica.</p>
 {% endif %}
 
+{# Cableado y canalizaciones (calibres, protecciones y conducto PVC por rama) — fragmento propio, ver og_wiring.py #}
+<div id="wiring-panel" hx-get="{{ url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="load" hx-swap="outerHTML"></div>
+
 <hr>
 <h4 class="section-title" style="font-size:15px;">Dimensionamiento calculado</h4>
 {% if dim.scenario_note %}<p class="card-note-sm">Configuración activa: {{ dim.scenario_note }}</p>{% endif %}

@@ -52,7 +52,7 @@ from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
     hy_s4_loads, hy_s5_demand,
-    og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review,
+    og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review, og_wiring,
     s1_client, s2_type, s3_site, s6_objetivos,
 )
 
@@ -1190,6 +1190,27 @@ def paso6_objetivos_recalcular(vid):
     blob = draft.load(vid)
     blob = draft.patch(vid, "objectives", s6_objetivos.recalc(blob, request.form, vid))
     return _s6_obj_render(vid, blob)
+
+
+# ── Step 7 wiring summary (Off-Grid / Hybrid) — "Cableado y canalizaciones", loaded lazily under the
+# Equipos step's "Resumen eléctrico" and re-rendered when a cable length changes. It reads the saved design
+# from the draft (og_wiring.py) rather than recomputing the scenario engine, and keeps only the cable run
+# lengths in blob["scratch"]["wiring"].
+
+
+def _wiring_render(vid: str, blob: dict):
+    return render_template("wizard/_wiring.html", vid=vid, **og_wiring.build_context(blob))
+
+
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/cableado", methods=["GET", "POST"])
+def paso6og_cableado(vid):
+    guard = _guard(vid, STEP_EQUIPOS)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    if request.method == "POST":
+        blob = draft.patch(vid, "scratch", {og_wiring.SCRATCH_KEY: og_wiring.lengths_from_form(request.form)})
+    return _wiring_render(vid, blob)
 
 
 # ── Step 7 (Grid Zero) actions — row edit, +Fila, quitar fila, Refrescar
