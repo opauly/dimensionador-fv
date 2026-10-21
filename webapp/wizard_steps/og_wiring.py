@@ -22,6 +22,11 @@ from calculations import wiring as W
 
 SCRATCH_KEY = "wiring"
 
+# DC branches carry just + and − (two conductors); no equipment-grounding conductor is counted
+# per DC run. Flip to True to count one EGC with every DC branch (what the workbook's conduit
+# tables do) — it changes conduit fill and the conductor metres.
+DC_BRANCH_HAS_EGC = False
+
 # Cable run lengths in metres. Site-specific, so editable in the UI; these defaults are
 # round-number stand-ins in the range the workbook's sample projects use.
 DEFAULT_LENGTHS = {
@@ -130,7 +135,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         W.size_branch(
             "Paneles → controlador de carga", kind="dc", qty=cc_qty,
             current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
-            v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit,
+            v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
             note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
                  f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
         ),
@@ -144,7 +149,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         i_out = min(i_out, rating_out)
     branches.append(W.size_branch(
         "Controlador de carga → baterías", kind="dc", qty=cc_qty, current_a=i_out, factor=W.CONTINUOUS_FACTOR,
-        v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit,
+        v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
         note="Corriente de salida = el menor entre la capacidad del controlador y la potencia del arreglo ÷ voltaje de batería.",
     ))
 
@@ -153,7 +158,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         i_dc = inv_kw * 1000.0 / W.INVERTER_EFFICIENCY / v_bat
         branches.append(W.size_branch(
             "Baterías → inversor", kind="dc", qty=inv_qty, current_a=i_dc, factor=W.CONTINUOUS_FACTOR,
-            v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit,
+            v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
             note=f"Por inversor: potencia ÷ eficiencia ({W.INVERTER_EFFICIENCY:.2f}) ÷ voltaje de banco ({v_bat:.1f} V). "
                  "La hoja de Excel usa el voltaje de salida CA en esta rama; aquí se usa el voltaje de CC.",
         ))
@@ -161,30 +166,35 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     ac = _ac_summary(blob, inv_qty)
     if ac is not None:
         summary, design_v, split = ac
-        out = summary["ac_out"]
+        # Each inverter has its own AC out and AC in run to the panel: its own phase (or two for a
+        # 240 V unit), neutral and ground. 120 V units therefore carry 3 conductors each, and the
+        # voltage drop is judged against the inverter's own voltage, not the 240 V of the pair.
+        leg_v = _f(inverter, "output_v", 120.0) or 120.0
+        hot = 2 if leg_v >= 200 else 1
+        demand_w = summary["peak_current_a"] * design_v
+        i_out = demand_w / (leg_v * inv_qty)
         branches.append(W.size_branch(
-            "Inversor → tablero AC (salida)", kind="ac", qty=1,
-            current_a=out["design_current_a"] / W.CONTINUOUS_FACTOR, factor=W.CONTINUOUS_FACTOR,
-            v_ref=design_v, length_m=L["ac_out_m"], hot=2 if split else 1, neutral=1,
-            ocpd_override=out["breaker_a"], insulation=ins, conduit_type=conduit,
-            note=f"Demanda × 1.25 a {design_v:.0f} V; el breaker es el mismo del resumen de arriba. "
-                 f"{'Dos fases + neutro + tierra (split-phase).' if split else 'Fase + neutro + tierra.'}",
+            "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
+            current_a=i_out, factor=W.CONTINUOUS_FACTOR,
+            v_ref=leg_v, length_m=L["ac_out_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit,
+            note=f"Por inversor ({leg_v:.0f} V): demanda ÷ voltaje ÷ {inv_qty} inversor(es), × 1.25. "
+                 f"{hot} fase{'s' if hot > 1 else ''} + neutro + tierra por inversor.",
         ))
         ac_in = summary.get("ac_in")
-        if ac_in:
+        rated_in = _f(inverter, "ac_input_current_max_a")
+        if ac_in and rated_in:
             ctx["show_ac_in"] = True
-            per_leg_a = ac_in["design_current_a"] / inv_qty if split and inv_qty > 1 else None
             ac_in_branch = W.size_branch(
-                "Red → entrada AC del inversor", kind="ac", qty=1,
-                current_a=ac_in["design_current_a"], factor=1.0,
-                v_ref=design_v, length_m=L["ac_in_m"], hot=2 if split else 1, neutral=1,
-                ocpd_override=ac_in["breaker_a"], insulation=ins, conduit_type=conduit,
-                note="Se dimensiona con la misma corriente y breaker del resumen de arriba (passthrough del inversor × cantidad, sin otro 1.25).",
+                "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
+                current_a=rated_in, factor=1.0,
+                v_ref=leg_v, length_m=L["ac_in_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit,
+                note=f"Por inversor: corriente máx. de passthrough del datasheet ({rated_in:.0f} A). "
+                     f"{hot} fase{'s' if hot > 1 else ''} + neutro + tierra por inversor.",
             )
-            if per_leg_a:  # a separate note so the table flags this branch
+            if inv_qty > 1:
                 ac_in_branch["notes"].append(
-                    f"Con {inv_qty} inversores de 120 V en split-phase, cada uno va en una fase: por fase circularían ~{per_leg_a:.0f} A, "
-                    "no la suma — el resumen actual es conservador.")
+                    f"El resumen de arriba suma los {inv_qty} inversores en un solo breaker de 2 polos ({ac_in['breaker_a']} A); "
+                    f"aquí cada inversor tiene su propio breaker de {ac_in_branch['ocpd_a']} A — más ajustado.")
             branches.append(ac_in_branch)
     else:
         ctx["ac_missing"] = True
@@ -193,7 +203,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     for b in branches:
         if b.get("ugc"):
             b["ugc_label"] = W.gauge_label(b["ugc"])
-            b["egc_label"] = W.gauge_label(b["egc"])
+            b["egc_label"] = W.gauge_label(b["egc"]) if b.get("egc") else None
             for row in b.get("conductors") or []:
                 row["label"] = W.gauge_label(row["gauge"])
     ctx["meter_rows"] = [(W.gauge_label(g), m) for g, m in ctx["meters"].items()]

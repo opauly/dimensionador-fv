@@ -57,7 +57,7 @@
           <td class="wr-big">{{ b.ocpd_a if b.ocpd_a else '—' }} A</td>
           {% if b.ugc %}
             <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %}<span class="wr-flag" title="Subido de {{ b.ugc_initial }} AWG por caída de tensión">↑</span>{% endif %}
-              <div class="wr-sub">tierra {{ b.egc_label }}</div></td>
+              <div class="wr-sub">{{ b.conductors|sum(attribute='count') }} conductores{% if b.egc_label %} · tierra {{ b.egc_label }}{% endif %}</div></td>
             <td class="{{ 'wr-bad' if b.vd_pct > vd_limit else '' }}">{{ '%.1f'|format(b.vd_pct) }} %</td>
             <td>{% if b.conduit %}<span class="wr-big">{{ b.conduit.trade }}″</span><div class="wr-sub">relleno {{ b.conduit.fill_pct|round|int }} %</div>{% else %}<span class="wr-bad">sin tamaño</span>{% endif %}</td>
           {% else %}

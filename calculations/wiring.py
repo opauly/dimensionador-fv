@@ -114,10 +114,13 @@ def size_branch(
     label: str, *, kind: str, qty: int, current_a: float, factor: float, v_ref: float, length_m: float,
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
+    egc_included: bool = True,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
     factors (used for voltage drop, like the workbook); `factor` is the multiplier that
-    turns it into the NEC design current. `kind` is "dc" or "ac"."""
+    turns it into the NEC design current. `kind` is "dc" or "ac". `egc_included=False` leaves the
+    equipment-grounding conductor out of this branch's conductor count (conduit fill and metres) —
+    used for DC branches that carry only + and −."""
     notes: list[str] = [note] if note else []
     design_a = round(current_a * factor, 2)
     ugc_i = initial_gauge(design_a)
@@ -152,7 +155,7 @@ def size_branch(
     if ocpd is not None and amp is not None and ocpd > amp:
         notes.append(f"OCPD de {ocpd} A mayor que la ampacidad del conductor ({amp:.0f} A): permitido por NEC 240.4(B) (siguiente tamaño estándar).")
 
-    conductors = [("UGC", ugc, hot), ("EGC", egc, 1)]
+    conductors = [("UGC", ugc, hot)] + ([("EGC", egc, 1)] if egc_included else [])
     if neutral:
         conductors.insert(1, ("Neutro", ugc, neutral))
     rows, total_mm2, missing = [], 0.0, False
@@ -171,7 +174,7 @@ def size_branch(
     out.update({
         "ugc_initial": ugc_i, "ugc": ugc, "ugc_ampacity": amp, "upsized_for_vd": ugc != ugc_i,
         "ocpd_a": ocpd, "vd_v": round(vd_v, 2), "vd_pct": round(vd_pct, 2), "vd_pct_initial": round(vd_pct_initial, 2),
-        "egc": egc, "conductors": rows, "total_mm2": round(total_mm2, 1), "conduit": conduit,
+        "egc": egc if egc_included else None, "conductors": rows, "total_mm2": round(total_mm2, 1), "conduit": conduit,
     })
     return out
 

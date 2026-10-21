@@ -83,5 +83,17 @@ check("BOM conduit 3 m tubes with waste: ceil(22/3)", co["tubes"], 8)
 pr = B.protection_rows(br)[0]
 check("BOM protection qty + poles", (pr["qty"], "2 polos" in pr["item"]), (2, True))
 
+# ── Conductor counts per branch (2 wires DC; 3 per 120 V inverter on AC) ───────────
+nb = W.size_branch("dc", kind="dc", qty=2, current_a=31.72, factor=1.5625, v_ref=161.8, length_m=15.0, egc_included=False)
+check("DC branch: 2 conductors, no EGC", [(r["role"], r["count"]) for r in nb["conductors"]], [("UGC", 2)])
+check("DC branch: egc field empty when not carried", nb["egc"], None)
+ab = W.size_branch("ac", kind="ac", qty=2, current_a=36.75, factor=1.25, v_ref=120.0, length_m=10.0, hot=1, neutral=1)
+check("AC 120 V inverter: phase + neutral + ground", [(r["role"], r["count"]) for r in ab["conductors"]], [("UGC", 1), ("Neutro", 1), ("EGC", 1)])
+check("AC Vd judged on 120 V (36.75 A, 8 AWG, 10 m) %", ab["vd_pct"], 1.32, 0.01)
+meters = B.conductor_rows([nb, ab], "RHW-2")
+tot = {r["item"]: r["meters"] for r in meters}
+check("BOM: AC 8 AWG live+neutral = 2 inverters x 2 conductors x 10 m + DC pair 2x2x15", tot["Conductor Cu RHW-2 8 AWG — activos / neutro"], 40.0 + 60.0)
+check("BOM: AC ground = 2 inverters x 1 x 10 m (DC has none)", tot["Conductor Cu RHW-2 8 AWG — tierra (EGC)"], 20.0)
+
 print("\n" + ("ALL WIRING CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
