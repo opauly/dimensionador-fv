@@ -22,10 +22,12 @@ from calculations import wiring as W
 
 SCRATCH_KEY = "wiring"
 
-# DC branches carry just + and − (two conductors); no equipment-grounding conductor is counted
-# per DC run. Flip to True to count one EGC with every DC branch (what the workbook's conduit
-# tables do) — it changes conduit fill and the conductor metres.
-DC_BRANCH_HAS_EGC = False
+# Equipment-grounding conductor (EGC) per DC run. The PV run (panels -> controller) carries one with
+# its + and − (three conductors); the battery-side runs (controller -> batteries, batteries -> inverter)
+# carry just + and −. Each switch independently adds/removes one EGC from that branch's conductor
+# count, which changes its conduit fill and the conductor metres in the BOM.
+PV_BRANCH_HAS_EGC = True
+BATTERY_DC_BRANCH_HAS_EGC = False
 
 # Cable run lengths in metres. Site-specific, so editable in the UI; these defaults are
 # round-number stand-ins in the range the workbook's sample projects use.
@@ -135,7 +137,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         W.size_branch(
             "Paneles → controlador de carga", kind="dc", qty=cc_qty,
             current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
-            v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
+            v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
             note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
                  f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
         ),
@@ -149,7 +151,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         i_out = min(i_out, rating_out)
     branches.append(W.size_branch(
         "Controlador de carga → baterías", kind="dc", qty=cc_qty, current_a=i_out, factor=W.CONTINUOUS_FACTOR,
-        v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
+        v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
         note="Corriente de salida = el menor entre la capacidad del controlador y la potencia del arreglo ÷ voltaje de batería.",
     ))
 
@@ -158,7 +160,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
         i_dc = inv_kw * 1000.0 / W.INVERTER_EFFICIENCY / v_bat
         branches.append(W.size_branch(
             "Baterías → inversor", kind="dc", qty=inv_qty, current_a=i_dc, factor=W.CONTINUOUS_FACTOR,
-            v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=DC_BRANCH_HAS_EGC,
+            v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
             note=f"Por inversor: potencia ÷ eficiencia ({W.INVERTER_EFFICIENCY:.2f}) ÷ voltaje de banco ({v_bat:.1f} V). "
                  "La hoja de Excel usa el voltaje de salida CA en esta rama; aquí se usa el voltaje de CC.",
         ))
