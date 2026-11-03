@@ -125,6 +125,7 @@ def size_branch(
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
     egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
+    min_gauge: str | None = None,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
     factors (used for voltage drop, like the workbook); `factor` is the multiplier that
@@ -136,7 +137,11 @@ def size_branch(
     fixed set of ratings (e.g. the fuses a Lynx Power In bus takes): the smallest one >= the design
     current is used, and the conductor is then enlarged until its ampacity allows that rating — a
     conductor may only be protected by the next standard size above its ampacity (NEC 240.4(B)), so
-    a 200 A fuse cannot sit on a 130 A cable."""
+    a 200 A fuse cannot sit on a 130 A cable.
+
+    `min_gauge` is a practice floor (e.g. Pauly always pulls #10 solar cable): the conductor starts
+    there when the ampacity would allow something smaller. The EGC still derives from the
+    gauge the floor starts from, as the workbook derives it from the initial gauge."""
     notes: list[str] = [note] if note else []
     design_a = round(current_a * factor, 2)
     ugc_i = initial_gauge(design_a)
@@ -151,8 +156,12 @@ def size_branch(
         return out
 
     vd = vdrop_dc if kind == "dc" else vdrop_ac
-    start = T.GAUGE_ORDER.index(ugc_i)
-    ugc = ugc_i
+    start_g = ugc_i
+    if min_gauge and T.GAUGE_ORDER.index(min_gauge) > T.GAUGE_ORDER.index(ugc_i):
+        start_g = min_gauge
+        notes.append(f"Calibre mínimo de práctica: {min_gauge} AWG (la ampacidad permitiría {ugc_i} AWG).")
+    start = T.GAUGE_ORDER.index(start_g)
+    ugc = start_g
     vd_v = vd(ugc, current_a, length_m)
     for g in T.GAUGE_ORDER[start:]:
         ugc = g
@@ -164,7 +173,7 @@ def size_branch(
     if vd_pct > VD_LIMIT_PCT:
         out["ok"] = False
         notes.append(f"La caída de tensión ({vd_pct:.2f} %) supera {VD_LIMIT_PCT:.0f} % incluso con el calibre máximo de la tabla.")
-    egc = egc_gauge(ugc_i, ugc)
+    egc = egc_gauge(start_g, ugc)
 
     if ocpd_override is not None:
         ocpd = ocpd_override
@@ -187,7 +196,7 @@ def size_branch(
                     ugc = g
                     vd_v = vd(ugc, current_a, length_m)
                     vd_pct = vd_v / v_ref * 100.0 if v_ref else 0.0
-                    egc = egc_gauge(ugc_i, ugc)
+                    egc = egc_gauge(start_g, ugc)
                 break
     amp = ampacity(ugc)
     if ocpd is not None and amp is not None and ocpd > amp:
@@ -210,7 +219,7 @@ def size_branch(
         notes.append("No hay área de conducto PVC suficiente en la tabla para esta combinación de conductores.")
 
     out.update({
-        "ugc_initial": ugc_i, "ugc": ugc, "ugc_ampacity": amp, "upsized_for_vd": ugc != ugc_i,
+        "ugc_initial": ugc_i, "ugc_from": start_g, "ugc": ugc, "ugc_ampacity": amp, "upsized_for_vd": ugc != start_g,
         "ocpd_a": ocpd, "vd_v": round(vd_v, 2), "vd_pct": round(vd_pct, 2), "vd_pct_initial": round(vd_pct_initial, 2),
         "egc": egc if egc_included else None, "conductors": rows, "total_mm2": round(total_mm2, 1), "conduit": conduit,
     })

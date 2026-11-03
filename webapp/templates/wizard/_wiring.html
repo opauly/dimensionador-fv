@@ -13,6 +13,12 @@
 .wr-sub { font-size:11.5px; color:#6b7280; }
 .wr-bad { color:#B84345; font-weight:600; }
 .wr-flag { color:#92400e; cursor:help; margin-left:4px; }
+.wr-cpl-row { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end; margin:6px 0; }
+.wr-cpl label { display:block; font-size:11.5px; color:var(--muted-2); margin-bottom:2px; }
+.wr-cpl select, .wr-cpl input { padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:13px; font-family:var(--font); }
+.wr-cpl-num input { width:90px; }
+.wr-checks { list-style:none; margin:6px 0 4px; padding:0; font-size:12.5px; }
+.wr-checks li { margin:2px 0; } .wr-checks .ok span { color:#1E8449; } .wr-checks .bad { color:#B84345; } .wr-checks .warn span { color:#92400e; }
 .wr-details { margin:8px 0 0; font-size:12.5px; color:#6b7280; }
 .wr-details summary { cursor:pointer; color:var(--navy); font-weight:600; }
 .wr-details ul { margin:6px 0 0; padding-left:18px; }
@@ -20,6 +26,40 @@
 </style>
 
 <h5 style="font-size:13px;margin:14px 0 2px;">Cableado y canalizaciones</h5>
+{% if can_couple %}
+  {# PV coupling (hybrid only). Separate form from the cable lengths so each posts only its own fields. #}
+  <form id="wr-cpl" class="wr-cpl" hx-post="{{ post_url or url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change delay:300ms"
+        hx-target="{{ form_target or '#wiring-panel' }}" hx-swap="{{ form_swap or 'outerHTML' }}">
+    <div class="wr-cpl-row">
+      <div><label for="wr-mode">Acople FV</label>
+        <select id="wr-mode" name="coupling_mode">
+          <option value="dc" {{ 'selected' if not coupling.ac else '' }}>DC — controladores de carga</option>
+          <option value="ac" {{ 'selected' if coupling.ac else '' }}>AC — inversor FV en el AC-OUT de los Multis</option>
+        </select></div>
+      {% if coupling.ac %}
+        <div><label for="wr-pvinv">Inversor FV</label>
+          <select id="wr-pvinv" name="pv_inverter_id">
+            {% for i in coupling.options %}<option value="{{ i.id }}" {{ 'selected' if i.id == coupling.selected_id else '' }}>{{ i.brand }} {{ i.model }}</option>{% endfor %}
+          </select></div>
+        {% if coupling.check %}
+          <div class="wr-cpl-num"><label for="wr-strings">Strings</label>
+            <input id="wr-strings" type="number" min="1" name="cpl_strings" value="{{ coupling.strings }}"></div>
+          <div class="wr-cpl-num"><label for="wr-series">Módulos por string</label>
+            <input id="wr-series" type="number" min="1" name="cpl_series" value="{{ coupling.series }}"></div>
+          <input type="hidden" name="pv_inverter_qty" value="{{ coupling.qty }}">
+        {% endif %}
+      {% endif %}
+    </div>
+    {% if coupling.ac and coupling.check %}
+      <ul class="wr-checks">
+        {% for c in coupling.check.checks %}
+          <li class="{{ 'ok' if c.ok else ('bad' if c.ok is false else 'warn') }}"><span>{{ '✓' if c.ok else ('✗' if c.ok is false else '⚠') }}</span> {{ c.label }}: {{ c.detail }}</li>
+        {% endfor %}
+      </ul>
+      <p class="card-note-sm">Acople AC: el inversor FV va en el lado de carga de los Multis (sub-panel de cargas críticas) y no hay controladores de carga. El dimensionamiento de equipos de arriba sigue siendo de acople DC; aquí cambian el cableado y la lista de materiales.</p>
+    {% endif %}
+  </form>
+{% endif %}
 {% if not ready %}
   <p class="card-note-sm">{{ reason }}</p>
 {% else %}
@@ -58,7 +98,7 @@
           <td><span class="wr-big">{{ b.ocpd_a if b.ocpd_a else '—' }} A</span>
             <div class="wr-sub">{{ 'fusible Lynx' if b.protection == 'fuse' else ('breaker CC' if b.kind == 'dc' else 'breaker CA') }}{% if b.alt %} · {{ b.alt.label }}: {{ b.alt.ocpd_a }} A{% endif %}{% if b.max_ocpd_a %} · máx. {{ b.max_ocpd_a }} A{% endif %}</div></td>
           {% if b.ugc %}
-            <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %}<span class="wr-flag" title="Subido de {{ b.ugc_initial }} AWG por caída de tensión">↑</span>{% endif %}
+            <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %}<span class="wr-flag" title="Subido de {{ b.ugc_from or b.ugc_initial }} AWG por caída de tensión">↑</span>{% endif %}
               <div class="wr-sub">{{ b.conductors|sum(attribute='count') }} conductores{% if b.egc_label %} · tierra {{ b.egc_label }}{% endif %}</div></td>
             <td class="{{ 'wr-bad' if b.vd_pct > vd_limit else '' }}">{{ '%.1f'|format(b.vd_pct) }} %</td>
             <td>{% if b.conduit %}<span class="wr-big">{{ b.conduit.trade }}″</span><div class="wr-sub">relleno {{ b.conduit.fill_pct|round|int }} %</div>{% else %}<span class="wr-bad">sin tamaño</span>{% endif %}</td>

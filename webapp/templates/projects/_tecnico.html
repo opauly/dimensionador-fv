@@ -41,7 +41,7 @@
   {# Wiring / breaker / conduit table + editable runs (shared fragment with the wizard) #}
   {% with ready=wiring.ready, reason=wiring.reason, branches=wiring.branches, lengths=wiring.lengths, length_labels=wiring.length_labels,
           insulation=wiring.insulation, conduit_type=wiring.conduit_type, vd_limit=wiring.vd_limit, terminal_temp=wiring.terminal_temp,
-          show_ac_in=wiring.show_ac_in, meter_rows=wiring.meter_rows, ac_missing=wiring.ac_missing,
+          show_ac_in=wiring.show_ac_in, coupling=wiring.coupling, can_couple=wiring.can_couple, meter_rows=wiring.meter_rows, ac_missing=wiring.ac_missing,
           post_url=wiring.post_url, form_target=wiring.form_target, form_swap=wiring.form_swap, vid=chosen.id, hide_meters=true %}
     {% include "wizard/_wiring.html" %}
   {% endwith %}
@@ -50,6 +50,15 @@
 
   <p class="tc-h">Lista de materiales preliminar</p>
   <p class="card-note-sm">Derivada del diseño y del dimensionamiento de arriba; no es una lista de compra cerrada. Conductores y tubería incluyen {{ bom.waste_pct }} % de desperdicio; la tubería PVC se cuenta en tubos estándar de {{ '%g'|format(bom.tube_m) }} m.</p>
+
+  {% if bom.system %}
+    <div class="dtable-wrap"><table class="dtable tc-table">
+      <thead><tr><td>Barra DC y comunicaciones</td><td class="tc-num">Cant.</td><td>Cómo se calcula</td></tr></thead>
+      <tbody>
+        {% for r in bom.system %}<tr><td>{{ r.item }}</td><td class="tc-num"><b>{{ r.qty }}</b></td><td class="tc-sub">{{ r.note }}</td></tr>{% endfor %}
+      </tbody>
+    </table></div>
+  {% endif %}
 
   {% if bom.wiring_ready %}
     <div class="dtable-wrap"><table class="dtable tc-table">

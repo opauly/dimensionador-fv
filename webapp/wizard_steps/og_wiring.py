@@ -13,12 +13,18 @@ Branches (each sized by `wiring.size_branch`):
   3. Batteries -> inverter           (DC, per inverter)
   4. Inverter -> AC panel            (AC out; breaker taken from the existing AC summary)
   5. Grid -> inverter AC input       (AC in; hybrid with grid connection only)
+
+AC-coupled hybrid (`og_coupling`): branches 1 and 2 are replaced — there are no charge controllers.
+  1. PV strings -> PV inverter       (DC, one run per string; Pauly's #10 solar-cable floor)
+  2. PV inverter -> critical-loads sub-panel (AC 240 V split-phase: L1 + L2 + ground, no neutral)
 """
 from __future__ import annotations
 
 import math
 
+from calculations import coupling as C
 from calculations import wiring as W
+from webapp.wizard_steps import og_coupling
 
 SCRATCH_KEY = "wiring"
 
@@ -45,6 +51,7 @@ BATTERY_DC_BRANCH_HAS_EGC = False
 DEFAULT_LENGTHS = {
     "pv_cc_m": 15.0,     # PV array -> charge controller
     "cc_bat_m": 2.0,     # charge controller -> battery bank
+    "pv_inv_ac_m": 10.0,  # AC-coupled: PV inverter -> critical-loads sub-panel
     "bat_inv_m": 2.0,    # battery bank -> inverter
     "ac_out_m": 10.0,    # inverter -> AC panel
     "ac_in_m": 10.0,     # grid -> inverter AC input
@@ -55,6 +62,17 @@ LENGTH_LABELS = {
     "bat_inv_m": "Baterías → inversor",
     "ac_out_m": "Inversor → tablero AC",
     "ac_in_m": "Red → entrada AC del inversor",
+}
+
+
+# AC-coupled designs: no controller run; the PV run ends at the PV inverter and the other
+# lengths read against the critical-loads sub-panel.
+LENGTH_LABELS_AC = {
+    "pv_cc_m": "Paneles → inversor FV (vía gabinete DC)",
+    "pv_inv_ac_m": "Inversor FV → sub-panel de cargas críticas",
+    "bat_inv_m": "Baterías → Multis",
+    "ac_out_m": "Multis → sub-panel",
+    "ac_in_m": "Red → entrada AC de los Multis",
 }
 
 
@@ -76,14 +94,20 @@ def lengths(blob: dict) -> dict[str, float]:
     return clean_lengths(((blob or {}).get("scratch") or {}).get(SCRATCH_KEY))
 
 
-def lengths_from_form(form) -> dict[str, float]:
+def lengths_from_form(form, base: dict | None = None) -> dict[str, float]:
+    """Lengths posted by the form; a key the form does not carry (the controller run is hidden in an
+    AC-coupled design) keeps its value from `base`, then the default."""
+    base = clean_lengths(base)
     out = {}
-    for key, default in DEFAULT_LENGTHS.items():
+    for key in DEFAULT_LENGTHS:
+        if key not in form:
+            out[key] = base[key]
+            continue
         try:
             v = float(str(form.get(key, "")).replace(",", "."))
-            out[key] = v if v > 0 else default
+            out[key] = v if v > 0 else DEFAULT_LENGTHS[key]
         except ValueError:
-            out[key] = default
+            out[key] = DEFAULT_LENGTHS[key]
     return out
 
 
@@ -131,26 +155,37 @@ def _fresh_inverter(eq: dict) -> dict:
     return snap
 
 
-def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
+def build_context(blob: dict, lengths_override: dict | None = None, coupling_override: dict | None = None) -> dict:
     """{'ready': bool, 'reason': str|None, 'branches': [...], 'lengths': {...}, ...}
 
-    `lengths_override` lets a caller that owns the lengths elsewhere (a project's tech_spec)
-    size the same saved design with its own cable runs."""
+    `lengths_override` / `coupling_override` let a caller that owns those elsewhere (a project's
+    tech_spec) size the same saved design with its own cable runs and PV coupling."""
     blob = blob or {}
     eq = blob.get("equipment") or {}
     panel, cc = eq.get("panel") or {}, eq.get("charge_controller") or {}
     battery, inverter = eq.get("battery") or {}, _fresh_inverter(eq)
+    # AC coupling is a Hybrid option; an Off-Grid design stays DC-coupled whatever was saved.
+    can_couple = (blob.get("meta") or {}).get("system_type") == "hybrid"
+    saved_cpl = coupling_override if coupling_override is not None else og_coupling.from_blob(blob)
+    cpl = og_coupling.resolve(eq, saved_cpl if can_couple else {})
+    ac_coupled = cpl["ac"]
     ctx = {
         "ready": False, "reason": None, "branches": [],
         "lengths": clean_lengths(lengths_override) if lengths_override is not None else lengths(blob),
-        "length_labels": LENGTH_LABELS, "meters": {}, "insulation": W.DEFAULT_INSULATION,
+        "length_labels": LENGTH_LABELS_AC if ac_coupled else LENGTH_LABELS, "meters": {}, "insulation": W.DEFAULT_INSULATION,
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
-        "show_ac_in": False,
+        "show_ac_in": False, "coupling": cpl, "can_couple": can_couple,
     }
-    n_series, n_strings = int(eq.get("panels_per_string") or 0), int(eq.get("n_strings") or 0)
-    if not (panel and cc and battery and inverter and n_series and n_strings):
-        ctx["reason"] = "Elige y valida una configuración (paneles, controlador, baterías e inversor) para dimensionar el cableado."
-        return ctx
+    if ac_coupled:
+        n_series, n_strings = int(cpl.get("series") or 0), int(cpl.get("strings") or 0)
+        if not (panel and battery and inverter and cpl.get("pv_inverter") and n_series and n_strings):
+            ctx["reason"] = "Elige y valida una configuración (paneles, baterías e inversor Victron) para dimensionar el cableado."
+            return ctx
+    else:
+        n_series, n_strings = int(eq.get("panels_per_string") or 0), int(eq.get("n_strings") or 0)
+        if not (panel and cc and battery and inverter and n_series and n_strings):
+            ctx["reason"] = "Elige y valida una configuración (paneles, controlador, baterías e inversor) para dimensionar el cableado."
+            return ctx
 
     L = ctx["lengths"]
     cc_qty = max(1, int(eq.get("charge_controller_qty") or 1))
@@ -161,29 +196,51 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     array_v = vmp * n_series
     ins, conduit = W.DEFAULT_INSULATION, W.DEFAULT_CONDUIT
 
-    branches = [
-        W.size_branch(
-            "Paneles → controlador de carga", kind="dc", qty=cc_qty,
-            current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
-            v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
-            protection="breaker",
-            note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
-                 f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
-        ),
-    ]
+    if ac_coupled:
+        pv_inv, pv_qty = cpl["pv_inverter"], cpl["qty"]
+        branches = [
+            W.size_branch(
+                "Paneles → inversor FV (strings)", kind="dc", qty=n_strings,
+                current_a=isc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
+                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE,
+                note=f"Un tendido por string ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el gabinete DC. "
+                     f"Corriente = Isc × 1.25 × 1.25 (NEC 690.8); breaker de la serie estándar CC (NB1-63DC).",
+            ),
+        ]
+        pv_ac_a = C.pv_inverter_ac_current_a(pv_inv)
+        pv_ac = W.size_branch(
+            "Inversor FV → sub-panel de cargas críticas", kind="ac", qty=pv_qty,
+            current_a=pv_ac_a, factor=W.CONTINUOUS_FACTOR,
+            v_ref=C.PV_INVERTER_AC_V, length_m=L["pv_inv_ac_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+            note=f"Salida del inversor FV: {_f(pv_inv, 'kw'):g} kW ÷ {C.PV_INVERTER_AC_V:.0f} V = {pv_ac_a:.1f} A, × 1.25. "
+                 "L1 + L2 + tierra, sin neutro; entra al sub-panel de cargas críticas del lado de carga de los Multis.",
+        )
+        branches.append(pv_ac)
+    else:
+        branches = [
+            W.size_branch(
+                "Paneles → controlador de carga", kind="dc", qty=cc_qty,
+                current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
+                protection="breaker",
+                note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
+                     f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
+            ),
+        ]
 
-    # Controller output: the lower of its rating and what the array can push at battery voltage.
-    pv_power_cc = array_v * imp * strings_per_cc
-    i_out = pv_power_cc / v_bat
-    rating_out = _f(cc, "imax_out")
-    if rating_out:
-        i_out = min(i_out, rating_out)
-    branches.append(W.size_branch(
-        "Controlador de carga → baterías", kind="dc", qty=cc_qty, current_a=i_out, factor=W.CONTINUOUS_FACTOR,
-        v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
-        protection="fuse", ocpd_choices=LYNX_FUSE_SIZES_A,
-        note="Corriente de salida = el menor entre la capacidad del controlador y la potencia del arreglo ÷ voltaje de batería.",
-    ))
+        # Controller output: the lower of its rating and what the array can push at battery voltage.
+        pv_power_cc = array_v * imp * strings_per_cc
+        i_out = pv_power_cc / v_bat
+        rating_out = _f(cc, "imax_out")
+        if rating_out:
+            i_out = min(i_out, rating_out)
+        branches.append(W.size_branch(
+            "Controlador de carga → baterías", kind="dc", qty=cc_qty, current_a=i_out, factor=W.CONTINUOUS_FACTOR,
+            v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
+            protection="fuse", ocpd_choices=LYNX_FUSE_SIZES_A,
+            note="Corriente de salida = el menor entre la capacidad del controlador y la potencia del arreglo ÷ voltaje de batería.",
+        ))
 
     inv_kw = _f(inverter, "kw")
     if inv_kw:

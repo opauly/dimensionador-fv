@@ -24,8 +24,10 @@ def _model(item: dict | None) -> str:
     return f"{item.get('brand', '')} {item.get('model', '')}".strip()
 
 
-def equipment_rows(eq: dict) -> list[dict]:
-    """The chosen equipment with its quantity and the datasheet facts the installer needs."""
+def equipment_rows(eq: dict, coupling: dict | None = None) -> list[dict]:
+    """The chosen equipment with its quantity and the datasheet facts the installer needs.
+    In an AC-coupled design the PV inverter replaces the charge controller."""
+    coupling = coupling or {}
     panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
     bat, cc, mon = eq.get("battery") or {}, eq.get("charge_controller") or {}, eq.get("monitoring") or {}
     rows: list[dict] = []
@@ -39,11 +41,52 @@ def equipment_rows(eq: dict) -> list[dict]:
     if bat:
         rows.append({"category": "Baterías", "model": _model(bat), "qty": int((eq.get("battery_bank") or {}).get("battery_count") or 0),
                      "specs": f"{bat.get('capacity_kwh')} kWh · {bat.get('voltage_v')} V · {bat.get('capacity_ah')} Ah · DoD {bat.get('dod_pct')} % · {bat.get('cycles')} ciclos"})
-    if cc:
+    if coupling.get("ac") and coupling.get("pv_inverter"):
+        pv_inv, chk = coupling["pv_inverter"], coupling.get("check") or {}
+        rows.append({"category": "Inversor FV (acople AC)", "model": _model(pv_inv), "qty": int(coupling.get("qty") or 1),
+                     "specs": f"{pv_inv.get('kw')} kW · {pv_inv.get('mppt_channels')} MPPT · ventana {pv_inv.get('vmin_mppt')}–{pv_inv.get('vmax_mppt')} V · "
+                              f"{coupling.get('strings')} strings × {coupling.get('series')} módulos · Voc {chk.get('voc_string')} V · CC/CA {chk.get('dc_ac_ratio')}"})
+    elif cc:
         rows.append({"category": "Controlador de carga", "model": _model(cc), "qty": int(eq.get("charge_controller_qty") or 1),
                      "specs": f"Vin máx {cc.get('vin_max')} V · {cc.get('imax_in')} A entrada · {cc.get('imax_out')} A salida"})
     if mon:
         rows.append({"category": "Monitoreo", "model": _model(mon), "qty": 1, "specs": ""})
+    return rows
+
+
+LYNX_INPUTS = 4          # each Victron Lynx Power In takes four fused DC inputs
+BOLTS_PER_INPUT = 2      # one per polarity (+ and -)
+
+
+def system_rows(eq: dict, coupling: dict | None, wiring_ctx: dict) -> list[dict]:
+    """DC bus and communication hardware that follows from the equipment counts, not from a
+    cable run: Lynx Power In bars, their bolts, battery fuses, UTP and CAN cables.
+
+    Each battery, inverter (and charge controller in a DC-coupled design) lands on its own fused
+    Lynx input. UTP count: one VE.Bus link between each pair of Victron inverters, one inverter to
+    the GX device, one Fronius to the GX device for Grid Zero (AC-coupled), one GX to the router."""
+    coupling = coupling or {}
+    bat_qty = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
+    inv_qty = int(eq.get("inverter_qty") or 1) if eq.get("inverter") else 0
+    cc_qty = 0 if coupling.get("ac") else (int(eq.get("charge_controller_qty") or 1) if eq.get("charge_controller") else 0)
+    inputs = bat_qty + inv_qty + cc_qty
+    rows: list[dict] = []
+    if inputs:
+        parts = [f"{bat_qty} batería(s)", f"{inv_qty} inversor(es)"] + ([f"{cc_qty} controlador(es)"] if cc_qty else [])
+        rows.append({"item": "Victron Lynx Power In", "qty": math.ceil(inputs / LYNX_INPUTS),
+                     "note": f"{inputs} entradas fusionadas ({', '.join(parts)}); {LYNX_INPUTS} por barra"})
+        rows.append({"item": "Pernos / roscas para Lynx Power In", "qty": inputs * BOLTS_PER_INPUT,
+                     "note": f"{BOLTS_PER_INPUT} por entrada (+ y −)"})
+    if bat_qty:
+        rows.append({"item": "Fusible MEGA de batería (calibre por definir)", "qty": bat_qty,
+                     "note": "uno por batería en la barra Lynx; calibre según manual de la batería"})
+    if eq.get("monitoring"):
+        utp = max(inv_qty - 1, 0) + (1 if inv_qty else 0) + (1 if coupling.get("ac") else 0) + 1
+        parts = ([f"{inv_qty - 1} VE.Bus entre inversores"] if inv_qty > 1 else []) + (["1 inversor ↔ GX"] if inv_qty else []) \
+            + (["1 inversor FV ↔ GX (Grid Zero)"] if coupling.get("ac") else []) + ["1 GX ↔ router"]
+        rows.append({"item": "Cable UTP con RJ-45 (3 m)", "qty": utp, "note": " · ".join(parts)})
+        if bat_qty:
+            rows.append({"item": "Cable VE.CAN / CAN-bus de batería", "qty": 1, "note": "BMS de la batería ↔ GX"})
     return rows
 
 
@@ -104,12 +147,14 @@ def conduit_rows(branches: list[dict], conduit_type: str) -> list[dict]:
 
 
 def build_bom(eq: dict, wiring_ctx: dict) -> dict:
-    """{'equipment': [...], 'protections': [...], 'conductors': [...], 'conduit': [...]}.
+    """{'equipment': [...], 'system': [...], 'protections': [...], 'conductors': [...], 'conduit': [...]}.
     The wiring sections are empty (with `wiring_ready` False) when no branch was sized."""
     branches = wiring_ctx.get("branches") or []
     ready = bool(wiring_ctx.get("ready"))
+    coupling = wiring_ctx.get("coupling") or {}
     return {
-        "equipment": equipment_rows(eq),
+        "equipment": equipment_rows(eq, coupling),
+        "system": system_rows(eq, coupling, wiring_ctx),
         "protections": protection_rows(branches) if ready else [],
         "conductors": conductor_rows(branches, wiring_ctx.get("insulation", W.DEFAULT_INSULATION)) if ready else [],
         "conduit": conduit_rows(branches, wiring_ctx.get("conduit_type", W.DEFAULT_CONDUIT)) if ready else [],

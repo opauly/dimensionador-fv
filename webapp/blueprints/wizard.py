@@ -52,7 +52,7 @@ from webapp.wizard_steps import common as step_common
 from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
     hy_s4_loads, hy_s5_demand,
-    og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review, og_wiring,
+    og_coupling, og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review, og_wiring,
     s1_client, s2_type, s3_site, s6_objetivos,
 )
 
@@ -1209,7 +1209,14 @@ def paso6og_cableado(vid):
         return guard
     blob = draft.load(vid)
     if request.method == "POST":
-        blob = draft.patch(vid, "scratch", {og_wiring.SCRATCH_KEY: og_wiring.lengths_from_form(request.form)})
+        scratch = {}
+        if any(k in request.form for k in og_wiring.DEFAULT_LENGTHS):
+            scratch[og_wiring.SCRATCH_KEY] = og_wiring.lengths_from_form(request.form, og_wiring.lengths(blob))
+        cpl = og_coupling.from_form(request.form)
+        if cpl is not None:
+            scratch[og_coupling.SCRATCH_KEY] = cpl
+        if scratch:
+            blob = draft.patch(vid, "scratch", scratch)
     return _wiring_render(vid, blob)
 
 

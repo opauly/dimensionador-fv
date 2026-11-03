@@ -10,6 +10,8 @@ stored in `projects.tech_spec` (migration 052):
     version_id       which version of the project's proposal the tab reads (default: the latest
                      locked one, else the latest) — the promoted version can be a stale design
     wiring_lengths   cable run lengths measured on site, which refine the sizing
+    coupling         PV coupling of a hybrid design (DC controllers or AC-coupled PV inverter),
+                     see webapp/wizard_steps/og_coupling.py
 
 The wiring maths is `calculations/wiring.py` (NEC tables from the CCC+FV workbook); the BOM
 assembly is `calculations/bom.py`. Wiring is available for Off-Grid / Hybrid designs; Grid Zero
@@ -94,7 +96,7 @@ def render_panel(ctx: dict, *, message: str | None = None) -> str:
 
     system_type = project.get("system_type")
     if system_type in ("off_grid", "hybrid"):
-        wiring_ctx = og_wiring.build_context(blob, spec.get("wiring_lengths") or {})
+        wiring_ctx = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"))
     else:
         wiring_ctx = {"ready": False, "reason": "El cableado automático está disponible para sistemas Off-Grid e Híbridos; Grid Zero se agregará después.",
                       "branches": []}
@@ -128,7 +130,7 @@ def register(bp):
         whole panel so the wiring table and the BOM can never disagree."""
         from database.projects_db import get_project, update_tech_spec
         from webapp.blueprints.projects_common import detail_ctx
-        from webapp.wizard_steps import og_wiring
+        from webapp.wizard_steps import og_coupling, og_wiring
 
         project = get_project(pid)
         if not project:
@@ -138,6 +140,9 @@ def register(bp):
         if form.get("version_id"):
             spec["version_id"] = form["version_id"]
         if any(k in form for k in og_wiring.DEFAULT_LENGTHS):
-            spec["wiring_lengths"] = og_wiring.lengths_from_form(form)
+            spec["wiring_lengths"] = og_wiring.lengths_from_form(form, spec.get("wiring_lengths"))
+        cpl = og_coupling.from_form(form)
+        if cpl is not None:
+            spec["coupling"] = cpl
         update_tech_spec(pid, spec)
         return render_panel(detail_ctx(pid, active_tab="tecnico"))
