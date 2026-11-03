@@ -53,8 +53,10 @@
           <td><b>{{ b.label }}</b>{% if flags or not b.ok %}<span class="wr-flag" title="{{ (flags + (['Revisar: no se pudo dimensionar completamente.'] if not b.ok else []))|join(' · ') }}">⚠</span>{% endif %}
             <div class="wr-sub">{{ b.length_m|round(1) }} m · {{ b.v_ref|round(0)|int }} V {{ 'CC' if b.kind == 'dc' else 'CA' }}</div></td>
           <td>{{ b.qty }}</td>
-          <td title="Corriente de diseño {{ '%.1f'|format(b.design_a) }} A">{{ '%.1f'|format(b.current_a) }} A</td>
-          <td class="wr-big">{{ b.ocpd_a if b.ocpd_a else '—' }} A</td>
+          <td title="Corriente de diseño {{ '%.1f'|format(b.design_a) }} A">{{ '%.1f'|format(b.current_a) }} A
+            {% if b.alt %}<div class="wr-sub">{{ b.alt.label }}: {{ '%.1f'|format(b.alt.current_a) }} A</div>{% endif %}</td>
+          <td><span class="wr-big">{{ b.ocpd_a if b.ocpd_a else '—' }} A</span>
+            {% if b.alt or b.max_ocpd_a %}<div class="wr-sub">{% if b.alt %}{{ b.alt.label }}: {{ b.alt.ocpd_a }} A{% endif %}{% if b.alt and b.max_ocpd_a %} · {% endif %}{% if b.max_ocpd_a %}máx. {{ b.max_ocpd_a }} A{% endif %}</div>{% endif %}</td>
           {% if b.ugc %}
             <td><span class="wr-big">{{ b.ugc_label }}</span>{% if b.upsized_for_vd %}<span class="wr-flag" title="Subido de {{ b.ugc_initial }} AWG por caída de tensión">↑</span>{% endif %}
               <div class="wr-sub">{{ b.conductors|sum(attribute='count') }} conductores{% if b.egc_label %} · tierra {{ b.egc_label }}{% endif %}</div></td>

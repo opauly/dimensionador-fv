@@ -27,6 +27,11 @@ SCRATCH_KEY = "wiring"
 # carry just + and −. Each switch independently adds/removes one EGC from that branch's conductor
 # count, which changes its conduit fill and the conductor metres in the BOM.
 PV_BRANCH_HAS_EGC = True
+
+# What the AC-OUT breaker and conductor are designed from (the other basis is shown next to it):
+#   "connected" — 125 % of the connected loads, i.e. every critical circuit loaded at once
+#   "demand"    — 125 % of the demand-factor estimate (the v1 demand factors are uncalibrated)
+AC_OUT_BASIS = "connected"
 BATTERY_DC_BRANCH_HAS_EGC = False
 
 # Cable run lengths in metres. Site-specific, so editable in the UI; these defaults are
@@ -100,7 +105,24 @@ def _ac_summary(blob: dict, inverter_qty: int):
         demand["total_demand_kw"], design_v, eq.get("inverter") or {}, inverter_qty,
         grid_connected=bool(consumption.get("grid_connected")),
     )
-    return summary, design_v, split
+    return summary, design_v, split, demand
+
+
+def _fresh_inverter(eq: dict) -> dict:
+    """The saved design snapshots the inverter row when it was chosen, so fields added to the
+    catalog later (rated AC-out current, efficiency) are missing from older drafts. Re-read the
+    row by id and fall back to the snapshot."""
+    snap = eq.get("inverter") or {}
+    if snap.get("id"):
+        try:
+            from database.equipment_db import get_inverter
+
+            fresh = get_inverter(snap["id"])
+            if fresh:
+                return {**snap, **fresh}
+        except Exception:
+            pass
+    return snap
 
 
 def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
@@ -111,7 +133,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     blob = blob or {}
     eq = blob.get("equipment") or {}
     panel, cc = eq.get("panel") or {}, eq.get("charge_controller") or {}
-    battery, inverter = eq.get("battery") or {}, eq.get("inverter") or {}
+    battery, inverter = eq.get("battery") or {}, _fresh_inverter(eq)
     ctx = {
         "ready": False, "reason": None, "branches": [],
         "lengths": clean_lengths(lengths_override) if lengths_override is not None else lengths(blob),
@@ -157,47 +179,69 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
 
     inv_kw = _f(inverter, "kw")
     if inv_kw:
-        i_dc = inv_kw * 1000.0 / W.INVERTER_EFFICIENCY / v_bat
+        eff = (_f(inverter, "efficiency_pct") / 100.0) or W.INVERTER_EFFICIENCY
+        i_dc = inv_kw * 1000.0 / eff / v_bat
         branches.append(W.size_branch(
             "Baterías → inversor", kind="dc", qty=inv_qty, current_a=i_dc, factor=W.CONTINUOUS_FACTOR,
             v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
-            note=f"Por inversor: potencia ÷ eficiencia ({W.INVERTER_EFFICIENCY:.2f}) ÷ voltaje de banco ({v_bat:.1f} V). "
+            note=f"Por inversor: potencia ÷ eficiencia ({eff:.2f}{'' if _f(inverter, 'efficiency_pct') else ', supuesta'}) ÷ voltaje de banco ({v_bat:.1f} V). "
                  "La hoja de Excel usa el voltaje de salida CA en esta rama; aquí se usa el voltaje de CC.",
         ))
 
     ac = _ac_summary(blob, inv_qty)
     if ac is not None:
-        summary, design_v, split = ac
+        summary, design_v, split, demand = ac
         # Each inverter has its own AC out and AC in run to the panel: its own phase (or two for a
         # 240 V unit), neutral and ground. 120 V units therefore carry 3 conductors each, and the
         # voltage drop is judged against the inverter's own voltage, not the 240 V of the pair.
         leg_v = _f(inverter, "output_v", 120.0) or 120.0
         hot = 2 if leg_v >= 200 else 1
-        demand_w = summary["peak_current_a"] * design_v
-        i_out = demand_w / (leg_v * inv_qty)
-        branches.append(W.size_branch(
+        conn = "phase" if hot == 1 else "phases"
+        i_connected = demand["total_installed_kw"] * 1000.0 / (leg_v * inv_qty)
+        i_demand = demand["total_demand_kw"] * 1000.0 / (leg_v * inv_qty)
+        i_out, i_alt = (i_connected, i_demand) if AC_OUT_BASIS == "connected" else (i_demand, i_connected)
+        alt_label = "demanda" if AC_OUT_BASIS == "connected" else "carga conectada"
+        basis_label = "carga conectada (todos los circuitos a la vez)" if AC_OUT_BASIS == "connected" else "demanda (factores de demanda)"
+
+        out_branch = W.size_branch(
             "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
             current_a=i_out, factor=W.CONTINUOUS_FACTOR,
             v_ref=leg_v, length_m=L["ac_out_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit,
-            note=f"Por inversor ({leg_v:.0f} V): demanda ÷ voltaje ÷ {inv_qty} inversor(es), × 1.25. "
-                 f"{hot} fase{'s' if hot > 1 else ''} + neutro + tierra por inversor.",
-        ))
+            note=f"Por inversor ({leg_v:.0f} V): {basis_label} ÷ {inv_qty} inversor(es), × 1.25. "
+                 f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
+        )
+        out_branch["alt"] = {"label": alt_label, "current_a": round(i_alt, 1), "ocpd_a": W.ocpd_size(i_alt * W.CONTINUOUS_FACTOR)}
+        rated_out = _f(inverter, "ac_out_rated_a")
+        if rated_out:
+            out_branch["max_ocpd_a"] = W.ocpd_size_max(rated_out)
+            if out_branch.get("ocpd_a") and out_branch["max_ocpd_a"] and out_branch["ocpd_a"] > out_branch["max_ocpd_a"]:
+                out_branch["notes"].append(
+                    f"El breaker de {out_branch['ocpd_a']} A supera lo que admite la salida del inversor "
+                    f"({rated_out:.0f} A nominal → máx. {out_branch['max_ocpd_a']} A).")
+        branches.append(out_branch)
+
+        # AC IN: designed from the most the inverter can take in (its pass-through rating); the breaker
+        # is the largest standard size AT OR BELOW that rating (manufacturer: "rated … or less").
         ac_in = summary.get("ac_in")
         rated_in = _f(inverter, "ac_input_current_max_a")
         if ac_in and rated_in:
             ctx["show_ac_in"] = True
-            ac_in_branch = W.size_branch(
+            max_in = W.ocpd_size_max(rated_in)
+            in_branch = W.size_branch(
                 "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
                 current_a=rated_in, factor=1.0,
-                v_ref=leg_v, length_m=L["ac_in_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit,
-                note=f"Por inversor: corriente máx. de passthrough del datasheet ({rated_in:.0f} A). "
-                     f"{hot} fase{'s' if hot > 1 else ''} + neutro + tierra por inversor.",
+                v_ref=leg_v, length_m=L["ac_in_m"], hot=hot, neutral=1,
+                ocpd_override=max_in, insulation=ins, conduit_type=conduit,
+                note=f"Por inversor: máxima corriente de entrada (passthrough) del datasheet, {rated_in:.0f} A. "
+                     f"Breaker = el mayor estándar ≤ {rated_in:.0f} A ({max_in} A); el fabricante pide protección de {rated_in:.0f} A o menos. "
+                     f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
             )
+            in_branch["max_ocpd_a"] = max_in
             if inv_qty > 1:
-                ac_in_branch["notes"].append(
+                in_branch["notes"].append(
                     f"El resumen de arriba suma los {inv_qty} inversores en un solo breaker de 2 polos ({ac_in['breaker_a']} A); "
-                    f"aquí cada inversor tiene su propio breaker de {ac_in_branch['ocpd_a']} A — más ajustado.")
-            branches.append(ac_in_branch)
+                    f"aquí cada inversor tiene su propio breaker de {max_in} A.")
+            branches.append(in_branch)
     else:
         ctx["ac_missing"] = True
 

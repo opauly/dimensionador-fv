@@ -95,5 +95,14 @@ tot = {r["item"]: r["meters"] for r in meters}
 check("BOM: AC 8 AWG live+neutral = 2 inverters x 2 conductors x 10 m + DC pair 2x2x15", tot["Conductor Cu RHW-2 8 AWG — activos / neutro"], 40.0 + 60.0)
 check("BOM: AC ground = 2 inverters x 1 x 10 m (DC has none)", tot["Conductor Cu RHW-2 8 AWG — tierra (EGC)"], 20.0)
 
+# ── Breaker ceilings and the AC design bases ───────────────────────────────────
+check("'95 A or less' -> largest standard size <= 95 A", W.ocpd_size_max(95), 90)
+check("115 A rated AC out -> 110 A ceiling", W.ocpd_size_max(115), 110)
+ao = W.size_branch("ac out", kind="ac", qty=2, current_a=13250 / 240, factor=1.25, v_ref=120.0, length_m=10.0, hot=1, neutral=1)
+check("AC out from connected loads: 55.2 A x 1.25 -> breaker", ao["ocpd_a"], 70)
+check("AC out from connected loads: conductor (needs >= 69 A)", ao["ugc"], "4")
+ai = W.size_branch("ac in", kind="ac", qty=2, current_a=95.0, factor=1.0, v_ref=120.0, length_m=10.0, hot=1, neutral=1, ocpd_override=W.ocpd_size_max(95))
+check("AC in from 95 A pass-through: breaker 90 A, conductor 3 AWG (>= 95 A)", (ai["ocpd_a"], ai["ugc"]), (90, "3"))
+
 print("\n" + ("ALL WIRING CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

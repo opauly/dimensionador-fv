@@ -44,7 +44,7 @@ def list_inverters() -> list[dict]:
     result = (
         get_client()
         .table("inverters")
-        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, ac_out_rated_a, efficiency_pct, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )

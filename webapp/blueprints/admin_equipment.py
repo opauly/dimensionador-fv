@@ -124,6 +124,10 @@ def _inverter_fields(src):
         {"key": "ac_input_current_max_a", "label": "Corriente AC entrada máx. (A)", "type": "number", "step": "1",
          "value": src.get("ac_input_current_max_a", ""),
          "help": "Solo inversores híbridos (passthrough). Dejar en 0 si no aplica."},
+        {"key": "ac_out_rated_a", "label": "Corriente nominal salida AC principal (A)", "type": "number", "step": "1",
+         "value": src.get("ac_out_rated_a", ""),
+         "help": "Con la red presente la salida también lleva el passthrough; es el tope del breaker de salida (MultiPlus-II 5k: 115 A)."},
+        {"key": "efficiency_pct", "label": "Eficiencia máxima (%)", "type": "number", "step": "0.1", "value": src.get("efficiency_pct", "")},
         {"key": "warranty_yr", "label": "Garantía (años)", "type": "number", "step": "1", "value": src.get("warranty_yr", 5)},
     ]
 
@@ -135,7 +139,9 @@ def _inverter_payload(form):
         "vmax": _fo(form, "vmax"), "vmin_mppt": _fo(form, "vmin_mppt"), "vmax_mppt": _fo(form, "vmax_mppt"),
         "imax_mppt": _fo(form, "imax_mppt"), "mppt_channels": _i(form, "mppt_channels", 1),
         "output_v": _fo(form, "output_v"), "ac_output_current_a": _fo(form, "ac_output_current_a"),
-        "ac_input_current_max_a": _fo(form, "ac_input_current_max_a"), "warranty_yr": _i(form, "warranty_yr", 5),
+        "ac_input_current_max_a": _fo(form, "ac_input_current_max_a"),
+        "ac_out_rated_a": _fo(form, "ac_out_rated_a"), "efficiency_pct": _fo(form, "efficiency_pct"),
+        "warranty_yr": _i(form, "warranty_yr", 5),
     }
 
 

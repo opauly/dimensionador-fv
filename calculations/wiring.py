@@ -70,6 +70,16 @@ def ocpd_size(design_a: float) -> int | None:
     return None
 
 
+def ocpd_size_max(rating_a: float) -> int | None:
+    """Largest standard OCPD rating <= `rating_a` (a manufacturer's "or less" limit, e.g. the
+    MultiPlus-II 5k AC input: 'fuse or breaker rated 95 A or less' -> 90 A). None below the table."""
+    best = None
+    for size in T.OCPD_SIZES_A:
+        if size <= rating_a:
+            best = size
+    return best
+
+
 def vdrop_dc(gauge: str, current_a: float, length_m: float) -> float:
     return 2.0 * current_a * T.T8_R_DC_CU_OHM_KM[gauge] * length_m / 1000.0
 
