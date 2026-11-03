@@ -1,0 +1,117 @@
+{# Lista de materiales tab — the project's purchase list (no prices), see projects_lista.py.
+   Root id "lista-panel": every form below swaps it (outerHTML). Two separate forms (inputs / lines)
+   so a layout change never posts stale quantity fields. #}
+<div id="lista-panel">
+<style>
+.ls-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 6px; }
+.ls-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 14px; margin: 8px 0; }
+.ls-grid label { display: block; font-size: 11.5px; color: var(--muted-2); margin-bottom: 2px; }
+.ls-grid input, .ls-grid select, .ls-add input, .ls-add select { width: 100%; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); }
+.ls-table td { font-size: 13px; vertical-align: middle; }
+.ls-group td { background: #f4f6f5; font-weight: 700; font-size: 12px; color: var(--navy); text-transform: uppercase; letter-spacing: .04em; }
+.ls-qty { width: 78px; text-align: right; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); }
+.ls-cm { width: 100%; box-sizing: border-box; padding: 3px 6px; border: 1px solid transparent; border-radius: 6px; font-size: 12.5px; font-family: var(--font); color: #4b5563; background: transparent; }
+.ls-cm:hover, .ls-cm:focus { border-color: var(--border); background: #fff; }
+.ls-sub { font-size: 11.5px; color: #6b7280; }
+.ls-new { display: inline-block; font-size: 10.5px; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 4px; padding: 1px 5px; margin-left: 6px; }
+.ls-edit { color: #1d4ed8; font-size: 11px; margin-left: 6px; }
+.ls-off td { color: #9ca3af; text-decoration: line-through; }
+.ls-btn { border: 0; background: none; color: #6b7280; cursor: pointer; font-size: 12px; padding: 2px 6px; }
+.ls-btn:hover { color: #b84345; }
+.ls-pending { margin: 6px 0; padding: 8px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: 12.5px; color: #78350f; }
+.ls-pending li { margin: 2px 0; }
+.ls-dl { display: inline-block; padding: 7px 14px; background: var(--navy); color: #fff; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; }
+</style>
+
+{% if empty %}
+  <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
+{% else %}
+  <p class="ls-h" style="margin-top:6px;">Lista de materiales</p>
+  <p class="card-note-sm">Lista de compra derivada del diseño {% if chosen %}(cotización v{{ chosen.version_number }}){% endif %}{% if coupling.ac %} · acople AC{% endif %}: sin precios, lista para enviar a los proveedores. Las cantidades salen del diseño, del cableado de la pestaña Técnico y de reglas explícitas; lo que edites aquí se conserva si el diseño cambia.
+    <b>{{ n_lines }}</b> líneas{% if n_new %}, <b>{{ n_new }}</b> que tu lista maestra no tiene{% endif %}.</p>
+  <p><a class="ls-dl" href="{{ url_for('projects.lista_descargar', pid=pid) }}">Descargar Excel (formato Solicitud de materiales)</a></p>
+  {% if not custom_lengths %}<p class="ls-sub">⚠️ Los largos de cable son los valores por defecto: ajústalos en la pestaña Técnico con las distancias reales de la obra.</p>{% endif %}
+
+  {% if result.pending %}
+    <ul class="ls-pending">{% for p in result.pending %}<li>{{ p }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <p class="ls-h">Datos para calcular</p>
+  <form hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-trigger="change delay:500ms" hx-target="#lista-panel" hx-swap="outerHTML">
+    <input type="hidden" name="action" value="inputs">
+    <b style="font-size:12.5px;">Layout del techo</b>
+    <div class="ls-grid">
+      <div><label for="ls-rows">Filas de paneles</label><input id="ls-rows" type="number" min="1" name="layout_rows" value="{{ layout.rows or '' }}" placeholder="p. ej. 2"></div>
+      <div><label for="ls-or">Orientación</label>
+        <select id="ls-or" name="layout_orientation">
+          <option value="portrait" {{ 'selected' if layout.orientation != 'landscape' else '' }}>Vertical (portrait)</option>
+          <option value="landscape" {{ 'selected' if layout.orientation == 'landscape' else '' }}>Horizontal (landscape)</option>
+        </select></div>
+      <div><label for="ls-rail">Largo de riel (m)</label><input id="ls-rail" type="number" step="0.1" min="1" name="layout_rail_len" value="{{ layout.rail_len_m }}"></div>
+      <div><label for="ls-foot">Separación de patas (m)</label><input id="ls-foot" type="number" step="0.1" min="0.3" name="layout_foot" value="{{ layout.foot_spacing_m }}"></div>
+    </div>
+    {% if counts %}<p class="ls-sub">{{ counts.rows }} fila(s) de {{ counts.per_row }} módulos, {{ counts.row_len_m }} m por fila · {{ counts.rail_lines }} líneas de riel · {{ counts.rails }} rieles, {{ counts.feet }} patas, {{ counts.mid }} midclamps, {{ counts.end }} endclamps (antes de repuestos).</p>{% endif %}
+
+    <b style="font-size:12.5px;">Opciones del proyecto</b>
+    <div class="ls-grid">
+      <div><label for="ls-sb">Breaker CC por string (A)</label><input id="ls-sb" type="number" min="10" name="opt_string_breaker" value="{{ options.string_breaker_a or '' }}" placeholder="el calculado"></div>
+      <div><label for="ls-bends">Curvas por canalización</label><input id="ls-bends" type="number" min="0" name="opt_bends" value="{{ options.bends_per_raceway }}"></div>
+      <div><label for="ls-lb">Conduletas LB por canalización</label><input id="ls-lb" type="number" min="0" name="opt_lb" value="{{ options.lb_per_raceway }}"></div>
+      {% for b in branches %}
+        <div><label for="ls-m-{{ b.key }}">Tubería: {{ where.get(b.key, b.label) }} ({{ b.conduit.trade }}″)</label>
+          <select id="ls-m-{{ b.key }}" name="mat_{{ b.key }}">
+            {% for val, lab in conduit_choices %}<option value="{{ val }}" {{ 'selected' if conduit_mats.get(b.key, 'PVC') == val else '' }}>{{ lab }}</option>{% endfor %}
+          </select></div>
+      {% endfor %}
+    </div>
+    <p class="ls-sub">El tamaño de tubería sale de las tablas PVC del dimensionamiento; EMT usa el mismo tamaño comercial.</p>
+  </form>
+
+  <p class="ls-h">Líneas</p>
+  <form id="ls-lines" hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-trigger="change delay:600ms" hx-target="#lista-panel" hx-swap="outerHTML">
+    <input type="hidden" name="action" value="lines">
+    <div class="dtable-wrap"><table class="dtable ls-table">
+      <thead><tr><td>Detalle</td><td style="text-align:right;">Cant.</td><td>Unidad</td><td>Comentarios</td><td></td></tr></thead>
+      <tbody>
+      {% for sec in sections %}
+        <tr class="ls-group"><td colspan="5">{{ sec.name }}</td></tr>
+        {% for grp in sec.groups %}
+          {% if grp.name %}<tr><td colspan="5" style="font-weight:700;font-size:12.5px;padding-top:10px;">{{ grp.name }}</td></tr>{% endif %}
+          {% for ln in grp.lines %}
+            <tr class="{{ 'ls-off' if not ln.qty else '' }}">
+              <td>{{ ln.name }}{% if not ln.in_master %}<span class="ls-new" title="Este ítem no está en tu lista maestra de Solicitud de materiales">nueva</span>{% endif %}
+                {% if ln.edited %}<span class="ls-edit" title="Calculado: {{ ln.computed_qty }}">editada</span>{% endif %}
+                {% if ln.note %}<div class="ls-sub">{{ ln.note }}</div>{% endif %}</td>
+              <td style="text-align:right;"><input class="ls-qty" type="number" step="any" min="0" name="q:{{ ln.id }}" value="{{ ln.qty }}"></td>
+              <td>{{ ln.unit }}</td>
+              <td style="min-width:220px;"><input class="ls-cm" type="text" name="c:{{ ln.id }}" value="{{ ln.comment }}"></td>
+              <td style="white-space:nowrap;">
+                {% if ln.edited or not ln.qty %}{% if not ln.manual %}<button type="button" class="ls-btn" hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-vals='{"action":"reset","id":"{{ ln.id }}"}' hx-target="#lista-panel" hx-swap="outerHTML" title="Volver al valor calculado">↺</button>{% endif %}{% endif %}
+                <button type="button" class="ls-btn" hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-vals='{"action":"remove","id":"{{ ln.id }}"}' hx-target="#lista-panel" hx-swap="outerHTML" title="Quitar de la lista">✕</button>
+              </td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </form>
+
+  <p class="ls-h">Agregar línea</p>
+  <form class="ls-add" hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-target="#lista-panel" hx-swap="outerHTML">
+    <input type="hidden" name="action" value="add">
+    <div class="ls-grid">
+      <div style="grid-column: span 2;"><label for="ls-add-key">De la lista maestra</label>
+        <select id="ls-add-key" name="add_key"><option value="">— elegir —</option>
+          {% for it in catalog %}<option value="{{ it.key }}">{{ it.section }}{{ ' · ' ~ it.group if it.group else '' }} — {{ it.name }}</option>{% endfor %}
+        </select></div>
+      <div><label for="ls-add-name">…o nombre nuevo</label><input id="ls-add-name" type="text" name="add_name" placeholder="Material que no está en la lista"></div>
+      <div><label for="ls-add-qty">Cantidad</label><input id="ls-add-qty" type="number" step="any" min="0" name="add_qty" value="1"></div>
+      <div><label for="ls-add-unit">Unidad (si es nuevo)</label><input id="ls-add-unit" type="text" name="add_unit" value="un"></div>
+      <div><label for="ls-add-cm">Comentario</label><input id="ls-add-cm" type="text" name="add_comment"></div>
+      <div style="align-self:end;"><button class="ls-dl" style="border:0;cursor:pointer;" type="submit">Agregar</button></div>
+    </div>
+  </form>
+  <p class="ls-sub"><button type="button" class="ls-btn" hx-post="{{ url_for('projects.lista_guardar', pid=pid) }}" hx-vals='{"action":"reset_all"}' hx-confirm="¿Quitar todas las ediciones y líneas agregadas?" hx-target="#lista-panel" hx-swap="outerHTML">Volver todo a lo calculado</button></p>
+{% endif %}
+</div>

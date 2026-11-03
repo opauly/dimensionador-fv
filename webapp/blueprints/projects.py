@@ -86,7 +86,7 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from webapp.blueprints import (
     projects_adjust, projects_budget, projects_invoicing, projects_ledger, projects_labor,
-    projects_payments, projects_promote, projects_tech,
+    projects_lista, projects_payments, projects_promote, projects_tech, projects_unifilar,
 )
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
@@ -100,6 +100,8 @@ projects_invoicing.register(bp)
 projects_payments.register(bp)
 projects_promote.register(bp)
 projects_adjust.register(bp)
+projects_lista.register(bp)
+projects_unifilar.register(bp)
 projects_tech.register(bp)
 
 
@@ -296,6 +298,10 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return projects_payments.render_panel(ctx)
     if tab == "tecnico":
         return projects_tech.render_panel(ctx)
+    if tab == "lista":
+        return projects_lista.render_panel(ctx)
+    if tab == "unifilar":
+        return projects_unifilar.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 
@@ -355,6 +361,16 @@ def pagos(pid):
 @bp.route("/<pid>/tecnico")
 def tecnico(pid):
     return _project_page(pid, "tecnico")
+
+
+@bp.route("/<pid>/lista")
+def lista(pid):
+    return _project_page(pid, "lista")
+
+
+@bp.route("/<pid>/unifilar")
+def unifilar(pid):
+    return _project_page(pid, "unifilar")
 
 
 @bp.route("/<pid>/estado", methods=["POST"])

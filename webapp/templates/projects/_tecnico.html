@@ -48,42 +48,11 @@
   {% if custom_lengths %}<p class="tc-sub">Largos de obra guardados en este proyecto.</p>{% elif wiring.ready %}
     <p class="tc-sub">⚠️ Largos por defecto: ajústalos a las distancias reales de la obra para que calibres y materiales sean los correctos.</p>{% endif %}
 
-  <p class="tc-h">Lista de materiales preliminar</p>
-  <p class="card-note-sm">Derivada del diseño y del dimensionamiento de arriba; no es una lista de compra cerrada. Conductores y tubería incluyen {{ bom.waste_pct }} % de desperdicio; la tubería PVC se cuenta en tubos estándar de {{ '%g'|format(bom.tube_m) }} m.</p>
-
-  {% if bom.system %}
-    <div class="dtable-wrap"><table class="dtable tc-table">
-      <thead><tr><td>Barra DC y comunicaciones</td><td class="tc-num">Cant.</td><td>Cómo se calcula</td></tr></thead>
-      <tbody>
-        {% for r in bom.system %}<tr><td>{{ r.item }}</td><td class="tc-num"><b>{{ r.qty }}</b></td><td class="tc-sub">{{ r.note }}</td></tr>{% endfor %}
-      </tbody>
-    </table></div>
-  {% endif %}
-
-  {% if bom.wiring_ready %}
-    <div class="dtable-wrap"><table class="dtable tc-table">
-      <thead><tr><td>Protecciones</td><td class="tc-num">Cant.</td><td>Se usa en</td></tr></thead>
-      <tbody>
-        {% for r in bom.protections %}<tr><td>{{ r.item }}</td><td class="tc-num"><b>{{ r.qty }}</b></td><td class="tc-sub">{{ r.used_in }}</td></tr>{% endfor %}
-      </tbody>
-    </table></div>
-
-    <div class="dtable-wrap"><table class="dtable tc-table">
-      <thead><tr><td>Conductores</td><td class="tc-num">Calculado (m)</td><td class="tc-num">Con desperdicio (m)</td></tr></thead>
-      <tbody>
-        {% for r in bom.conductors %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.meters) }}</td><td class="tc-num"><b>{{ r.with_waste }}</b></td></tr>{% endfor %}
-      </tbody>
-    </table></div>
-
-    <div class="dtable-wrap"><table class="dtable tc-table">
-      <thead><tr><td>Canalización</td><td class="tc-num">Recorrido (m)</td><td class="tc-num">Tubos de {{ '%g'|format(bom.tube_m) }} m</td></tr></thead>
-      <tbody>
-        {% for r in bom.conduit %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.meters) }}</td><td class="tc-num"><b>{{ r.tubes }}</b></td></tr>{% endfor %}
-      </tbody>
-    </table></div>
-  {% else %}
-    <p class="card-note-sm">Protecciones, conductores y canalización aparecen cuando el cableado se puede dimensionar.</p>
-  {% endif %}
+  <p class="tc-h">Materiales y plano</p>
+  <p class="card-note-sm">La lista de compra (equipos, protecciones, cables, tubería, montaje) y el diagrama unifilar se generan con el dimensionamiento de arriba y viven en sus propias pestañas:
+    <a href="{{ url_for('projects.lista', pid=pid) }}" hx-get="{{ url_for('projects.lista', pid=pid) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">Lista de materiales</a> ·
+    <a href="{{ url_for('projects.unifilar', pid=pid) }}" hx-get="{{ url_for('projects.unifilar', pid=pid) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">Unifilar</a>.
+    Ajusta aquí los largos de obra{% if wiring.can_couple %} y el acople FV{% endif %}: la lista y el plano se recalculan con ellos.</p>
 
   {% if other_lines %}
     <div class="dtable-wrap"><table class="dtable tc-table">
@@ -92,7 +61,7 @@
         {% for r in other_lines %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.qty) if r.qty else '—' }}</td><td class="tc-sub">{{ r.specs }}</td></tr>{% endfor %}
       </tbody>
     </table></div>
-    <p class="card-note-sm">Estructura, accesorios y materiales eléctricos están hoy como una sola línea de costo; el desglose por pieza (rieles, cajas, conectores, tornillería) es lo que falta para cerrar la lista de materiales.</p>
+    <p class="card-note-sm">Estos renglones del costo de la cotización no se desglosan aquí; el detalle por pieza está en la pestaña Lista de materiales.</p>
   {% endif %}
 {% endif %}
 </div>

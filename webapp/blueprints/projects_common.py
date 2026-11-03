@@ -96,6 +96,8 @@ TAB_SPECS = [
     {"key": "facturacion", "label": "Facturación"},
     {"key": "pagos", "label": "Pagos"},
     {"key": "tecnico", "label": "Técnico"},
+    {"key": "lista", "label": "Lista de materiales"},
+    {"key": "unifilar", "label": "Unifilar"},
 ]
 TAB_KEYS = [t["key"] for t in TAB_SPECS]
 LEDGER_TAB_CATEGORIES = {t["category"] for t in TAB_SPECS if "category" in t}
@@ -121,6 +123,10 @@ def tab_url(pid: str, key: str) -> str:
         return url_for("projects.pagos", pid=pid)
     if key == "tecnico":
         return url_for("projects.tecnico", pid=pid)
+    if key == "lista":
+        return url_for("projects.lista", pid=pid)
+    if key == "unifilar":
+        return url_for("projects.unifilar", pid=pid)
     return url_for("projects.gastos", pid=pid, categoria=key)
 
 # ── Facturación category labels — new construction (§1.10.1); config.py has

@@ -1,0 +1,13 @@
+{
+  "project": {
+    "name": "Proyecto María José Castro en Carrillo, Guanacaste",
+    "client": "María José Castro",
+    "location": "Carrillo, Guanacaste, Costa Rica",
+    "date": "2026-10-27"
+  },
+  "pv": {"strings": 2, "modules_per_string": 8, "module_w": 620, "module_label": "JA Solar 620 W", "roof_m2": 32, "string_breaker": "32 A 2P DC"},
+  "fronius": {"label": "Fronius Primo 10.0-1 US 240 V", "kw": 10, "ac_breaker": "2P 60 A"},
+  "multis": {"ac_in_breaker": "2P 100 A"},
+  "battery": {"count": 4, "label": "Pylontech Fidus", "short": "Fidus", "kwh_each": 4.8, "lynx": "power_in"},
+  "export": "grid_zero"
+}

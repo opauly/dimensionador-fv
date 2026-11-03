@@ -1,0 +1,456 @@
+"""Materials list (purchase list, no prices) from a saved design.
+
+Deterministic: every quantity comes from the design (equipment counts), the wiring sizing
+(`calculations/wiring.py` branches) and explicit rules below. Nothing here comes from an LLM.
+
+Output lines are keyed to Oscar's master checklist (`materials/catalog.py`) when the item exists
+there, so the export lands on the same rows he already sends to dealers. A part the design needs
+that the master list does not carry (a 25 A DC breaker, a 3/0 cable) is added as a new line
+flagged `in_master=False` instead of being dropped or forced onto a wrong row.
+
+Edits live in the project (`tech_spec["materials"]`) and are applied on top of the computed list,
+so regenerating after a design change never wipes a manual quantity:
+
+    layout     roof layout the mounting counts need (rows, orientation, rail length ...)
+    options    project choices (string breaker rating, raceway material per run, fittings per run)
+    overrides  {line id: {"qty": n, "comment": str}}   -- user-edited quantity / comment
+    extras     [{"id", "key" | None, "name", "unit", "qty", "comment"}]   -- lines added by hand
+"""
+from __future__ import annotations
+
+import math
+from collections import OrderedDict
+
+from calculations import bom as B
+from calculations import wiring as W
+from materials.catalog import CATALOG, SECTIONS
+
+WASTE = 0.10             # cut-offs and slack on cable and conduit
+CABLE_STEP_M = 5         # cable is bought by the metre; round the request up to 5 m
+SOLAR_ROLL_M = 100       # PV cable comes in 100 m rolls
+TUBE_M = 3.0             # standard conduit length
+SPARE_PCT = 5            # spare mounting hardware
+LUG_STEP = 5             # lugs are requested in fives
+SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
+PANEL_GAP_M = 0.02       # gap between modules in a row
+STRAP_SPACING_M = {"PVC": 1.25, "EMT": 1.5}
+
+DEFAULT_LAYOUT = {"rows": None, "orientation": "portrait", "rail_len_m": 4.7, "foot_spacing_m": 1.0}
+DEFAULT_OPTIONS = {"string_breaker_a": None, "bends_per_raceway": 2, "lb_per_raceway": 0, "conduit_material": {}}
+# Battery-side DC runs are not piped by default (the MultiPlus manual: no closed conduit around battery cables).
+DEFAULT_CONDUIT_MATERIAL = {"bat_inv": "none", "cc_bat": "none"}
+CONDUIT_MATERIALS = ("PVC", "EMT", "none")
+
+WHERE = {
+    "pv_strings": "Strings FV", "pv_cc": "Paneles → controlador", "pv_inv_ac": "Fronius → sub-panel",
+    "cc_bat": "Controlador → baterías", "bat_inv": "Baterías → inversores", "ac_out": "AC Out", "ac_in": "AC In",
+}
+
+# Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
+ALIASES = {
+    "Inversor Quattro 48/10000/140 120V": ["quattro 48/10000"],
+    "Inversor Multiplus 5000 120V": ["48/5000"],
+    "Inversor Multiplus 3000 120V": ["48/3000"],
+    "Controlador de carga 450/200": ["450/200"],
+    "Controlador de carga 250/100": ["250/100"],
+    "Controlador de carga 150/70": ["150/70"],
+    "Batería Pylontech US5000": ["us5000"],
+    "Batería Pylontech Fidus": ["fidus"],
+    "Ekrano GX": ["ekrano"],
+    "Cerbo GX": ["cerbo"],
+}
+
+_SECTION_RANK = {s: i for i, s in enumerate(SECTIONS)}
+_BY_NAME = {(r["section"], r["name"]): r for r in CATALOG}
+_BY_KEY = {r["key"]: r for r in CATALOG}
+_INDEX = {r["key"]: i for i, r in enumerate(CATALOG)}
+
+
+def _find(kind: str, **attrs) -> dict | None:
+    for r in CATALOG:
+        if r.get("kind") == kind and all(str(r["attrs"].get(k)) == str(v) for k, v in attrs.items()):
+            return r
+    return None
+
+
+def _named(name: str, section: str | None = None) -> dict | None:
+    if section:
+        return _BY_NAME.get((section, name))
+    return next((r for r in CATALOG if r["name"] == name), None)
+
+
+def _norm(text: str) -> str:
+    return " ".join((text or "").lower().replace("-", " ").split())
+
+
+def match_equipment(item: dict | None) -> dict | None:
+    text = _norm(f"{(item or {}).get('brand', '')} {(item or {}).get('model', '')}")
+    for name, subs in ALIASES.items():
+        if any(_norm(s) in text for s in subs):
+            return _named(name)
+    return None
+
+
+def _ceil_to(x: float, step: float) -> float:
+    return math.ceil(round(x, 6) / step) * step
+
+
+class Collector:
+    """Accumulates list lines; the same item added twice sums its quantity and joins its notes."""
+
+    def __init__(self) -> None:
+        self.lines: "OrderedDict[str, dict]" = OrderedDict()
+        self._dyn = 0
+
+    def add(self, row: dict | None, qty: float, *, name: str | None = None, unit: str = "un", section: str = "Generales",
+            group: str | None = None, sibling: dict | None = None, where: str | None = None, note: str | None = None,
+            source: str = "regla", comment: str | None = None) -> None:
+        if qty is None or qty <= 0:
+            return
+        if row is not None:
+            key, in_master = row["key"], True
+            name, unit, section, group = row["name"], row["unit"], row["section"], row["group"]
+            order = (_SECTION_RANK.get(section, 9), _INDEX[key], 0)
+        else:
+            key, in_master = "x:" + _slug(name or "item"), False
+            if sibling:
+                section, group = sibling["section"], sibling["group"]
+            idx = max((_INDEX[r["key"]] for r in CATALOG if r["section"] == section and r["group"] == group), default=len(CATALOG))
+            self._dyn += 1
+            order = (_SECTION_RANK.get(section, 9), idx, self._dyn)
+        line = self.lines.get(key)
+        if line is None:
+            line = {"id": key, "name": name, "unit": unit, "section": section, "group": group, "qty": 0.0, "in_master": in_master,
+                    "source": source, "wheres": [], "notes": [], "comments": [], "order": order}
+            self.lines[key] = line
+        line["qty"] += qty
+        for lst, val in ((line["wheres"], where), (line["notes"], note), (line["comments"], comment)):
+            if val and val not in lst:
+                lst.append(val)
+
+
+def _slug(s: str) -> str:
+    import re
+    import unicodedata
+
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+# ── Rules ──────────────────────────────────────────────────────────────────────
+
+def _equipment(c: Collector, eq: dict, coupling: dict) -> None:
+    panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
+    bat, cc, mon = eq.get("battery") or {}, eq.get("charge_controller") or {}, eq.get("monitoring") or {}
+    model = lambda it: f"{it.get('brand', '')} {it.get('model', '')}".strip()  # noqa: E731
+    n_panels = int(eq.get("panel_count") or 0)
+    if panel and n_panels:
+        c.add(_named("Paneles solares", "Paneles solares"), n_panels, source="diseño", comment=model(panel),
+              note=f"{n_panels} módulos del diseño")
+    if inv:
+        qty = int(eq.get("inverter_qty") or 1)
+        row = match_equipment(inv)
+        c.add(row, qty, name=model(inv), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
+              note=f"{qty} inversor(es) del diseño")
+    if coupling.get("ac") and coupling.get("pv_inverter"):
+        pv = coupling["pv_inverter"]
+        c.add(None, int(coupling.get("qty") or 1), name=f"Inversor {model(pv)}", section="Paneles solares", source="diseño",
+              comment=f"{pv.get('kw')} kW · acople AC", note="Inversor FV del acople AC")
+    elif cc:
+        qty = int(eq.get("charge_controller_qty") or 1)
+        row = match_equipment(cc)
+        c.add(row, qty, name=model(cc), section="Victron Energy", source="diseño", note=f"{qty} controlador(es) del diseño")
+    n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
+    if bat and n_bat:
+        row = match_equipment(bat)
+        c.add(row, n_bat, name=model(bat), section="Victron Energy", source="diseño", note=f"{n_bat} batería(s) del diseño")
+        if "pylontech" in _norm(bat.get("brand", "")):
+            c.add(_named("Cables para Pylontech", "Victron Energy"), n_bat, source="regla", note="un juego de cables por batería Pylontech")
+    if mon:
+        row = match_equipment(mon)
+        c.add(row, 1, name=model(mon), section="Victron Energy", source="diseño")
+
+
+def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
+    for r in B.system_rows(eq, coupling, wiring_ctx):
+        item = r["item"]
+        if item.startswith("Victron Lynx Power In"):
+            c.add(_named("Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
+        elif item.startswith("Pernos"):
+            c.add(_named("Roscas para Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
+        elif item.startswith("Fusible MEGA de batería"):
+            c.add(None, r["qty"], name="Fusible Mega de batería (calibre por definir)", section="Victron Energy",
+                  sibling=_find("fuse_mega", amps=225), note=r["note"], comment="calibre por definir")
+        elif item.startswith("Cable UTP"):
+            c.add(_named("Cable UTP normal", "Victron Energy"), r["qty"], note=r["note"])
+        elif item.startswith("Cable VE.CAN"):
+            c.add(_named("Cable UTP tipo A", "Victron Energy"), r["qty"], note=r["note"] + " (cable VE.CAN)")
+
+
+def layout_counts(panel: dict, n_panels: int, layout: dict) -> dict | None:
+    """Rails, feet and clamps for `rows` rows of modules (two rails under each row)."""
+    rows = int(layout.get("rows") or 0)
+    if not (rows and n_panels):
+        return None
+    ppr = math.ceil(n_panels / rows)
+    portrait = layout.get("orientation") != "landscape"
+    dim = float(panel.get("width_m" if portrait else "height_m") or 0)
+    if not dim:
+        return None
+    row_len = ppr * dim + (ppr - 1) * PANEL_GAP_M
+    lines = rows * 2
+    rails_per_line = math.ceil(row_len / float(layout["rail_len_m"]))
+    return {
+        "rows": rows, "per_row": ppr, "row_len_m": round(row_len, 2), "rail_lines": lines,
+        "rails": lines * rails_per_line, "splices": lines * (rails_per_line - 1),
+        "feet": lines * (math.ceil(row_len / float(layout["foot_spacing_m"])) + 1),
+        "mid": rows * (ppr - 1) * 2, "end": rows * 4,
+    }
+
+
+def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
+    panel = eq.get("panel") or {}
+    n_panels = int(eq.get("panel_count") or 0)
+    if not n_panels:
+        return
+    counts = layout_counts(panel, n_panels, layout)
+    if counts is None:
+        pending.append("Falta el layout del techo (filas de paneles y orientación): rieles, patas y clamps no se calculan sin él.")
+        return
+    spare = 1 + SPARE_PCT / 100
+    desc = (f"{counts['rows']} fila(s) de {counts['per_row']} módulos ({layout['orientation']}), "
+            f"{counts['row_len_m']} m por fila, 2 rieles por fila")
+    for name, key, base, why in (
+        ("Rieles (largueros)", "rails", counts["rails"], f"{desc}; rieles de {layout['rail_len_m']} m"),
+        ("Patas tipo \"L\" / Escuadra de fijación", "feet", counts["feet"], f"una pata cada {layout['foot_spacing_m']} m de riel + 1 por línea"),
+        ("Midclamp", "mid", counts["mid"], "2 por cada espacio entre módulos de una fila"),
+        ("Endclamp", "end", counts["end"], "4 por fila (2 en cada extremo)"),
+    ):
+        c.add(_named(name, "Paneles solares"), math.ceil(base * spare), note=f"{why}; {base} calculados + {SPARE_PCT} % de repuesto")
+    c.add(_named("Tierras para rieles", "Paneles solares"), counts["rails"], note="una tierra por riel")
+    if counts["splices"]:
+        c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
+
+
+def _pv_connectors(c: Collector, eq: dict, coupling: dict) -> None:
+    strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
+    if strings:
+        c.add(_named("MC4", "Paneles solares"), strings * 2 * 2, comment="Parejas macho/hembra",
+              note=f"{strings} strings × 2 polaridades × 2 extremos del tendido")
+
+
+def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
+    """({(kind, gauge, color): metres}, {(gauge): conductor ends needing a lug})."""
+    tally: dict[tuple, dict] = {}
+    lugs: dict[str, dict] = {}
+
+    def put(kind, gauge, color, m, where, ends=0):
+        t = tally.setdefault((kind, gauge, color), {"m": 0.0, "where": []})
+        t["m"] += m
+        if where not in t["where"]:
+            t["where"].append(where)
+        if ends:
+            lg = lugs.setdefault(gauge, {"n": 0, "where": [], "dc": {}})
+            lg["n"] += ends
+            if where not in lg["where"]:
+                lg["where"].append(where)
+            if kind == "cable_thhn" and color in ("rojo", "negro") and where in ("Baterías → inversores", "Controlador → baterías"):
+                lg["dc"][color] = lg["dc"].get(color, 0) + ends
+
+    for b in branches:
+        key, where, L = b.get("key"), WHERE.get(b.get("key"), b["label"]), b["length_m"]
+        for i in range(b["qty"]):
+            for r in b.get("conductors") or []:
+                g, n = r["gauge"], r["count"]
+                if r["role"] == "EGC":
+                    if i >= b.get("raceways", b["qty"]):
+                        continue            # a shared pipe carries one ground for all its runs
+                    put("cable_thhn", g, "verde", n * L, where, 2 * n)
+                elif key in ("pv_strings", "pv_cc"):
+                    put("cable_solar", g, "rojo", L, where)
+                    put("cable_solar", g, "negro", L, where)
+                elif key in ("cc_bat", "bat_inv"):
+                    put("cable_thhn", g, "rojo", L, where, 2)
+                    put("cable_thhn", g, "negro", L, where, 2)
+                elif key == "pv_inv_ac":
+                    put("cable_thhn", g, "negro", L, where, 2)
+                    put("cable_thhn", g, "rojo", L, where, 2)
+                elif r["role"] == "Neutro":
+                    put("cable_thhn", g, "blanco", n * L, where, 2 * n)
+                else:   # AC phases: inverter 1 on L1 (black), inverter 2 on L2 (red)
+                    put("cable_thhn", g, "negro" if i % 2 == 0 else "rojo", n * L, where, 2 * n)
+    return tally, lugs
+
+
+def _cables(c: Collector, branches: list[dict]) -> None:
+    tally, lugs = _cable_lines(branches)
+    total_m, colors = 0.0, set()
+    for (kind, g, color), t in tally.items():
+        m = t["m"] * (1 + WASTE)
+        label = W.gauge_label(g)
+        if kind == "cable_solar":
+            qty = _ceil_to(m, SOLAR_ROLL_M)
+            row, name, section, group = _find(kind, gauge=g, color=color), f"Cable #{g} AWG - SOLAR {color}", "Paneles solares", None
+            note = f"{t['m']:g} m calculados + {int(WASTE * 100)} % de desperdicio, en rollos de {SOLAR_ROLL_M} m"
+        else:
+            qty = _ceil_to(m, CABLE_STEP_M)
+            row, name = _find(kind, gauge=g, color=color), f"Cable #{g} AWG THHN, CU, color {color}"
+            section, group = "Generales", "Cable"
+            note = f"{t['m']:g} m calculados ({label}) + {int(WASTE * 100)} % de desperdicio, redondeado a {CABLE_STEP_M} m"
+            total_m += t["m"]
+        colors.add(color)
+        c.add(row, qty, name=name, unit="m", section=section, group=group, sibling=_find(kind, gauge="10", color=color) or _find(kind, gauge="4", color=color),
+              where=" · ".join(t["where"]), note=note)
+
+    for g, lg in lugs.items():
+        n = math.ceil(lg["n"] * (1 + WASTE))
+        c.add(_find("lug", gauge=g), _ceil_to(n, LUG_STEP), name=f"Conector de ojo para cable #{g} AWG", section="Generales",
+              group="Accesorios eléctricos", sibling=_find("lug", gauge="4"), where=" · ".join(lg["where"]),
+              note=f"{lg['n']} extremos de conductor × 1.1, de a {LUG_STEP}")
+        for color, ends in lg["dc"].items():
+            m = max(1, math.ceil(ends * SHRINK_M_PER_LUG))
+            c.add(_find("shrink", gauge=g, color=color), m, name=f"Termoencogible para cable #{g} {color}", unit="m", section="Generales",
+                  group="Accesorios eléctricos", sibling=_find("shrink", gauge="4", color=color), note=f"{ends} terminales × {SHRINK_M_PER_LUG * 100:g} cm, mínimo 1 m")
+    for color in sorted(colors):
+        row = _find("tape", color=color)
+        if row:
+            c.add(row, 1, note=f"un rollo por color de conductor usado ({color})")
+    n_ties = max(1, math.ceil(total_m / 50))
+    c.add(_named("Gasas plásticas #8 (Negras)", "Generales"), n_ties, note="un paquete por cada 50 m de cable THHN", comment="Paquetes")
+    c.add(_named("Kit barra de tierras", "Generales"), 1, note="uno por sistema")
+
+
+def _protections(c: Collector, branches: list[dict], opts: dict) -> None:
+    for b in branches:
+        amps, key, where = b.get("ocpd_a"), b.get("key"), WHERE.get(b.get("key"), b["label"])
+        if not amps:
+            continue
+        hot = next((r["count"] for r in b.get("conductors") or [] if r["role"] == "UGC"), 2)
+        if b.get("protection") == "fuse":
+            c.add(_find("fuse_mega", amps=amps), b["qty"], name=f"Fusible Mega {amps}A", section="Victron Energy", sibling=_find("fuse_mega", amps=225),
+                  where=where, note=f"un fusible por tendido ({b['qty']}) en la barra Lynx Power In")
+        elif key in ("pv_strings", "pv_cc"):
+            a = int(opts.get("string_breaker_a") or amps) if key == "pv_strings" else amps
+            note = "uno por string" + (f" (calculado {amps} A, elegido {a} A)" if a != amps else "")
+            c.add(_find("breaker_dc_din", amps=a, poles=2), b["qty"], name=f"Breaker DC para riel DIN {a}A 2P", section="Paneles solares",
+                  sibling=_find("breaker_dc_din", amps=32, poles=2), where=where, note=note)
+        else:
+            qty, poles = b["qty"], hot
+            note = f"{amps} A calculado"
+            if key in ("ac_in", "ac_out") and hot == 1 and qty % 2 == 0:
+                qty, poles, note = qty // 2, 2, f"{b['qty']} inversores de 120 V en L1 y L2 comparten un breaker de 2 polos de {amps} A"
+            c.add(_find("breaker_ac_din", amps=amps, poles=poles), qty, name=f"Breaker AC para riel DIN {amps}A {poles}P", section="Generales",
+                  sibling=_find("breaker_ac_din", amps=90, poles=2), where=where, note=note)
+
+
+def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
+    mats = {**DEFAULT_CONDUIT_MATERIAL, **(opts.get("conduit_material") or {})}
+    groups: dict[tuple, dict] = {}
+    for b in branches:
+        cd = b.get("conduit")
+        mat = mats.get(b.get("key"), "PVC")
+        if not cd or mat == "none":
+            continue
+        g = groups.setdefault((mat, cd["trade"]), {"raceways": 0, "m": 0.0, "where": []})
+        g["raceways"] += b.get("raceways", b["qty"])
+        g["m"] += b.get("raceways", b["qty"]) * b["length_m"]
+        g["where"].append(WHERE.get(b.get("key"), b["label"]))
+    used_pvc = False
+    bends, lbs = int(opts.get("bends_per_raceway", 2)), int(opts.get("lb_per_raceway", 0))
+    for (mat, trade), g in groups.items():
+        where = " · ".join(g["where"])
+        tubes = math.ceil(g["m"] * (1 + WASTE) / TUBE_M)
+        per = max(1, math.ceil(tubes / g["raceways"]))
+        used_pvc = used_pvc or mat == "PVC"
+        spacing = STRAP_SPACING_M[mat]
+        conn_kind = "conduit_press_connector" if mat == "EMT" else "conduit_connector"
+        conn_name = f'Conector de presión {trade}" EMT' if mat == "EMT" else f'Conector {trade}"/ {mat} SCH-40'
+        for kind, text, qty, note in (
+            ("conduit_tube", f'Tuberia {trade}" / {mat}', tubes,
+             f"{g['m']:g} m de recorrido × 1.1 en tubos de {TUBE_M:g} m ({g['raceways']} canalización(es))"),
+            (conn_kind, conn_name, 2 * g["raceways"], "2 por canalización (uno en cada extremo)"),
+            ("conduit_union", f'Uniones de {trade}" / {mat}', g["raceways"] * (per - 1), f"{per - 1} por canalización (tubos de {TUBE_M:g} m)"),
+            ("conduit_bend", f'Curva de {trade}" / {mat}', bends * g["raceways"], f"{bends} curvas por canalización"),
+            ("conduit_lb", f'Conduleta LB {trade}"', lbs * g["raceways"], f"{lbs} por canalización"),
+            ("conduit_strap", f'Gasa channel {trade}"', math.ceil(g["m"] / spacing), f"una cada {spacing:g} m de recorrido"),
+        ):
+            sibling = _find(kind, material=mat, trade="1") or _find(kind, material="PVC", trade="1")
+            c.add(_find(kind, material=mat, trade=trade), qty, name=text, section="Generales", sibling=sibling, where=where, note=note)
+    if used_pvc:
+        c.add(_named("Pegamento para PVC", "Generales"), 1, note="una unidad si hay tubería PVC")
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None) -> dict:
+    """{'lines': [...], 'pending': [...], 'layout': {...}, 'options': {...}, 'counts': {...}}.
+
+    `wiring_ctx` is `og_wiring.build_context(...)`; `spec` the project's tech_spec (edits live in
+    spec["materials"]). Lines are in master-list order, new lines at the end of their group."""
+    mat = ((spec or {}).get("materials")) or {}
+    layout = {**DEFAULT_LAYOUT, **(mat.get("layout") or {})}
+    opts = {**DEFAULT_OPTIONS, **(mat.get("options") or {})}
+    coupling = wiring_ctx.get("coupling") or {}
+    branches = wiring_ctx.get("branches") or []
+    pending: list[str] = []
+
+    c = Collector()
+    _equipment(c, eq, coupling)
+    _system(c, eq, coupling, wiring_ctx)
+    _mounting(c, eq, layout, pending)
+    _pv_connectors(c, eq, coupling)
+    if wiring_ctx.get("ready"):
+        _cables(c, branches)
+        _protections(c, branches, opts)
+        _conduit(c, branches, opts)
+    else:
+        pending.append("El cableado todavía no se puede dimensionar (" + (wiring_ctx.get("reason") or "faltan datos del diseño")
+                       + "): cables, protecciones y tubería quedan fuera.")
+    pending.append("Por definir en cada proyecto (no salen del diseño): gabinetes y cajas, centro de carga del sub-panel, supresor de picos, "
+                   "riel DIN y strut, tornillería de techo, tubería flexible. Agrégalos con «Agregar línea».")
+
+    lines = apply_edits(list(c.lines.values()), mat)
+    return {"lines": lines, "pending": pending, "layout": layout, "options": opts,
+            "counts": layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)}
+
+
+def _finish(line: dict) -> dict:
+    qty = line["qty"]
+    line["qty"] = int(qty) if float(qty).is_integer() else round(qty, 1)
+    line["comment"] = " · ".join(dict.fromkeys(line["wheres"] + line["comments"]))
+    line["note"] = "; ".join(line["notes"])
+    return line
+
+
+def apply_edits(lines: list[dict], mat: dict) -> list[dict]:
+    """Computed lines + the user's quantity/comment overrides + hand-added lines."""
+    overrides, extras = mat.get("overrides") or {}, mat.get("extras") or []
+    out = []
+    for line in lines:
+        _finish(line)
+        line["computed_qty"], line["computed_comment"] = line["qty"], line["comment"]
+        line["edited"] = False
+        ov = overrides.get(line["id"]) or {}
+        if "qty" in ov:
+            line["qty"], line["edited"] = ov["qty"], True
+        if ov.get("comment"):
+            line["comment"], line["edited"] = ov["comment"], True
+        out.append(line)
+    for i, ex in enumerate(extras):
+        row = _BY_KEY.get(ex.get("key")) if ex.get("key") else None
+        name = row["name"] if row else ex.get("name") or "Línea manual"
+        out.append({
+            "id": "m:" + str(ex.get("id") or i), "name": name, "unit": row["unit"] if row else ex.get("unit") or "un",
+            "section": row["section"] if row else ex.get("section") or "Generales", "group": row["group"] if row else ex.get("group"),
+            "qty": ex.get("qty") or 0, "computed_qty": None, "edited": False, "in_master": bool(row), "source": "manual",
+            "comment": ex.get("comment") or "", "note": "agregada a mano", "manual": True,
+            "order": (_SECTION_RANK.get(row["section"] if row else ex.get("section") or "Generales", 9),
+                      _INDEX[row["key"]] if row else 10_000, 1000 + i),
+        })
+    out.sort(key=lambda line: line["order"])
+    return out
+
+
+def catalog_options() -> list[dict]:
+    """The master list as {key, name, section, group} for the 'add a line' picker."""
+    return [{"key": r["key"], "name": r["name"], "section": r["section"], "group": r["group"] or ""} for r in CATALOG]

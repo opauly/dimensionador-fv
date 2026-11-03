@@ -76,6 +76,19 @@ LENGTH_LABELS_AC = {
 }
 
 
+# Stable keys for the branches, so the materials rules and the unifilar can find a run without
+# matching on its (Spanish, editable) label.
+BRANCH_KEYS = {
+    "Paneles → controlador de carga": "pv_cc",
+    "Controlador de carga → baterías": "cc_bat",
+    "Paneles → inversor FV (strings)": "pv_strings",
+    "Inversor FV → sub-panel de cargas críticas": "pv_inv_ac",
+    "Baterías → inversor": "bat_inv",
+    "Inversor → tablero AC (salida)": "ac_out",
+    "Red → entrada AC del inversor": "ac_in",
+}
+
+
 def clean_lengths(saved: dict | None) -> dict[str, float]:
     """Defaults overlaid with any positive saved values (also used for a project's own lengths)."""
     saved = saved or {}
@@ -203,7 +216,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Paneles → inversor FV (strings)", kind="dc", qty=n_strings,
                 current_a=isc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
-                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE,
+                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
                 note=f"Un tendido por string ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el gabinete DC. "
                      f"Corriente = Isc × 1.25 × 1.25 (NEC 690.8); breaker de la serie estándar CC (NB1-63DC).",
             ),
@@ -223,7 +236,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Paneles → controlador de carga", kind="dc", qty=cc_qty,
                 current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
-                protection="breaker",
+                protection="breaker", shared_conduit=True,
                 note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
                      f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
             ),
@@ -275,7 +288,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
         out_branch = W.size_branch(
             "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
             current_a=i_out, factor=W.CONTINUOUS_FACTOR,
-            v_ref=leg_v, length_m=L["ac_out_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit,
+            v_ref=leg_v, length_m=L["ac_out_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit, shared_conduit=True,
             note=f"Por inversor ({leg_v:.0f} V): {basis_label} ÷ {inv_qty} inversor(es), × 1.25. "
                  f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
         )
@@ -300,7 +313,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
                 current_a=rated_in, factor=1.0,
                 v_ref=leg_v, length_m=L["ac_in_m"], hot=hot, neutral=1,
-                ocpd_override=max_in, insulation=ins, conduit_type=conduit,
+                ocpd_override=max_in, insulation=ins, conduit_type=conduit, shared_conduit=True,
                 note=f"Por inversor: máxima corriente de entrada (passthrough) del datasheet, {rated_in:.0f} A. "
                      f"Breaker = el mayor estándar ≤ {rated_in:.0f} A ({max_in} A); el fabricante pide protección de {rated_in:.0f} A o menos. "
                      f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
@@ -314,6 +327,8 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     else:
         ctx["ac_missing"] = True
 
+    for b in branches:
+        b["key"] = BRANCH_KEYS.get(b["label"])
     ctx.update(ready=True, branches=branches, meters=W.conductor_meters(branches))
     for b in branches:
         if b.get("ugc"):

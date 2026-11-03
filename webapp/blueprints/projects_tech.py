@@ -27,17 +27,6 @@ _EQUIPMENT_LINES = {
 }
 
 
-def _pick_version(versions: list[dict], wanted: str | None) -> dict | None:
-    if not versions:
-        return None
-    if wanted:
-        hit = next((v for v in versions if v["id"] == wanted), None)
-        if hit:
-            return hit
-    locked = [v for v in versions if v.get("locked")]
-    return (locked or versions)[-1]
-
-
 def _facts(blob: dict, project: dict) -> list[tuple[str, str]]:
     eq = blob.get("equipment") or {}
     panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
@@ -71,35 +60,18 @@ def _facts(blob: dict, project: dict) -> list[tuple[str, str]]:
 
 def render_panel(ctx: dict, *, message: str | None = None) -> str:
     from calculations.bom import build_bom
-    from database.proposals_db import list_versions
+    from webapp.blueprints import projects_design
     from webapp.blueprints.projects_common import fmt_usd
-    from webapp.wizard_steps import og_wiring
-    from wizard import draft
 
     project = ctx["project"]
-    spec = project.get("tech_spec") or {}
-    proposal_id = project.get("proposal_id")
-    if not proposal_id:
-        return render_template("projects/_tecnico.html", pid=project["id"], empty=(
-            "Este proyecto se creó sin cotización, así que no hay un diseño guardado del cual leer equipos y cableado."))
-
-    versions = list_versions(proposal_id)
-    chosen = _pick_version(versions, spec.get("version_id"))
-    if chosen is None:
-        return render_template("projects/_tecnico.html", pid=project["id"], empty="La cotización de este proyecto no tiene versiones.")
-
-    blob = draft.load(chosen["id"])
-    eq = blob.get("equipment") or {}
-    if not eq.get("panel"):
-        return render_template("projects/_tecnico.html", pid=project["id"], empty=(
-            "La versión elegida todavía no tiene equipos seleccionados."), versions=versions, chosen=chosen)
+    d = projects_design.load(project)
+    spec, versions, chosen, blob, eq = d["spec"], d["versions"], d["chosen"], d["blob"], d["eq"]
+    if d["empty"]:
+        extra = {"versions": versions, "chosen": chosen} if chosen and not eq.get("panel") else {}
+        return render_template("projects/_tecnico.html", pid=project["id"], empty=d["empty"], **extra)
 
     system_type = project.get("system_type")
-    if system_type in ("off_grid", "hybrid"):
-        wiring_ctx = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"))
-    else:
-        wiring_ctx = {"ready": False, "reason": "El cableado automático está disponible para sistemas Off-Grid e Híbridos; Grid Zero se agregará después.",
-                      "branches": []}
+    wiring_ctx = d["wiring"]
     wiring_ctx.update(post_url=url_for("projects.tecnico_guardar", pid=project["id"]),
                       form_target="#tech-panel", form_swap="outerHTML")
 

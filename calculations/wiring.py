@@ -125,7 +125,7 @@ def size_branch(
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
     egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
-    min_gauge: str | None = None,
+    min_gauge: str | None = None, shared_conduit: bool = False,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
     factors (used for voltage drop, like the workbook); `factor` is the multiplier that
@@ -139,6 +139,9 @@ def size_branch(
     conductor may only be protected by the next standard size above its ampacity (NEC 240.4(B)), so
     a 200 A fuse cannot sit on a 130 A cable.
 
+    `shared_conduit` puts the `qty` runs in ONE raceway (e.g. both PV strings, or the AC wiring of two
+    inverters, share a pipe): the conduit is sized for all their conductors together and counted once.
+
     `min_gauge` is a practice floor (e.g. Pauly always pulls #10 solar cable): the conductor starts
     there when the ampacity would allow something smaller. The EGC still derives from the
     gauge the floor starts from, as the workbook derives it from the initial gauge."""
@@ -148,7 +151,7 @@ def size_branch(
     out: dict = {
         "label": label, "kind": kind, "qty": qty, "current_a": round(current_a, 2), "design_a": design_a,
         "length_m": length_m, "v_ref": round(v_ref, 1), "notes": notes, "ok": True,
-        "insulation": insulation, "protection": protection,
+        "insulation": insulation, "protection": protection, "raceways": 1 if shared_conduit else qty,
     }
     if ugc_i is None:
         out.update(ok=False, ugc=None, ocpd_a=ocpd_override or ocpd_size(design_a), conduit=None)
@@ -206,12 +209,13 @@ def size_branch(
     if neutral:
         conductors.insert(1, ("Neutro", ugc, neutral))
     rows, total_mm2, missing = [], 0.0, False
+    pipe_runs = qty if shared_conduit else 1
     for role, g, n in conductors:
         a = conductor_area(g, insulation)
         if a is None:
             missing = True
         else:
-            total_mm2 += a * n
+            total_mm2 += a * n * (1 if role == "EGC" else pipe_runs)   # one EGC serves every run in a shared pipe
         rows.append({"role": role, "gauge": g, "count": n, "mm2": a})
     conduit = None if missing else pick_conduit(total_mm2, conduit_type)
     if conduit is None:
@@ -237,5 +241,6 @@ def conductor_meters(branches: list[dict]) -> dict[str, float]:
     totals: dict[str, float] = {}
     for b in branches:
         for row in b.get("conductors") or []:
-            totals[row["gauge"]] = totals.get(row["gauge"], 0.0) + row["count"] * b["qty"] * b["length_m"]
+            runs = b.get("raceways", b["qty"]) if row["role"] == "EGC" else b["qty"]
+            totals[row["gauge"]] = totals.get(row["gauge"], 0.0) + row["count"] * runs * b["length_m"]
     return {g: round(totals[g], 1) for g in T.GAUGE_ORDER if g in totals}

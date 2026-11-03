@@ -120,7 +120,8 @@ def conductor_rows(branches: list[dict], insulation: str) -> list[dict]:
     for b in branches:
         for r in b.get("conductors") or []:
             target = ground if r["role"] == "EGC" else live
-            target[r["gauge"]] = target.get(r["gauge"], 0.0) + r["count"] * b["qty"] * b["length_m"]
+            runs = b.get("raceways", b["qty"]) if r["role"] == "EGC" else b["qty"]   # one EGC per shared pipe
+            target[r["gauge"]] = target.get(r["gauge"], 0.0) + r["count"] * runs * b["length_m"]
     rows = []
     for title, data in (("activos / neutro", live), ("tierra (EGC)", ground)):
         for g in sorted(data, key=lambda g: W.T.GAUGE_ORDER.index(g)):
@@ -136,7 +137,7 @@ def conduit_rows(branches: list[dict], conduit_type: str) -> list[dict]:
     for b in branches:
         c = b.get("conduit")
         if c:
-            by_size[c["trade"]] = by_size.get(c["trade"], 0.0) + b["qty"] * b["length_m"]
+            by_size[c["trade"]] = by_size.get(c["trade"], 0.0) + b.get("raceways", b["qty"]) * b["length_m"]
     order = [t for t, _m, _a in W.T.T4_PVC_CONDUIT[conduit_type]]
     rows = []
     for trade in sorted(by_size, key=order.index):

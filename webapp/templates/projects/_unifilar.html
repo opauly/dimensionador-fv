@@ -1,0 +1,57 @@
+{# Unifilar tab — see projects_unifilar.py. Root id "uni-panel"; the questions form swaps it (outerHTML). #}
+<div id="uni-panel">
+<style>
+.un-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 6px; }
+.un-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 16px; margin: 8px 0; }
+.un-grid label { display: block; font-size: 11.5px; color: var(--muted-2); margin-bottom: 2px; }
+.un-grid input[type=text], .un-grid select { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); }
+.un-block { padding: 10px 14px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-size: 13px; color: #7f1d1d; margin: 8px 0; }
+.un-block li { margin: 3px 0; }
+.un-warn li { margin: 4px 0; font-size: 13px; } .un-warn .warn { color: #92400e; } .un-warn .info { color: #374151; }
+.un-warn ul { padding-left: 18px; }
+.un-ask { border-left: 3px solid #d97706; padding-left: 8px; }
+.un-pdf { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 8px; background: #f9fafb; }
+.un-dl { display: inline-block; padding: 7px 14px; background: var(--navy); color: #fff; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; margin-right: 8px; }
+</style>
+
+{% if empty %}
+  <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
+{% else %}
+  <p class="un-h" style="margin-top:6px;">Diagrama unifilar</p>
+  <p class="card-note-sm">Sistema híbrido acoplado en AC: Fronius en el AC-OUT de dos MultiPlus-II en split-phase, baterías en Lynx Power In y Ekrano GX. El dibujo sale de los mismos calibres y breakers del dimensionamiento de la pestaña Técnico (el mismo origen de la lista de materiales). Los pendientes y revisiones se muestran aquí y no se dibujan en el plano.</p>
+
+  <form hx-post="{{ url_for('projects.unifilar_guardar', pid=pid) }}" hx-trigger="change delay:400ms" hx-target="#uni-panel" hx-swap="outerHTML">
+    <div class="un-grid">
+      <div class="{{ 'un-ask' if not answers.export else '' }}"><label for="un-export">Inyección a la red</label>
+        <select id="un-export" name="export"><option value="">— elegir —</option>
+          {% for val, lab in export_choices %}<option value="{{ val }}" {{ 'selected' if answers.export == val else '' }}>{{ lab }}</option>{% endfor %}
+        </select></div>
+      <div class="{{ 'un-ask' if not answers.lynx else '' }}"><label for="un-lynx">Bus DC de baterías</label>
+        <select id="un-lynx" name="lynx"><option value="">— elegir —</option>
+          {% for val, lab in lynx_choices %}<option value="{{ val }}" {{ 'selected' if answers.lynx == val else '' }}>{{ lab }}</option>{% endfor %}
+        </select></div>
+      <div><label for="un-q4">Uso del sub-panel (Q4)</label><input id="un-q4" type="text" name="q4" value="{{ answers.q4 }}"></div>
+      <div><label for="un-l1">Cargas críticas (línea 1)</label><input id="un-l1" type="text" name="loads1" value="{{ answers.loads1 }}"></div>
+      <div><label for="un-l2">Cargas críticas (línea 2)</label><input id="un-l2" type="text" name="loads2" value="{{ answers.loads2 }}"></div>
+      <div><label><input type="checkbox" name="spd" value="1" {{ 'checked' if answers.spd else '' }}> Lleva supresor de picos (SPD)</label>
+        <input type="text" name="spd_label" value="{{ answers.spd_label }}" style="margin-top:4px;"></div>
+      <div><label for="un-rev">Revisión</label><input id="un-rev" type="text" name="revision" value="{{ answers.revision }}">
+        <label style="margin-top:4px;"><input type="checkbox" name="draft" value="1" {{ 'checked' if answers.draft else '' }}> Marcar como BORRADOR</label></div>
+    </div>
+  </form>
+
+  {% if problems.blockers %}
+    <div class="un-block"><b>No se puede dibujar todavía:</b>
+      <ul>{% for b in problems.blockers %}<li>{{ b }}</li>{% endfor %}</ul></div>
+  {% else %}
+    <p><a class="un-dl" href="{{ url_for('projects.unifilar_pdf', pid=pid) }}" target="_blank">Abrir PDF</a>
+      <a class="un-dl" style="background:#4b5563;" href="{{ url_for('projects.unifilar_pdf', pid=pid) }}" download="{{ pdf_name }}">Descargar</a>
+      <span class="card-note-sm">{{ pdf_name }}</span></p>
+    <p class="un-h">Revisiones de ingeniería (no van en el plano)</p>
+    <div class="un-warn"><ul>
+      {% for w in problems.warnings %}<li class="{{ w.level }}">{{ '⚠️' if w.level == 'warn' else 'ℹ️' }} {{ w.text }}</li>{% endfor %}
+    </ul></div>
+    <iframe class="un-pdf" title="Unifilar" src="{{ url_for('projects.unifilar_pdf', pid=pid) }}#toolbar=0&navpanes=0"></iframe>
+  {% endif %}
+{% endif %}
+</div>

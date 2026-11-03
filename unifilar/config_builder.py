@@ -1,0 +1,230 @@
+"""Design -> unifilar config (and the engineering checks that go with it).
+
+Deterministic: the labels on the drawing are the gauges, breakers and colours that
+`og_wiring` already sized for the project (the same numbers the materials list uses), so the
+diagram and the purchase list cannot disagree. Nothing comes from an LLM.
+
+`build_config()` returns `(cfg, problems)`. `cfg` is the JSON the drawing script
+(`unifilar/generate_unifilar.py`, the `unifilar-hibrido-ac` skill) takes; `problems` is split into
+- `blockers`: out of the skill's scope or missing answers — the drawing is not generated,
+- `warnings`: engineering checks to review. They go to the UI, never inside the PDF
+  (the plan must be able to go to the client).
+"""
+from __future__ import annotations
+
+import re
+from datetime import date
+
+from calculations import wiring as W
+
+# Questions the drawing cannot infer and the wizard must never assume (docs/unifilar/CONTEXTO.md §3.4, §7).
+EXPORT_CHOICES = (("grid_zero", "Cero inyección (Grid Zero)"), ("inyeccion", "Con inyección a la red"))
+LYNX_CHOICES = (("power_in", "Solo Lynx Power In"), ("power_in_distributor", "Lynx Power In + Lynx Distributor"))
+
+DEFAULT_ANSWERS = {
+    "export": None, "lynx": None, "spd": True, "spd_label": "SPD SDSA 1175",
+    "q4": "circuitos críticos", "loads1": "iluminación, internet, tomacorrientes,", "loads2": "refrigerador, etc.",
+    "revision": "A (borrador)", "draft": True,
+}
+
+_LATIN = str.maketrans({"→": "-", "−": "-", "≥": ">=", "≤": "<=", "–": "-", "—": "-", "“": '"', "”": '"', "’": "'"})
+
+
+def latin(s: str) -> str:
+    """Helvetica in reportlab has no arrows or minus signs; keep the text drawable."""
+    return (s or "").translate(_LATIN)
+
+
+def clean_answers(saved: dict | None) -> dict:
+    a = {**DEFAULT_ANSWERS, **(saved or {})}
+    a["export"] = a["export"] if a["export"] in dict(EXPORT_CHOICES) else None
+    a["lynx"] = a["lynx"] if a["lynx"] in dict(LYNX_CHOICES) else None
+    return a
+
+
+def answers_from_form(form) -> dict:
+    return clean_answers({
+        "export": form.get("export"), "lynx": form.get("lynx"), "spd": form.get("spd") == "1",
+        "spd_label": (form.get("spd_label") or "").strip() or DEFAULT_ANSWERS["spd_label"],
+        "q4": (form.get("q4") or "").strip() or DEFAULT_ANSWERS["q4"],
+        "loads1": (form.get("loads1") or "").strip() or DEFAULT_ANSWERS["loads1"],
+        "loads2": (form.get("loads2") or "").strip(),
+        "revision": (form.get("revision") or "").strip() or DEFAULT_ANSWERS["revision"],
+        "draft": form.get("draft") == "1",
+    })
+
+
+def _g(gauge: str) -> str:
+    return f"#{gauge} AWG" if W.T.T8_CMILS[gauge] <= W.T.T8_CMILS["4/0"] else f"{gauge} kcmil"
+
+
+def _branch(branches: list[dict], key: str) -> dict | None:
+    return next((b for b in branches if b.get("key") == key), None)
+
+
+def _egc(b: dict | None) -> str | None:
+    return b.get("egc") if b else None
+
+
+def _model(item: dict) -> str:
+    return f"{item.get('brand', '')} {item.get('model', '')}".strip()
+
+
+def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[str]:
+    """Reasons the drawing cannot be generated (empty list = go)."""
+    out: list[str] = []
+    cpl = wiring.get("coupling") or {}
+    if project.get("system_type") != "hybrid":
+        out.append("El unifilar es para sistemas híbridos; este proyecto no es híbrido.")
+    elif not cpl.get("ac"):
+        out.append("El unifilar solo cubre acople AC (inversor FV en el AC-OUT de los Multis). Cambia el acople a AC en la pestaña Técnico; el acople DC está fuera del alcance.")
+    if not wiring.get("ready"):
+        out.append("Falta un diseño completo: " + (wiring.get("reason") or "el cableado no se puede dimensionar") )
+        return out
+    inv, qty = eq.get("inverter") or {}, int(eq.get("inverter_qty") or 1)
+    if qty != 2:
+        out.append(f"El dibujo es para 2 MultiPlus-II en split-phase; este diseño tiene {qty}. Un solo Multi o 3+ está fuera de alcance.")
+    if float(inv.get("output_v") or 120) >= 200:
+        out.append("El dibujo supone Multis de 120 V en split-phase; el inversor del diseño no es de 120 V.")
+    if int(cpl.get("qty") or 1) != 1:
+        out.append("El dibujo tiene un solo inversor FV.")
+    if int(cpl.get("strings") or 0) not in (1, 2):
+        out.append(f"El dibujo admite 1 o 2 strings (un MPPT cada uno); el diseño tiene {cpl.get('strings')}.")
+    n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
+    dist = answers.get("lynx") == "power_in_distributor"
+    if not 1 <= n_bat <= (4 if dist else 6):
+        out.append(f"El dibujo admite 1 a {4 if dist else 6} baterías{' con Distributor' if dist else ''}; el diseño tiene {n_bat}.")
+    if not eq.get("monitoring"):
+        out.append("El dibujo incluye un Ekrano GX; el diseño no tiene equipo de monitoreo.")
+    return out
+
+
+def missing_answers(answers: dict) -> list[str]:
+    out = []
+    if not answers.get("export"):
+        out.append("Inyección a la red: elige cero inyección o con inyección.")
+    if not answers.get("lynx"):
+        out.append("Bus DC de baterías: elige solo Lynx Power In o con Lynx Distributor (siempre se pregunta, no se supone).")
+    return out
+
+
+def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | None = None) -> tuple[dict | None, dict]:
+    """(cfg | None, {'blockers': [...], 'warnings': [{'level','text'}]})."""
+    eq, wiring, blob = d["eq"], d["wiring"], d["blob"]
+    answers = clean_answers(answers)
+    blockers = check_scope(project, eq, wiring, answers) + missing_answers(answers)
+    if blockers:
+        return None, {"blockers": blockers, "warnings": []}
+
+    cpl, branches = wiring["coupling"], wiring["branches"]
+    panel, inv, bat, mon = eq["panel"], eq["inverter"], eq["battery"], eq["monitoring"]
+    pv_inv = cpl["pv_inverter"]
+    pv, fr = _branch(branches, "pv_strings"), _branch(branches, "pv_inv_ac")
+    ac_in, ac_out, bat_inv = _branch(branches, "ac_in"), _branch(branches, "ac_out"), _branch(branches, "bat_inv")
+    n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
+    site = blob.get("site") or {}
+    place = ", ".join(x for x in (site.get("city"), site.get("province")) if x)
+    client = project.get("client_name") or "Cliente"
+    string_a = string_breaker_a or pv["ocpd_a"]
+
+    def hots(b, neutral=True):
+        g, e = b["ugc"], b.get("egc") or b["ugc"]
+        return [f"L1 {_g(g)} negro", f"L2 {_g(g)} rojo"] + ([f"N {_g(g)} blanco"] if neutral else []) + [f"T {_g(e)} verde"]
+
+    multi_label = "MULTIPLUS-II " + (re.search(r"48/\d+", inv.get("model", "")) or re.search(r"\d+", inv.get("model", "") + "0"))[0]
+    cfg = {
+        "project": {
+            "name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
+            "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
+            "revision": answers["revision"], "draft": bool(answers["draft"]),
+        },
+        "pv": {
+            "strings": int(cpl["strings"]), "modules_per_string": int(cpl["series"]), "module_w": int(panel.get("wp") or 0),
+            "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(),
+            "roof_m2": (eq.get("array") or {}).get("area_m2"),
+            "string_breaker": f"{string_a} A 2P DC", "dc_wire": f"{_g(pv['ugc'])} SOLAR",
+            "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
+        },
+        "fronius": {
+            "label": f"{_model(pv_inv)} 240 V", "kw": pv_inv.get("kw"), "ac_breaker": f"2P {fr['ocpd_a']} A",
+            "ac_conductors": [x for x in hots(fr, neutral=False)], "ground_wire": f"T {_g(_egc(fr) or fr['ugc'])} verde",
+        },
+        "multis": {
+            "label": multi_label, "model": f"{inv.get('model', '').split('/70')[0]} 120 V",
+            "ac_in_breaker": f"2P {ac_in['ocpd_a']} A" if ac_in else "2P por definir",
+            "ac_in_conductors": hots(ac_in) if ac_in else ["por definir"],
+            "ac_out_conductors": hots(ac_out),
+            "dc_pos": f"+ {_g(bat_inv['ugc'])} rojo", "dc_neg": f"- {_g(bat_inv['ugc'])} negro",
+            "ground_wire": f"T {_g(_egc(ac_out) or ac_out['ugc'])} verde",
+        },
+        "battery": {
+            "count": n_bat, "label": _model(bat), "short": bat.get("model") or "Batería", "kwh_each": float(bat.get("capacity_kwh") or 0),
+            "can_master": "pylontech" in (bat.get("brand") or "").lower(), "lynx": answers["lynx"],
+            "cables_note": (["Cables batería a Power In (+ / -):", "juego de cables de la batería"] if "pylontech" in (bat.get("brand") or "").lower()
+                            else ["Cables batería a Power In (+ / -):", "por definir"]),
+        },
+        "gx": {"label": (mon.get("model") or "GX").upper()},
+        "export": answers["export"],
+        "subpanel": {
+            "q2": f"2P {ac_out['ocpd_a']} A" if ac_out else "2P", "q4": answers["q4"],
+            "spd": answers["spd_label"] if answers["spd"] else None,
+            "loads": [x for x in (answers["loads1"], answers["loads2"]) if x],
+        },
+        "comms_notes": {
+            "vebus": "VE.Bus (UTP RJ-45, en lista de materiales)",
+            "can": f"CAN-bus BMS ({bat.get('model') or 'batería'} #1 a {mon.get('model') or 'GX'}) · cable VE.CAN en lista de materiales",
+            "eth": "Ethernet / Modbus TCP (control de potencia del Fronius) · UTP en lista de materiales",
+        },
+    }
+    cfg = _latinize(cfg)
+    return cfg, {"blockers": [], "warnings": warnings(project, d, answers, string_a)}
+
+
+def _latinize(x):
+    if isinstance(x, str):
+        return latin(x)
+    if isinstance(x, list):
+        return [_latinize(i) for i in x]
+    if isinstance(x, dict):
+        return {k: _latinize(v) for k, v in x.items()}
+    return x
+
+
+def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]:
+    """Engineering reviews (docs/unifilar/references/diseno.md). Advice to confirm, not verdicts."""
+    eq, wiring = d["eq"], d["wiring"]
+    cpl, branches = wiring["coupling"], wiring["branches"]
+    panel, inv = eq["panel"], eq["inverter"]
+    out: list[dict] = []
+
+    def add(level, text):
+        out.append({"level": level, "text": text})
+
+    ac_in, ac_out, pv = _branch(branches, "ac_in"), _branch(branches, "ac_out"), _branch(branches, "pv_strings")
+    fr, bat_inv = _branch(branches, "pv_inv_ac"), _branch(branches, "bat_inv")
+    rated_in = float(inv.get("ac_input_current_max_a") or 0)
+    if ac_in and rated_in:
+        add("info", f"Q1 (AC-IN): 2P {ac_in['ocpd_a']} A sobre {_g(ac_in['ugc'])} ({ac_in.get('ugc_ampacity'):g} A a 75 °C); cada Multi admite {rated_in:g} A de entrada AC. "
+                    f"Un breaker de 100 A estaría por encima de ese límite.")
+    isc = float(panel.get("isc") or 0)
+    need = 1.56 * isc
+    if string_a < need:
+        add("warn", f"Breaker de string {string_a} A es menor que 1.56 × Isc = {need:.1f} A.")
+    else:
+        add("info", f"Breaker de string {string_a} A ≥ 1.56 × Isc ({need:.1f} A). Confirmar que no pase el fusible serie máximo del módulo (no está en el catálogo) "
+                    f"y que su tensión nominal CC cubra el Voc del string ({cpl['check']['voc_string']:.0f} V).")
+    if fr:
+        add("info", f"Q3 (Fronius): 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A.")
+    if answers.get("lynx") == "power_in":
+        add("warn", "Sin Lynx Distributor, los Multis quedan protegidos por los fusibles de las baterías y los del Power In: confirmar que baste y revisar la capacidad de interrupción frente a la corriente de falla del banco.")
+    if bat_inv:
+        add("info", f"DC de cada Multi: {bat_inv['current_a']:.0f} A, cable {_g(bat_inv['ugc'])} con fusible de {bat_inv['ocpd_a']} A. El manual del MultiPlus-II pide no instalar los cables de batería en conducto cerrado.")
+    for c in cpl["check"]["checks"]:
+        if c["ok"] is False:
+            add("warn", f"{c['label']}: {c['detail']}")
+    add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería).")
+    add("warn", "El sub-panel de cargas críticas y sus breakers (Q2, Q4) no están en la cotización: quedan en la lista de materiales como «por definir».")
+    if answers.get("export") == "grid_zero":
+        add("info", "Grid Zero requiere el UTP Fronius ↔ Ekrano (incluido en la lista de materiales).")
+    add("info", "Calibres y breakers salen del dimensionamiento de la pestaña Técnico con los largos por defecto; ajusta los largos de obra antes de emitir el plano.")
+    return out
