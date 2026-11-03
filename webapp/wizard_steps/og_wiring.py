@@ -22,6 +22,12 @@ from calculations import wiring as W
 
 SCRATCH_KEY = "wiring"
 
+# The 48 V DC equipment (controllers, batteries, inverters) all lands on a Victron Lynx Power In bus,
+# which is protected with fuses, not breakers, and only a few ratings are stocked. Sizing is the same;
+# the protection is just limited to this set. Only the PV array -> charge controller run uses a
+# (DC) breaker.
+LYNX_FUSE_SIZES_A = (100, 125, 200, 250)
+
 # Equipment-grounding conductor (EGC) per DC run. The PV run (panels -> controller) carries one with
 # its + and − (three conductors); the battery-side runs (controller -> batteries, batteries -> inverter)
 # carry just + and −. Each switch independently adds/removes one EGC from that branch's conductor
@@ -160,6 +166,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
             "Paneles → controlador de carga", kind="dc", qty=cc_qty,
             current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
             v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
+            protection="breaker",
             note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
                  f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
         ),
@@ -174,6 +181,7 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     branches.append(W.size_branch(
         "Controlador de carga → baterías", kind="dc", qty=cc_qty, current_a=i_out, factor=W.CONTINUOUS_FACTOR,
         v_ref=v_bat, length_m=L["cc_bat_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
+        protection="fuse", ocpd_choices=LYNX_FUSE_SIZES_A,
         note="Corriente de salida = el menor entre la capacidad del controlador y la potencia del arreglo ÷ voltaje de batería.",
     ))
 
@@ -181,12 +189,16 @@ def build_context(blob: dict, lengths_override: dict | None = None) -> dict:
     if inv_kw:
         eff = (_f(inverter, "efficiency_pct") / 100.0) or W.INVERTER_EFFICIENCY
         i_dc = inv_kw * 1000.0 / eff / v_bat
-        branches.append(W.size_branch(
+        bat_inv = W.size_branch(
             "Baterías → inversor", kind="dc", qty=inv_qty, current_a=i_dc, factor=W.CONTINUOUS_FACTOR,
             v_ref=v_bat, length_m=L["bat_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=BATTERY_DC_BRANCH_HAS_EGC,
-            note=f"Por inversor: potencia ÷ eficiencia ({eff:.2f}{'' if _f(inverter, 'efficiency_pct') else ', supuesta'}) ÷ voltaje de banco ({v_bat:.1f} V). "
+            protection="fuse", ocpd_choices=LYNX_FUSE_SIZES_A,
+            note=f"Fusible en la barra Lynx Power In. Por inversor: potencia ÷ eficiencia ({eff:.2f}{'' if _f(inverter, 'efficiency_pct') else ', supuesta'}) ÷ voltaje de banco ({v_bat:.1f} V). "
                  "La hoja de Excel usa el voltaje de salida CA en esta rama; aquí se usa el voltaje de CC.",
-        ))
+        )
+        bat_inv["notes"].append(
+            "El manual del MultiPlus-II indica no instalar los cables de batería dentro de un conducto cerrado: confirma si este tramo va entubado.")
+        branches.append(bat_inv)
 
     ac = _ac_summary(blob, inv_qty)
     if ac is not None:

@@ -104,5 +104,18 @@ check("AC out from connected loads: conductor (needs >= 69 A)", ao["ugc"], "4")
 ai = W.size_branch("ac in", kind="ac", qty=2, current_a=95.0, factor=1.0, v_ref=120.0, length_m=10.0, hot=1, neutral=1, ocpd_override=W.ocpd_size_max(95))
 check("AC in from 95 A pass-through: breaker 90 A, conductor 3 AWG (>= 95 A)", (ai["ocpd_a"], ai["ugc"]), (90, "3"))
 
+# ── Lynx fuses: restricted sizes, and the cable follows the fuse (NEC 240.4(B)) ─────
+F = (100, 125, 200, 250)
+f1 = W.size_branch("cc->bat", kind="dc", qty=1, current_a=94.51, factor=1.25, v_ref=51.2, length_m=2.0, hot=2, egc_included=False, protection="fuse", ocpd_choices=F)
+check("fuse for 118 A design: smallest of 100/125/200/250 that fits", f1["ocpd_a"], 125)
+check("125 A fuse on 1 AWG (130 A) is fine", f1["ugc"], "1")
+f2 = W.size_branch("bat->inv", kind="dc", qty=1, current_a=101.7, factor=1.25, v_ref=51.2, length_m=2.0, hot=2, egc_included=False, protection="fuse", ocpd_choices=F)
+check("fuse for 127 A design jumps to 200 A", f2["ocpd_a"], 200)
+check("200 A fuse needs a cable that can carry it: 3/0 AWG (200 A @75 C)", f2["ugc"], "3/0")
+f3 = W.size_branch("big", kind="dc", qty=1, current_a=250.0, factor=1.25, v_ref=51.2, length_m=2.0, hot=2, egc_included=False, protection="fuse", ocpd_choices=F)
+check("design above the largest fuse -> flagged, no rating", (f3["ocpd_a"], f3["ok"]), (None, False))
+rows = B.protection_rows([f1, f2, {**ao, "protection": "breaker"}])
+check("BOM fuse label has no poles and names the bus", any("Fusible CC 200 A (barra Lynx Power In)" == r["item"] for r in rows), True)
+
 print("\n" + ("ALL WIRING CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

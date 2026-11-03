@@ -124,20 +124,26 @@ def size_branch(
     label: str, *, kind: str, qty: int, current_a: float, factor: float, v_ref: float, length_m: float,
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
-    egc_included: bool = True,
+    egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
     factors (used for voltage drop, like the workbook); `factor` is the multiplier that
     turns it into the NEC design current. `kind` is "dc" or "ac". `egc_included=False` leaves the
     equipment-grounding conductor out of this branch's conductor count (conduit fill and metres) —
-    used for DC branches that carry only + and −."""
+    used for DC branches that carry only + and −.
+
+    `protection` is "breaker" or "fuse" (reporting only). `ocpd_choices` restricts the OCPD to a
+    fixed set of ratings (e.g. the fuses a Lynx Power In bus takes): the smallest one >= the design
+    current is used, and the conductor is then enlarged until its ampacity allows that rating — a
+    conductor may only be protected by the next standard size above its ampacity (NEC 240.4(B)), so
+    a 200 A fuse cannot sit on a 130 A cable."""
     notes: list[str] = [note] if note else []
     design_a = round(current_a * factor, 2)
     ugc_i = initial_gauge(design_a)
     out: dict = {
         "label": label, "kind": kind, "qty": qty, "current_a": round(current_a, 2), "design_a": design_a,
         "length_m": length_m, "v_ref": round(v_ref, 1), "notes": notes, "ok": True,
-        "insulation": insulation,
+        "insulation": insulation, "protection": protection,
     }
     if ugc_i is None:
         out.update(ok=False, ugc=None, ocpd_a=ocpd_override or ocpd_size(design_a), conduit=None)
@@ -160,7 +166,29 @@ def size_branch(
         notes.append(f"La caída de tensión ({vd_pct:.2f} %) supera {VD_LIMIT_PCT:.0f} % incluso con el calibre máximo de la tabla.")
     egc = egc_gauge(ugc_i, ugc)
 
-    ocpd = ocpd_override if ocpd_override is not None else ocpd_size(design_a)
+    if ocpd_override is not None:
+        ocpd = ocpd_override
+    elif ocpd_choices:
+        ocpd = next((c for c in sorted(ocpd_choices) if c >= design_a), None)
+        if ocpd is None:
+            out["ok"] = False
+            notes.append(f"La corriente de diseño ({design_a:.0f} A) supera el {'fusible' if protection == 'fuse' else 'dispositivo'} "
+                         f"máximo disponible ({max(ocpd_choices)} A): requiere conductores/protecciones en paralelo.")
+    else:
+        ocpd = ocpd_size(design_a)
+    # A conductor may only carry an OCPD up to the next standard size above its ampacity (NEC 240.4(B)).
+    # A restricted set (fuses) can force a larger rating than the design current needs -> enlarge the cable.
+    if ocpd is not None:
+        for g in T.GAUGE_ORDER[T.GAUGE_ORDER.index(ugc):]:
+            a = ampacity(g)
+            if a is not None and ocpd <= ocpd_size(a):
+                if g != ugc:
+                    notes.append(f"Conductor subido de {ugc} a {g} para poder llevar el {'fusible' if protection == 'fuse' else 'dispositivo'} de {ocpd} A.")
+                    ugc = g
+                    vd_v = vd(ugc, current_a, length_m)
+                    vd_pct = vd_v / v_ref * 100.0 if v_ref else 0.0
+                    egc = egc_gauge(ugc_i, ugc)
+                break
     amp = ampacity(ugc)
     if ocpd is not None and amp is not None and ocpd > amp:
         notes.append(f"OCPD de {ocpd} A mayor que la ampacidad del conductor ({amp:.0f} A): permitido por NEC 240.4(B) (siguiente tamaño estándar).")

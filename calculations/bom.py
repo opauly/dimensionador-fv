@@ -48,22 +48,25 @@ def equipment_rows(eq: dict) -> list[dict]:
 
 
 def protection_rows(branches: list[dict]) -> list[dict]:
-    """Breakers/fuses grouped by kind and rating, one per run of each branch."""
+    """Breakers and fuses grouped by kind and rating, one per run of each branch. DC branches on the
+    Lynx Power In bus use fuses (no poles); the PV array run uses a DC breaker; AC uses breakers."""
     groups: dict[tuple, dict] = {}
     for b in branches:
         if not b.get("ocpd_a"):
             continue
         hot = next((r["count"] for r in b.get("conductors") or [] if r["role"] == "UGC"), 2)
-        key = (b["kind"], b["ocpd_a"], hot)
+        fuse = b.get("protection") == "fuse"
+        key = (fuse, b["kind"], b["ocpd_a"], 0 if fuse else hot)
         g = groups.setdefault(key, {"qty": 0, "branches": []})
         g["qty"] += b["qty"]
         g["branches"].append(b["label"])
     rows = []
-    for (kind, amps, poles), g in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        rows.append({
-            "item": f"{'Breaker/fusible CC' if kind == 'dc' else 'Breaker CA'} {amps} A, {poles} polo{'s' if poles != 1 else ''}",
-            "qty": g["qty"], "used_in": " · ".join(g["branches"]),
-        })
+    for (fuse, kind, amps, poles), g in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2])):
+        if fuse:
+            item = f"Fusible CC {amps} A (barra Lynx Power In)"
+        else:
+            item = f"{'Breaker CC' if kind == 'dc' else 'Breaker CA'} {amps} A, {poles} polo{'s' if poles != 1 else ''}"
+        rows.append({"item": item, "qty": g["qty"], "used_in": " · ".join(g["branches"])})
     return rows
 
 
