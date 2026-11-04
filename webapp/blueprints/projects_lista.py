@@ -11,6 +11,7 @@ import uuid
 from flask import Response, render_template, request, url_for
 
 from materials import engine
+from materials.export_pdf import build_pdf
 from materials.export_xlsx import build_workbook
 
 CONDUIT_CHOICES = (("PVC", "PVC"), ("EMT", "EMT"), ("none", "Sin tubería"))
@@ -63,6 +64,12 @@ def render_panel(ctx: dict, *, message: str | None = None) -> str:
         n_new=sum(1 for ln in result["lines"] if ln["qty"] and not ln["in_master"]),
         coupling=d["wiring"].get("coupling") or {}, custom_lengths=bool(d["spec"].get("wiring_lengths")),
     )
+
+
+def _safe_name(project: dict) -> tuple[str, str]:
+    name = (project.get("client_name") or "Proyecto").strip()
+    safe = "".join(ch if ch.isalnum() or ch in " _-" else "" for ch in name).strip().replace(" ", "_") or "Proyecto"
+    return name, safe
 
 
 def register(bp):
@@ -160,3 +167,20 @@ def register(bp):
         safe = "".join(ch if ch.isalnum() or ch in " _-" else "" for ch in name).strip().replace(" ", "_") or "Proyecto"
         return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         headers={"Content-Disposition": f'attachment; filename="Proyecto_{safe}_Solicitud_de_materiales.xlsx"'})
+
+    @bp.route("/<pid>/lista/pdf")
+    def lista_pdf(pid):
+        """The same list as a PDF for the dealers: no dealer, Bodega or price columns."""
+        from database.projects_db import get_project
+
+        project = get_project(pid)
+        if not project:
+            return Response("Proyecto no encontrado.", status=404)
+        d, result = _build(project)
+        if result is None:
+            return Response("Este proyecto no tiene un diseño guardado del cual generar la lista.", status=409)
+        name, safe = _safe_name(project)
+        site = (d["blob"].get("site") or {}).get("city") or ""
+        data = build_pdf(result["lines"], "Solicitud de materiales", f"Proyecto {name}" + (f" - {site}" if site else ""))
+        return Response(data, mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="Proyecto_{safe}_Lista_de_materiales.pdf"'})

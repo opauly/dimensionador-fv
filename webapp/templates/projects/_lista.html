@@ -29,7 +29,8 @@
   <p class="ls-h" style="margin-top:6px;">Lista de materiales</p>
   <p class="card-note-sm">Lista de compra derivada del diseño {% if chosen %}(cotización v{{ chosen.version_number }}){% endif %}{% if coupling.ac %} · acople AC{% endif %}: sin precios, lista para enviar a los proveedores. Las cantidades salen del diseño, del cableado de la pestaña Técnico y de reglas explícitas; lo que edites aquí se conserva si el diseño cambia.
     <b>{{ n_lines }}</b> líneas{% if n_new %}, <b>{{ n_new }}</b> que tu lista maestra no tiene{% endif %}.</p>
-  <p><a class="ls-dl" href="{{ url_for('projects.lista_descargar', pid=pid) }}">Descargar Excel (formato Solicitud de materiales)</a></p>
+  <p><a class="ls-dl" href="{{ url_for('projects.lista_descargar', pid=pid) }}">Descargar Excel (formato Solicitud de materiales)</a>
+     <a class="ls-dl" style="margin-left:8px;" href="{{ url_for('projects.lista_pdf', pid=pid) }}">Descargar PDF (para enviar a proveedores)</a></p>
   {% if not custom_lengths %}<p class="ls-sub">⚠️ Los largos de cable son los valores por defecto: ajústalos en la pestaña Técnico con las distancias reales de la obra.</p>{% endif %}
 
   {% if result.pending %}
