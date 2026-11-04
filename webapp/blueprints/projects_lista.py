@@ -11,7 +11,6 @@ import uuid
 from flask import Response, render_template, request, url_for
 
 from materials import engine
-from materials.export_pdf import build_pdf
 from materials.export_xlsx import build_workbook
 
 CONDUIT_CHOICES = (("PVC", "PVC"), ("EMT", "EMT"), ("none", "Sin tubería"))
@@ -179,6 +178,10 @@ def register(bp):
         d, result = _build(project)
         if result is None:
             return Response("Este proyecto no tiene un diseño guardado del cual generar la lista.", status=409)
+        try:
+            from materials.export_pdf import build_pdf
+        except ModuleNotFoundError:  # reportlab not installed in this environment
+            return Response("Falta instalar reportlab: pip install -r requirements.txt", status=500)
         name, safe = _safe_name(project)
         site = (d["blob"].get("site") or {}).get("city") or ""
         data = build_pdf(result["lines"], "Solicitud de materiales", f"Proyecto {name}" + (f" - {site}" if site else ""))
