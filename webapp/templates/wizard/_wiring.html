@@ -60,6 +60,35 @@
     {% endif %}
   </form>
 {% endif %}
+{% if roof %}
+  {# Roof layout (wizard only: the Técnico tab passes no `roof`; the project's Lista tab edits the same answer).
+     It sizes the mounting hardware in the materials list: rails, feet, clamps, rail grounds and splices. #}
+  <form id="wr-roof" class="wr-cpl" hx-post="{{ url_for('wizard.paso6og_techo', vid=vid) }}" hx-trigger="change delay:400ms"
+        hx-target="#wiring-panel" hx-swap="outerHTML">
+    <h5 style="font-size:13px;margin:14px 0 2px;">Techo y montaje</h5>
+    <p class="card-note-sm">¿Cómo van a quedar los {{ roof.n_panels }} módulos en el techo? Con esto se calculan rieles, patas y clamps de la lista de materiales; el cableado no cambia.</p>
+    <div class="wr-cpl-row">
+      <div class="wr-cpl-num"><label for="wr-rows">Filas de paneles</label>
+        <input id="wr-rows" type="number" min="1" max="{{ roof.n_panels }}" name="layout_rows" value="{{ roof.layout.rows or '' }}" placeholder="p. ej. 2"></div>
+      <div><label for="wr-orient">Orientación</label>
+        <select id="wr-orient" name="layout_orientation">
+          <option value="portrait" {{ 'selected' if roof.layout.orientation != 'landscape' else '' }}>Vertical (portrait)</option>
+          <option value="landscape" {{ 'selected' if roof.layout.orientation == 'landscape' else '' }}>Horizontal (landscape)</option>
+        </select></div>
+      <div class="wr-cpl-num"><label for="wr-rail">Largo de riel (m)</label>
+        <input id="wr-rail" type="number" step="0.1" min="1" name="layout_rail_len" value="{{ roof.layout.rail_len_m }}"></div>
+      <div class="wr-cpl-num"><label for="wr-foot">Separación de patas (m)</label>
+        <input id="wr-foot" type="number" step="0.1" min="0.3" name="layout_foot" value="{{ roof.layout.foot_spacing_m }}"></div>
+    </div>
+    {% if roof.counts %}
+      <p class="card-note-sm">{{ roof.counts.rows }} fila(s) de {{ roof.counts.per_row }} módulos, {{ roof.counts.row_len_m }} m por fila · {{ roof.counts.rails }} rieles, {{ roof.counts.feet }} patas, {{ roof.counts.mid }} midclamps, {{ roof.counts.end }} endclamps (antes de repuestos).</p>
+    {% elif not roof.has_dims %}
+      <p class="card-note-sm wr-bad">Este panel no tiene medidas (ancho/alto) en el catálogo, así que no se pueden calcular los rieles.</p>
+    {% else %}
+      <p class="card-note-sm">Sin las filas, la lista de materiales deja el montaje pendiente.</p>
+    {% endif %}
+  </form>
+{% endif %}
 {% if not ready %}
   <p class="card-note-sm">{{ reason }}</p>
 {% else %}

@@ -36,6 +36,33 @@ PANEL_GAP_M = 0.02       # gap between modules in a row
 STRAP_SPACING_M = {"PVC": 1.25, "EMT": 1.5}
 
 DEFAULT_LAYOUT = {"rows": None, "orientation": "portrait", "rail_len_m": 4.7, "foot_spacing_m": 1.0}
+LAYOUT_SCRATCH_KEY = "roof_layout"   # where the wizard keeps the roof layout while a quote is being built
+
+
+def clean_layout(raw: dict | None) -> dict:
+    """Only the layout keys that carry a real value (rows > 0, a known orientation, positive lengths)."""
+    raw, out = raw or {}, {}
+    try:
+        rows = int(float(str(raw.get("rows")).replace(",", ".")))
+        if rows > 0:
+            out["rows"] = rows
+    except (TypeError, ValueError):
+        pass
+    if raw.get("orientation") in ("portrait", "landscape"):
+        out["orientation"] = raw["orientation"]
+    for k in ("rail_len_m", "foot_spacing_m"):
+        try:
+            v = float(str(raw.get(k)).replace(",", "."))
+            if v > 0:
+                out[k] = v
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def layout_from_blob(blob: dict | None) -> dict:
+    """The roof layout answered in the wizard (blob["scratch"]["roof_layout"])."""
+    return clean_layout(((blob or {}).get("scratch") or {}).get(LAYOUT_SCRATCH_KEY))
 DEFAULT_OPTIONS = {"string_breaker_a": None, "bends_per_raceway": 2, "lb_per_raceway": 0, "conduit_material": {}}
 # Battery-side DC runs are not piped by default (the MultiPlus manual: no closed conduit around battery cables).
 DEFAULT_CONDUIT_MATERIAL = {"bat_inv": "none", "cc_bat": "none"}
@@ -382,13 +409,15 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None) -> dict:
+def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout: dict | None = None) -> dict:
     """{'lines': [...], 'pending': [...], 'layout': {...}, 'options': {...}, 'counts': {...}}.
 
     `wiring_ctx` is `og_wiring.build_context(...)`; `spec` the project's tech_spec (edits live in
-    spec["materials"]). Lines are in master-list order, new lines at the end of their group."""
+    spec["materials"]). `base_layout` is the layout answered in the wizard; what the project saved in
+    its Lista tab wins over it, key by key. Lines are in master-list order, new lines at the end of
+    their group."""
     mat = ((spec or {}).get("materials")) or {}
-    layout = {**DEFAULT_LAYOUT, **(mat.get("layout") or {})}
+    layout = {**DEFAULT_LAYOUT, **clean_layout(base_layout), **clean_layout(mat.get("layout"))}
     opts = {**DEFAULT_OPTIONS, **(mat.get("options") or {})}
     coupling = wiring_ctx.get("coupling") or {}
     branches = wiring_ctx.get("branches") or []

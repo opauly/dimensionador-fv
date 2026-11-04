@@ -1198,8 +1198,38 @@ def paso6_objetivos_recalcular(vid):
 # lengths in blob["scratch"]["wiring"].
 
 
+def _roof_context(blob: dict) -> dict | None:
+    """The roof-layout question under the wiring block: the saved answer, the module count it applies
+    to and the mounting counts it gives. None until a panel is chosen (nothing to lay out yet)."""
+    from materials import engine
+
+    eq = (blob or {}).get("equipment") or {}
+    panel, n_panels = eq.get("panel") or {}, int(eq.get("panel_count") or 0)
+    if not (panel and n_panels):
+        return None
+    layout = {**engine.DEFAULT_LAYOUT, **engine.layout_from_blob(blob)}
+    return {"layout": layout, "n_panels": n_panels, "counts": engine.layout_counts(panel, n_panels, layout),
+            "has_dims": bool(panel.get("width_m") and panel.get("height_m"))}
+
+
 def _wiring_render(vid: str, blob: dict):
-    return render_template("wizard/_wiring.html", vid=vid, **og_wiring.build_context(blob))
+    return render_template("wizard/_wiring.html", vid=vid, roof=_roof_context(blob), **og_wiring.build_context(blob))
+
+
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/techo", methods=["POST"])
+def paso6og_techo(vid):
+    """Save the roof layout (rows, orientation, rail length, foot spacing) next to the cable lengths."""
+    from materials import engine
+
+    guard = _guard(vid, STEP_EQUIPOS)
+    if guard:
+        return guard
+    f = request.form
+    layout = engine.clean_layout({"rows": f.get("layout_rows"), "orientation": f.get("layout_orientation"),
+                                  "rail_len_m": f.get("layout_rail_len"), "foot_spacing_m": f.get("layout_foot")})
+    # A blank rows box clears the answer; clean_layout drops it, so keep the other keys but not a stale count.
+    blob = draft.patch(vid, "scratch", {engine.LAYOUT_SCRATCH_KEY: layout})
+    return _wiring_render(vid, blob)
 
 
 @bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/cableado", methods=["GET", "POST"])

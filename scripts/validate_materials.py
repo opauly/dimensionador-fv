@@ -148,5 +148,14 @@ out = io.BytesIO()
 build(cfg, out)
 check("the PDF renders from the config", out.getvalue()[:4], b"%PDF")
 
+# Roof layout answered in the wizard (blob scratch) feeds the list; the project's own answer wins key by key.
+from materials import engine as ME  # noqa: E402
+check("clean_layout drops blanks and junk", ME.clean_layout({"rows": "", "orientation": "diagonal", "rail_len_m": "-1", "foot_spacing_m": "1,2"}), {"foot_spacing_m": 1.2})
+check("layout_from_blob reads scratch.roof_layout", ME.layout_from_blob({"scratch": {"roof_layout": {"rows": "2", "orientation": "landscape"}}}), {"rows": 2, "orientation": "landscape"})
+wiz = {"rows": 2, "orientation": "landscape"}
+check("wizard layout reaches the list", ME.build_list(EQ, CTX, {}, wiz)["layout"]["rows"], 2)
+check("project layout wins over the wizard's", ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 3}}}, wiz)["layout"]["rows"], 3)
+check("no layout anywhere leaves mounting pending", any("layout del techo" in x for x in ME.build_list(EQ, CTX, {}, None)["pending"]), True)
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -18,6 +18,8 @@ lista de compra. Todo es determinista; no hay LLM en ninguna cifra.
 - **Ediciones del proyecto** en `projects.tech_spec["materials"]`: `layout` (filas, orientación, largo de riel,
   separación de patas), `options` (breaker de string, curvas y LB por canalización, material de cada canalización),
   `overrides` (cantidad/comentario editados) y `extras` (líneas agregadas a mano). Sobreviven a cambios del diseño.
+- **Layout del techo en el asistente**: el paso Equipos (Off-Grid / Híbrido) pregunta «Techo y montaje» bajo el cableado y lo guarda en
+  `scratch.roof_layout` de la versión. La lista lo usa como base; lo que el proyecto guarde en su pestaña Lista gana, clave por clave.
 - Excel: `materials/export_xlsx.py`, mismo encabezado y filas de sección/grupo que la hoja maestra; columnas de
   proveedores y Bodega vacías; solo líneas con cantidad.
 - **Por definir en cada proyecto** (la lista lo avisa, se agregan a mano): gabinetes y cajas, centro de carga del
