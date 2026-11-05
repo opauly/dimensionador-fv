@@ -25,11 +25,13 @@ sites no suggestion is made — the honest answer is "not enough comparable site
 from __future__ import annotations
 
 import statistics
+import math
 import time
 from typing import Iterable
 
 MIN_DAYS = 30                      # a site needs this many usable days to be a reference
 MIN_PEAK_DAYS = 10                 # days with a recorded peak before a site counts for the inverter comparison
+MIN_SITES_FOR_FIT = 4              # sites needed to fit how sizes grow with load
 MIN_SITES_FOR_SUGGESTION = 2   # below ~3 the suggestion is flagged confidence "baja"
 LOW_SOC_PCT = 20.0
 STRESSED_LOW_SOC_DAYS_PCT = 10.0
@@ -159,33 +161,54 @@ def _quantiles(values: list[float]) -> dict | None:
     return {"n": len(vals), "p25": q(0.25), "median": statistics.median(vals), "p75": q(0.75), "min": vals[0], "max": vals[-1]}
 
 
+def _size_fit(sites: list[dict], key: str, daily_kwh: float) -> dict | None:
+    """How a quantity (kWp, battery kWh) grows with the daily load across healthy sites: a power law y = a * load^b fitted on
+    logs. Returns the prediction for `daily_kwh` with a p25-p75 band from the scatter, or None when the data cannot support a fit
+    (fewer than 4 sites, or loads that barely differ)."""
+    pts = [(s["avg_load_kwh"], s[key]) for s in sites if s.get(key) and s["avg_load_kwh"] > 0]
+    if len(pts) < MIN_SITES_FOR_FIT:
+        return None
+    xs = [math.log(x) for x, _ in pts]
+    ys = [math.log(y) for _, y in pts]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxx = sum((x - mx) ** 2 for x in xs)
+    if sxx < 0.25:                                   # loads within ~±12% of each other: no slope to learn
+        return None
+    b = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / sxx
+    a = my - b * mx
+    resid = [y - (a + b * x) for x, y in zip(xs, ys)]
+    ss_tot = sum((y - my) ** 2 for y in ys)
+    r2 = 1 - sum(r * r for r in resid) / ss_tot if ss_tot > 0 else 0.0
+    df = len(pts) - 2
+    sd = max(math.sqrt(sum(r * r for r in resid) / df), 0.08)          # a handful of points can fit perfectly by luck
+    mid = math.exp(a + b * math.log(daily_kwh))
+    leverage = 1 + 1 / len(pts) + (math.log(daily_kwh) - mx) ** 2 / sxx   # farther from the data = less certain
+    spread = 0.674 * (1 + 1.2 / df) * sd * math.sqrt(leverage)         # p25-p75 band in log space
+    loads = [x for x, _ in pts]
+    return {"n": len(pts), "exponent": b, "r2": r2, "growth_per_doubling_pct": (2 ** b - 1) * 100,
+            "p25": mid * math.exp(-spread), "median": mid, "p75": mid * math.exp(spread),
+            "extrapolated": not (min(loads) <= daily_kwh <= max(loads)), "load_min": min(loads), "load_max": max(loads)}
+
+
 def reference_class(stats: list[dict], *, system_type: str, daily_kwh: float, window: float = 2.0) -> dict:
-    """Comparable sites (same system type, load within [1/window, window] x daily_kwh; widened once if too few),
-    their health, and — only when enough healthy sites exist — a data-backed kWp / battery suggestion."""
+    """Every installed, monitored site of the same system type (size does not matter: what is used is how kWp, battery and inverter
+    relate to the daily load across the healthy ones), their health, and a data-backed kWp / battery suggestion."""
     same = _unique_systems([s for s in stats if s["system_type"] == system_type])
-
-    def pick(w):
-        return [s for s in same if daily_kwh / w <= s["avg_load_kwh"] <= daily_kwh * w]
-
-    comparable, used_window = pick(window), window
-    if len(comparable) < MIN_SITES_FOR_SUGGESTION + 1:
-        comparable, used_window = pick(window * 1.6), window * 1.6
+    comparable, used_window = same, None
     full = comparable   # every stats row already carries registered kWp and battery
     healthy = [s for s in full if s["verdict"] == "sano"]
 
-    inv_sites = [s for s in healthy if s["inverter_kw"] and s["peak_max_w"]]
+    inv_sites = [dict(s, peak_kw=s["peak_max_w"] / 1000.0) for s in healthy if s["inverter_kw"] and s["peak_max_w"]]
     inverter = None
     if inv_sites:
-        pq = _quantiles([s["peak_kw_per_kwh_day"] for s in inv_sites])
-        iq = _quantiles([s["inverter_kw_per_kwh_day"] for s in inv_sites])
+        ifit, pfit = _size_fit(inv_sites, "inverter_kw", daily_kwh), _size_fit(inv_sites, "peak_kw", daily_kwh)
         lq = _quantiles([s["inverter_loading_pct"] for s in inv_sites])
         inverter = {
             "n": len(inv_sites), "confidence": _confidence(len(inv_sites)),
-            "peak_kw_per_kwh_day": pq, "inverter_kw_per_kwh_day": iq, "loading_pct": lq,
-            "peak_kw": {"p25": pq["p25"] * daily_kwh, "median": pq["median"] * daily_kwh, "p75": pq["p75"] * daily_kwh},
-            "inverter_kw": {"p25": iq["p25"] * daily_kwh, "median": iq["median"] * daily_kwh, "p75": iq["p75"] * daily_kwh},
+            "loading_pct": lq, "fit": bool(ifit and pfit),
+            "inverter_kw": ifit, "peak_kw": pfit,
             "sites": [{"name": s["name"], "load": s["avg_load_kwh"], "inverter_kw": s["inverter_kw"],
-                       "peak_kw": s["peak_max_w"] / 1000.0, "loading_pct": s["inverter_loading_pct"]} for s in inv_sites],
+                       "peak_kw": s["peak_kw"], "loading_pct": s["inverter_loading_pct"]} for s in inv_sites],
         }
 
     out = {
@@ -203,10 +226,17 @@ def reference_class(stats: list[dict], *, system_type: str, daily_kwh: float, wi
     if len(healthy) >= MIN_SITES_FOR_SUGGESTION:
         kq = _quantiles([s["kwp_per_kwh_day"] for s in healthy])
         bq = _quantiles([s["battery_per_kwh_day"] for s in healthy])
+        ratio = lambda q: {"p25": q["p25"] * daily_kwh, "median": q["median"] * daily_kwh, "p75": q["p75"] * daily_kwh}
+        kfit, bfit = _size_fit(healthy, "kwp", daily_kwh), _size_fit(healthy, "battery_nominal_kwh", daily_kwh)
+        conf = _confidence(len(healthy))
+        if (kfit and kfit["extrapolated"]) or (bfit and bfit["extrapolated"]):
+            conf = {"alta": "media", "media": "baja"}.get(conf, conf)       # asked for a size outside the observed range
         out["suggestion"] = {
-            "n": len(healthy), "confidence": _confidence(len(healthy)), "kwp_per_kwh_day": kq, "battery_per_kwh_day": bq,
-            "kwp": {"p25": kq["p25"] * daily_kwh, "median": kq["median"] * daily_kwh, "p75": kq["p75"] * daily_kwh},
-            "battery_nominal_kwh": {"p25": bq["p25"] * daily_kwh, "median": bq["median"] * daily_kwh, "p75": bq["p75"] * daily_kwh},
+            "n": len(healthy), "confidence": conf, "kwp_per_kwh_day": kq, "battery_per_kwh_day": bq,
+            "method": "fit" if (kfit and bfit) else "ratio", "kwp_fit": kfit, "battery_fit": bfit,
+            "kwp": ({k: kfit[k] for k in ("p25", "median", "p75")} if kfit else ratio(kq)),
+            "battery_nominal_kwh": ({k: bfit[k] for k in ("p25", "median", "p75")} if bfit else ratio(bq)),
+            "kwp_ratio": ratio(kq), "battery_ratio": ratio(bq),
         }
     else:
         out["note"] = (f"Solo {len(healthy)} sistema(s) sano(s) comparable(s) con kWp y batería registrados "
