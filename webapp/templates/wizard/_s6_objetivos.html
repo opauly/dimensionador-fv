@@ -131,6 +131,58 @@
   {% endif %}
 </div>
 
+{% if fleet %}
+{% set ref = fleet.ref %}
+<div class="obj-spot card" style="margin-top:12px;">
+  <p class="card-note" style="margin:0 0 6px;"><b>Referencia de la flota real</b>
+    <span class="obj-unit">— sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} ya instalados y monitoreados</span></p>
+  {% if ref.comparable %}
+    <p class="obj-note" style="margin-top:0;">{{ ref.comparable|length }} sistema(s) comparable(s), con consumo medido de
+      {{ '%.1f'|format(ref.load_range.min) }}–{{ '%.1f'|format(ref.load_range.max) }} kWh/día (el tuyo: {{ '%.1f'|format(fleet.daily_kwh) }}).
+      Con kWp y batería registrados: {{ ref.with_sizing }} —
+      {{ ref.verdicts.sano }} sano(s), {{ ref.verdicts.estresado }} estresado(s), {{ ref.verdicts.sobredimensionado }} sobredimensionado(s), {{ ref.verdicts.respaldo }} solo respaldo.</p>
+    {% if ref.suggestion %}
+      {% set sg = ref.suggestion %}
+      <table>
+        <thead><tr><th></th><th>Fórmula (punto óptimo)</th><th>Sistemas sanos de la flota</th><th>Rango (p25–p75)</th></tr></thead>
+        <tbody>
+          <tr><td>Paneles (potencia DC)</td>
+              <td>{{ '%.1f'|format(fleet.formula.kwp) }}<span class="u">kWp</span></td>
+              <td class="mid">{{ '%.1f'|format(sg.kwp.median) }}<span class="u">kWp</span></td>
+              <td>{{ '%.1f'|format(sg.kwp.p25) }}–{{ '%.1f'|format(sg.kwp.p75) }}<span class="u">kWp</span></td></tr>
+          <tr><td>Batería (capacidad nominal)</td>
+              <td>{{ '%.1f'|format(fleet.formula.battery_kwh) }}<span class="u">kWh</span></td>
+              <td class="mid">{{ '%.1f'|format(sg.battery_nominal_kwh.median) }}<span class="u">kWh</span></td>
+              <td>{{ '%.1f'|format(sg.battery_nominal_kwh.p25) }}–{{ '%.1f'|format(sg.battery_nominal_kwh.p75) }}<span class="u">kWh</span></td></tr>
+        </tbody>
+      </table>
+      <p class="obj-note" style="margin-top:8px;">Escalado por consumo: la flota sana usa {{ '%.2f'|format(sg.kwp_per_kwh_day.median) }} kWp y
+        {{ '%.2f'|format(sg.battery_per_kwh_day.median) }} kWh de batería por cada kWh/día. Confianza <b>{{ sg.confidence }}</b>
+        (n = {{ sg.n }} sistema(s) sano(s)){% if sg.n < 3 %} — pocos datos: es una referencia, no una norma{% endif %}.</p>
+    {% elif ref.note %}
+      <p class="obj-note">{{ ref.note }}</p>
+    {% endif %}
+    {% if ref.anomaly_types %}
+      <p class="obj-note">Alertas vistas en estos sitios: {% for t, c in ref.anomaly_types.items() %}{{ t }} ({{ c }}){{ ', ' if not loop.last }}{% endfor %}.</p>
+    {% endif %}
+    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Ver los sitios usados</summary>
+      <table style="margin-top:6px;">
+        <thead><tr><th>Sitio</th><th>kWh/día</th><th>kWp</th><th>Batería kWh</th><th>% días &lt;20% SoC</th><th>Ciclos/día</th><th>Veredicto</th></tr></thead>
+        <tbody>{% for x in fleet.sites %}
+          <tr><td>{{ x.name }}</td><td>{{ '%.1f'|format(x.load) }}</td><td>{{ '%.1f'|format(x.kwp) if x.kwp else '—' }}</td>
+              <td>{{ '%.1f'|format(x.battery) if x.battery else '—' }}</td><td>{{ '%.0f'|format(x.low_soc) if x.low_soc is not none else '—' }}</td>
+              <td>{{ '%.2f'|format(x.cycles) if x.cycles is not none else '—' }}</td><td>{{ x.verdict }}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </details>
+  {% else %}
+    <p class="obj-note">No hay sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} monitoreados con un consumo parecido
+      (los {{ ref.same_type_sites }} de este tipo están fuera de ±{{ '%.1f'|format(ref.window) }}× tu consumo).</p>
+  {% endif %}
+  <p class="obj-note" style="margin-top:6px;opacity:.75;">Datos medidos por VRM (días completos, desde mayo 2026). Muestra pequeña: úsalo para contrastar la fórmula, no para reemplazarla.</p>
+</div>
+{% endif %}
+
 {% if errors %}
   <div class="wiz-error" style="margin-top:12px;">
     {% for e in errors %}<div>{{ e }}</div>{% endfor %}

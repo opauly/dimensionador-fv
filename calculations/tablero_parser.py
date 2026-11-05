@@ -276,7 +276,8 @@ Return ONLY a JSON object (no markdown fences):
       "estimated": <true if YOU supplied the power, false if the text states it or it is a catalog value
                     printed in the text>,
       "usage": "<usage the customer stated, short, e.g. 'hasta 2 h día + 2 h noche', '2 ciclos/semana de 1 h'; '' if none>",
-      "duty_hours_day": <number or null — see 'Hours' below>}}
+      "duty_hours_day": <number or null — see 'Hours' below>,
+      "expected_pct": <number 10-100 or null — see 'Expected use' below>}}
   ],
   "notes": ["<short Spanish bullets, max ~10, see below>"]
 }}
@@ -314,6 +315,14 @@ How to read the text:
 - Pure tables: keep the old rules — skip headers/totals/zero-power rows, ignore any "factor de
   demanda"/simultaneity columns (this tool computes its own downstream), merge identical rows only
   when nothing meaningful is lost.
+
+- Expected use ("expected_pct"): customers often describe MAXIMUM or "up to" usage ("hasta 2 horas",
+  "estos son máximos de uso, no necesariamente mi consumo habitual"). "duty_hours_day" must keep the
+  STATED maximum; "expected_pct" is the share of it you expect on a typical day, e.g. a cooktop/oven used
+  "up to 2 h day and 2 h night" is realistically ~40%; lighting stated for a fixed evening window ~80-100%;
+  always-on electronics 100; a weekly chore stated as "one load a week" 100 (it is already an average).
+  Use 100 or null when the customer states typical/normal use, or when no hours are given. Never below 20.
+  Mention the reasoning for any value below 100 in "usage" (e.g. 'máx. 4 h/día; esperado ~40%').
 
 "notes" must be useful to the engineer, in Spanish, short:
   • which loads you EXCLUDED and why (customer said no / separate system),
@@ -384,11 +393,22 @@ def _hours(v):
     return round(h, 2) if 0 < h <= 24 else None
 
 
+def _expected(pct, hours):
+    """Expected-use % (20-100) — only meaningful next to stated hours; 100/None -> None (no reduction)."""
+    if _hours(hours) is None:
+        return None
+    try:
+        p = float(pct)
+    except (TypeError, ValueError):
+        return None
+    return None if p >= 100 or p <= 0 else round(max(20.0, p), 0)
+
+
 def parse_loads_text(text: str) -> dict:
     """Smart extraction of loads from ANY pasted text (table, loose list or a
     whole customer chat) for the Off-Grid/Hybrid wizard.
 
-    Returns {"loads": [{"Descripción", "Cantidad", "Potencia (kW)", "estimated", "usage", "Horas/día"}],
+    Returns {"loads": [{"Descripción", "Cantidad", "Potencia (kW)", "estimated", "usage", "Horas/día", "Esperado %"}],
              "notes": [str]}. `notes` carries exclusions, estimated powers and
     sizing-relevant requirements (autonomy days, separate systems...).
     Raises ValueError when the text is empty or no loads are found."""
@@ -426,6 +446,7 @@ def parse_loads_text(text: str) -> dict:
             "estimated":     bool(row.get("estimated")),
             "usage":         str(row.get("usage") or ""),
             "Horas/día":     _hours(row.get("duty_hours_day")),
+            "Esperado %":    _expected(row.get("expected_pct"), row.get("duty_hours_day")),
         })
     if not result:
         raise ValueError("No se encontraron cargas activas en el texto pegado.")

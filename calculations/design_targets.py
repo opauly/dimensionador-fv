@@ -93,6 +93,25 @@ def pv_sizing(
     return target_daily_kwh, deliverable_per_kw, target_system_kw
 
 
+# Roof capacity. A ~600 W module is ~1.13 x 2.38 m (2.7 m2) -> ~0.22 kWp per m2 of panel. Only part of a roof plane
+# can take panels (edges/setbacks, vents, skylights, shading, access), hence the packing factor. Both are first-pass
+# planning values, shown to the user as assumptions — the real layout is settled at Equipos.
+ROOF_PANEL_DENSITY_KWP_M2 = 0.22
+ROOF_PACKING_FACTOR = 0.70
+ROOF_REFERENCE_PANEL_W = 600
+
+
+def roof_capacity_kwp(roof_area_m2: float | None) -> float | None:
+    """kWp that fit on `roof_area_m2` of roof (None/<=0 -> None)."""
+    if roof_area_m2 is None or roof_area_m2 <= 0:
+        return None
+    return roof_area_m2 * ROOF_PACKING_FACTOR * ROOF_PANEL_DENSITY_KWP_M2
+
+
+def roof_panel_count(kwp: float) -> int:
+    return int(kwp * 1000.0 // ROOF_REFERENCE_PANEL_W)
+
+
 def inverter_required_kw(peak_kw: float, loading_target_pct: float) -> float:
     """Continuous inverter rating that keeps `peak_kw` at or under the loading ceiling."""
     return peak_kw / (loading_target_pct / 100.0)
@@ -104,6 +123,44 @@ def inverter_qty_recommended(peak_kw: float, inverter_kw: float, loading_target_
         math.ceil(peak_kw / (inverter_kw * loading_target_pct / 100.0))
         if inverter_kw > 0 else None
     )
+
+
+def offgrid_autonomy_days_achieved(
+    installed_nominal_kwh: float, daily_kwh: float, dod_usable_pct: float,
+    battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT, inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+) -> float | None:
+    """Days of average consumption an installed bank carries — `offgrid_battery_nominal_kwh()` solved the other way."""
+    if daily_kwh <= 0:
+        return None
+    return installed_nominal_kwh * (dod_usable_pct / 100.0) * battery_round_trip_eff * inverter_eff / daily_kwh
+
+
+def hybrid_nights_achieved(
+    installed_nominal_kwh: float, critical_night_kwh: float, shiftable_daily_kwh: float, *, reserve_soc_pct: float,
+    backup_usable_pct: float, battery_round_trip_eff: float = _BATTERY_ROUND_TRIP_EFF_DEFAULT,
+    inverter_eff: float = _INVERTER_CONVERSION_EFF_DEFAULT,
+) -> tuple[float | None, float | None]:
+    """(backup nights, cycling nights) an installed bank delivers — the two `hybrid_battery_layers()` formulas
+    solved for nights instead of capacity."""
+    eff = battery_round_trip_eff * inverter_eff
+    backup = (installed_nominal_kwh * (backup_usable_pct / 100.0) * eff / critical_night_kwh
+              if critical_night_kwh > 0 else None)
+    served_night_kwh = critical_night_kwh + shiftable_daily_kwh
+    window = max(0.0, 100.0 - reserve_soc_pct)
+    cycling = (installed_nominal_kwh * (window / 100.0) * eff / served_night_kwh
+               if served_night_kwh > 0 and window > 0 else None)
+    return backup, cycling
+
+
+def hybrid_reduction_pct(
+    system_kw: float, deliverable_per_kw: float, critical_daily_kwh: float, whole_home_avg_kwh_month: float,
+    daytime_fraction: float,
+) -> float:
+    """kWh the grid no longer supplies, as a % of whole-home consumption: generation left after the critical loads,
+    capped by daytime use — the daily split `estimate_hybrid_savings_pct()` uses, on energy instead of colones."""
+    gen_available_month = max(0.0, system_kw * deliverable_per_kw - critical_daily_kwh) * 30.4
+    self_consumed = min(gen_available_month, whole_home_avg_kwh_month * daytime_fraction)
+    return self_consumed / whole_home_avg_kwh_month * 100.0 if whole_home_avg_kwh_month > 0 else 0.0
 
 
 def hybrid_night_load(critical_daily_kwh: float, night_load_fraction: float | None) -> tuple[float, float]:
@@ -316,9 +373,8 @@ def hybrid_targets(
         if reduction_kw > coverage_kw:
             system_kw, pv_driven_by = reduction_kw, "kwh_reduction"
     # kWh reduction the final array delivers (generation left after the critical loads, capped by daytime use).
-    gen_available_month = max(0.0, system_kw * deliverable - critical_daily_kwh) * 30.4
-    self_consumed = min(gen_available_month, whole_home_avg_kwh_month * daytime_fraction)
-    reduction_pct_at_size = self_consumed / whole_home_avg_kwh_month * 100.0 if whole_home_avg_kwh_month > 0 else 0.0
+    reduction_pct_at_size = hybrid_reduction_pct(
+        system_kw, deliverable, critical_daily_kwh, whole_home_avg_kwh_month, daytime_fraction)
 
     return {
         "system_type": "hybrid",

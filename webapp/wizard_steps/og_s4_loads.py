@@ -47,7 +47,7 @@ _CATEGORY_LABEL_TO_KEY = {v: k for k, v in CATEGORY_LABELS_ES.items()}
 CATEGORY_SELECT_OPTIONS = [("", _CATEGORY_AUTO_LABEL)] + list(CATEGORY_LABELS_ES.items())
 CATALOG_OPTIONS = {f"{c['name']} ({c['nameplate_kw']} kW)": c for c in COMMON_LOADS_CATALOG_V1}
 
-_ROW_FIELDS = ["desc", "qty", "kw", "cat", "hd"]
+_ROW_FIELDS = ["desc", "qty", "kw", "cat", "hd", "ex"]
 
 DEFAULT_SCRATCH_KEY = "s4og"
 
@@ -73,6 +73,8 @@ def _rows_to_display(rows: list[dict]) -> list[dict]:
             # Optional engineer/customer-stated average hours per day at full
             # power. Blank -> the category estimator decides (as before).
             "Horas/día": to_float(row.get("hd")),
+            # Optional: % of those hours expected in real life (they are often stated as maximums). Blank = 100.
+            "Esperado %": to_float(row.get("ex")),
         })
     return out
 
@@ -94,7 +96,12 @@ def _loads_to_taxonomy_list(loads_display: list[dict]) -> list[dict]:
         if hours is not None and float(hours) > 0:
             # build_load_profile() already treats this as an explicit override
             # (confidence "user_confirmed") replacing the category estimator.
-            load["duty_hours_day"] = float(hours)
+            # The sizing basis is the EXPECTED use (hours x expected %); the stated maximum travels
+            # along as duty_hours_max so Step 5 can also report the all-at-maximum case.
+            pct = r.get("Esperado %")
+            factor = 1.0 if pct is None or float(pct) <= 0 else min(float(pct), 100.0) / 100.0
+            load["duty_hours_day"] = round(float(hours) * factor, 4)
+            load["duty_hours_max"] = float(hours)
         out.append(load)
     return out
 
@@ -112,6 +119,7 @@ def _classified_rows(extracted: list[dict]) -> list[dict]:
             "Potencia (kW)": r["Potencia (kW)"],
             "Categoría": CATEGORY_LABELS_ES.get(category_key, _CATEGORY_AUTO_LABEL),
             "Horas/día": r.get("Horas/día"),
+            "Esperado %": r.get("Esperado %"),
         })
     return rows
 
@@ -213,7 +221,7 @@ def add_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict
 
     rows = parse_rows(form, row_prefix, _ROW_FIELDS)
     loads = _rows_to_display(rows)
-    loads.append({"Descripción": "", "Cantidad": 1, "Potencia (kW)": 0.0, "Categoría": _CATEGORY_AUTO_LABEL, "Horas/día": None})
+    loads.append({"Descripción": "", "Cantidad": 1, "Potencia (kW)": 0.0, "Categoría": _CATEGORY_AUTO_LABEL, "Horas/día": None, "Esperado %": None})
     return _with_notes(blob, scratch_key, {"loads_data": loads})
 
 

@@ -66,7 +66,7 @@
        hx-include="#s4og-loads-rows input, #s4og-loads-rows select" hx-target="#s4og-cargas" hx-swap="outerHTML">
     <div class="dtable-wrap">
       <table class="dtable">
-        <thead><tr><td>Descripción</td><td>Cantidad</td><td>Potencia (kW)</td><td>Categoría</td><td title="Opcional: horas promedio al día a plena potencia. Vacío = el sistema lo estima según la categoría.">Horas/día</td><td></td></tr></thead>
+        <thead><tr><td>Descripción</td><td>Cantidad</td><td>Potencia (kW)</td><td>Categoría</td><td title="Opcional: horas promedio al día a plena potencia. Vacío = el sistema lo estima según la categoría.">Horas/día</td><td title="Opcional: qué % de esas horas se espera en la vida real (a menudo el cliente da el uso máximo). El dimensionamiento usa horas × %; vacío = 100%.">Uso esperado %</td><td></td></tr></thead>
         <tbody>
           {% for row in loads_data %}
           <tr>
@@ -81,6 +81,7 @@
               </select>
             </td>
             <td><input class="finput" type="number" min="0" max="24" step="any" style="max-width:90px;" placeholder="auto" name="row-{{ loop.index0 }}-hd" value="{{ row['Horas/día'] if row['Horas/día'] is not none else '' }}"></td>
+            <td><input class="finput" type="number" min="0" max="100" step="any" style="max-width:80px;" placeholder="100" name="row-{{ loop.index0 }}-ex" value="{{ row['Esperado %'] if row['Esperado %'] is not none else '' }}"></td>
             <td>
               <button class="btn btn-outline" type="button" title="Quitar fila"
                       hx-post="{{ url_for('wizard.paso4og_cargas_fila_quitar', vid=vid) }}"

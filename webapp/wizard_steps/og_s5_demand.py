@@ -224,12 +224,31 @@ def save_step(blob: dict, scratch_key: str = DEFAULT_SCRATCH_KEY) -> dict:
 
     total_kwh_day = profile.get("total_kwh_day", 0.0)
     total_diversified = profile.get("total_kwh_day_diversified", total_kwh_day)
-    return {
+    result = {
         **consumption,
         "profile": profile,
         "daily_kwh": total_kwh_day,
         "daily_kwh_diversified": total_diversified,
     }
+    result["daily_kwh_max"] = _daily_kwh_all_at_maximum(blob, consumption, total_kwh_day)
+    return result
+
+
+def _daily_kwh_all_at_maximum(blob: dict, consumption: dict, expected_total: float):
+    """kWh/day if every load were used at its STATED maximum (Step 4's Horas/día, before the expected-use %). None when
+    no load carries an expected-use reduction, i.e. the maximum is the same as the sizing basis."""
+    loads = consumption.get("loads") or []
+    if not any(l.get("duty_hours_max") and l.get("duty_hours_day") != l.get("duty_hours_max") for l in loads):
+        return None
+    try:
+        from calculations.load_profile_off_grid import build_load_profile
+
+        max_loads = [{**l, "duty_hours_day": l["duty_hours_max"]} if l.get("duty_hours_max") else l for l in loads]
+        lat, lon = _site_latlon(blob)
+        total = build_load_profile(max_loads, lat=lat, lon=lon)["total_kwh_day"]
+        return total if total > expected_total + 1e-9 else None
+    except Exception:
+        return None
 
 
 # ── build_context ────────────────────────────────────────────────────────
