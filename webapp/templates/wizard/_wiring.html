@@ -76,9 +76,9 @@
           <option value="landscape" {{ 'selected' if roof.layout.orientation == 'landscape' else '' }}>Horizontal (landscape)</option>
         </select></div>
       <div class="wr-cpl-num"><label for="wr-rail">Largo de riel (m)</label>
-        <input id="wr-rail" type="number" step="0.1" min="1" name="layout_rail_len" value="{{ roof.layout.rail_len_m }}"></div>
+        <input id="wr-rail" type="number" step="any" min="1" name="layout_rail_len" value="{{ roof.layout.rail_len_m }}"></div>
       <div class="wr-cpl-num"><label for="wr-foot">Separación de patas (m)</label>
-        <input id="wr-foot" type="number" step="0.1" min="0.3" name="layout_foot" value="{{ roof.layout.foot_spacing_m }}"></div>
+        <input id="wr-foot" type="number" step="any" min="0.3" name="layout_foot" value="{{ roof.layout.foot_spacing_m }}"></div>
     </div>
     {% if roof.counts %}
       <p class="card-note-sm">{{ roof.counts.rows }} fila(s) de {{ roof.counts.per_row }} módulos, {{ roof.counts.row_len_m }} m por fila · {{ roof.counts.rails }} rieles, {{ roof.counts.feet }} patas, {{ roof.counts.mid }} midclamps, {{ roof.counts.end }} endclamps (antes de repuestos).</p>
@@ -102,7 +102,7 @@
       {% for key, label in length_labels.items() %}
         {% if key != 'ac_in_m' or show_ac_in %}
           <div><label for="wr-{{ key }}">{{ label }} (m)</label>
-            <input id="wr-{{ key }}" type="number" step="0.5" min="0.5" name="{{ key }}" value="{{ lengths[key] }}"></div>
+            <input id="wr-{{ key }}" type="number" step="any" min="0.5" name="{{ key }}" value="{{ lengths[key] }}"></div>
         {% else %}
           <input type="hidden" name="{{ key }}" value="{{ lengths[key] }}">
         {% endif %}

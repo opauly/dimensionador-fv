@@ -9,8 +9,8 @@
   <details style="margin-top:12px;">
     <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Coordenadas manuales (opcional)</summary>
     <div class="fgrid" style="margin-top:8px;">
-      <div><label class="flabel">Latitud</label><input class="finput" type="number" step="0.00001" name="lat_manual" value="{{ lat_manual }}"></div>
-      <div><label class="flabel">Longitud</label><input class="finput" type="number" step="0.00001" name="lon_manual" value="{{ lon_manual }}"></div>
+      <div><label class="flabel">Latitud</label><input class="finput" type="number" step="any" name="lat_manual" value="{{ lat_manual }}"></div>
+      <div><label class="flabel">Longitud</label><input class="finput" type="number" step="any" name="lon_manual" value="{{ lon_manual }}"></div>
     </div>
   </details>
 
@@ -30,7 +30,7 @@
 
   <div class="wiz-nav">
     <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=3) }}">← Atrás</button>
-    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+    <button id="s3-next" class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
   </div>
 </form>
 {% endblock %}

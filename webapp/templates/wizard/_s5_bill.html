@@ -3,9 +3,9 @@
    action re-renders the whole region, not just this block). #}
 <div class="card" style="margin:12px 0;">
   <p style="margin:0 0 4px;"><b>Subir factura eléctrica (ICE, CNFL, JASEC…)</b></p>
-  <p class="card-note-sm" style="margin:0 0 10px;">Sube una o más facturas en PDF. La IA extrae el historial de consumo automáticamente.</p>
+  <p class="card-note-sm" style="margin:0 0 10px;">Sube una o más facturas (PDF o foto). La IA extrae el historial de consumo automáticamente.</p>
   <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-    <input id="s5-bill-file" class="finput" type="file" name="files" accept="application/pdf" multiple style="max-width:340px;">
+    <input id="s5-bill-file" class="finput" type="file" name="files" accept="application/pdf,image/*" multiple style="max-width:340px;">
     <button class="btn" type="button"
             hx-post="{{ url_for('wizard.paso5_factura_extraer', vid=vid) }}"
             hx-include="#s5-bill-file" hx-encoding="multipart/form-data"
@@ -23,15 +23,17 @@
       Distribuidora: <b>{{ bill_meta.distributor or '—' }}</b> · NISE: <b>{{ bill_meta.nise or '—' }}</b> ·
       {{ bill_history|length }} meses extraídos
     </p>
+    {% for n in bill_meta.notes or [] %}<p class="card-note-sm" style="margin:2px 0;">ℹ {{ n }}</p>{% endfor %}
     <div class="dtable-wrap" style="max-height:240px;overflow:auto;">
       <table class="dtable">
-        <thead><tr><td>Mes</td><td>Año</td><td>kWh</td><td>Factura (₡)</td></tr></thead>
+        <thead><tr><td>Mes</td><td>Año</td><td>kWh{{ " consumo total" if bill_meta.net_metering else "" }}</td>{% if bill_meta.net_metering %}<td>Retirada</td><td>Producida</td><td>Depositada</td>{% endif %}<td>Factura (₡)</td></tr></thead>
         <tbody>
           {% for h in bill_history %}
           <tr>
             <td>{{ h.month }}</td>
             <td>{{ h.year }}</td>
             <td>{{ h.kwh }}</td>
+            {% if bill_meta.net_metering %}<td>{{ h.grid_kwh if h.grid_kwh is defined else '—' }}</td><td>{{ h.produced_kwh if h.produced_kwh is defined else '—' }}</td><td>{{ h.exported_kwh if h.exported_kwh is defined else '—' }}</td>{% endif %}
             <td>{{ '{:,.0f}'.format(h.bill_crc) if h.bill_crc else '—' }}</td>
           </tr>
           {% endfor %}

@@ -216,6 +216,60 @@ def _render_step(vid: str, n: int, blob: dict, *, error: str | None = None):
     return render_template(_step_template(n, blob), **shell_ctx(vid, n, blob), **ctx)
 
 
+# ── Siguiente refresh after htmx actions ────────────────────────────────
+# Most steps' actions swap only an inner block (#s5og-demanda, #s7-costos, ...)
+# while Siguiente lives OUTSIDE it, so the button kept the disabled state the
+# page loaded with until a full reload. Rather than teaching every one of the
+# dozens of action routes about the nav, refresh it centrally: after any htmx
+# POST on a gated step, append out-of-band copies of the button and its note,
+# computed with the very same build_context(...)["can_continue"] the full page
+# uses. Steps whose nav is inside the swapped fragment (Objetivos, Equipos), or
+# that already do this in their own fragment (3, 4 Off-Grid/Hybrid), are not listed.
+
+_NAV_NOTES = {
+    gz_s5_consumption: "Ingresa al menos un mes de consumo para continuar.",
+    og_s5_demand: "Calcula el perfil de consumo para continuar.",
+    gz_s7_costs: "Agrega al menos una línea con costo para continuar.",
+    og_s7_costs: "Agrega al menos una línea con costo para continuar.",
+}
+_NAV_GATED_MODULES = (gz_s4_utility, *_NAV_NOTES, hy_s5_demand)
+
+
+@bp.after_request
+def _refresh_next_button(resp):
+    try:
+        if (request.method != "POST" or request.headers.get("HX-Request") != "true"
+                or resp.status_code != 200 or resp.mimetype != "text/html"
+                or request.endpoint in ("wizard.paso_post", "wizard.paso_atras")):
+            return resp
+        import re
+        m = re.search(r"/paso/(\d+)(?:/|$)", request.path)
+        vid = (request.view_args or {}).get("vid")
+        if not vid or not m:
+            return resp
+        n = int(m.group(1))
+        blob = draft.load(vid)
+        module = _step_module(n, blob)
+        if module not in _NAV_GATED_MODULES:
+            return resp
+        ctx = module.build_context(blob)
+        ok = bool(ctx.get("can_continue"))
+        note = _NAV_NOTES.get(module)
+        if module is hy_s5_demand:
+            note = ("Calcula el perfil de consumo"
+                    + (" (crítico y del tablero principal)" if ctx.get("mp_loads_mode") else "")
+                    + " para continuar.")
+        html = ('<button id="wiz-next" class="btn" type="submit" hx-swap-oob="true"'
+                + ("" if ok else " disabled") + ">Siguiente →</button>")
+        if note:
+            html += ('<p id="wiz-next-note" class="wiz-note" hx-swap-oob="true"'
+                     + (" hidden" if ok else "") + f">{note}</p>")
+        resp.set_data(resp.get_data(as_text=True) + html)
+    except Exception:  # never break the action itself over a nav refresh
+        pass
+    return resp
+
+
 # ── Step 1: /nueva (no row yet) ─────────────────────────────────────────
 
 
@@ -509,7 +563,7 @@ def paso_action(vid, n, action):
         blob = draft.patch(vid, "site", values)
         ctx = s3_site.build_context(blob)
         ctx["error"] = error
-        return render_template("wizard/_s3_irradiancia.html", vid=vid, n=n, **ctx)
+        return render_template("wizard/_s3_irradiancia.html", vid=vid, n=n, oob=True, **ctx)
 
     abort(404)
 
@@ -545,7 +599,10 @@ def paso4_distribuidor(vid):
 def _s4og_render(vid: str, blob: dict, *, error: str | None = None):
     ctx = og_s4_loads.build_context(blob)
     ctx["error"] = error
-    return render_template("wizard/_s4og_cargas.html", vid=vid, n=4, **ctx)
+    hybrid = ((blob or {}).get("meta") or {}).get("system_type") == "hybrid"
+    nav_note = ("Agrega al menos una carga crítica para continuar." if hybrid
+                else "Agrega al menos una carga para continuar.")
+    return render_template("wizard/_s4og_cargas.html", vid=vid, n=4, oob=True, nav_note=nav_note, **ctx)
 
 
 def _s4og_patch(vid: str, scratch_key: str, new_sub: dict) -> dict:

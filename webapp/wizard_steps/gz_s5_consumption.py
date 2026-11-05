@@ -140,17 +140,23 @@ def extract_bills(blob: dict, files: list) -> dict:
     from calculations.tariff_calculator import fill_bill_amounts
 
     utility = blob.get("utility") or {}
+    from calculations.bill_parser import merge_history
+
     all_history: list[dict] = []
-    meta: dict = {}
+    meta: dict = {"notes": []}
     errors: list[str] = []
     for f in files:
         try:
             result = parse_bill_pdf(f.read())
             all_history.extend(result.get("history", []))
-            meta = {"distributor": result.get("distributor", ""), "nise": result.get("nise", "")}
+            meta["distributor"] = result.get("distributor") or meta.get("distributor", "")
+            meta["nise"] = result.get("nise") or meta.get("nise", "")
+            meta["net_metering"] = meta.get("net_metering", False) or result.get("net_metering", False)
+            meta["notes"].extend(n for n in result.get("notes", []) if n not in meta["notes"])
         except Exception as exc:
             errors.append(f"{getattr(f, 'filename', 'archivo')}: {exc}")
 
+    all_history = merge_history(all_history)  # bills overlap: one row per month
     if all_history:
         tariff_info = _tariff_info(utility)
         if tariff_info:

@@ -55,6 +55,8 @@ def build_context(blob: dict) -> dict:
         # resolved — same as Streamlit's `value=float(current.get("lat", 0.0))`.
         "lat_manual": lat or 0.0,
         "lon_manual": lon or 0.0,
+        "lat": lat,
+        "lon": lon,
         "pvgis_data": pvgis_data,
         "avg_monthly": avg_monthly,
         "yearly": yearly,

@@ -9,7 +9,11 @@ import base64
 import json
 import os
 
+# Extraction needs real judgment about what each column means, so it gets a
+# stronger model than the cheap seasonal-estimate call below. Override with
+# BILL_PARSER_MODEL if needed.
 _MODEL = "claude-haiku-4-5-20251001"
+_EXTRACT_MODEL = os.environ.get("BILL_PARSER_MODEL", "claude-sonnet-5-5")
 
 MONTH_NAMES_ES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -17,25 +21,48 @@ MONTH_NAMES_ES = [
 ]
 
 _EXTRACT_PROMPT = """
-You are extracting structured data from a Costa Rican electricity bill (ICE or CNFL).
+You are extracting structured data from a Costa Rican electricity bill. The document may be a PDF
+or a photo/screenshot, from any distributor (ICE, CNFL, JASEC, ESPH, a cooperative...), in any
+layout, old or new. Read it the way an experienced energy auditor would: work out what each
+column really means before copying numbers.
 
 Return ONLY a JSON object with this exact shape:
 {
-  "distributor": "<CNFL|ICE|JASEC|ESPH|COOPELESCA|COOPEGUANACASTE|COOPESANTOS|COOPEALFARORUIZ>",
-  "nise": "<customer account number>",
+  "distributor": "<CNFL|ICE|JASEC|ESPH|COOPELESCA|COOPEGUANACASTE|COOPESANTOS|COOPEALFARORUIZ|other name>",
+  "nise": "<customer account / contract number>",
+  "net_metering": <true if the customer has solar self-generation (autogeneración / medición neta /
+                   "energía depositada" / "producida" columns), else false>,
   "history": [
-    {"month": <1-12>, "year": <4-digit year>, "kwh": <integer>, "bill_crc": <integer or null>}
-  ]
+    {"month": <1-12>, "year": <4-digit year>,
+     "grid_kwh": <kWh drawn from the utility grid that month>,
+     "produced_kwh": <kWh produced by the customer's PV, or null if not shown>,
+     "exported_kwh": <kWh injected/deposited into the grid, or null if not shown>,
+     "bill_crc": <integer or null>}
+  ],
+  "notes": ["<max 3 short items, ONLY things that affect the kWh numbers: unreadable/uncertain values,
+             estimated (not real) readings, multiple meters, bi-monthly periods, a period that looks
+             like an outlier. No remarks about charges, taxes, fees or layout.>"]
 }
 
 Rules:
-- Include ALL months shown in the consumption history table ("HISTORIAL DE CONSUMO" or similar).
+- Include EVERY month you can read: the consumption-history table ("HISTORIAL / HISTORICO DE
+  CONSUMO" or similar) AND the current billing period itself (its readings: previous vs current,
+  usually labelled "Consumo" / "Retirado de la red"). Label the current period by its billing
+  period ("PERIODO AL COBRO", e.g. 9-2026 → month 9, year 2026) and use the same convention as the
+  history table. If the period is bi-monthly, split nothing; list it under its label and mention it in notes.
 - month is 1-12 (1=Enero, 12=Diciembre).
+- grid_kwh is the energy the customer took FROM the grid ("consumo", "retirada", "retirado de la red").
+  Do NOT subtract anything and do NOT add production: report the raw columns exactly as printed;
+  the code computes total consumption afterwards.
+- For self-generation bills set produced_kwh ("producida/producido", "generación") and exported_kwh
+  ("depositada/depositado/entregada", "energía inyectada"). If a bill has no such columns, set both
+  null and net_metering false.
 - Include 0 kWh months — they indicate new service, not missing data.
-- bill_crc: set to the TOTAL POR PAGAR amount (as an integer, no decimals) only for the
-  most recent month. Set null for all other months.
-- nise is the account number labeled "NISE" or "NIS" on the bill.
-- If multiple meters are present, extract data for the first/primary meter only.
+- bill_crc: the TOTAL POR PAGAR (integer colones, no decimals), ONLY for the current billing period;
+  null for every other month.
+- If multiple meters are present, extract data for the first/primary meter only and say so in notes.
+- If a table is cropped, blurry or you are unsure of a value, still give your best reading and say
+  which month/value is uncertain in notes. Never invent months that are not on the document.
 - Return ONLY the JSON object, no markdown, no explanation.
 """
 
@@ -62,54 +89,133 @@ Instructions:
 """
 
 
-def parse_bill_pdf(pdf_bytes: bytes) -> dict:
+def _document_block(data: bytes) -> dict:
+    """Claude content block for a PDF or an image, sniffed from magic bytes
+    (customers send PDFs, WhatsApp photos, screenshots...)."""
+    b64 = base64.standard_b64encode(data).decode("utf-8")
+    if data[:4] == b"%PDF":
+        return {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        media = "image/png"
+    elif data[:3] == b"\xff\xd8\xff":
+        media = "image/jpeg"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        media = "image/webp"
+    else:
+        raise ValueError("Formato de archivo no soportado (usa PDF, JPG, PNG o WEBP).")
+    return {"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}}
+
+
+def _num(v):
+    try:
+        return None if v is None or v == "" else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_row(row: dict, notes: list[str]) -> dict | None:
+    """Turn the raw per-column reading into one row with TOTAL consumption.
+
+    Arithmetic is done here, not by the model:
+      total = grid + produced - exported   (self-generation / net-metering bills)
+      total = grid                          (plain bills)
     """
-    Extract consumption history from a PDF electricity bill.
+    try:
+        month, year = int(row["month"]), int(row["year"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not 1 <= month <= 12:
+        return None
+
+    grid = _num(row.get("grid_kwh"))
+    if grid is None:  # tolerate a model answering with the old "kwh" shape
+        grid = _num(row.get("kwh"))
+    if grid is None:
+        return None
+    produced = _num(row.get("produced_kwh"))
+    exported = _num(row.get("exported_kwh"))
+
+    out = {"month": month, "year": year}
+    if produced is not None:
+        exported = exported or 0.0
+        if exported > produced:
+            notes.append(f"{month}/{year}: la energía depositada ({exported:.0f}) supera la producida ({produced:.0f}); revisar.")
+            exported = produced
+        out.update(kwh=round(grid + produced - exported), grid_kwh=round(grid),
+                   produced_kwh=round(produced), exported_kwh=round(exported),
+                   # The printed bill is the NET-METERED bill, not what the customer
+                   # would pay without solar -> let the tariff price the real consumption.
+                   bill_crc=None)
+    else:
+        out.update(kwh=round(grid), bill_crc=row.get("bill_crc"))
+    return out
+
+
+def merge_history(rows: list[dict]) -> list[dict]:
+    """One row per (year, month) across several bills; later input wins but
+    never loses a bill_crc or PV columns it already had."""
+    merged: dict[tuple[int, int], dict] = {}
+    for r in rows:
+        k = (r["year"], r["month"])
+        prev = merged.get(k, {})
+        merged[k] = {**prev, **{kk: vv for kk, vv in r.items() if vv is not None}}
+    return [merged[k] for k in sorted(merged)]
+
+
+def parse_bill_pdf(file_bytes: bytes) -> dict:
+    """
+    Extract consumption history from an electricity bill (PDF or image).
 
     Returns:
         {
             "distributor": str,
             "nise": str,
-            "history": [{"month": int, "year": int, "kwh": int, "bill_crc": int|None}]
+            "net_metering": bool,
+            "notes": [str],
+            "history": [{"month": int, "year": int, "kwh": int,   # TOTAL consumption
+                         "bill_crc": int|None,
+                         # only on self-generation bills:
+                         "grid_kwh": int, "produced_kwh": int, "exported_kwh": int}]
         }
     """
     import anthropic
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
     response = client.messages.create(
-        model=_MODEL,
-        max_tokens=1024,
+        model=_EXTRACT_MODEL,
+        max_tokens=16000,  # thinking tokens count against this
         messages=[
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "document",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "application/pdf",
-                            "data": pdf_b64,
-                        },
-                    },
-                    {"type": "text", "text": _EXTRACT_PROMPT},
-                ],
+                "content": [_document_block(file_bytes), {"type": "text", "text": _EXTRACT_PROMPT}],
             }
         ],
     )
 
-    text = response.content[0].text.strip()
+    # Newer models may emit a thinking block first; take the first text block.
+    text = next(b.text for b in response.content if getattr(b, "type", "") == "text").strip()
     if text.startswith("```"):
         parts = text.split("```")
         text = parts[1].lstrip("json").strip() if len(parts) > 1 else text
 
     data = json.loads(text)
 
-    if "history" not in data or not data["history"]:
+    notes = [str(n) for n in (data.get("notes") or [])]
+    history = [r for r in (_normalize_row(h, notes) for h in data.get("history") or []) if r]
+    if not history:
         raise ValueError("No se encontró historial de consumo en la factura.")
 
-    return data
+    net = bool(data.get("net_metering")) or any("produced_kwh" in h for h in history)
+    if net:
+        notes.insert(0, "Factura con autogeneración: el consumo mostrado es retirado + producido − depositado.")
+    return {
+        "distributor": data.get("distributor", ""),
+        "nise": data.get("nise", ""),
+        "net_metering": net,
+        "notes": notes,
+        "history": merge_history(history),
+    }
 
 
 def _estimate_missing_kwh(

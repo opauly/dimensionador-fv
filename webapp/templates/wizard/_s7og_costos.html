@@ -42,7 +42,7 @@
      hx-include="#s7og-tabla-rows input, #s7og-tabla-rows select" hx-target="#s7og-costos" hx-swap="outerHTML">
   <div class="s7-margin-row">
     <label class="s7-margin-label" for="margin_pct_pct">Margen de utilidad</label>
-    <input class="finput" type="number" min="0" step="0.5" id="margin_pct_pct" name="margin_pct_pct"
+    <input class="finput" type="number" min="0" step="any" id="margin_pct_pct" name="margin_pct_pct"
            value="{{ '%.1f'|format((margin_pct or 0) * 100) }}"> %
     <span class="s7-profit-usd" title="Utilidad total en esta cotización, sin IVA — cifra interna, nunca aparece en el PDF del cliente.">= ${{ '{:,.2f}'.format(profit_usd or 0) }} de utilidad (interno, no visible en el PDF)</span>
     <span class="s7-margin-note">Se aplica sobre el costo real de cada ítem y reparte la utilidad entre todos — excepto el Permiso de Interconexión, que se cobra sin margen.
@@ -60,7 +60,7 @@
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item" value="{{ row.item }}"></td>
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item_en" value="{{ row.item_en }}"></td>
           <td><input class="finput" type="number" min="0" step="1" name="r-{{ loop.index0 }}-qty" value="{{ row.qty if row.qty is not none else '' }}"></td>
-          <td><input class="finput" type="number" min="0" step="0.01" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}">
+          <td><input class="finput" type="number" min="0" step="any" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}">
             {% if row.price_note %}<div class="s7-no-margin" style="{{ 'color:#a15c1b;' if row.price_stale else '' }}max-width:230px;" title="Fecha y fuente del precio guardado en el catálogo">{{ '⚠ ' if row.price_stale else '' }}{{ row.price_note }}</div>{% endif %}
           </td>
           <td class="s7-price-shown">

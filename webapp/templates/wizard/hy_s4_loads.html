@@ -32,8 +32,8 @@
 
   <div class="wiz-nav">
     <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=4) }}">← Atrás</button>
-    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+    <button id="s4-next" class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
   </div>
-  {% if not can_continue %}<p class="wiz-note">Agrega al menos una carga crítica para continuar.</p>{% endif %}
+  <p id="s4-next-note" class="wiz-note">{% if not can_continue %}Agrega al menos una carga crítica para continuar.{% endif %}</p>
 </form>
 {% endblock %}

@@ -5,8 +5,8 @@
 
   <div class="wiz-nav">
     <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=5) }}">← Atrás</button>
-    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+    <button id="wiz-next" class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
   </div>
-  {% if not can_continue %}<p class="wiz-note">Calcula el perfil de consumo para continuar.</p>{% endif %}
+  <p id="wiz-next-note" class="wiz-note" {{ 'hidden' if can_continue else '' }}>Calcula el perfil de consumo para continuar.</p>
 </form>
 {% endblock %}

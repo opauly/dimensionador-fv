@@ -15,6 +15,18 @@
         <span class="card-value">{{ '%.0f'|format(yearly) if yearly is not none else '—' }} kWh/kWp</span>
       </div>
     </div>
+    {% if lat is not none and lon is not none %}
+      {# OpenStreetMap embed (no API key / JS lib). bbox ≈ ±0.01° around the pin. #}
+      <div style="margin-top:12px;">
+        <iframe title="Ubicación usada para la irradiancia" loading="lazy"
+                style="width:100%;height:280px;border:1px solid var(--border, #d8dde3);border-radius:8px;"
+                src="https://www.openstreetmap.org/export/embed.html?bbox={{ '%.5f'|format(lon - 0.01) }}%2C{{ '%.5f'|format(lat - 0.01) }}%2C{{ '%.5f'|format(lon + 0.01) }}%2C{{ '%.5f'|format(lat + 0.01) }}&amp;layer=mapnik&amp;marker={{ '%.5f'|format(lat) }}%2C{{ '%.5f'|format(lon) }}"></iframe>
+        <p class="wiz-note" style="margin:4px 0 0;">
+          Ubicación usada: {{ '%.5f'|format(lat) }}, {{ '%.5f'|format(lon) }} ·
+          <a href="https://www.openstreetmap.org/?mlat={{ lat }}&amp;mlon={{ lon }}#map=15/{{ lat }}/{{ lon }}" target="_blank" rel="noopener">abrir mapa</a>
+        </p>
+      </div>
+    {% endif %}
     {% if chart_html %}
       <div style="margin-top:12px;">{{ chart_html | safe }}</div>
     {% endif %}
@@ -23,3 +35,8 @@
   {% endif %}
   {% if not can_continue %}<p class="wiz-note">{{ blocked_note }}</p>{% endif %}
 </div>
+{# Out-of-band: the PVGIS action swaps only #s3-irradiancia, so refresh the
+   Siguiente button here or it stays disabled after a successful fetch. #}
+{% if oob %}
+<button id="s3-next" class="btn" type="submit" hx-swap-oob="true" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+{% endif %}

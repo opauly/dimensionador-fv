@@ -4,6 +4,12 @@
    scratch_key/persisted section). Root id must stay "s4og-cargas". #}
 <div id="s4og-cargas">
   {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
+  {% if import_notes %}
+    <div class="card" style="margin:8px 0;padding:10px 12px;">
+      <p style="margin:0 0 4px;font-size:13px;"><b>Notas de la IA al leer el texto</b> <span class="card-note-sm">(revisar antes de continuar)</span></p>
+      <ul style="margin:0;padding-left:18px;font-size:12.5px;">{% for n in import_notes %}<li>{{ n }}</li>{% endfor %}</ul>
+    </div>
+  {% endif %}
 
   <h5 style="font-size:13px;margin:10px 0 4px;">Cargas comunes</h5>
   <p class="card-note-sm">Agrega cargas típicas desde el catálogo — potencia y categoría ya vienen precargadas, ambas editables después en la tabla final.</p>
@@ -60,13 +66,13 @@
        hx-include="#s4og-loads-rows input, #s4og-loads-rows select" hx-target="#s4og-cargas" hx-swap="outerHTML">
     <div class="dtable-wrap">
       <table class="dtable">
-        <thead><tr><td>Descripción</td><td>Cantidad</td><td>Potencia (kW)</td><td>Categoría</td><td></td></tr></thead>
+        <thead><tr><td>Descripción</td><td>Cantidad</td><td>Potencia (kW)</td><td>Categoría</td><td title="Opcional: horas promedio al día a plena potencia. Vacío = el sistema lo estima según la categoría.">Horas/día</td><td></td></tr></thead>
         <tbody>
           {% for row in loads_data %}
           <tr>
             <td><input class="finput" type="text" name="row-{{ loop.index0 }}-desc" value="{{ row['Descripción'] }}"></td>
             <td><input class="finput" type="number" min="1" step="1" name="row-{{ loop.index0 }}-qty" value="{{ row['Cantidad'] }}"></td>
-            <td><input class="finput" type="number" min="0" step="0.01" name="row-{{ loop.index0 }}-kw" value="{{ row['Potencia (kW)'] }}"></td>
+            <td><input class="finput" type="number" min="0" step="any" name="row-{{ loop.index0 }}-kw" value="{{ row['Potencia (kW)'] }}"></td>
             <td>
               <select class="finput" name="row-{{ loop.index0 }}-cat">
                 {% for key, label in category_options %}
@@ -74,6 +80,7 @@
                 {% endfor %}
               </select>
             </td>
+            <td><input class="finput" type="number" min="0" max="24" step="any" style="max-width:90px;" placeholder="auto" name="row-{{ loop.index0 }}-hd" value="{{ row['Horas/día'] if row['Horas/día'] is not none else '' }}"></td>
             <td>
               <button class="btn btn-outline" type="button" title="Quitar fila"
                       hx-post="{{ url_for('wizard.paso4og_cargas_fila_quitar', vid=vid) }}"
@@ -91,3 +98,9 @@
           hx-include="#s4og-loads-rows input, #s4og-loads-rows select"
           hx-target="#s4og-cargas" hx-swap="outerHTML">+ Fila</button>
 </div>
+{# Out-of-band: every action here swaps only #s4og-cargas, but Siguiente (and its
+   "agrega una carga" note) live outside it — refresh them or they stay stale. #}
+{% if oob %}
+<button id="s4-next" class="btn" type="submit" hx-swap-oob="true" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+<p id="s4-next-note" class="wiz-note" hx-swap-oob="true">{% if not can_continue %}{{ nav_note }}{% endif %}</p>
+{% endif %}

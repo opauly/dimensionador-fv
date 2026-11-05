@@ -41,12 +41,12 @@
               <td>{{ row.category_label }}</td>
               <td>{{ row.quantity }}</td>
               <td>
-                <input class="finput" type="number" min="0" max="24" step="0.1" name="line-{{ loop.index0 }}-hd" value="{{ row.duty_hours_day }}"
+                <input class="finput" type="number" min="0" max="24" step="any" name="line-{{ loop.index0 }}-hd" value="{{ row.duty_hours_day }}"
                        title="Cuando no se ajusta, muestra las horas equivalentes implícitas en el estimado de esa categoría — edítalo y usa 'Recalcular con cambios' para forzar kWh/día = potencia × horas × cantidad.">
               </td>
               <td>{{ row.kwh_day }}</td>
               <td>
-                <input class="finput" type="number" min="0" max="150" step="1" name="line-{{ loop.index0 }}-fd" value="{{ row.factor_pct }}"
+                <input class="finput" type="number" min="0" max="150" step="any" name="line-{{ loop.index0 }}-fd" value="{{ row.factor_pct }}"
                        title="Fracción de la potencia instalada de esta línea que se considera simultánea — usa 'Recalcular con cambios' para aplicarlo.">
               </td>
               <td title="kWh/día × Factor demanda — la energía diversificada de esta línea.">{{ row.energy_kwh_day }}</td>

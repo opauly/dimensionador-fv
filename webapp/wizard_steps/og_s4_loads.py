@@ -47,7 +47,7 @@ _CATEGORY_LABEL_TO_KEY = {v: k for k, v in CATEGORY_LABELS_ES.items()}
 CATEGORY_SELECT_OPTIONS = [("", _CATEGORY_AUTO_LABEL)] + list(CATEGORY_LABELS_ES.items())
 CATALOG_OPTIONS = {f"{c['name']} ({c['nameplate_kw']} kW)": c for c in COMMON_LOADS_CATALOG_V1}
 
-_ROW_FIELDS = ["desc", "qty", "kw", "cat"]
+_ROW_FIELDS = ["desc", "qty", "kw", "cat", "hd"]
 
 DEFAULT_SCRATCH_KEY = "s4og"
 
@@ -70,6 +70,9 @@ def _rows_to_display(rows: list[dict]) -> list[dict]:
             "Cantidad": int(to_float(row.get("qty"), 1.0) or 1),
             "Potencia (kW)": to_float(row.get("kw"), 0.0) or 0.0,
             "Categoría": CATEGORY_LABELS_ES.get(cat_key, _CATEGORY_AUTO_LABEL),
+            # Optional engineer/customer-stated average hours per day at full
+            # power. Blank -> the category estimator decides (as before).
+            "Horas/día": to_float(row.get("hd")),
         })
     return out
 
@@ -77,16 +80,23 @@ def _rows_to_display(rows: list[dict]) -> list[dict]:
 def _loads_to_taxonomy_list(loads_display: list[dict]) -> list[dict]:
     """Verbatim port of wizard/off_grid.py:_loads_to_taxonomy_list() — the
     shape build_load_profile() (Step 5) expects."""
-    return [
-        {
+    out = []
+    for r in loads_display:
+        if not r.get("Descripción"):
+            continue
+        load = {
             "name": r.get("Descripción", ""),
             "quantity": int(r.get("Cantidad") or 1),
             "nameplate_kw": float(r.get("Potencia (kW)") or 0),
             "category": _CATEGORY_LABEL_TO_KEY.get(r.get("Categoría")),
         }
-        for r in loads_display
-        if r.get("Descripción")
-    ]
+        hours = r.get("Horas/día")
+        if hours is not None and float(hours) > 0:
+            # build_load_profile() already treats this as an explicit override
+            # (confidence "user_confirmed") replacing the category estimator.
+            load["duty_hours_day"] = float(hours)
+        out.append(load)
+    return out
 
 
 def _classified_rows(extracted: list[dict]) -> list[dict]:
@@ -101,6 +111,7 @@ def _classified_rows(extracted: list[dict]) -> list[dict]:
             "Cantidad": r["Cantidad"],
             "Potencia (kW)": r["Potencia (kW)"],
             "Categoría": CATEGORY_LABELS_ES.get(category_key, _CATEGORY_AUTO_LABEL),
+            "Horas/día": r.get("Horas/día"),
         })
     return rows
 
@@ -117,11 +128,21 @@ def _current_loads_display(blob: dict, scratch_key: str) -> list[dict]:
     return list(consumption.get("loads_display") or [])
 
 
+def _notes(blob: dict, scratch_key: str) -> list[str]:
+    return list(_scratch(blob, scratch_key).get("import_notes") or [])
+
+
+def _with_notes(blob: dict, scratch_key: str, out: dict) -> dict:
+    """Table edits rewrite the scratch sub-dict; carry the import notes over."""
+    notes = _notes(blob, scratch_key)
+    return {**out, "import_notes": notes} if notes else out
+
+
 def _append(blob: dict, scratch_key: str, new_rows: list[dict]) -> dict:
     """Every import method (catálogo/tablero/texto) appends onto whatever's
     already in the table — never replaces (PLAN's explicit requirement)."""
     current = _current_loads_display(blob, scratch_key)
-    return {"loads_data": current + new_rows}
+    return _with_notes(blob, scratch_key, {"loads_data": current + new_rows})
 
 
 # ── catálogo ─────────────────────────────────────────────────────────────
@@ -156,10 +177,14 @@ def extract_tablero(blob: dict, scratch_key: str, file_bytes: bytes, media_type:
 
 
 def extract_text(blob: dict, scratch_key: str, text: str) -> dict:
-    from calculations.tablero_parser import parse_tablero_text_off_grid
+    from calculations.tablero_parser import parse_loads_text
 
-    extracted = parse_tablero_text_off_grid(text)
-    return _append(blob, scratch_key, _classified_rows(extracted))
+    parsed = parse_loads_text(text)
+    out = _append(blob, scratch_key, _classified_rows(parsed["loads"]))
+    # Assumptions / exclusions / requirements found in the text (autonomy days,
+    # separate systems, estimated powers...) stay visible beside the table.
+    out["import_notes"] = _notes(blob, scratch_key) + parsed["notes"]
+    return out
 
 
 # ── editable table — change-triggered sync, +Fila, quitar fila ──────────
@@ -180,7 +205,7 @@ def update_table(blob: dict, scratch_key: str, form, row_prefix: str = "row") ->
     from webapp.wizard_steps.common import parse_rows
 
     rows = parse_rows(form, row_prefix, _ROW_FIELDS)
-    return {"loads_data": _rows_to_display(rows)}
+    return _with_notes(blob, scratch_key, {"loads_data": _rows_to_display(rows)})
 
 
 def add_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict:
@@ -188,8 +213,8 @@ def add_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict
 
     rows = parse_rows(form, row_prefix, _ROW_FIELDS)
     loads = _rows_to_display(rows)
-    loads.append({"Descripción": "", "Cantidad": 1, "Potencia (kW)": 0.0, "Categoría": _CATEGORY_AUTO_LABEL})
-    return {"loads_data": loads}
+    loads.append({"Descripción": "", "Cantidad": 1, "Potencia (kW)": 0.0, "Categoría": _CATEGORY_AUTO_LABEL, "Horas/día": None})
+    return _with_notes(blob, scratch_key, {"loads_data": loads})
 
 
 def remove_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> dict:
@@ -200,7 +225,7 @@ def remove_row(blob: dict, scratch_key: str, form, row_prefix: str = "row") -> d
     idx = int(form.get("_row", -1) or -1)
     if 0 <= idx < len(loads):
         loads.pop(idx)
-    return {"loads_data": loads}
+    return _with_notes(blob, scratch_key, {"loads_data": loads})
 
 
 # ── Siguiente/Atrás ──────────────────────────────────────────────────────
@@ -245,5 +270,6 @@ def build_context(blob: dict, scratch_key: str = DEFAULT_SCRATCH_KEY) -> dict:
         "catalog_options": list(CATALOG_OPTIONS.keys()),
         "category_options": CATEGORY_SELECT_OPTIONS,
         "loads_data": loads_data,
+        "import_notes": _notes(blob, scratch_key),
         "can_continue": len(loads_data) > 0,
     }

@@ -6,7 +6,7 @@
    dropped; see hy_s4_loads.py's module docstring). Root id "s4hmp-bill". #}
 <div id="s4hmp-bill">
   <label class="flabel">Consumo promedio mensual del tablero principal (kWh) *</label>
-  <input class="finput" type="number" min="0" step="10" name="mp_avg_kwh_month" style="max-width:220px;"
+  <input class="finput" type="number" min="0" step="any" name="mp_avg_kwh_month" style="max-width:220px;"
          value="{{ mp_bill.avg_kwh_month }}"
          hx-post="{{ url_for('wizard.paso4h_mp_bill', vid=vid) }}" hx-trigger="change delay:400ms"
          hx-target="#s4hmp-bill" hx-swap="outerHTML">

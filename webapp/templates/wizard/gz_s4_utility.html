@@ -24,7 +24,7 @@
 
   <div class="wiz-nav">
     <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=4) }}">← Atrás</button>
-    <button class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
+    <button id="wiz-next" class="btn" type="submit" {{ 'disabled' if not can_continue else '' }}>Siguiente →</button>
   </div>
 </form>
 {% endblock %}

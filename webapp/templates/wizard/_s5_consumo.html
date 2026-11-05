@@ -34,8 +34,8 @@
           {% for row in months %}
           <tr>
             <td>{{ row.name }}</td>
-            <td><input class="finput" type="number" min="0" step="1" name="m-{{ loop.index0 }}-kwh" value="{{ row.kwh }}"></td>
-            <td><input class="finput" type="number" min="0" step="1" name="m-{{ loop.index0 }}-bill_crc" value="{{ row.bill_crc }}"></td>
+            <td><input class="finput" type="number" min="0" step="any" name="m-{{ loop.index0 }}-kwh" value="{{ row.kwh }}"></td>
+            <td><input class="finput" type="number" min="0" step="any" name="m-{{ loop.index0 }}-bill_crc" value="{{ row.bill_crc }}"></td>
           </tr>
           {% endfor %}
         </tbody>
