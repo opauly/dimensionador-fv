@@ -139,7 +139,6 @@
   {% if ref.comparable %}
     <p class="obj-note" style="margin-top:0;">{{ ref.comparable|length }} sistema(s) comparable(s), con consumo medido de
       {{ '%.1f'|format(ref.load_range.min) }}–{{ '%.1f'|format(ref.load_range.max) }} kWh/día (el tuyo: {{ '%.1f'|format(fleet.daily_kwh) }}).
-      Con kWp y batería registrados: {{ ref.with_sizing }} —
       {{ ref.verdicts.sano }} sano(s), {{ ref.verdicts.estresado }} estresado(s), {{ ref.verdicts.sobredimensionado }} sobredimensionado(s), {{ ref.verdicts.respaldo }} solo respaldo.</p>
     {% if ref.suggestion %}
       {% set sg = ref.suggestion %}
@@ -154,6 +153,12 @@
               <td>{{ '%.1f'|format(fleet.formula.battery_kwh) }}<span class="u">kWh</span></td>
               <td class="mid">{{ '%.1f'|format(sg.battery_nominal_kwh.median) }}<span class="u">kWh</span></td>
               <td>{{ '%.1f'|format(sg.battery_nominal_kwh.p25) }}–{{ '%.1f'|format(sg.battery_nominal_kwh.p75) }}<span class="u">kWh</span></td></tr>
+          {% if ref.inverter and ref.inverter.n >= 2 %}
+          <tr><td>Inversor (potencia AC continua)</td>
+              <td>{{ '%.1f'|format(fleet.formula.inverter_kw) }}<span class="u">kW</span></td>
+              <td class="mid">{{ '%.1f'|format(ref.inverter.inverter_kw.median) }}<span class="u">kW</span></td>
+              <td>{{ '%.1f'|format(ref.inverter.inverter_kw.p25) }}–{{ '%.1f'|format(ref.inverter.inverter_kw.p75) }}<span class="u">kW</span></td></tr>
+          {% endif %}
         </tbody>
       </table>
       <p class="obj-note" style="margin-top:8px;">Escalado por consumo: la flota sana usa {{ '%.2f'|format(sg.kwp_per_kwh_day.median) }} kWp y
@@ -162,15 +167,30 @@
     {% elif ref.note %}
       <p class="obj-note">{{ ref.note }}</p>
     {% endif %}
+    {% if ref.inverter and ref.inverter.n < 2 %}
+      {% set one = ref.inverter.sites[0] %}
+      <p class="obj-note">Inversor: solo 1 sistema comparable tiene inversor registrado y picos medidos ({{ '%.1f'|format(one.load) }} kWh/día):
+        pico máximo {{ '%.1f'|format(one.peak_kw) }} kW con un inversor de {{ '%.1f'|format(one.inverter_kw) }} kW ({{ '%.0f'|format(one.loading_pct) }}%).
+        Es un dato, no una referencia (los picos son promedios de 15 min; el real es mayor).</p>
+    {% elif ref.inverter %}
+      {% set iv = ref.inverter %}
+      <p class="obj-note">Inversor: el pico de carga medido fue {{ '%.2f'|format(iv.peak_kw_per_kwh_day.median) }} kW por cada kWh/día
+        (≈ {{ '%.1f'|format(iv.peak_kw.median) }} kW para tu consumo{% if fleet.formula.peak_kw %}; la fórmula usa {{ '%.1f'|format(fleet.formula.peak_kw) }} kW{% endif %}) y
+        el inversor instalado equivale a {{ '%.2f'|format(iv.inverter_kw_per_kwh_day.median) }} kW por kWh/día. El pico máximo observado representó
+        {% if iv.n < 3 %}entre {{ '%.0f'|format(iv.loading_pct.min) }}% y {{ '%.0f'|format(iv.loading_pct.max) }}%{% else %}{{ '%.0f'|format(iv.loading_pct.median) }}% (p25–p75 {{ '%.0f'|format(iv.loading_pct.p25) }}–{{ '%.0f'|format(iv.loading_pct.p75) }}%){% endif %}
+        de su potencia continua. Confianza <b>{{ iv.confidence }}</b> (n = {{ iv.n }}). Los picos son promedios de 15 min: el pico real es mayor.</p>
+    {% elif ref.inverter_candidates %}
+      <p class="obj-note">Inversor: ninguno de los {{ ref.inverter_candidates }} sistema(s) sano(s) comparable(s) tiene potencia de inversor registrada y picos medidos.</p>
+    {% endif %}
     {% if ref.anomaly_types %}
       <p class="obj-note">Alertas vistas en estos sitios: {% for t, c in ref.anomaly_types.items() %}{{ t }} ({{ c }}){{ ', ' if not loop.last }}{% endfor %}.</p>
     {% endif %}
     <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Ver los sitios usados</summary>
       <table style="margin-top:6px;">
-        <thead><tr><th>Sitio</th><th>kWh/día</th><th>kWp</th><th>Batería kWh</th><th>% días &lt;20% SoC</th><th>Ciclos/día</th><th>Veredicto</th></tr></thead>
+        <thead><tr><th>Sitio</th><th>kWh/día</th><th>kWp</th><th>Batería kWh</th><th>Inversor kW</th><th>Pico kW</th><th>% días &lt;20% SoC</th><th>Ciclos/día</th><th>Veredicto</th></tr></thead>
         <tbody>{% for x in fleet.sites %}
           <tr><td>{{ x.name }}</td><td>{{ '%.1f'|format(x.load) }}</td><td>{{ '%.1f'|format(x.kwp) if x.kwp else '—' }}</td>
-              <td>{{ '%.1f'|format(x.battery) if x.battery else '—' }}</td><td>{{ '%.0f'|format(x.low_soc) if x.low_soc is not none else '—' }}</td>
+              <td>{{ '%.1f'|format(x.battery) if x.battery else '—' }}</td><td>{{ '%.1f'|format(x.inverter) if x.inverter else '—' }}</td><td>{{ '%.1f'|format(x.peak_kw) if x.peak_kw else '—' }}</td><td>{{ '%.0f'|format(x.low_soc) if x.low_soc is not none else '—' }}</td>
               <td>{{ '%.2f'|format(x.cycles) if x.cycles is not none else '—' }}</td><td>{{ x.verdict }}</td></tr>{% endfor %}
         </tbody>
       </table>
@@ -179,7 +199,7 @@
     <p class="obj-note">No hay sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} monitoreados con un consumo parecido
       (los {{ ref.same_type_sites }} de este tipo están fuera de ±{{ '%.1f'|format(ref.window) }}× tu consumo).</p>
   {% endif %}
-  <p class="obj-note" style="margin-top:6px;opacity:.75;">Datos medidos por VRM (días completos, desde mayo 2026). Muestra pequeña: úsalo para contrastar la fórmula, no para reemplazarla.</p>
+  <p class="obj-note" style="margin-top:6px;opacity:.75;">Solo se usan sitios con kWp, batería y tipo de sistema registrados ({{ fleet.coverage.used }} en uso; {{ fleet.coverage.no_metadata }} monitoreados quedan fuera por no tener esos datos{% if fleet.coverage.too_few_days %}, {{ fleet.coverage.too_few_days }} por tener menos de 30 días completos{% endif %}). Datos medidos por VRM desde mayo 2026. Muestra pequeña: úsalo para contrastar la fórmula, no para reemplazarla.</p>
 </div>
 {% endif %}
 

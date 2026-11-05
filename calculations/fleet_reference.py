@@ -15,6 +15,8 @@ Health vocabulary (thresholds from docs/design-calibration-2026-08.md §3, delib
   * "stressed"  = the bank went below 20% SoC on more than 10% of the complete days it was observed
   * "sobredimensionado" = the bank cycles < 0.2/day while the site is self-supplying (capex that never becomes kWh)
   * "respaldo"  = the bank cycles < 0.2/day but the site still buys >= 30% of its energy: backup-only use, no verdict
+A site counts only when its kWp, battery size and system type are registered (no telemetry-snapshot guesses).
+For the inverter comparison a site must ALSO have `inverter_nominal_kw` registered and >= MIN_PEAK_DAYS recorded daily peaks.
 Only days flagged `complete_day` (or with >= 20 h of coverage) count, so a monitoring outage never reads as a fault.
 
 Every number comes with `n` (how many sites back it). With fewer than MIN_SITES_FOR_SUGGESTION healthy comparable
@@ -27,6 +29,7 @@ import time
 from typing import Iterable
 
 MIN_DAYS = 30                      # a site needs this many usable days to be a reference
+MIN_PEAK_DAYS = 10                 # days with a recorded peak before a site counts for the inverter comparison
 MIN_SITES_FOR_SUGGESTION = 2   # below ~3 the suggestion is flagged confidence "baja"
 LOW_SOC_PCT = 20.0
 STRESSED_LOW_SOC_DAYS_PCT = 10.0
@@ -59,7 +62,8 @@ def _usable_days(energy_rows: Iterable[dict]) -> list[dict]:
     return out
 
 
-def _nominal_kwh(site: dict, energy_rows: list[dict]) -> float | None:
+def _nominal_kwh(site: dict) -> float | None:
+    """Registered battery size only (the site's own metadata) — never guessed from telemetry snapshots."""
     nominal = _f(site.get("battery_nominal_kwh"))
     if nominal and nominal > 0:
         return nominal
@@ -67,28 +71,27 @@ def _nominal_kwh(site: dict, energy_rows: list[dict]) -> float | None:
     if usable and usable > 0:
         dod = _f(site.get("battery_dod_pct"))
         return usable / ((dod / 100.0) if dod and dod > 0 else _REFERENCE_DOD)
-    snaps = [_f(r.get("battery_kwh_snapshot")) for r in energy_rows]
-    snaps = [s for s in snaps if s and s > 0]
-    return max(snaps) if snaps else None
+    return None
 
 
-def _kwp(site: dict, energy_rows: list[dict]) -> float | None:
+def _kwp(site: dict) -> float | None:
     kwp = _f(site.get("pv_kwp"))
-    if kwp and kwp > 0:
-        return kwp
-    snaps = [_f(r.get("pv_kwp_snapshot")) for r in energy_rows]
-    snaps = [s for s in snaps if s and s > 0]
-    return max(snaps) if snaps else None
+    return kwp if kwp and kwp > 0 else None
 
 
 def compute_site_stats(site: dict, energy_rows: list[dict], anomalies: list[dict] | None = None) -> dict | None:
-    """Everything the reference class needs from one site, or None when the site has too little usable data."""
+    """Everything the reference class needs from one site, or None when it has no registered kWp / battery / system type
+    or too little usable data."""
+    # A site is a reference ONLY when its metadata is filled in (system type, kWp and battery size). A site without
+    # them is not used at all — not even for load statistics — so every number shown is backed by a known system.
+    kwp, nominal = _kwp(site), _nominal_kwh(site)
+    if not (kwp and nominal and site.get("system_type")):
+        return None
     days = _usable_days(energy_rows)
     if len(days) < MIN_DAYS:
         return None
     loads = [_f(r["load_kwh"]) for r in days]
     avg_load = statistics.fmean(loads)
-    kwp, nominal = _kwp(site, energy_rows), _nominal_kwh(site, energy_rows)
 
     pv = [_f(r.get("pv_kwh")) for r in days if _f(r.get("pv_kwh")) is not None]
     avg_pv = statistics.fmean(pv) if pv else None
@@ -109,9 +112,17 @@ def compute_site_stats(site: dict, energy_rows: list[dict], anomalies: list[dict
     sorted_loads = sorted(loads)
     p90_load = sorted_loads[min(len(sorted_loads) - 1, int(0.9 * len(sorted_loads)))]
 
+    # Inverter: only when the site has its inverter kW registered AND enough days with a recorded peak. The peak comes
+    # from the ingestion's daily maximum of the load series (15-min averages understate real peaks -> a lower bound).
+    inv_kw = _f(site.get("inverter_nominal_kw"))
+    inv_kw = inv_kw if inv_kw and inv_kw > 0 else None
+    peaks = sorted(p for p in (_f(r.get("peak_load_w")) for r in days) if p and p > 0)
+    peak_max = peaks[-1] if len(peaks) >= MIN_PEAK_DAYS else None
+    peak_p95 = peaks[min(len(peaks) - 1, int(0.95 * len(peaks)))] if len(peaks) >= MIN_PEAK_DAYS else None
+
     an = anomalies or []
-    verdict = "sin datos de batería"
-    if nominal and kwp and low_soc_pct is not None:
+    verdict = "sin datos de SoC"
+    if low_soc_pct is not None:
         if low_soc_pct > STRESSED_LOW_SOC_DAYS_PCT or (cycles is not None and cycles > CYCLES_UNDERBUILT_ABOVE):
             verdict = "estresado"
         elif cycles is not None and cycles < CYCLES_IDLE_BELOW:
@@ -130,6 +141,10 @@ def compute_site_stats(site: dict, energy_rows: list[dict], anomalies: list[dict
         "battery_per_kwh_day": (nominal / avg_load) if nominal else None,
         "specific_yield": (avg_pv / kwp) if (kwp and avg_pv is not None) else None,
         "grid_share": grid_share, "low_soc_days_pct": low_soc_pct, "float_days_pct": float_pct,
+        "inverter_kw": inv_kw, "peak_days": len(peaks), "peak_max_w": peak_max, "peak_p95_w": peak_p95,
+        "peak_kw_per_kwh_day": (peak_max / 1000.0 / avg_load) if peak_max else None,
+        "inverter_kw_per_kwh_day": (inv_kw / avg_load) if inv_kw else None,
+        "inverter_loading_pct": (100.0 * peak_max / (inv_kw * 1000.0)) if (peak_max and inv_kw) else None,
         "cycles_per_day": cycles, "avg_outage_min_day": statistics.fmean(outage_min) if outage_min else None,
         "anomaly_types": sorted({a.get("anomaly_type") for a in an if a.get("anomaly_type")}),
         "anomaly_count": len(an), "verdict": verdict,
@@ -153,12 +168,28 @@ def reference_class(stats: list[dict], *, system_type: str, daily_kwh: float, wi
         return [s for s in same if daily_kwh / w <= s["avg_load_kwh"] <= daily_kwh * w]
 
     comparable, used_window = pick(window), window
-    if len([s for s in comparable if s["kwp"] and s["battery_nominal_kwh"]]) < MIN_SITES_FOR_SUGGESTION:
+    if len(comparable) < MIN_SITES_FOR_SUGGESTION + 1:
         comparable, used_window = pick(window * 1.6), window * 1.6
-    full = [s for s in comparable if s["kwp"] and s["battery_nominal_kwh"]]
+    full = comparable   # every stats row already carries registered kWp and battery
     healthy = [s for s in full if s["verdict"] == "sano"]
 
+    inv_sites = [s for s in healthy if s["inverter_kw"] and s["peak_max_w"]]
+    inverter = None
+    if inv_sites:
+        pq = _quantiles([s["peak_kw_per_kwh_day"] for s in inv_sites])
+        iq = _quantiles([s["inverter_kw_per_kwh_day"] for s in inv_sites])
+        lq = _quantiles([s["inverter_loading_pct"] for s in inv_sites])
+        inverter = {
+            "n": len(inv_sites), "confidence": _confidence(len(inv_sites)),
+            "peak_kw_per_kwh_day": pq, "inverter_kw_per_kwh_day": iq, "loading_pct": lq,
+            "peak_kw": {"p25": pq["p25"] * daily_kwh, "median": pq["median"] * daily_kwh, "p75": pq["p75"] * daily_kwh},
+            "inverter_kw": {"p25": iq["p25"] * daily_kwh, "median": iq["median"] * daily_kwh, "p75": iq["p75"] * daily_kwh},
+            "sites": [{"name": s["name"], "load": s["avg_load_kwh"], "inverter_kw": s["inverter_kw"],
+                       "peak_kw": s["peak_max_w"] / 1000.0, "loading_pct": s["inverter_loading_pct"]} for s in inv_sites],
+        }
+
     out = {
+        "inverter": inverter, "inverter_candidates": len(healthy),
         "system_type": system_type, "daily_kwh": daily_kwh, "window": used_window,
         "same_type_sites": len(same), "comparable": comparable, "with_sizing": len(full), "healthy": len(healthy),
         "verdicts": {v: sum(1 for s in full if s["verdict"] == v) for v in ("sano", "estresado", "sobredimensionado", "respaldo")},
@@ -209,10 +240,10 @@ def _count_types(sites: list[dict]) -> dict:
 # ── database loader (read-only) ──────────────────────────────────────────
 
 _ENERGY_COLS = ("site_id,date,load_kwh,pv_kwh,grid_kwh,battery_discharge_kwh,min_soc,battery_reached_float,"
-                "outage_minutes,complete_day,hours_covered,pv_kwp_snapshot,battery_kwh_snapshot")
+                "outage_minutes,complete_day,hours_covered,pv_kwp_snapshot,battery_kwh_snapshot,peak_load_w")
 _SITE_COLS = ("site_id,display_name,system_type,pv_kwp,battery_nominal_kwh,battery_usable_kwh,battery_dod_pct,"
-              "exports_to_grid,latitude,longitude")
-_CACHE: dict = {"at": 0.0, "stats": None}
+              "exports_to_grid,latitude,longitude,inverter_nominal_kw")
+_CACHE: dict = {"at": 0.0, "stats": None, "left_out": None}
 CACHE_SECONDS = 6 * 3600
 
 
@@ -247,11 +278,24 @@ def load_fleet(force: bool = False) -> list[dict]:
     for a in anomalies:
         an_by_site.setdefault(str(a["site_id"]), []).append(a)
 
-    stats = []
+    stats, no_meta, short = [], 0, 0
     for site in sites:
         sid = str(site["site_id"])
-        st = compute_site_stats(site, by_site.get(sid, []), an_by_site.get(sid, []))
+        rows = by_site.get(sid, [])
+        if not rows:
+            continue                      # nothing monitored yet
+        st = compute_site_stats(site, rows, an_by_site.get(sid, []))
         if st:
             stats.append(st)
-    _CACHE.update(at=time.time(), stats=stats)
+        elif _kwp(site) and _nominal_kwh(site) and site.get("system_type"):
+            short += 1                    # metadata ok, not enough complete days yet
+        else:
+            no_meta += 1                  # metadata missing -> not used
+    _CACHE.update(at=time.time(), stats=stats, left_out={"no_metadata": no_meta, "too_few_days": short})
     return stats
+
+
+def fleet_coverage() -> dict:
+    """{"used", "no_metadata", "too_few_days"} for the last load_fleet() — how much of the monitored fleet backs the numbers."""
+    left = _CACHE.get("left_out") or {"no_metadata": 0, "too_few_days": 0}
+    return {"used": len(_CACHE.get("stats") or []), **left}

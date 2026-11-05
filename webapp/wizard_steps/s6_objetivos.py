@@ -392,7 +392,7 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             notes.insert(1, f"Base de consumo: USO ESPERADO ({_fmt(inputs['daily_kwh'])} kWh/día). Si todo se usara al máximo declarado: "
                             f"{_fmt(dmax)} kWh/día → {_fmt(mx['system_kw'])} kWp de paneles y {_fmt(mx['battery_nominal_kwh'])} kWh de batería (punto óptimo).")
         return {"rows": rows, "notes": notes,
-                "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"]}}
+                "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
     # hybrid
     cols = [band["piso"], band["optimo"], band["techo"]]
@@ -416,7 +416,7 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
     if not assumptions.get("site_exports_to_grid") and tier.pv_coverage > dt.NON_EXPORTING_COVERAGE_CEILING:
         notes.append(f"Cobertura {_fmt(tier.pv_coverage, 2)}× supera ~{dt.NON_EXPORTING_COVERAGE_CEILING}×: un sitio que no exporta no aprovecharía el excedente.")
     return {"rows": rows, "notes": notes,
-            "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"]}}
+            "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
 
 def _fleet_block(system_type: str, inputs: dict, block: dict | None) -> dict | None:
@@ -431,11 +431,13 @@ def _fleet_block(system_type: str, inputs: dict, block: dict | None) -> dict | N
         from calculations import fleet_reference as fr
 
         ref = fr.reference_class(fr.load_fleet(), system_type=system_type, daily_kwh=float(daily))
+        coverage = fr.fleet_coverage()
     except Exception:
         return None
     sites = sorted(ref["comparable"], key=lambda x: x["avg_load_kwh"])
-    return {"ref": ref, "daily_kwh": daily, "formula": block.get("optimo"),
-            "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"],
+    return {"ref": ref, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
+            "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"], "inverter": x["inverter_kw"],
+                       "peak_kw": (x["peak_max_w"] / 1000.0) if x["peak_max_w"] else None,
                        "low_soc": x["low_soc_days_pct"], "cycles": x["cycles_per_day"], "verdict": x["verdict"],
                        "anomalies": ", ".join(x["anomaly_types"])} for x in sites]}
 
