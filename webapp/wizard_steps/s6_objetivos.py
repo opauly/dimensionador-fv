@@ -419,7 +419,39 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
 
-def _fleet_block(system_type: str, inputs: dict, block: dict | None) -> dict | None:
+def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, goals: dict) -> dict | None:
+    """Replay of real fleet weather and load patterns against this design (off-grid only; hybrids lean on the grid, so "unserved
+    energy" is not their failure mode). Best-effort and never blocks: no cached dataset yet -> {"pending": True}."""
+    if system_type != "off_grid":
+        return None
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds = fs.get_dataset()
+        if ds is None:
+            return {"pending": True}
+        daily, optimo = float(inputs["daily_kwh"]), block.get("optimo") or {}
+        kwp = float(optimo.get("kwp") or 0)
+        if not kwp or not ds.get("k"):
+            return {"unavailable": True, "validation": ds.get("validation") or []}
+        fleet_battery = ((ref.get("suggestion") or {}).get("battery_nominal_kwh") or {}).get("median")
+        compare = {"formula": optimo.get("battery_kwh"), "fleet": fleet_battery}
+        reserve = float(goals.get("reserve_soc_pct") or 35.0)
+        res = fs.design(ds, daily, kwp, reserve_pct=reserve, compare_batteries=compare)
+        if res is None:
+            return {"unavailable": True, "validation": ds.get("validation") or []}
+        dmax = inputs.get("daily_kwh_max")
+        if dmax and dmax > daily * 1.05:
+            mx = fs.design(ds, float(dmax), kwp * dmax / daily, reserve_pct=reserve)
+            res["max_case"] = None if mx is None else {"daily_kwh": float(dmax), "battery_min_physical": mx["battery_min_physical"],
+                                                       "battery_min_reserve": mx["battery_min_reserve"]}
+        res["accepted"] = [v for v in res["validation"] if v["accepted"]]
+        return res
+    except Exception:
+        return None
+
+
+def _fleet_block(system_type: str, inputs: dict, block: dict | None, goals: dict | None = None) -> dict | None:
     """What REAL monitored sites like this one look like (vrm-monitor fleet), next to the formula's own target. Read-only
     and best-effort: any failure reading the fleet just hides the card."""
     if system_type not in ("off_grid", "hybrid") or not block or inputs.get("missing"):
@@ -435,7 +467,8 @@ def _fleet_block(system_type: str, inputs: dict, block: dict | None) -> dict | N
     except Exception:
         return None
     sites = sorted(ref["comparable"], key=lambda x: x["avg_load_kwh"])
-    return {"ref": ref, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
+    sim = _simulation_block(system_type, inputs, block, ref, goals or {})
+    return {"ref": ref, "sim": sim, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
             "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"], "inverter": x["inverter_kw"],
                        "peak_kw": (x["peak_max_w"] / 1000.0) if x["peak_max_w"] else None,
                        "low_soc": x["low_soc_days_pct"], "cycles": x["cycles_per_day"], "verdict": x["verdict"],
@@ -494,7 +527,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         "assumptions": assumptions,
         "night_load_pct": None if assumptions.get("night_load_fraction") is None else round(assumptions["night_load_fraction"] * 100, 1),
         "block": block,
-        "fleet": _fleet_block(system_type, inputs, block),
+        "fleet": _fleet_block(system_type, inputs, block, goals),
         "inputs_missing": inputs["missing"],
         "errors": status["errors"],
         "needs_ack": status["needs_ack"],

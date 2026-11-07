@@ -205,6 +205,58 @@
   {% endif %}
   <p class="obj-note" style="margin-top:6px;opacity:.75;">Solo se usan sitios con kWp, batería y tipo de sistema registrados ({{ fleet.coverage.used }} en uso; {{ fleet.coverage.no_metadata }} monitoreados quedan fuera por no tener esos datos{% if fleet.coverage.too_few_days %}, {{ fleet.coverage.too_few_days }} por tener menos de 30 días completos{% endif %}). Datos medidos por VRM desde mayo 2026. Muestra pequeña: úsalo para contrastar la fórmula, no para reemplazarla.</p>
 </div>
+
+{% if fleet.sim %}
+{% set sm = fleet.sim %}
+<div class="obj-spot card" style="margin-top:12px;">
+  <p class="card-note" style="margin:0 0 6px;"><b>Simulación con datos reales</b>
+    <span class="obj-unit">— tu diseño puesto a prueba con el clima y los patrones de consumo de la flota (datos cada 15 min)</span></p>
+  {% if sm.pending %}
+    <p class="obj-note">La simulación se está preparando (la primera vez tarda cerca de un minuto). Recarga la página en un momento.</p>
+  {% elif sm.unavailable %}
+    <p class="obj-note">Todavía no hay al menos 2 sistemas aislados cuyo comportamiento la simulación reproduzca bien; sin eso no se simula.</p>
+  {% else %}
+    <p class="obj-note" style="margin-top:0;">Con tu consumo esperado ({{ '%.1f'|format(sm.daily_kwh) }} kWh/día) y {{ '%.1f'|format(sm.kwp) }} kWp de paneles, la batería
+      mínima que cumple (máximo 2 % de días sin energía y sin rachas de más de 2 días) es:</p>
+    <table>
+      <tbody>
+        <tr><td>Usando el banco hasta el 10 %</td>
+            <td class="mid">{% if sm.battery_min_physical %}{{ '%.0f'|format(sm.battery_min_physical) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
+        <tr><td>Sin tocar tu reserva de {{ '%.0f'|format(sm.reserve_pct) }} %</td>
+            <td class="mid">{% if sm.battery_min_reserve %}{{ '%.0f'|format(sm.battery_min_reserve) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
+      </tbody>
+    </table>
+    {% if sm.compare %}
+    <table style="margin-top:8px;">
+      <thead><tr><th>Si instalas…</th><th>Batería</th><th>Días sin energía</th><th>Días que tocan la reserva</th><th>Racha máx. sin energía</th></tr></thead>
+      <tbody>{% for c in sm.compare %}
+        <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
+            <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
+            <td>{{ '%.1f'|format(c.fail_pct_physical) }} %</td><td>{{ '%.1f'|format(c.fail_pct_reserve) }} %</td>
+            <td>{{ '%.0f'|format(c.streak_p90) }} día(s)</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if sm.kwp_min %}
+      <p class="obj-note" style="margin-top:8px;">Paneles: con una batería de {{ '%.0f'|format(sm.kwp_min_for_battery) }} kWh ya se cumple desde ≈{{ '%.1f'|format(sm.kwp_min) }} kWp
+        (tu diseño usa {{ '%.1f'|format(sm.kwp) }} kWp). Más paneles casi no cambian el resultado: lo que limita es guardar energía para la noche y los días nublados.</p>
+    {% endif %}
+    {% if sm.max_case %}
+      <p class="obj-note">Si todo se usara al máximo declarado ({{ '%.1f'|format(sm.max_case.daily_kwh) }} kWh/día): batería mínima
+        {% if sm.max_case.battery_min_physical %}{{ '%.0f'|format(sm.max_case.battery_min_physical) }} kWh (hasta el 10 %){% else %}—{% endif %}
+        {% if sm.max_case.battery_min_reserve %}/ {{ '%.0f'|format(sm.max_case.battery_min_reserve) }} kWh (sin tocar la reserva){% endif %}.</p>
+    {% endif %}
+    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Cómo se calculó y sus límites</summary>
+      <p class="obj-note">{{ sm.scenarios }} escenarios ({{ sm.locations }} ubicaciones con su clima real × {{ sm.patterns }} patrones de consumo de sitios reales, escalados a tu consumo),
+        {{ sm.days }} días-escenario entre {{ sm.window[0].strftime('%d/%m/%Y') }} y {{ sm.window[1].strftime('%d/%m/%Y') }}. Respuesta solar {{ '%.2f'|format(sm.k) }} kW por kWp y kW/m²,
+        calibrada en {{ sm.accepted|length }} sistema(s) aislado(s) cuya simulación reproduce su batería real
+        (error medio {% for v in sm.accepted %}{{ '%.0f'|format(v.rmse_pct) }}{{ ' y ' if not loop.last }}{% endfor %} puntos de carga).</p>
+      <p class="obj-note">Límites: son ~90 días de la época lluviosa (no incluye el verano); el patrón de consumo viene de otros clientes, no de los hábitos de esta casa;
+        el cálculo es por hora, no ve picos cortos. Úsalo para contrastar la fórmula, no para reemplazarla.</p>
+    </details>
+  {% endif %}
+</div>
+{% endif %}
 {% endif %}
 
 {% if errors %}

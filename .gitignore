@@ -18,3 +18,4 @@ secrets.json
 .vscode/
 *.swp
 vrm_exports/
+.cache/
