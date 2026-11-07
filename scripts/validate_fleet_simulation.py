@@ -26,7 +26,7 @@ def scenario(days=12, sun=True, flat=True):
     unit = (np.ones(T) / 24.0)[None, :] if flat else np.where((hour >= 17) | (hour <= 5), 1 / 12.0, 0.0)[None, :]
     counted = np.ones((1, days), dtype=bool)
     counted[:, :fs.WARMUP_DAYS] = False
-    return {"ghi": ghi, "unit": unit, "counted": counted, "n_days": days, "n": 1}
+    return {"ghi": ghi, "unit": unit, "counted": counted, "valid": np.ones((1, T), dtype=bool), "n_days": days, "n": 1}
 
 
 floors = np.array([10.0])
@@ -51,6 +51,21 @@ check("a higher reserve floor never fails fewer days", r4["fail_pct"][1, 0] >= r
 
 soc = fs._replay_soc(np.zeros(48), np.full(48, 0.5), 10.0, 100.0, 10.0)
 check("replay: an empty-sun day drains the bank but never below the floor", soc.min() >= 10.0 - 1e-9 and soc[-1] < soc[0])
+
+# ── hybrid ──
+h = fs._run_hybrid(sc, 0.72, 10.0, np.array([8.0, 8.0, 8.0]), np.array([3.0, 15.0, 60.0]), 30.0, keep_state=True)
+check("hybrid: a bigger battery never imports more from the grid", h["import_pct"][0] >= h["import_pct"][1] >= h["import_pct"][2])
+check("hybrid: a bigger battery never covers fewer nights", h["nights_ok_pct"][0] <= h["nights_ok_pct"][1] <= h["nights_ok_pct"][2])
+check("hybrid: a huge battery with 8 kWp covers every night", h["nights_ok_pct"][2] == 100)
+check("hybrid: a 3 kWh battery cannot carry a 10 kWh/day load through the night", h["nights_ok_pct"][0] < 50)
+hp = fs._run_hybrid(sc, 0.72, 10.0, np.array([2.0, 8.0, 20.0]), np.array([15.0] * 3), 30.0)
+check("hybrid: more panels never import more", hp["import_pct"][0] >= hp["import_pct"][1] >= hp["import_pct"][2])
+sv = fs._outage_survival(sc, 10.0, np.array([3.0, 15.0, 60.0]), h["state"], h["counted_h"])
+check("hybrid: a bigger battery outlasts outages at least as long", np.median(sv[0]) <= np.median(sv[1]) <= np.median(sv[2]))
+check("hybrid: 60 kWh at 10 kWh/day lasts roughly 3+ days from full", np.max(sv[2]) >= 48)
+check("outage coverage: everything survives -> 100 %, nothing -> 0 %", fs._coverage_pct(np.array([72.0] * 5), [1, 5]) == 100 and fs._coverage_pct(np.array([0.0] * 5), [1, 5]) == 0)
+imp, soc2 = fs._replay_import(np.zeros(24), np.full(24, 1.0), 10.0, 100.0, 30.0)
+check("hybrid replay: the battery stops at the floor and the grid covers the rest", soc2.min() >= 30.0 - 1e-9 and imp.sum() > 0)
 
 print("\nFAILED" if fails else "\nall passed")
 sys.exit(1 if fails else 0)

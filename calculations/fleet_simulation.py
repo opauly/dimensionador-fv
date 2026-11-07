@@ -13,6 +13,11 @@ How it works
   4. Each scenario is run hour by hour (battery balance with round-trip and inverter efficiency); a local day "fails" when any
      energy is left unserved. Reported: % of failing days and the longest run of failing days.
 
+Hybrid systems (`design_hybrid`) use the same engine with the grid as the fallback: the battery serves the load down to the
+reserve and the grid covers the rest, so the questions are different: how much of the load solar+battery covers, how many nights
+the battery lasts until sunrise, and how many REAL grid outages (`vrm.grid_events`) it would have outlasted. A hybrid replay
+under-states grid import (real sites import more than an ideal dispatch), so the gap measured on cycling hybrids is reported next to it.
+
 Limits (stated in the UI): daily-scale weather is the fleet's own window (~90 days, rainy season); the load SHAPE comes from other
 customers; the model is hourly, so very short peaks are not seen.
 
@@ -34,6 +39,7 @@ log = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / ".cache" / "fleet_sim.pkl"
 STALE_HOURS = 24
+DATASET_VERSION = 2              # bump when the cached dataset gains fields; older caches are rebuilt in the background
 LOCAL_UTC_OFFSET_H = -6          # Costa Rica / the fleet's region (no daylight saving)
 SHIFT_MIN = 60                   # site bucket start -> hour-ending label, matches Open-Meteo's "average of the preceding hour"
 ETA_CHARGE = ETA_DISCHARGE = 0.975   # sqrt of the 0.95 round-trip default used by design_targets
@@ -46,6 +52,12 @@ WARMUP_DAYS = 2
 MIN_OVERLAP_DAYS = 20
 MIN_CORR, MAX_RMSE_PCT = 0.65, 10.0
 MIN_CALIBRATION_SITES = 2
+NIGHT_TARGET_PCT = 90.0          # hybrid: the battery should carry the whole night (18:00-06:00) on at least this share of nights
+OUTAGE_TARGET_PCT = 90.0         # hybrid: ...and outlast at least this share of real grid outages
+NIGHT_START_H, NIGHT_END_H = 18, 6
+OUTAGE_MIN_MIN, OUTAGE_MAX_H = 15, 72   # outages shorter than 15 min are noise; longer than 3 days no battery is designed for
+MIN_OUTAGES = 8
+HYBRID_MIN_CORR = 0.65
 
 _lock = threading.Lock()
 _state: dict = {"ds": None, "loaded_at": 0.0, "building": False}
@@ -56,7 +68,7 @@ _state: dict = {"ds": None, "loaded_at": 0.0, "building": False}
 def _fetch_samples(vrm, site_id: str, page: int = 1000) -> list[dict]:
     rows, start = [], 0
     while True:
-        chunk = (vrm.table("site_samples").select("ts,pv_w,load_w,battery_w,soc_pct")
+        chunk = (vrm.table("site_samples").select("ts,pv_w,load_w,battery_w,soc_pct,grid_w")
                  .eq("site_id", site_id).order("ts").range(start, start + page - 1).execute().data or [])
         rows.extend(chunk)
         if len(chunk) < page:
@@ -65,7 +77,7 @@ def _fetch_samples(vrm, site_id: str, page: int = 1000) -> list[dict]:
 
 
 def _hourly(df: pd.DataFrame) -> pd.DataFrame:
-    x = df[["pv_w", "load_w", "soc_pct"]].copy()
+    x = df[[c for c in ("pv_w", "load_w", "soc_pct", "grid_w") if c in df.columns]].copy()
     x.index = x.index + pd.Timedelta(minutes=SHIFT_MIN)
     return x.resample("1h").mean()
 
@@ -90,6 +102,7 @@ def build_dataset() -> dict:
 
     vrm = get_client().schema("vrm")
     sites = vrm.table("sites").select("site_id,display_name,system_type,pv_kwp,battery_nominal_kwh,latitude,longitude").execute().data or []
+    hybrid_ids = {s["site_id"] for s in sites if s.get("system_type") == "hybrid"}
     sites = [s for s in sites if s.get("pv_kwp") and s.get("battery_nominal_kwh") and s.get("system_type")]
 
     wrows, start = [], 0
@@ -107,7 +120,7 @@ def build_dataset() -> dict:
         s = g.set_index("ts")["ghi_wm2"].sort_index()
         weather[(float(la), float(lo))] = s[~s.index.duplicated()].dropna()
 
-    loads, validation, seen = {}, [], set()
+    loads, validation, seen, hybrids = {}, [], set(), []
     for s in sites:
         rows = _fetch_samples(vrm, s["site_id"])
         if not rows:
@@ -123,17 +136,87 @@ def build_dataset() -> dict:
         load = (h["load_w"].dropna() / 1000.0)
         if len(load) >= 24 * MIN_OVERLAP_DAYS and load.sum() / (len(load) / 24.0) >= 1.0:
             loads[s["display_name"]] = load
-        if s["system_type"] != "off_grid" or s.get("latitude") is None:
+        if s.get("latitude") is None:
             continue
         ghi = weather.get((round(float(s["latitude"]), 2), round(float(s["longitude"]), 2)))
         if ghi is None:
             continue
-        validation.append(_validate_site(s, h, ghi))
+        if s["system_type"] == "off_grid":
+            validation.append(_validate_site(s, h, ghi))
+        elif s["system_type"] == "hybrid" and "grid_w" in h:
+            hybrids.append((s, h, ghi))
 
     ok = [v for v in validation if v["accepted"]]
     k = float(np.median([v["k"] for v in ok])) if len(ok) >= MIN_CALIBRATION_SITES else None
-    return {"built_at": time.time(), "weather": weather, "loads": loads, "k": k, "validation": validation,
+    hyb_val = [_validate_hybrid(s, h, g, k) for s, h, g in hybrids] if k else []
+    good = [v for v in hyb_val if v["accepted"]]
+    gaps = sorted(v["gap_pts"] for v in good)
+    hybrid = {"validation": hyb_val, "accepted": len(good),
+              "gap_pts": float(np.median(gaps)) if gaps else None,
+              "gap_range": (float(np.percentile(gaps, 25)), float(np.percentile(gaps, 75))) if gaps else None,
+              "k_sites": [v["k_site"] for v in hyb_val if v["k_site"]], "outages": _fetch_outages(vrm, hybrid_ids)}
+    return {"version": DATASET_VERSION, "built_at": time.time(), "weather": weather, "loads": loads, "k": k, "validation": validation,
+            "hybrid": hybrid,
             "window": (min(s.index[0] for s in weather.values()), max(s.index[-1] for s in weather.values()))}
+
+
+def _fetch_outages(vrm, site_ids: set) -> dict:
+    """Real grid outages at the fleet's hybrid sites, in hours. Outages beyond OUTAGE_MAX_H are counted apart (not designed for)."""
+    rows, start = [], 0
+    while True:
+        chunk = vrm.table("grid_events").select("site_id,duration_minutes").range(start, start + 999).execute().data or []
+        rows.extend(chunk)
+        if len(chunk) < 1000:
+            break
+        start += 1000
+    mine = [r for r in rows if r["site_id"] in site_ids and r.get("duration_minutes") is not None and float(r["duration_minutes"]) >= OUTAGE_MIN_MIN]
+    hours = [float(r["duration_minutes"]) / 60.0 for r in mine]
+    return {"hours": [h for h in hours if h <= OUTAGE_MAX_H], "longer": sum(1 for h in hours if h > OUTAGE_MAX_H),
+            "sites": len({r["site_id"] for r in mine})}
+
+
+def _replay_import(pv_kwh, load_kwh, nominal, soc0_pct, floor_pct):
+    """Hybrid replay of one site: battery serves down to `floor`, the grid covers the rest. Returns (grid import kWh, SoC %) per hour."""
+    imp, soc = np.zeros(len(pv_kwh)), np.zeros(len(pv_kwh))
+    e, lo = nominal * soc0_pct / 100.0, nominal * floor_pct / 100.0
+    for i in range(len(pv_kwh)):
+        net = pv_kwh[i] - load_kwh[i] / ETA_INVERTER
+        if net >= 0:
+            e = min(nominal, e + net * ETA_CHARGE)
+        else:
+            need = -net / ETA_DISCHARGE
+            used = min(need, max(0.0, e - lo))
+            e -= used
+            imp[i] = (need - used) * ETA_DISCHARGE * ETA_INVERTER
+        soc[i] = 100.0 * e / nominal
+    return imp, soc
+
+
+def _validate_hybrid(site: dict, h: pd.DataFrame, ghi: pd.Series, k: float) -> dict:
+    """Replay a hybrid with the off-grid solar response and its own lowest battery level as floor; compare battery level and grid import.
+    Only sites that really cycle their battery (not parked at 100 %) say anything about the dispatch."""
+    kwp, nominal = float(site["pv_kwp"]), float(site["battery_nominal_kwh"])
+    out = {"name": site["display_name"], "corr": None, "rmse_pct": None, "sim_share": None, "real_share": None, "gap_pts": None,
+           "k_site": None, "accepted": False}
+    j = h.join(ghi.rename("ghi"), how="inner").dropna(subset=["pv_w", "load_w", "soc_pct", "grid_w", "ghi"])
+    if len(j) < 24 * MIN_OVERLAP_DAYS:
+        return out
+    bright = j[(j.soc_pct < 90) & (j.ghi > 300)]
+    if len(bright) >= 50:
+        out["k_site"] = float(((bright.pv_w / 1000.0) / (kwp * bright.ghi / 1000.0)).quantile(0.75))
+    real_soc = j.soc_pct.values
+    load = j.load_w.values / 1000.0
+    if load.sum() / (len(j) / 24.0) < 1.0:
+        return out
+    imp, soc = _replay_import(k * kwp * j.ghi.values / 1000.0, load, nominal, float(real_soc[0]), float(np.percentile(real_soc, 2)))
+    real_imp = np.clip(j.grid_w.values, 0, None) / 1000.0
+    out["sim_share"], out["real_share"] = 100.0 * imp.sum() / load.sum(), 100.0 * real_imp.sum() / load.sum()
+    out["gap_pts"] = out["real_share"] - out["sim_share"]
+    out["corr"] = float(pd.Series(soc).corr(pd.Series(real_soc)))
+    out["rmse_pct"] = float(np.sqrt(np.mean((soc - real_soc) ** 2)))
+    cycles = float(np.percentile(real_soc, 95) - np.percentile(real_soc, 5)) >= 25.0 and out["real_share"] < 60.0
+    out["accepted"] = bool(cycles and out["corr"] is not None and out["corr"] >= HYBRID_MIN_CORR)
+    return out
 
 
 def _validate_site(site: dict, h: pd.DataFrame, ghi: pd.Series) -> dict:
@@ -199,7 +282,7 @@ def get_dataset() -> dict | None:
                 _state.update(ds=ds, loaded_at=time.time())
         except Exception:                                   # noqa: BLE001
             ds = None
-    if ds is None or time.time() - ds["built_at"] > STALE_HOURS * 3600:
+    if ds is None or ds.get("version") != DATASET_VERSION or time.time() - ds["built_at"] > STALE_HOURS * 3600:
         refresh(blocking=False)
     return ds
 
@@ -233,7 +316,7 @@ def _scenarios(ds: dict) -> dict | None:
     valid = np.array([o for _, _, o in names])
     day_ok = valid.reshape(len(names), n_days, 24).all(axis=2)
     counted = day_ok & (np.cumsum(day_ok, axis=1) > WARMUP_DAYS)
-    return {"ghi": ghi, "unit": unit, "counted": counted, "n_days": n_days, "n": len(names),
+    return {"ghi": ghi, "unit": unit, "counted": counted, "valid": valid, "n_days": n_days, "n": len(names),
             "locations": len({n[0] for n in names}), "patterns": len({n[1] for n in names}), "index": index}
 
 
@@ -309,4 +392,136 @@ def design(ds: dict, daily_kwh: float, kwp: float, *, reserve_pct: float,
         out["kwp_min_for_battery"] = float(battery)
     else:
         out["kwp_min"], out["kwp_min_for_battery"] = None, None
+    return out
+
+
+# ── hybrid ───────────────────────────────────────────────────────────────
+
+def _run_hybrid(sc: dict, k: float, daily_kwh: float, kwp: np.ndarray, batt: np.ndarray, floor_pct: float, keep_state: bool = False) -> dict:
+    """Hour-by-hour balance for P (kWp, battery) pairs x S scenarios with the grid as fallback.
+    Returns grid-import % of the load, % of nights carried to sunrise by solar+battery, and (optionally) the battery energy per hour."""
+    S, T = sc["ghi"].shape
+    P = len(batt)
+    local_h = np.arange(T) % 24
+    night = (local_h >= NIGHT_START_H) | (local_h < NIGHT_END_H)
+    night_id = (np.arange(T) - NIGHT_START_H) // 24 + 1
+    n_nights = int(night_id.max()) + 1
+    counted_h = np.repeat(sc["counted"], 24, axis=1)[:, :T]                               # (S,T)
+    nom, lo = batt[:, None], batt[:, None] * floor_pct / 100.0
+    e = np.broadcast_to(nom, (P, S)).copy()
+    imp_total = np.zeros((P, S))
+    night_imp = np.zeros((P, S, n_nights))
+    state = np.zeros((P, S, T), dtype=np.float32) if keep_state else None
+    for t in range(T):
+        pv = k * kwp[:, None] * sc["ghi"][:, t][None, :]
+        net = pv - daily_kwh * sc["unit"][:, t][None, :] / ETA_INVERTER
+        gain = np.minimum(nom, e + net * ETA_CHARGE)
+        need = -net / ETA_DISCHARGE
+        avail = np.maximum(0.0, e - lo)
+        short = np.maximum(0.0, need - avail)
+        e = np.where(net >= 0, gain, e - np.minimum(need, avail))
+        imp = short * ETA_DISCHARGE * ETA_INVERTER
+        imp_total += imp * counted_h[:, t][None, :]
+        if night[t]:
+            night_imp[:, :, night_id[t]] += imp
+        if keep_state:
+            state[:, :, t] = e
+    # a night counts when all its 12 hours are inside valid, post-warm-up data
+    valid = sc["valid"]
+    night_ok_mask = np.zeros((S, n_nights), dtype=bool)
+    for n in range(WARMUP_DAYS + 1, n_nights):
+        idx = np.where((night_id == n) & night)[0]
+        if len(idx) == 12:
+            night_ok_mask[:, n] = valid[:, idx].all(axis=1)
+    carried = (night_imp <= FAIL_KWH) & night_ok_mask[None]
+    load_total = daily_kwh * (sc["unit"] * counted_h).sum(axis=1)                        # (S,)
+    return {"import_pct": 100.0 * imp_total.sum(axis=1) / max(1e-9, load_total.sum()),
+            "nights_ok_pct": 100.0 * carried.sum(axis=(1, 2)) / max(1, night_ok_mask.sum() * 1),
+            "state": state, "counted_h": counted_h}
+
+
+def _outage_survival(sc: dict, daily_kwh: float, batt: np.ndarray, state: np.ndarray, counted_h: np.ndarray, horizon: int = int(OUTAGE_MAX_H)) -> list[np.ndarray]:
+    """For each battery: hours the critical load would have been served if the grid failed at each hour of the dataset (no sun counted,
+    battery released down to the physical floor). One sorted array per battery."""
+    S, T = sc["ghi"].shape
+    need = daily_kwh * sc["unit"] / (ETA_INVERTER * ETA_DISCHARGE)                         # (S,T) battery kWh per hour
+    cs = np.concatenate([np.zeros((S, 1)), np.cumsum(need, axis=1)], axis=1)               # (S,T+1)
+    starts = np.arange(T - horizon - 1)
+    out = []
+    for p in range(len(batt)):
+        vals = []
+        for s in range(S):
+            ok = counted_h[s, starts] & sc["valid"][s, starts]
+            if not ok.any():
+                continue
+            t = starts[ok]
+            avail = np.maximum(0.0, state[p, s, t].astype(float) - batt[p] * PHYSICAL_FLOOR_PCT / 100.0)
+            reach = np.searchsorted(cs[s], cs[s, t + 1] + avail, side="right") - 1
+            vals.append(np.minimum(reach - (t + 1), horizon))
+        out.append(np.sort(np.concatenate(vals)) if vals else np.zeros(0))
+    return out
+
+
+def _coverage_pct(surv_sorted: np.ndarray, durations_h: list[float]) -> float:
+    """Average over the real outages of the share of start times at which the battery would have outlasted that outage."""
+    if not len(surv_sorted) or not durations_h:
+        return float("nan")
+    need = np.ceil(np.array(durations_h))
+    share = 1.0 - np.searchsorted(surv_sorted, need, side="left") / len(surv_sorted)
+    return float(100.0 * share.mean())
+
+
+def design_hybrid(ds: dict, critical_daily_kwh: float, kwp: float, *, reserve_pct: float,
+                  compare_batteries: dict[str, float] | None = None) -> dict | None:
+    """Hybrid design test: real sun + fleet load patterns + real grid outages. See the module docstring."""
+    hyb = ds.get("hybrid")
+    k = ds.get("k")
+    sc = _scenarios(ds)
+    if hyb is None or not k or not sc or critical_daily_kwh <= 0 or kwp <= 0:
+        return None
+    reserve = float(min(max(reserve_pct, PHYSICAL_FLOOR_PCT), 60.0))
+    durations = hyb["outages"]["hours"]
+    have_outages = len(durations) >= MIN_OUTAGES
+    grid = critical_daily_kwh * np.linspace(0.4, 6.0, 29)
+    extras = {n: float(b) for n, b in (compare_batteries or {}).items() if b and b > 0}
+    cands = np.concatenate([grid, np.array(list(extras.values()))]) if extras else grid
+    run = _run_hybrid(sc, k, critical_daily_kwh, np.full(len(cands), kwp), cands, reserve, keep_state=True)
+    surv = _outage_survival(sc, critical_daily_kwh, cands, run["state"], run["counted_h"])
+    gap = hyb.get("gap_pts")
+
+    def adj(x):
+        return None if gap is None else float(min(100.0, x + gap))
+
+    def first(mask):
+        idx = np.where(mask[:len(grid)])[0]
+        return float(grid[idx[0]]) if len(idx) else None
+
+    cover = np.array([_coverage_pct(s, durations) for s in surv]) if have_outages else np.full(len(cands), np.nan)
+    out = {"k": k, "scenarios": sc["n"], "locations": sc["locations"], "patterns": sc["patterns"], "days": int(sc["counted"].sum()),
+           "window": ds["window"], "reserve_pct": reserve, "kwp": kwp, "daily_kwh": critical_daily_kwh,
+           "gap_pts": gap, "gap_range": hyb.get("gap_range"), "gap_sites": hyb.get("accepted", 0),
+           "night_target": NIGHT_TARGET_PCT, "outage_target": OUTAGE_TARGET_PCT,
+           "battery_min_nights": first(run["nights_ok_pct"] >= NIGHT_TARGET_PCT),
+           "battery_min_backup": first(cover >= OUTAGE_TARGET_PCT) if have_outages else None,
+           "outages": {"n": len(durations), "sites": hyb["outages"]["sites"], "longer": hyb["outages"]["longer"], "enough": have_outages,
+                       "median_h": float(np.median(durations)) if durations else None,
+                       "p90_h": float(np.percentile(durations, 90)) if durations else None},
+           "compare": [], "validation": hyb["validation"], "k_sites": hyb.get("k_sites") or []}
+    for i, (n, b) in enumerate(extras.items()):
+        j = len(grid) + i
+        sv = surv[j]
+        out["compare"].append({"name": n, "battery": b, "import_pct": float(run["import_pct"][j]), "import_pct_adj": adj(run["import_pct"][j]),
+                               "nights_ok_pct": float(run["nights_ok_pct"][j]),
+                               "outage_cover_pct": None if not have_outages else float(cover[j]),
+                               "backup_p10_h": float(np.percentile(sv, 10)) if len(sv) else None,
+                               "backup_median_h": float(np.median(sv)) if len(sv) else None})
+    # Panels: more kWp with the formula (or first compared) battery
+    ref_b = next(iter(extras.values()), None) or out["battery_min_nights"]
+    if ref_b:
+        factors = np.array([0.6, 0.8, 1.0, 1.25, 1.5])
+        rk = _run_hybrid(sc, k, critical_daily_kwh, kwp * factors, np.full(len(factors), ref_b), reserve)
+        out["kwp_curve"] = [{"kwp": float(kwp * f), "factor": float(f), "import_pct": float(rk["import_pct"][i]),
+                             "import_pct_adj": adj(rk["import_pct"][i]), "nights_ok_pct": float(rk["nights_ok_pct"][i])}
+                            for i, f in enumerate(factors)]
+        out["kwp_curve_battery"] = float(ref_b)
     return out

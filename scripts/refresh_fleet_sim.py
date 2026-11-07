@@ -24,3 +24,12 @@ for v in ds["validation"]:
     flag = "accepted" if v["accepted"] else "rejected"
     print(f"  {v['name'][:34]:34} {flag:9} k={v['k'] if v['k'] is None else round(v['k'], 2)} corr={v['corr'] if v['corr'] is None else round(v['corr'], 2)} "
           f"rmse={v['rmse_pct'] if v['rmse_pct'] is None else round(v['rmse_pct'], 1)}")
+hy = ds.get("hybrid") or {}
+print("hybrid replay (battery level + grid import; only cycling sites count):")
+for v in hy.get("validation", []):
+    f = lambda x, n=1: "-" if x is None else round(x, n)
+    print(f"  {v['name'][:34]:34} {'accepted' if v['accepted'] else 'rejected':9} corr={f(v['corr'], 2)} rmse={f(v['rmse_pct'])} "
+          f"grid share sim={f(v['sim_share'])}% real={f(v['real_share'])}% gap={f(v['gap_pts'])} pts  k_site={f(v['k_site'], 2)}")
+print("typical gap (real - ideal replay), points of load:", hy.get("gap_pts"), hy.get("gap_range"))
+o = hy.get("outages") or {}
+print(f"outages: {len(o.get('hours', []))} within 72 h at {o.get('sites')} sites, {o.get('longer')} longer; hours sorted: {sorted(round(h, 1) for h in o.get('hours', []))}")

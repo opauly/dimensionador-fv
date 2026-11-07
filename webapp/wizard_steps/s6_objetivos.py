@@ -420,22 +420,33 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
 
 
 def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, goals: dict) -> dict | None:
-    """Replay of real fleet weather and load patterns against this design (off-grid only; hybrids lean on the grid, so "unserved
-    energy" is not their failure mode). Best-effort and never blocks: no cached dataset yet -> {"pending": True}."""
-    if system_type != "off_grid":
+    """Replay of real fleet weather, load patterns and (hybrids) grid outages against this design. Off-grid asks "how often does the
+    energy run out"; hybrid asks "how much does solar+battery cover, how many nights does the battery last, how many real outages
+    would it outlast" — the grid is its fallback, so "unserved energy" is not its failure mode.
+    Best-effort and never blocks: no cached dataset yet -> {"pending": True}."""
+    if system_type not in ("off_grid", "hybrid"):
         return None
     try:
         from calculations import fleet_simulation as fs
 
         ds = fs.get_dataset()
-        if ds is None:
+        if ds is None or (system_type == "hybrid" and "hybrid" not in ds):
             return {"pending": True}
-        daily, optimo = float(inputs["daily_kwh"]), block.get("optimo") or {}
+        optimo = block.get("optimo") or {}
         kwp = float(optimo.get("kwp") or 0)
         if not kwp or not ds.get("k"):
             return {"unavailable": True, "validation": ds.get("validation") or []}
         fleet_battery = ((ref.get("suggestion") or {}).get("battery_nominal_kwh") or {}).get("median")
         compare = {"formula": optimo.get("battery_kwh"), "fleet": fleet_battery}
+        if system_type == "hybrid":
+            reserve = float(goals.get("reserve_soc_pct") or 30.0)
+            res = fs.design_hybrid(ds, float(inputs["critical_daily_kwh"]), kwp, reserve_pct=reserve, compare_batteries=compare)
+            if res is None:
+                return {"unavailable": True, "validation": ds.get("validation") or []}
+            res["kind"] = "hybrid"
+            res["accepted"] = [v for v in res["validation"] if v["accepted"]]
+            return res
+        daily = float(inputs["daily_kwh"])
         reserve = float(goals.get("reserve_soc_pct") or 35.0)
         res = fs.design(ds, daily, kwp, reserve_pct=reserve, compare_batteries=compare)
         if res is None:
@@ -445,6 +456,7 @@ def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, go
             mx = fs.design(ds, float(dmax), kwp * dmax / daily, reserve_pct=reserve)
             res["max_case"] = None if mx is None else {"daily_kwh": float(dmax), "battery_min_physical": mx["battery_min_physical"],
                                                        "battery_min_reserve": mx["battery_min_reserve"]}
+        res["kind"] = "off_grid"
         res["accepted"] = [v for v in res["validation"] if v["accepted"]]
         return res
     except Exception:
