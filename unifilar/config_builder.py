@@ -250,7 +250,7 @@ def _meter(eq: dict, grid_zero: bool = False) -> dict | None:
         model = (mon.get("model") or "").upper()
         return {"title": f"{(mon.get('brand') or '').upper()} SMART METER".strip(),
                 "lines": [model.replace("SMART METER", "").strip() or "en paralelo", "en paralelo en el tablero principal", f"{n_ct} TC (POR VERIFICAR TAMAÑO)"],
-                "ct_label": f"{n_ct} TC", "comm": "Modbus RTU al Fronius"}
+                "ct_label": f"{n_ct} TC", "comm": "Modbus RTU (cat6e) al Fronius"}
     m = eq.get("energy_meter")
     if not m:
         return None
@@ -393,7 +393,7 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
     if note:
         out.append(note)
     add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería).")
-    add("warn", "El sub-panel de cargas críticas y sus breakers (Q2, Q4) no están en la cotización: quedan en la lista de materiales como «por definir».")
+    add("info", "El sub-panel de cargas críticas lo pone el propietario o constructor y no va en la lista; en la lista están los breakers Q1, Q2 y Q3 (Q4 y los circuitos del sub-panel quedan a su cargo).")
     if answers.get("export") == "grid_zero":
         add("info", "Grid Zero requiere el UTP Fronius ↔ Ekrano (incluido en la lista de materiales).")
     add("info", "Calibres y breakers salen del dimensionamiento de la pestaña Técnico con los largos por defecto; ajusta los largos de obra antes de emitir el plano.")
@@ -468,6 +468,6 @@ def warnings_off_grid(project: dict, eq: dict, wiring: dict, answers: dict, stri
         out.append({"level": "info", "text": "Sistema aislado: sin entrada AC (red o generador) en el dibujo."})
     if eq.get("energy_meter"):
         out.append({"level": "info", "text": "El medidor VM va en paralelo en el tablero principal; si el sistema no tiene tablero principal en el dibujo, se anota en el sub-panel de cargas críticas."})
-    out.append({"level": "warn", "text": "El sub-panel de cargas críticas y sus breakers (Q2, Q4) no están en la cotización: quedan en la lista de materiales como «por definir»."})
+    out.append({"level": "info", "text": "El sub-panel de cargas críticas lo pone el propietario o constructor y no va en la lista; en la lista están los breakers Q1 y Q2 (Q4 y los circuitos del sub-panel quedan a su cargo)."})
     out.append({"level": "info", "text": "Calibres y breakers salen del dimensionamiento de la pestaña Técnico con los largos por defecto; ajusta los largos de obra antes de emitir el plano."})
     return out

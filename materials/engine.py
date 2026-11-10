@@ -34,6 +34,10 @@ SPARE_PCT = 5            # spare mounting hardware
 FEET_PER_SILICONE = 20   # one tube of roof sealant per this many feet (L brackets)
 EMT_STUBS_PER_INVERTER = 4   # short 1" EMT pieces (about 50 cm each) joining the wire duct to each inverter
 EMT_TUBES_PER_INVERTER = 1   # linear rule from his purchase: one 3 m tube per inverter (2 inverters -> 2 tubes)
+GZ_RUN_FALLBACK_M = 10.0     # Grid Zero: when the wiring lengths are not available (same as the wiring default)
+GZ_LINK_FALLBACK_M = 2.0
+CHINT_STRINGS = 2            # 2-pole string breakers that fit in one Chint DC 5-space box
+GX_BREAKER_A = 16            # smallest stocked DC breaker, for the Ekrano/Cerbo supply
 MONITOR_CIRCUIT_M = 15       # monitoring outlet circuit: metres of each #12 conductor
 LUG_STEP = 5             # lugs are requested in fives
 SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
@@ -231,7 +235,14 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
             n_ct = ct_count(eq["monitoring"], inv)
             if n_ct:
                 c.add(_BY_KEY[METER_CT_KEY], n_ct, comment="POR VERIFICAR TAMAÑO",
-                      note=f"{n_ct} transformadores de corriente del medidor Fronius: uno por fase ({'trifásico' if n_ct == 3 else 'monofásico'})")
+                      note=f"{n_ct} transformadores de corriente del medidor Fronius: uno por fase ({'trifásico' if n_ct == 3 else 'monofásico'}), "
+                           "justo después del medidor de consumo")
+                # Modbus (RS485) from the meter, where the CTs sit after the consumption meter, to the inverter: Ethernet cat6e as long as the
+                # inverter -> generation base run plus the hop between the two meter bases.
+                run = float((lengths or {}).get("ac_out_m") or GZ_RUN_FALLBACK_M) + float((lengths or {}).get("gz_link_m") or GZ_LINK_FALLBACK_M)
+                c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name="Cable de red Ethernet cat6e", unit="m", section="Generales",
+                      group="Monitoreo", sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"), where="Medidor Fronius → inversor",
+                      note=f"{run:g} m (Fronius → base de generación + base de generación → base de consumo) + {int(WASTE * 100)} % de desperdicio, de a {CABLE_STEP_M:g} m")
         return
     if inv:
         qty = int(eq.get("inverter_qty") or 1)
@@ -363,11 +374,17 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     c.add(_named("Riel strut perfil bajo", "Generales"), 1, note="uno por proyecto")
 
     strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
-    c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), 1, note="siempre va: aloja los breakers DC de los strings")
+    chint = max(1, math.ceil(strings / CHINT_STRINGS))       # a 5-space box holds two 2-pole breakers
+    c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), chint,
+          note="siempre va: aloja los breakers DC de los strings" + (f" ({CHINT_STRINGS} strings por caja, {strings} strings)" if chint > 1 else ""))
     c.add(None, 2, name="Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)", section="Generales",
           sibling=_named("Centro de carga Chint DC 5 espacios", "Generales"), note="2 por proyecto, como en la cotización de MAZ")
-    if strings * 2 > 5:
-        pending.append(f"El centro de carga Chint de 5 espacios solo aloja 2 breakers 2P de strings y el diseño tiene {strings}: agrega otro centro de carga.")
+    if chint > 1:
+        pending.append(f"Cada centro de carga Chint de 5 espacios aloja 2 breakers 2P de strings; el diseño tiene {strings} strings, así que van {chint} cajas.")
+    if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power from the Lynx bus through a small DC breaker (drawn as QDC)
+        c.add(_find("breaker_dc_din", amps=GX_BREAKER_A, poles=2), 1, name=f"Breaker DC para riel DIN {GX_BREAKER_A}A 2P", section="Paneles solares",
+              sibling=_find("breaker_dc_din", amps=32, poles=2), comment="ALIMENTACIÓN EKRANO/CERBO · POR CONFIRMAR AMPERAJE",
+              note="protege la alimentación DC del Ekrano/Cerbo desde la barra Lynx (el «QDC 2P» del unifilar); se usa el menor calibre comercial DC")
 
     counts = layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)
     feet = counts["feet"] if counts else 0

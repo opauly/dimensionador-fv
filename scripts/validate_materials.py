@@ -267,7 +267,7 @@ EQ_DC4 = {**EQ_DC, "n_strings": 4, "charge_controller_qty": 2}
 BLOB_DC4 = {**BLOB_DC, "equipment": EQ_DC4}
 dc4 = og_wiring.build_context(BLOB_DC4)
 _dc4l = {ln["name"]: ln for ln in engine.build_list(EQ_DC4, dc4, {}, None)["lines"] if ln["qty"]}
-check("DC-coupled list: 4 strings on 2 controllers -> 4 string breakers (not 2)", sum(ln["qty"] for n, ln in _dc4l.items() if n.startswith("Breaker DC para riel DIN")), 4)
+check("DC-coupled list: 4 strings on 2 controllers -> 4 string breakers (not 2)", _dc4l["Breaker DC para riel DIN 32A 2P"]["qty"], 4)
 check("DC-coupled list: the strings -> breakers and breakers -> controller runs both carry solar cable", sum(ln["qty"] for n, ln in _dc4l.items() if "SOLAR" in n) > 0, True)
 from unifilar.generate_unifilar import _slots  # noqa: E402
 check("up to 4 units are all drawn", _slots(4), [(0, 1), (1, 2), (2, 3), (3, 4)])
@@ -312,6 +312,60 @@ _build_dc(cfg_cc6, out_cc6)
 check("the 6-controller drawing renders", out_cc6.getvalue()[:4], b"%PDF")
 _, prob_few = CB.build_config(project, {**d_cc6, "eq": {**EQ_CC6, "n_strings": 5}}, {"lynx": "power_in"})
 check("more controllers than strings is refused", any("al menos un string por controlador" in b for b in prob_few["blockers"]), True)
+
+check("grid zero list: cat6e for the Smart Meter = (Fronius -> base 10 m + base -> base 12 m) x 1.1, in 5 m steps",
+      {ln["name"]: ln for ln in ME.build_list({**GZ_EQ, "monitoring": SM}, GZ_L, {}, None, "grid_zero")["lines"] if ln["qty"]}["Cable de red Ethernet cat6e"]["qty"],
+      ME._ceil_to((10 + 12) * (1 + ME.WASTE), ME.CABLE_STEP_M))
+_gdef = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
+check("grid zero list: without wiring lengths the cat6e still comes (10 + 2 m default)", _gdef["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to((10 + 2) * (1 + ME.WASTE), ME.CABLE_STEP_M))
+
+# ── Batch 10: the list and the drawing must agree (every breaker, device and count the drawing shows is on the list) ──
+import re  # noqa: E402
+from math import ceil  # noqa: E402
+
+
+def _amps(text):
+    m = re.search(r"(\d+) A", text or "")
+    return int(m.group(1)) if m else None
+
+
+def _list(eq, ctx, kind=None):
+    return {ln["name"]: ln for ln in engine.build_list(eq, ctx, {}, None, kind)["lines"] if ln["qty"]}
+
+
+def _qty(lines, prefix):
+    return sum(ln["qty"] for n, ln in lines.items() if n.startswith(prefix))
+
+
+# AC-coupled hybrid
+_lh = _list({**EQ, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, CTX)
+_ch, _ = CB.build_config(project, {"eq": {**EQ, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, "wiring": CTX, "blob": BLOB}, ans)
+check("hybrid AC: Q1, Q2 and Q3 breakers of the drawing are on the list",
+      [f"Breaker AC para riel DIN {_amps(x)}A 2P" in _lh for x in (_ch["multis"]["ac_in_breaker"], _ch["subpanel"]["q2"], _ch["fronius"]["ac_breaker"])], [True, True, True])
+check("hybrid AC: string breakers of the drawing = list", (_qty(_lh, f"Breaker DC para riel DIN {_amps(_ch['pv']['string_breaker'])}A"), _ch["pv"]["strings"]), (_ch["pv"]["strings"], _ch["pv"]["strings"]))
+check("hybrid AC: batteries, Multis and SPD of the drawing are on the list", (_lh["Batería Pylontech Fidus"]["qty"], _lh["Inversor Multiplus 5000 120V"]["qty"], "Supresor de Picos SDSA 1175" in _lh), (_ch["battery"]["count"], 2, True))
+check("hybrid AC: one Mega fuse per battery plus one per Multi", _qty(_lh, "Fusible Mega"), _ch["battery"]["count"] + 2)
+check("hybrid AC: the Ekrano supply breaker (QDC) is on the list, flagged to confirm", (_qty(_lh, "Breaker DC para riel DIN 16A"), _lh["Breaker DC para riel DIN 16A 2P"]["comment"]), (1, "ALIMENTACIÓN EKRANO/CERBO · POR CONFIRMAR AMPERAJE"))
+check("hybrid AC: the meter in the drawing is on the list with its CTs", ("Medidor VM-3P75CT" in _lh, _lh["Transformador de Corriente 100A:333mV"]["qty"]), (True, 2))
+# DC-coupled
+_ld = _list({**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, dc_ctx)
+check("DC-coupled: string breakers, controllers, Multis, batteries of the drawing = list",
+      (_qty(_ld, "Breaker DC para riel DIN 32A"), _ld["Controlador de carga 250/100"]["qty"], _ld["Inversor Multiplus 5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
+      (cfg_dc["pv"]["strings"], cfg_dc["controllers"]["count"], cfg_dc["multis"]["qty"], cfg_dc["battery"]["count"]))
+check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Lynx Power In"]["qty"]), (ceil((4 + 2 + 1) / 4),) * 2)
+check("DC-coupled: AC breakers of the drawing are on the list",
+      [f"Breaker AC para riel DIN {_amps(x)}A 2P" in _ld for x in ((cfg_dc["grid_in"] or {}).get("breaker"), cfg_dc["subpanel"]["q2"]) if x], [True, True])
+# Grid Zero
+_lg = _list({**GZ_EQ, "monitoring": SM}, GZ_L, "grid_zero")
+_cgz, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": GZ_L, "blob": GZ_BLOB}, {})
+check("grid zero: generation-base breaker, string breakers and SPD of the drawing are on the list",
+      (f"Breaker {_amps(_cgz['base']['breaker'])}A compatible con base para medidor" in _lg, _qty(_lg, "Breaker DC para riel DIN 32A"), "Supresor de Picos SDSA 1175" in _lg), (True, _cgz["pv"]["strings"], True))
+check("grid zero: the meter and its CTs in the drawing are on the list (2 TC)", ("Fronius Smart Meter WR 100-600 V-3" in _lg, _lg["Transformador de Corriente 100A:333mV"]["qty"], _cgz["meter"]["ct_label"]), (True, 2, "2 TC"))
+check("grid zero: no Ekrano supply breaker (no GX)", _qty(_lg, "Breaker DC para riel DIN 16A"), 0)
+check("grid zero: the link cable of the drawing is on the list", all(f"Cable {_g}" for _g in _cgz["base"]["link_conductors"]) and any("Base de generación → base de consumo" in w for ln in _lg.values() for w in ln.get("wheres") or []), True)
+# Chint boxes follow the strings (a 5-space box holds two 2-pole breakers)
+check("Chint DC boxes: 2 strings -> 1, 3 -> 2, 12 -> 6",
+      [_list({**EQ, "n_strings": n}, {"ready": False, "branches": [], "coupling": {"strings": n}}).get("Centro de carga Chint DC 5 espacios", {}).get("qty") for n in (2, 3, 12)], [1, 2, 6])
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -62,7 +62,7 @@ DEFAULT_LENGTHS = {
     "ac_out_m": 10.0,    # inverter -> AC panel
     "ac_in_m": 10.0,     # grid -> inverter AC input
     "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
-    "gz_link_m": 3.0,    # Grid Zero: generation meter base -> existing consumption meter base
+    "gz_link_m": 2.0,    # Grid Zero: generation meter base -> existing consumption meter base
 }
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",

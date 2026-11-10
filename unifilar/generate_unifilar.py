@@ -406,11 +406,16 @@ def _pv_array(c, h, PV, rows=None):
     return ys
 
 
-def _dc_box(c, h, PV, ys, wire_out=None, title='CENTRO DE CARGA DC', sub='(Chint 5 espacios)'):
+def _chint_sub(n_strings):
+    boxes = max(1, -(-n_strings // 2))
+    return '(Chint 5 espacios)' if boxes == 1 else f'(Chint 5 espacios × {boxes})'
+
+
+def _dc_box(c, h, PV, ys, wire_out=None, title='CENTRO DE CARGA DC', sub=None):
     """Centro de carga DC con un breaker por string; las líneas naranja cruzan la caja hasta x = 560."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     box(340, 590, 130, 120, white)
-    txt(405, 697, title, 7, 'Helvetica-Bold'); txt(405, 688, sub, 6, 'Helvetica', GRAY)
+    txt(405, 697, title, 7, 'Helvetica-Bold'); txt(405, 688, sub or _chint_sub(PV['strings']), 6, 'Helvetica', GRAY)
     for i, yc in enumerate(ys):
         seg([(254, yc), (560, yc)], ORANGE, 1.6)
     for i, yc in enumerate(ys):
@@ -432,7 +437,7 @@ def _dc_box_combined(c, h, PV, ys, n_cc, rows=None):
         per = -(-len(ys) // n_cc)
         groups = [list(range(g * per, min((g + 1) * per, len(ys)))) for g in range(n_cc) if g * per < len(ys)]
     box(340, 590, 130, 120, white)
-    txt(405, 697, 'CENTRO DE CARGA DC', 7, 'Helvetica-Bold'); txt(405, 688, '(Chint 5 espacios)', 6, 'Helvetica', GRAY)
+    txt(405, 697, 'CENTRO DE CARGA DC', 7, 'Helvetica-Bold'); txt(405, 688, _chint_sub(PV['strings']), 6, 'Helvetica', GRAY)
     outs = []
     for g, idx in enumerate(groups):
         if rows and nums[idx[0]] is None:

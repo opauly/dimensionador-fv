@@ -79,6 +79,10 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Fronius Smart Meter (Grid Zero):** es una opción de monitoreo del paso Equipos (modelo WR 100-600 V-3, migración 061). Lleva transformadores de corriente («donas»,
   Fronius Smart Meter CT V de 100/250/400 A, 333 mV), uno por fase: 2 en monofásico, 3 en trifásico (`calculations/meter_cts.py`). En la lista salen con el comentario
   «POR VERIFICAR TAMAÑO» y en la cotización como línea «Transformadores de corriente» (precio de `monitoring_devices.ct_cost_usd`, $0 hasta cargarlo).
+- **Cable del Fronius Smart Meter:** Ethernet cat6e (Modbus RS485 al inversor). Las donas van justo después del medidor de consumo, así que el cable cubre el tramo
+  «Fronius → base de generación» + «Base de generación → base de consumo» (largos de Técnico) + 10 % de desperdicio, de a 5 m.
+- **Centros de carga Chint DC:** una caja de 5 espacios aloja 2 breakers 2P de strings; van ⌈strings ÷ 2⌉ cajas (el unifilar lo rotula «Chint 5 espacios × n»).
+- **Breaker de alimentación del Ekrano/Cerbo** (el «QDC 2P» del unifilar): breaker DC 2P de 16 A, el menor calibre comercial, con comentario «POR CONFIRMAR AMPERAJE». No va en Grid Zero.
 - **Medidor VM en la cotización:** si se elige en Equipos, sale como línea «Medidor de energía» (precio del catálogo; $0 hasta que se cargue el precio en Admin → Monitoreo).
 - **Unifilar:** tres dibujos (`unifilar/generate_unifilar.py`): híbrido acoplado en AC, acople DC (off-grid o híbrido: strings → centro de carga DC → controladores MPPT →
   Lynx Power In → Multis → sub-panel) y Grid Zero (strings → centro de carga DC → Fronius → base de medidor de generación, interconectada con la base de medición de consumo → tablero principal). El medidor VM se dibuja en paralelo en
@@ -91,6 +95,11 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
 - **Mínimos:** un paquete de amarras; las gazas salen de la distancia de la tubería, sin repuesto.
+
+## Revisión lista ↔ unifilar
+
+`scripts/validate_materials.py` compara lo que dibuja el unifilar con la lista en los tres sistemas (híbrido AC, acople DC y Grid Zero): breakers Q1/Q2/Q3 y de strings,
+cantidades de baterías, Multis, controladores y barras Lynx, SPD, medidor con sus donas y el cable de interconexión de Grid Zero.
 
 ## Validación
 
