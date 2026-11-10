@@ -73,9 +73,9 @@ DEFAULT_CONDUIT_MATERIAL = {"bat_inv": "none", "cc_bat": "none"}
 CONDUIT_MATERIALS = ("PVC", "EMT", "none")
 
 WHERE = {
-    "pv_strings": "Strings FV", "pv_cc": "Paneles → controlador", "pv_inv_ac": "Fronius → sub-panel",
+    "pv_strings": "Strings FV", "pv_cc": "Breakers CC → controlador", "pv_inv_ac": "Fronius → sub-panel",
     "cc_bat": "Controlador → baterías", "bat_inv": "Baterías → inversores", "ac_out": "AC Out", "ac_in": "AC In",
-    "pv_dc_inv": "Breakers CC → Fronius", "gz_ac": "Fronius → base de medidor",
+    "pv_dc_inv": "Breakers CC → Fronius", "gz_ac": "Fronius → base de generación",
 }
 
 # Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
@@ -190,7 +190,7 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
     """Grid Zero only: meter base with main switch, the breaker that feeds the grid from the inverter
     (125 % of the inverter's maximum output current, next standard size) and the padlock."""
     inv = eq.get("inverter") or {}
-    c.add(_BY_KEY[METER_BASE_KEY], 1, note="base de medidor con interruptor principal: solo Grid Zero")
+    c.add(_BY_KEY[METER_BASE_KEY], 1, note="base de medidor de generación con interruptor principal: solo Grid Zero")
     out_a = float(inv.get("ac_output_current_a") or 0)
     sizes = list(T.OCPD_SIZES_A)
     if out_a > 0:
@@ -208,7 +208,7 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
     row = _BY_KEY[METER_BREAKER_KEY] if amps == 30 else None
     c.add(row, 1, name=f"Breaker {amps}A compatible con base para medidor", section="Generales", group="Interconexión",
           sibling=_BY_KEY[METER_BREAKER_KEY], comment=comment, note=why)
-    c.add(_BY_KEY[PADLOCK_KEY], 1, note="candado para la base de medidor")
+    c.add(_BY_KEY[PADLOCK_KEY], 1, note="candado para la base de medidor de generación")
 
 
 def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = None, grid_zero: bool = False) -> None:

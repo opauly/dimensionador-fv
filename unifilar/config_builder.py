@@ -73,7 +73,7 @@ def _model(item: dict) -> str:
 KIND_TEXT = {
     "hybrid_ac": "Sistema híbrido acoplado en AC: Fronius en el AC-OUT de dos MultiPlus-II en split-phase, baterías en Lynx Power In y Ekrano GX.",
     "off_grid": "Sistema acoplado en DC (aislado o híbrido): strings, controladores MPPT, baterías en Lynx Power In, Multis y sub-panel de cargas críticas.",
-    "grid_zero": "Sistema Grid Zero: strings, centro de carga DC, inversor Fronius, base de medidor con su breaker y tablero principal; sin baterías ni equipo Victron.",
+    "grid_zero": "Sistema Grid Zero: strings, centro de carga DC, inversor Fronius, base de medidor de generación con su breaker (interconectada con la base de medición de consumo) y tablero principal; sin baterías ni equipo Victron.",
 }
 
 
@@ -103,16 +103,16 @@ def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[st
         return out
     if kind == "off_grid":
         inv, qty = eq.get("inverter") or {}, int(eq.get("inverter_qty") or 1)
-        if qty not in (1, 2):
-            out.append(f"El dibujo admite 1 o 2 inversores Victron; este diseño tiene {qty}.")
+        if not 1 <= qty <= 8:
+            out.append(f"El dibujo admite de 1 a 8 inversores Victron; este diseño tiene {qty}.")
         n_str, n_cc = int(eq.get("n_strings") or 0), int(eq.get("charge_controller_qty") or 1)
         if not 1 <= n_str <= 4:
             out.append(f"El dibujo admite de 1 a 4 strings; el diseño tiene {n_str}.")
         if not 1 <= n_cc <= 3:
             out.append(f"El dibujo admite de 1 a 3 controladores de carga; el diseño tiene {n_cc}.")
         n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
-        if not 1 <= n_bat <= 6:
-            out.append(f"El dibujo admite 1 a 6 baterías; el diseño tiene {n_bat}.")
+        if not 1 <= n_bat <= 24:
+            out.append(f"El dibujo admite de 1 a 24 baterías; el diseño tiene {n_bat}.")
         if answers.get("lynx") == "power_in_distributor":
             out.append("El dibujo de acople DC solo cubre Lynx Power In (sin Distributor).")
         if not eq.get("monitoring"):
@@ -130,8 +130,8 @@ def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[st
         out.append(f"El dibujo admite 1 o 2 strings (un MPPT cada uno); el diseño tiene {cpl.get('strings')}.")
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     dist = answers.get("lynx") == "power_in_distributor"
-    if not 1 <= n_bat <= (4 if dist else 6):
-        out.append(f"El dibujo admite 1 a {4 if dist else 6} baterías{' con Distributor' if dist else ''}; el diseño tiene {n_bat}.")
+    if not 1 <= n_bat <= (4 if dist else 24):
+        out.append(f"El dibujo admite 1 a {4 if dist else 24} baterías{' con Distributor' if dist else ''}; el diseño tiene {n_bat}.")
     if not eq.get("monitoring"):
         out.append("El dibujo incluye un Ekrano GX; el diseño no tiene equipo de monitoreo.")
     return out
@@ -206,6 +206,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
         "battery": {
             "count": n_bat, "label": _model(bat), "short": bat.get("model") or "Batería", "kwh_each": float(bat.get("capacity_kwh") or 0),
             "can_master": "pylontech" in (bat.get("brand") or "").lower(), "lynx": answers["lynx"],
+            "lynx_bars": 1 if answers["lynx"] == "power_in_distributor" else max(1, -(-(n_bat + 2) // 4)),
             "cables_note": (["Cables batería a Power In (+ / -):", "juego de cables de la batería"] if "pylontech" in (bat.get("brand") or "").lower()
                             else ["Cables batería a Power In (+ / -):", "por definir"]),
         },
@@ -286,7 +287,8 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
     eq, wiring = d["eq"], d["wiring"]
     branches = wiring["branches"]
     panel, inv, bat, mon, cc = eq["panel"], eq["inverter"], eq["battery"], eq["monitoring"], eq.get("charge_controller") or {}
-    pv_cc, cc_bat, bat_inv = _branch(branches, "pv_cc"), _branch(branches, "cc_bat"), _branch(branches, "bat_inv")
+    pv_cc, cc_bat, bat_inv = _branch(branches, "pv_strings"), _branch(branches, "cc_bat"), _branch(branches, "bat_inv")
+    dc_cc = _branch(branches, "pv_cc") or pv_cc
     ac_in, ac_out = _branch(branches, "ac_in"), _branch(branches, "ac_out")
     qty = int(eq.get("inverter_qty") or 1)
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
@@ -294,7 +296,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
 
     def hots(b):
         g, e = b["ugc"], b.get("egc") or b["ugc"]
-        live = ["L1 %s negro" % _g(g), "L2 %s rojo" % _g(g)] if (leg_240 or qty == 2) else ["L1 %s negro" % _g(g)]
+        live = ["L1 %s negro" % _g(g), "L2 %s rojo" % _g(g)] if (leg_240 or qty >= 2) else ["L1 %s negro" % _g(g)]
         return live + [f"N {_g(g)} blanco", f"T {_g(e)} verde"]
 
     fam = "QUATTRO" if "quattro" in (inv.get("model") or "").lower() else "MULTIPLUS-II"
@@ -305,7 +307,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
             "strings": int(eq["n_strings"]), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": (eq.get("array") or {}).get("area_m2"),
             "string_breaker": f"{string_breaker_a or pv_cc['ocpd_a']} A 2P DC", "dc_wire": f"{_g(pv_cc['ugc'])} SOLAR",
-            "ground_wire": f"T {_g(_egc(pv_cc) or pv_cc['ugc'])} verde",
+            "dc_out_wire": f"{_g(dc_cc['ugc'])} SOLAR", "ground_wire": f"T {_g(_egc(pv_cc) or pv_cc['ugc'])} verde",
         },
         "controllers": {
             "count": int(eq.get("charge_controller_qty") or 1), "label": _model(cc),
@@ -320,12 +322,13 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "battery": {
             "count": n_bat, "label": _model(bat), "short": bat.get("model") or "Batería", "kwh_each": float(bat.get("capacity_kwh") or 0),
             "can_master": "pylontech" in (bat.get("brand") or "").lower(), "lynx": "power_in",
+            "lynx_bars": max(1, -(-(n_bat + qty + int(eq.get("charge_controller_qty") or 1)) // 4)),
             "cables_note": (["Cables batería a Power In (+ / -):", "juego de cables de la batería"] if "pylontech" in (bat.get("brand") or "").lower()
                             else ["Cables batería a Power In (+ / -):", "por definir"]),
         },
         "gx": {"label": (mon.get("model") or "GX").upper()},
-        "grid_in": ({"label": "RED ELÉCTRICA", "breaker": f"{'2P' if (leg_240 or qty == 2) else '1P'} {ac_in['ocpd_a']} A", "conductors": hots(ac_in)} if ac_in else None),
-        "subpanel": {"q2": f"{'2P' if (leg_240 or qty == 2) else '1P'} {ac_out['ocpd_a']} A", "q4": answers["q4"], "spd": _spd_label(answers),
+        "grid_in": ({"label": "RED ELÉCTRICA", "breaker": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_in['ocpd_a']} A", "conductors": hots(ac_in)} if ac_in else None),
+        "subpanel": {"q2": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_out['ocpd_a']} A", "q4": answers["q4"], "spd": _spd_label(answers),
                      "loads": [x for x in (answers["loads1"], answers["loads2"]) if x]},
         "comms_notes": {
             "vebus": "VE.Bus (UTP RJ-45, en lista de materiales)",
@@ -377,6 +380,9 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
     for c in cpl["check"]["checks"]:
         if c["ok"] is False:
             add("warn", f"{c['label']}: {c['detail']}")
+    note = _abbreviated_note(eq)
+    if note:
+        out.append(note)
     add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería).")
     add("warn", "El sub-panel de cargas críticas y sus breakers (Q2, Q4) no están en la cotización: quedan en la lista de materiales como «por definir».")
     if answers.get("export") == "grid_zero":
@@ -408,20 +414,35 @@ def warnings_grid_zero(eq: dict, wiring: dict, string_a: int) -> list[dict]:
     out = _string_checks(panel, string_a, ch.get("voc_total"), "por string")
     ac = _branch(wiring["branches"], "gz_ac")
     if ac:
-        out.append({"level": "info", "text": f"Fronius → base de medidor: breaker 2P {ac['ocpd_a']} A sobre {_g(ac['ugc'])}"
+        out.append({"level": "info", "text": f"Fronius → base de medidor de generación: breaker 2P {ac['ocpd_a']} A sobre {_g(ac['ugc'])}"
                                              + (f" (máximo del fabricante {ac['max_ocpd_a']} A)." if ac.get("max_ocpd_a") else ".")})
-    out.append({"level": "info", "text": "La base de medidor con interruptor principal, el breaker y el candado están en la lista de materiales; "
-                                         "confirmar con la distribuidora si la conexión es en la base o en el tablero principal."})
+    out.append({"level": "info", "text": "La base de medidor de generación con interruptor principal, el breaker y el candado están en la lista de materiales. "
+                                         "Se dibuja interconectada con la base de medición de consumo existente; el cable de esa interconexión no está en la lista."})
     if _meter(eq, grid_zero=True):
         out.append({"level": "info", "text": "El medidor del Fronius va en paralelo en el tablero principal (se dibuja ahí)."})
     out.append({"level": "info", "text": "Calibres y breakers salen del dimensionamiento de la pestaña Técnico con los largos por defecto; ajusta los largos de obra antes de emitir el plano."})
     return out
 
 
+def _abbreviated_note(eq: dict, qty: int | None = None) -> dict | None:
+    n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
+    parts = []
+    if n_bat > 4:
+        parts.append(f"{n_bat} baterías (#1, #2, «…» y #{n_bat})")
+    if qty and qty > 3:
+        parts.append(f"{qty} inversores (MP#1, MP#2, «…» y MP#{qty})")
+    if not parts:
+        return None
+    return {"level": "info", "text": "Dibujo abreviado: " + " y ".join(parts) + ". El cableado de los equipos omitidos se repite igual que el de los dibujados."}
+
+
 def warnings_off_grid(project: dict, eq: dict, wiring: dict, answers: dict, string_a: int) -> list[dict]:
     panel, inv = eq["panel"], eq["inverter"]
     branches = wiring["branches"]
-    out = _string_checks(panel, string_a, None, "por controlador (strings combinados)")
+    out = _string_checks(panel, string_a, None, "por string")
+    note = _abbreviated_note(eq, int(eq.get("inverter_qty") or 1))
+    if note:
+        out.append(note)
     bat_inv = _branch(branches, "bat_inv")
     if bat_inv:
         out.append({"level": "info", "text": f"DC de cada inversor: {bat_inv['current_a']:.0f} A, cable {_g(bat_inv['ugc'])} con fusible de {bat_inv['ocpd_a']} A. "

@@ -4,7 +4,7 @@ Hybrid one (`og_wiring`) and returned in the same shape, so the Técnico tab, th
 Three runs, as Oscar draws them:
   1. PV strings -> DC breakers       (DC, one run per string; #10 solar-cable floor, 1 in conduit)
   2. DC breakers -> inverter          (DC, one run per string; protected by the string breaker, so no breaker of its own)
-  3. Inverter -> meter base           (AC 240 V split-phase, L1 + L2 + ground; breaker = 125 % of the inverter's maximum output
+  3. Inverter -> generation meter base           (AC 240 V split-phase, L1 + L2 + ground; breaker = 125 % of the inverter's maximum output
                                        current, limited to the manufacturer's maximum; it sits in the meter base)
 """
 from __future__ import annotations
@@ -19,12 +19,12 @@ from webapp.wizard_steps.og_wiring import _f, _size
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",
     "dc_inv_m": "Breakers CC → Fronius",
-    "ac_out_m": "Fronius → base de medidor",
+    "ac_out_m": "Fronius → base de generación",
 }
 BRANCH_KEYS = {
     "Paneles → breakers CC (strings)": "pv_strings",
     "Breakers CC → inversor (strings)": "pv_dc_inv",
-    "Inversor → base de medidor": "gz_ac",
+    "Inversor → base de medidor de generación": "gz_ac",
 }
 
 
@@ -75,10 +75,10 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
 
     out_a = C.pv_inverter_ac_current_a(inverter)
     ac = _size(
-        "Inversor → base de medidor", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+        "Inversor → base de medidor de generación", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
         v_ref=C.PV_INVERTER_AC_V, length_m=L["ac_out_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
         note=f"Salida del inversor: corriente máxima {out_a:.1f} A × 1.25 (NEC 705 / 690.8). L1 + L2 + tierra, sin neutro. "
-             "El breaker va en la base de medidor (interruptor principal).",
+             "El breaker va en la base de medidor de generación (interruptor principal).",
     )
     ds = fronius_limits(inverter.get("model")) or {}
     max_ocpd = _f(inverter, "max_ocpd_a") or ds.get("ocpd_a")

@@ -260,5 +260,31 @@ out_gz = io.BytesIO()
 _build_dc(cfg_gz, out_gz)
 check("grid zero PDF renders", out_gz.getvalue()[:4], b"%PDF")
 
+# ── Batch 8: one breaker per string in DC-coupled systems, abbreviated drawings for many units ─────────────────
+_dcb = {b["key"]: b for b in dc_ctx["branches"]}
+check("DC-coupled wiring: one breaker per string (2 runs), the run to the controller has none", (_dcb["pv_strings"]["qty"], _dcb["pv_strings"]["ocpd_a"] is not None, _dcb["pv_cc"]["ocpd_a"]), (2, True, None))
+EQ_DC4 = {**EQ_DC, "n_strings": 4, "charge_controller_qty": 2}
+BLOB_DC4 = {**BLOB_DC, "equipment": EQ_DC4}
+dc4 = og_wiring.build_context(BLOB_DC4)
+_dc4l = {ln["name"]: ln for ln in engine.build_list(EQ_DC4, dc4, {}, None)["lines"] if ln["qty"]}
+check("DC-coupled list: 4 strings on 2 controllers -> 4 string breakers (not 2)", sum(ln["qty"] for n, ln in _dc4l.items() if n.startswith("Breaker DC para riel DIN")), 4)
+check("DC-coupled list: the strings -> breakers and breakers -> controller runs both carry solar cable", sum(ln["qty"] for n, ln in _dc4l.items() if "SOLAR" in n) > 0, True)
+from unifilar.generate_unifilar import _slots  # noqa: E402
+check("up to 4 units are all drawn", _slots(4), [(0, 1), (1, 2), (2, 3), (3, 4)])
+check("8 units: #1, #2, ellipsis, #8", _slots(8), [(0, 1), (1, 2), (2, None), (3, 8)])
+EQ_BIG = {**EQ_DC4, "inverter_qty": 4, "battery_bank": {"battery_count": 8}}
+d_big = {"eq": EQ_BIG, "wiring": og_wiring.build_context({**BLOB_DC4, "equipment": EQ_BIG}), "blob": {**BLOB_DC4, "equipment": EQ_BIG}}
+cfg_big, prob_big = CB.build_config(project, d_big, {"lynx": "power_in"})
+check("4 inverters + 8 batteries + 4 strings on 2 controllers are drawable", (prob_big["blockers"], cfg_big["multis"]["qty"], cfg_big["battery"]["count"]), ([], 4, 8))
+check("Lynx bars follow the input count (8 + 4 + 2 = 14 -> 4)", cfg_big["battery"]["lynx_bars"], 4)
+check("abbreviated-drawing note is shown", any("abreviado" in w["text"] for w in prob_big["warnings"]), True)
+out_big = io.BytesIO()
+_build_dc(cfg_big, out_big)
+check("the abbreviated drawing renders", out_big.getvalue()[:4], b"%PDF")
+cfg_h8 = {**cfg_h, "battery": {**cfg_h["battery"], "count": 8}}
+out_h8 = io.BytesIO()
+build(cfg_h8, out_h8)
+check("AC-coupled hybrid with 8 batteries renders abbreviated", out_h8.getvalue()[:4], b"%PDF")
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -70,15 +70,20 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Techo:** MC4 y la tierra se amarra a los rieles con su accesorio de grounding; de ahí directo a los breakers DC, sin cajas ni empalmes.
 - **Grid Zero:** sin Victron, baterías ni Lynx. Lleva paneles, montaje, inversor de strings, centro de carga DC, SPD, riel DIN/strut, silicón y la
   interconexión: base de medidor con interruptor principal (1), breaker compatible (125 % de la corriente máxima del inversor, tamaño comercial
-  siguiente; casi siempre el Fronius) y candado (1). El cableado de Grid Zero todavía no se dimensiona.
+  siguiente; casi siempre el Fronius) y candado (1). Esa base es la de **generación**: se interconecta con la base de medición de consumo
+  existente de la distribuidora (se dibuja; el cable de esa interconexión todavía no está en la lista).
 - **Cableado Grid Zero (NEC):** tres tramos: strings → breakers CC (solar #10 mín., tubo 1"), breakers CC → Fronius (mismo conductor, sin breaker propio:
-  lo protege el del string) y Fronius → base de medidor (125 % de la corriente máxima del inversor, tope del fabricante; el breaker va en la base).
-  Largos editables en Técnico («Paneles → breakers CC», «Breakers CC → Fronius», «Fronius → base de medidor»). Código: `webapp/wizard_steps/gz_wiring.py`.
+  lo protege el del string) y Fronius → base de medidor de generación (125 % de la corriente máxima del inversor, tope del fabricante; el breaker va en la base).
+  Largos editables en Técnico («Paneles → breakers CC», «Breakers CC → Fronius», «Fronius → base de generación»). Código: `webapp/wizard_steps/gz_wiring.py`.
 - **Medidor VM en la cotización:** si se elige en Equipos, sale como línea «Medidor de energía» (precio del catálogo; $0 hasta que se cargue el precio en Admin → Monitoreo).
 - **Unifilar:** tres dibujos (`unifilar/generate_unifilar.py`): híbrido acoplado en AC, acople DC (off-grid o híbrido: strings → centro de carga DC → controladores MPPT →
-  Lynx Power In → Multis → sub-panel) y Grid Zero (strings → centro de carga DC → Fronius → base de medidor → tablero principal). El medidor VM se dibuja en paralelo en
+  Lynx Power In → Multis → sub-panel) y Grid Zero (strings → centro de carga DC → Fronius → base de medidor de generación, interconectada con la base de medición de consumo → tablero principal). El medidor VM se dibuja en paralelo en
   el tablero principal con sus transformadores de corriente; si el dibujo no tiene tablero principal (sistema aislado), se anota en el sub-panel de cargas críticas.
-  El dibujo DC cubre 1-2 inversores, 1-3 controladores, 1-4 strings, 1-6 baterías y solo Lynx Power In (sin Distributor).
+  El dibujo DC cubre 1-8 inversores, 1-3 controladores, 1-4 strings, 1-24 baterías y solo Lynx Power In (sin Distributor).
+- **Dibujo abreviado:** con más de 4 baterías o más de 3 inversores se dibujan #1, #2, «· · ·» y el último; el cableado del
+  resto se repite igual. El título del Lynx dice cuántas barras en paralelo (⌈entradas ÷ 4⌉).
+- **DC acoplado, un breaker por string:** «Paneles → breakers CC» (uno por string, con su breaker) y «Breakers CC → controlador» (strings combinados en una barra,
+  sin breaker propio). Largo del segundo tramo editable en Técnico.
 - **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
 - **Mínimos:** un paquete de amarras; las gazas salen de la distancia de la tubería, sin repuesto.

@@ -64,7 +64,8 @@ DEFAULT_LENGTHS = {
     "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
 }
 LENGTH_LABELS = {
-    "pv_cc_m": "Paneles → controlador",
+    "pv_cc_m": "Paneles → breakers CC",
+    "dc_inv_m": "Breakers CC → controlador",
     "cc_bat_m": "Controlador → baterías",
     "bat_inv_m": "Baterías → inversor",
     "ac_out_m": "Inversor → tablero AC",
@@ -86,7 +87,8 @@ LENGTH_LABELS_AC = {
 # Stable keys for the branches, so the materials rules and the unifilar can find a run without
 # matching on its (Spanish, editable) label.
 BRANCH_KEYS = {
-    "Paneles → controlador de carga": "pv_cc",
+    "Paneles → breakers CC (strings)": "pv_strings",
+    "Breakers CC → controlador de carga": "pv_cc",
     "Controlador de carga → baterías": "cc_bat",
     "Paneles → inversor FV (strings)": "pv_strings",
     "Inversor FV → sub-panel de cargas críticas": "pv_inv_ac",
@@ -289,14 +291,28 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     else:
         branches = [
             _size(
-                "Paneles → controlador de carga", kind="dc", qty=cc_qty,
-                current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                "Paneles → breakers CC (strings)", kind="dc", qty=n_strings,
+                current_a=isc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
+                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
+                min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
+                note=f"Un tendido por string ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el centro de carga DC. "
+                     f"Corriente = Isc × 1.25 × 1.25 (NEC 690.8); breaker de la serie comercial CC.",
+            ),
+            _size(
+                "Breakers CC → controlador de carga", kind="dc", qty=cc_qty,
+                current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                v_ref=array_v, length_m=L["dc_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
                 protection="breaker", shared_conduit=True, min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
-                note=f"{strings_per_cc} string(s) de {n_series} módulos por controlador, combinados en una caja (un par de conductores). "
-                     f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8).",
+                note=f"{strings_per_cc} string(s) por controlador, ya protegidos cada uno por su breaker; se combinan en una barra y entran "
+                     f"al MPPT con un par de conductores. Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8). No lleva breaker propio.",
             ),
         ]
+        branches[1]["ocpd_a"] = None
+        max_series = _f(panel, "max_series_fuse_a")
+        if max_series:
+            branches[0]["max_ocpd_a"] = int(max_series)
+            branches[0]["notes"].append(f"Datasheet del módulo: protección máxima en serie {int(max_series)} A (aplica también al breaker).")
 
         # Controller output: the lower of its rating and what the array can push at battery voltage.
         pv_power_cc = array_v * imp * strings_per_cc
