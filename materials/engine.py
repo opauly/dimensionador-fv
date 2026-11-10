@@ -30,6 +30,7 @@ CABLE_STEP_M = 5         # cable is bought by the metre; round the request up to
 SOLAR_ROLL_M = 100       # PV cable comes in 100 m rolls
 TUBE_M = 3.0             # standard conduit length
 SPARE_PCT = 5            # spare mounting hardware
+FEET_PER_SILICONE = 20   # one tube of roof sealant per this many feet (L brackets)
 LUG_STEP = 5             # lugs are requested in fives
 SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
 PANEL_GAP_M = 0.02       # gap between modules in a row
@@ -205,6 +206,9 @@ def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
             c.add(_named("Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
         elif item.startswith("Pernos"):
             c.add(_named("Roscas para Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
+        elif item.startswith("Fusible MEGA de batería") and r.get("amps"):
+            c.add(_find("fuse_mega", amps=r["amps"]), r["qty"], name=f"Fusible Mega {r['amps']}A", section="Victron Energy",
+                  sibling=_find("fuse_mega", amps=225), note=r["note"])
         elif item.startswith("Fusible MEGA de batería"):
             c.add(None, r["qty"], name="Fusible Mega de batería (calibre por definir)", section="Victron Energy",
                   sibling=_find("fuse_mega", amps=225), note=r["note"], comment="calibre por definir")
@@ -257,6 +261,22 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
     c.add(_named("Tierras para rieles", "Paneles solares"), counts["rails"], note="una tierra por riel")
     if counts["splices"]:
         c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
+
+
+def _project_kit(c: Collector, eq: dict, layout: dict) -> None:
+    """Items every project carries whatever its size (Oscar's rules): one enclosure, one surge
+    protector, roof sealant. Roof screws are not listed: the L brackets already come with theirs.
+    The critical-loads sub-panel is supplied by the owner or builder, so it is not listed either."""
+    if not eq.get("panel"):
+        return
+    c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
+          note="un gabinete para los breakers DC y AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
+    c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
+    counts = layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)
+    feet = counts["feet"] if counts else 0
+    c.add(_named("Silicon 3M (especificar color según color de las láminas del techo)", "Generales"),
+          max(1, math.ceil(feet / FEET_PER_SILICONE)),
+          note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1); cantidad por confirmar")
 
 
 def _pv_connectors(c: Collector, eq: dict, coupling: dict) -> None:
@@ -427,6 +447,7 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     _equipment(c, eq, coupling)
     _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)
+    _project_kit(c, eq, layout)
     _pv_connectors(c, eq, coupling)
     if wiring_ctx.get("ready"):
         _cables(c, branches)
@@ -435,8 +456,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     else:
         pending.append("El cableado todavía no se puede dimensionar (" + (wiring_ctx.get("reason") or "faltan datos del diseño")
                        + "): cables, protecciones y tubería quedan fuera.")
-    pending.append("Por definir en cada proyecto (no salen del diseño): gabinetes y cajas, centro de carga del sub-panel, supresor de picos, "
-                   "riel DIN y strut, tornillería de techo, tubería flexible. Agrégalos con «Agregar línea».")
+    pending.append("Por definir en cada proyecto (no salen del diseño): cajas y registros, riel DIN y strut, tubería flexible. "
+                   "Agrégalos con «Agregar línea». El sub-panel de cargas críticas lo pone el propietario o constructor.")
 
     lines = apply_edits(list(c.lines.values()), mat)
     return {"lines": lines, "pending": pending, "layout": layout, "options": opts,

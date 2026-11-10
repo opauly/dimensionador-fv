@@ -86,12 +86,13 @@ check("Fronius is a new line, not in the master list", (q("Inversor Fronius Prim
 check("string breaker follows the design: 25 A DC, 2 (new line)", (q("Breaker DC para riel DIN 25A 2P"), by["Breaker DC para riel DIN 25A 2P"]["in_master"]), (2, False))
 check("AC in: two 120 V Multis share one 2-pole 90 A breaker", q("Breaker AC para riel DIN 90A 2P"), 1)
 check("AC out 70 A 2P x1, Fronius 60 A 2P x1", (q("Breaker AC para riel DIN 70A 2P"), q("Breaker AC para riel DIN 60A 2P")), (1, 1))
-check("battery-to-Multi fuses: Mega 200 A x2 (Lynx series, new line) + battery fuses by definir x4",
-      (q("Fusible Mega 200A"), q("Fusible Mega de batería (calibre por definir)")), (2, 4))
-check("one ground per raceway: #8 green 49.5 m -> 50", q("Cable #8 AWG THHN, CU, color verde"), 50)
+check("battery-to-Multi fuses: Mega 125 A x2 (4000 W continuous / 0.96 / 51.2 V x 1.25 = 102 A) + battery fuses by definir x4",
+      (q("Fusible Mega 125A"), q("Fusible Mega de batería (calibre por definir)")), (2, 4))
+check("ground by breaker (T250.122), one per raceway: #8 green = AC out 10 m + AC in 10 m, +10 % -> 25", q("Cable #8 AWG THHN, CU, color verde"), 25)
+check("ground by breaker: #10 green = PV 15 m + Fronius 10 m (25 A and 60 A breakers), +10 % -> 30", q("Cable #10 AWG THHN, CU, color verde"), 30)
 check("#3 AWG is not in the master list -> new line", by["Cable #3 AWG THHN, CU, color negro"]["in_master"], False)
 check("#4 black THHN is a master line, 15 m", (by["Cable #4 AWG THHN, CU, color negro"]["in_master"], q("Cable #4 AWG THHN, CU, color negro")), (True, 15))
-check("heat-shrink for the DC lugs, 1 m minimum", q("Termoencogible para cable #3/0 rojo"), 1)
+check("heat-shrink for the DC lugs (#2 AWG), 1 m minimum", q("Termoencogible para cable #2 rojo"), 1)
 check("battery-side DC runs are not piped (no 1 1/4 in conduit from them)", any("Tuberia 1 1/4" in n and by[n]["comment"].startswith("Baterías") for n in by), False)
 check("PVC glue 1 when PVC is used", q("Pegamento para PVC"), 1)
 
@@ -129,9 +130,9 @@ check("both questions block the drawing until answered", (cfg, len(prob["blocker
 ans = {"export": "grid_zero", "lynx": "power_in"}
 cfg, prob = CB.build_config(project, d, ans)
 check("drawn from the sized design: string breaker / wire", (cfg["pv"]["string_breaker"], cfg["pv"]["dc_wire"]), ("25 A 2P DC", "#10 AWG SOLAR"))
-check("Q3 Fronius breaker and conductors", (cfg["fronius"]["ac_breaker"], cfg["fronius"]["ac_conductors"]), ("2P 60 A", ["L1 #6 AWG negro", "L2 #6 AWG rojo", "T #8 AWG verde"]))
+check("Q3 Fronius breaker and conductors", (cfg["fronius"]["ac_breaker"], cfg["fronius"]["ac_conductors"]), ("2P 60 A", ["L1 #6 AWG negro", "L2 #6 AWG rojo", "T #10 AWG verde"]))
 check("Q1 from the manual limit: 2P 90 A on #3 AWG", (cfg["multis"]["ac_in_breaker"], cfg["multis"]["ac_in_conductors"][0]), ("2P 90 A", "L1 #3 AWG negro"))
-check("DC to the Multis uses the sized cable", (cfg["multis"]["dc_pos"], cfg["multis"]["dc_neg"]), ("+ #3/0 AWG rojo", "- #3/0 AWG negro"))
+check("DC to the Multis uses the sized cable", (cfg["multis"]["dc_pos"], cfg["multis"]["dc_neg"]), ("+ #2 AWG rojo", "- #2 AWG negro"))
 check("layout 2 strings x 8, label and title", (cfg["pv"]["strings"], cfg["pv"]["modules_per_string"], cfg["project"]["name"]), (2, 8, "Proyecto María José Castro en Carrillo, Guanacaste"))
 cfg32, _ = CB.build_config(project, d, ans, string_breaker_a=32)
 check("her 32 A string breaker reaches the drawing", cfg32["pv"]["string_breaker"], "32 A 2P DC")
@@ -156,6 +157,15 @@ wiz = {"rows": 2, "orientation": "landscape"}
 check("wizard layout reaches the list", ME.build_list(EQ, CTX, {}, wiz)["layout"]["rows"], 2)
 check("project layout wins over the wizard's", ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 3}}}, wiz)["layout"]["rows"], 3)
 check("no layout anywhere leaves mounting pending", any("layout del techo" in x for x in ME.build_list(EQ, CTX, {}, None)["pending"]), True)
+
+# Batch-1 rules: one enclosure (size to confirm), one SPD, roof sealant by feet; no roof screws, no sub-panel.
+_res = ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 2}}}, None)
+_by = {ln["name"]: ln for ln in _res["lines"] if ln["qty"]}
+check("enclosure 50x40x20 x1 flagged to confirm", (_by["Gabinete metálico 50x40x20"]["qty"], _by["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
+check("one surge protector", _by["Supresor de Picos SDSA 1175"]["qty"], 1)
+check("sealant: 1 tube per 20 feet", _by["Silicon 3M (especificar color según color de las láminas del techo)"]["qty"], 3)
+check("no roof screws on the list", any("Tornillo de techo" in n for n in _by), False)
+check("no sub-panel board on the list", any("Tablero NEMA" in n for n in _by), False)
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
