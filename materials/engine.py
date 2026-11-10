@@ -27,12 +27,11 @@ from materials.catalog import CATALOG, SECTIONS
 
 WASTE = 0.10             # cut-offs and slack on cable and conduit
 CABLE_STEP_M = 5         # cable is bought by the metre; round the request up to 5 m
-SOLAR_ROLL_M = 100       # PV cable comes in 100 m rolls
 TUBE_M = 3.0             # standard conduit length
 SPARE_PCT = 5            # spare mounting hardware
 FEET_PER_SILICONE = 20   # one tube of roof sealant per this many feet (L brackets)
-EMT_STUBS_PER_INVERTER = 4   # short 1" EMT pieces joining the wire duct to each inverter (from the photo of his installs)
-EMT_STUB_LEN_M = 0.5
+EMT_STUBS_PER_INVERTER = 4   # short 1" EMT pieces (about 50 cm each) joining the wire duct to each inverter
+EMT_TUBES_PER_INVERTER = 1   # linear rule from his purchase: one 3 m tube per inverter (2 inverters -> 2 tubes)
 MONITOR_CIRCUIT_M = 15       # monitoring outlet circuit: metres of each #12 conductor
 LUG_STEP = 5             # lugs are requested in fives
 SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
@@ -279,6 +278,8 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
 
     strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
     c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), 1, note="siempre va: aloja los breakers DC de los strings")
+    c.add(None, 2, name="Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)", section="Generales",
+          sibling=_named("Centro de carga Chint DC 5 espacios", "Generales"), note="2 por proyecto, como en la cotización de MAZ")
     if strings * 2 > 5:
         pending.append(f"El centro de carga Chint de 5 espacios solo aloja 2 breakers 2P de strings y el diseño tiene {strings}: agrega otro centro de carga.")
 
@@ -286,17 +287,17 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     feet = counts["feet"] if counts else 0
     c.add(_named("Silicon 3M (especificar color según color de las láminas del techo)", "Generales"),
           max(1, math.ceil(feet / FEET_PER_SILICONE)),
-          note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1); cantidad por confirmar")
+          note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1)")
 
     c.add(_named("Ducto metálico cuadrado 4x4", "Generales"), 1, note="mínimo 1: lleva el cableado general de los inversores (el cable de batería va por fuera del tubo)")
     c.add(_named("Tapas para ducto metálico 4x4", "Generales"), 2, note="2 tapas finales por ducto (mínimo)")
     inv_qty = int(eq.get("inverter_qty") or 1) if eq.get("inverter") else 0
     stubs = inv_qty * EMT_STUBS_PER_INVERTER
     if stubs:
-        why = f"{stubs} tramos cortos de EMT 1\" del ducto a los inversores ({inv_qty} × {EMT_STUBS_PER_INVERTER}); cantidad por confirmar"
-        c.add(_find("conduit_tube", material="EMT", trade="1"), math.ceil(stubs * EMT_STUB_LEN_M / TUBE_M), where="Ducto → inversores",
-              note=f"{stubs} tramos de {EMT_STUB_LEN_M:g} m en tubos de {TUBE_M:g} m")
-        c.add(_find("conduit_press_connector", material="EMT", trade="1"), stubs, where="Ducto → inversores", note=why)
+        c.add(_find("conduit_tube", material="EMT", trade="1"), inv_qty * EMT_TUBES_PER_INVERTER, where="Ducto → inversores",
+              note=f"un tubo de {TUBE_M:g} m por inversor ({EMT_STUBS_PER_INVERTER} tramos de unos 50 cm del ducto a cada inversor)")
+        c.add(_find("conduit_press_connector", material="EMT", trade="1"), stubs, where="Ducto → inversores",
+              note=f"{EMT_STUBS_PER_INVERTER} tramos por inversor, un conector de presión por tramo")
 
     kit = "toma de monitoreo (Ekrano/router): siempre va"
     c.add(None, 1, name="Breaker 20A 1 polo CH (toma de monitoreo)", section="Generales", sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), note=kit)
@@ -366,9 +367,9 @@ def _cables(c: Collector, branches: list[dict]) -> None:
         m = t["m"] * (1 + WASTE)
         label = W.gauge_label(g)
         if kind == "cable_solar":
-            qty = _ceil_to(m, SOLAR_ROLL_M)
+            qty = _ceil_to(m, CABLE_STEP_M)
             row, name, section, group = _find(kind, gauge=g, color=color), f"Cable #{g} AWG - SOLAR {color}", "Paneles solares", None
-            note = f"{t['m']:g} m calculados + {int(WASTE * 100)} % de desperdicio, en rollos de {SOLAR_ROLL_M} m"
+            note = f"{t['m']:g} m calculados (distancia del techo al centro de carga DC) + {int(WASTE * 100)} % de desperdicio, pedido por metro en pasos de {CABLE_STEP_M} m"
         else:
             qty = _ceil_to(m, CABLE_STEP_M)
             row, name = _find(kind, gauge=g, color=color), f"Cable #{g} AWG THHN, CU, color {color}"

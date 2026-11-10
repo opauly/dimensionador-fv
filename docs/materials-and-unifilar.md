@@ -27,14 +27,14 @@ lista de compra. Todo es determinista; no hay LLM en ninguna cifra.
 
 ### Parámetros de las reglas (ajustables en `materials/engine.py`)
 
-Desperdicio 10 % en cable y tubo; cable redondeado a 5 m (cable solar en rollos de 100 m); tubos de 3 m; repuesto
+Desperdicio 10 % en cable y tubo; cable redondeado a 5 m (el cable solar también va por metro, según la distancia del techo al centro de carga DC); tubos de 3 m; repuesto
 de montaje 5 %; terminales de ojo de 5 en 5; termoencogible 8 cm por terminal (mínimo 1 m); separación de gazas 1.25 m
 (PVC) / 1.5 m (EMT); 2 curvas y 0 conduletas LB por canalización. Los conductores de una canalización compartida
 (strings FV, AC de los dos inversores) se dimensionan juntos y llevan **una** tierra.
 
 ### Calibración pendiente con compras reales (María José)
 
-Reglas que coinciden con lo comprado: rieles 9, tierras de riel 8, MC4 8, cable solar 100/100 m, UTP 4, VE.CAN 1,
+Reglas que coinciden con lo comprado: rieles 9, tierras de riel 8, MC4 8, UTP 4, VE.CAN 1,
 roscas Lynx 12, cables Pylontech 4, 4 cintas. Diferencias abiertas: barras Lynx 2 (compró 3) y fusibles MEGA (compró
 12 de 225 A; la regla da 2 de 200 A + 4 de batería por definir), uniones de riel 4 (compró 8), clamps 30/9 (compró 32/10),
 patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el breaker: #10 en strings y Fronius, #8 en AC; compró #10 y #6, que cubren todo).
@@ -55,12 +55,12 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 
 - **Calibres:** solo los que venden los proveedores. El #3 y el #1 no se piden: se sube al siguiente (#2). La herramienta muestra el
   mínimo seguro; para otro calibre se edita la cantidad de la línea o se agrega una línea a mano.
-- **Tubería:** el cableado solar va en PVC de al menos 1". AC In y AC Out van en PVC dimensionado (si el cliente ya tiene la
-  tubería, se marca «Sin tubería» en «Datos para calcular»). El cable de batería va por fuera del tubo.
-- **Ducto metálico 4x4:** siempre mínimo 1 ducto con 2 tapas; lleva el cableado general de los inversores. De ahí salen tramos
-  cortos de EMT 1" a cada inversor (4 por inversor, por confirmar).
+- **Tubería:** el cableado solar va en PVC de al menos 1". AC In y AC Out van en PVC dimensionado (la herramienta siempre la pide; si el
+  cliente ya la tiene, simplemente no se compra). El cable de batería va por fuera del tubo.
+- **Ducto metálico 4x4:** siempre mínimo 1 ducto con 2 tapas; lleva el cableado general de los inversores. De ahí salen 4 tramos
+  de unos 50 cm de EMT 1" a cada inversor: 1 tubo de 3 m y 4 conectores de presión por inversor.
 - **Siempre van:** gabinete 50x40x20 (comentario «POR CONFIRMAR MEDIDA»), centro de carga Chint DC de 5 espacios (breakers DC),
-  supresor de picos (1), silicón 3M (1 tubo por cada 20 patas), toma de monitoreo (breaker 20 A 1P, toma doble, placa inox,
+  supresor de picos (1), 2 prensacables PG-21, silicón 3M (1 tubo por cada 20 patas), toma de monitoreo (breaker 20 A 1P, toma doble, placa inox,
   caja de intemperie, #12 rojo/verde/blanco de 15 m).
 - **No se incluyen:** tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
