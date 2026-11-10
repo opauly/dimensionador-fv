@@ -62,7 +62,12 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Siempre van:** gabinete 50x40x20 (comentario «POR CONFIRMAR MEDIDA»), centro de carga Chint DC de 5 espacios (breakers DC),
   supresor de picos (1), 2 prensacables PG-21, silicón 3M (1 tubo por cada 20 patas), toma de monitoreo (breaker 20 A 1P, toma doble, placa inox,
   caja de intemperie, #12 rojo/verde/blanco de 15 m).
-- **No se incluyen:** tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
+- **También siempre:** 1 riel DIN perforado, 1 terminal para riel DIN y 1 riel strut perfil bajo.
+- **Cerbo o Ekrano GX:** lo define el selector «Monitoreo» del paso Equipos; la lista pone el que se eligió.
+- **Medidor de energía (VM-3P75CT):** se elige en Equipos («Medidor de energía», opcional; híbrido y off-grid). Trae 2 transformadores de
+  corriente (comentario «POR VERIFICAR TAMAÑO») y 1 cable UTP al GX o router. El catálogo lo guarda en `monitoring_devices` con
+  `device_kind = 'meter'` (migración 059, datos del datasheet y PDF guardado) y no sale en la lista de monitoreo.
+- **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
 - **Mínimos:** un paquete de amarras; las gazas salen de la distancia de la tubería, sin repuesto.
 

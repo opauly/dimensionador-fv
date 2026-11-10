@@ -186,5 +186,17 @@ check("ties: one pack", _by["Gasas plásticas #8 (Negras)"]["qty"], 1)
 check("solar strings go in at least 1 in conduit", [b["conduit"]["trade"] for b in CTX["branches"] if b.get("key") == "pv_strings"], ["1"])
 check("no 3 AWG anywhere in the sized branches", any(b.get("ugc") in ("3", "1") for b in CTX["branches"]), False)
 
+# Batch-5 rules: DIN rail, DIN terminal and strut x1 always; energy meter chosen in Equipos brings 2 CTs (size to verify) and 1 UTP.
+check("DIN rail, DIN terminal and strut x1", [_by[n]["qty"] for n in ("Riel DIN perforado 35x15mm", "Terminal para riel din", "Riel strut perfil bajo")], [1, 1, 1])
+check("no plexo box and no PVC pull box by default", any(n.startswith("Caja plexo") or n == "Caja de registro PVC" for n in _by), False)
+check("no meter selected: no meter, no CTs", any("VM-3P75CT" in n or "Transformador de Corriente" in n for n in _by), False)
+_utp0 = _by["Cable UTP normal"]["qty"]
+_EQM = {**EQ, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}
+_resm = ME.build_list(_EQM, CTX, {"materials": {"layout": {"rows": 2}}}, None)
+_bym = {ln["name"]: ln for ln in _resm["lines"] if ln["qty"]}
+check("meter VM-3P75CT x1 on the Victron section", (_bym["Medidor VM-3P75CT"]["qty"], _bym["Medidor VM-3P75CT"]["section"]), (1, "Victron Energy"))
+check("2 current transformers flagged to verify size", (_bym["Transformador de Corriente 100A:333mV"]["qty"], _bym["Transformador de Corriente 100A:333mV"]["comment"]), (2, "POR VERIFICAR TAMAÑO"))
+check("meter adds one UTP cable", _bym["Cable UTP normal"]["qty"], _utp0 + 1)
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

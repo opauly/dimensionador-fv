@@ -100,8 +100,16 @@ def _catalog() -> tuple[list[dict], list[dict], list[dict], list[dict], list[dic
     inverters = [i for i in list_inverters() if i.get("type") == "hybrid"]
     batteries = list_batteries()
     charge_controllers = list_charge_controllers()
-    monitoring_devices = list_monitoring_devices()
+    meter_ids = {m["id"] for m in _energy_meters()}
+    monitoring_devices = [m for m in list_monitoring_devices() if m["id"] not in meter_ids]
     return panels, inverters, batteries, charge_controllers, monitoring_devices
+
+
+def _energy_meters() -> list[dict]:
+    """Victron VM-3P75CT and friends: own selector, not part of the monitoring (GX) list."""
+    from database.energy_meters_db import list_energy_meters
+
+    return list_energy_meters()
 
 
 def _find(items: list[dict], id_: str | None) -> dict | None:
@@ -126,8 +134,11 @@ def _resolve_equipment(blob: dict) -> dict:
         charge_controllers[0]["id"] if charge_controllers else None
     )
     monitoring_id = s6.get("monitoring_id", current.get("monitoring_id"))
+    energy_meters = _energy_meters()
+    energy_meter_id = s6.get("energy_meter_id", current.get("energy_meter_id"))
 
     return {
+        "energy_meters": energy_meters, "energy_meter": _find(energy_meters, energy_meter_id),
         "panels": panels, "inverters": inverters, "batteries": batteries,
         "charge_controllers": charge_controllers, "monitoring_devices": monitoring_devices,
         "panel": _find(panels, panel_id) or (panels[0] if panels else None),
@@ -165,11 +176,13 @@ def select_equipment(blob: dict, form) -> dict:
     battery_id = _pick("battery_id", batteries)
     cc_id = _pick("charge_controller_id", charge_controllers)
     monitoring_id = (form.get("monitoring_id") or "").strip() or None
+    energy_meter_id = (form.get("energy_meter_id") or "").strip() or None
 
     equip_key = f"{panel_id}_{cc_id}_{battery_id}" if (panel_id and cc_id and battery_id) else None
     new_s6 = {
         **s6, "panel_id": panel_id, "inverter_id": inverter_id, "battery_id": battery_id,
         "charge_controller_id": cc_id, "monitoring_id": monitoring_id,
+        "energy_meter_id": energy_meter_id,
     }
     if s6.get("equip_key") != equip_key:
         new_s6["equip_key"] = equip_key
@@ -592,6 +605,7 @@ def save_step(blob: dict, vid: str | None = None) -> dict | None:
         "charge_controller_qty": c["cc_qty"],
         "inverter_qty": c["final_inverter_qty"],
         "monitoring_id": monitoring["id"] if monitoring else None, "monitoring": monitoring,
+        "energy_meter_id": (c.get("energy_meter") or {}).get("id"), "energy_meter": c.get("energy_meter"),
         "panels_per_string": c["panels_per_string"],
         "n_strings": c["n_strings"],
         "panel_count": c["actual_panel_count"],
@@ -629,6 +643,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "charge_controllers": c["charge_controllers"], "monitoring_devices": c["monitoring_devices"],
             "selected_panel": c["panel"], "selected_inverter": c["inverter"], "selected_battery": c["battery"],
             "selected_cc": c["cc"], "selected_monitoring": c["monitoring"],
+            "energy_meters": c.get("energy_meters") or [], "selected_energy_meter": c.get("energy_meter"),
             "panel_area": c["panel_area"], "split_phase": c["split_phase"],
         }
 
@@ -889,6 +904,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         "charge_controllers": c["charge_controllers"], "monitoring_devices": c["monitoring_devices"],
         "selected_panel": panel, "selected_inverter": inverter, "selected_battery": battery,
         "selected_cc": cc, "selected_monitoring": monitoring,
+        "energy_meters": c.get("energy_meters") or [], "selected_energy_meter": c.get("energy_meter"),
         "panel_area": c["panel_area"], "split_phase": split_phase,
         "is_hybrid_grid": is_hybrid_grid,
         "daily_kwh": daily_kwh, "autonomy_days": autonomy_days,

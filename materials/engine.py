@@ -88,7 +88,10 @@ ALIASES = {
     "Batería Pylontech Fidus": ["fidus"],
     "Ekrano GX": ["ekrano"],
     "Cerbo GX": ["cerbo"],
+    "Medidor VM-3P75CT": ["vm 3p75ct"],
 }
+CT_PER_METER = 2   # split-phase: one current transformer per line
+METER_CT_KEY = "interconexion-transformador-de-corriente-100a-333mv"
 
 _SECTION_RANK = {s: i for i, s in enumerate(SECTIONS)}
 _BY_NAME = {(r["section"], r["name"]): r for r in CATALOG}
@@ -199,6 +202,14 @@ def _equipment(c: Collector, eq: dict, coupling: dict) -> None:
     if mon:
         row = match_equipment(mon)
         c.add(row, 1, name=model(mon), section="Victron Energy", source="diseño")
+    meter = eq.get("energy_meter") or {}
+    if meter:
+        row = match_equipment(meter)
+        c.add(row, 1, name=model(meter), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
+              note="medidor de energía elegido en Equipos")
+        c.add(_BY_KEY[METER_CT_KEY], CT_PER_METER, comment="POR VERIFICAR TAMAÑO",
+              note=f"{CT_PER_METER} transformadores de corriente para el medidor (uno por línea)")
+        c.add(_named("Cable UTP normal", "Victron Energy"), 1, note="medidor → Cerbo/Ekrano GX o router (Ethernet o VE.Can)")
 
 
 def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
@@ -288,6 +299,9 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
           note="un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
     c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
+    c.add(_named("Riel DIN perforado 35x15mm", "Generales"), 1, note="uno por proyecto: para los breakers y bornes del gabinete")
+    c.add(_named("Terminal para riel din", "Generales"), 1, note="uno por proyecto")
+    c.add(_named("Riel strut perfil bajo", "Generales"), 1, note="uno por proyecto")
 
     strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
     c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), 1, note="siempre va: aloja los breakers DC de los strings")

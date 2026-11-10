@@ -141,6 +141,26 @@
   </div>
   {% endif %}
 </div>
+{% if energy_meters %}
+<div style="max-width:340px;margin-top:12px;">
+  <label class="flabel">Medidor de energía (opcional)</label>
+  <select class="finput" name="energy_meter_id" hx-include="#s6og-form"
+          hx-post="{{ url_for('wizard.paso6og_equipo', vid=vid) }}"
+          hx-trigger="change" hx-target="#s6og-equipos" hx-swap="outerHTML">
+    <option value="" {{ 'selected' if not selected_energy_meter else '' }}>— Sin medidor —</option>
+    {% for m in energy_meters %}
+      <option value="{{ m.id }}" {{ 'selected' if selected_energy_meter and m.id == selected_energy_meter.id else '' }}>{{ m.brand }} {{ m.model }}</option>
+    {% endfor %}
+  </select>
+  {% if selected_energy_meter %}
+  <div class="s6og-spec">
+    <b>{{ selected_energy_meter.brand }} {{ selected_energy_meter.model }}</b><br>
+    Corriente nominal: {{ selected_energy_meter.rated_current_a or '—' }} A · lleva 2 transformadores de corriente<br>
+    Compatible con: {{ selected_energy_meter.compatible_with or '—' }}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 <span id="s6og-calc-spin" class="htmx-indicator" style="margin-left:8px;color:var(--muted);font-size:13px;">Simulando confiabilidad sobre un año real de irradiancia…</span>
 
 {% if no_daily_kwh %}
