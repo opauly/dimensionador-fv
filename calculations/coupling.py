@@ -20,6 +20,9 @@ DC_BREAKER_SIZES_A = (10, 16, 20, 25, 32, 40, 50, 63)
 # ampacity would allow #12.
 PV_MIN_GAUGE = "10"
 
+# Solar wiring always goes in at least 1" conduit (bigger than the 3/4" the fill would allow).
+PV_MIN_CONDUIT_TRADE = "1"
+
 # Fronius AC output (single phase, split-phase 240 V).
 PV_INVERTER_AC_V = 240.0
 
@@ -109,6 +112,11 @@ def check_strings(panel: dict, pv_inv: dict, strings: int, series: int, *, qty: 
 
 
 def pv_inverter_ac_current_a(pv_inv: dict) -> float:
-    """Rated AC output current: the catalog value when present, else kW / 240 V."""
+    """Rated AC output current: the catalog value when present, else the Fronius datasheet, else kW / 240 V."""
     cur = _f(pv_inv, "ac_output_current_a")
-    return cur if cur else _f(pv_inv, "kw") * 1000.0 / PV_INVERTER_AC_V
+    if cur:
+        return cur
+    from calculations.datasheet_limits import fronius_limits
+
+    ds = fronius_limits(pv_inv.get("model"))                 # Fronius datasheet: max continuous output current @240 V
+    return ds["out_a"] if ds else _f(pv_inv, "kw") * 1000.0 / PV_INVERTER_AC_V

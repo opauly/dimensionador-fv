@@ -31,6 +31,9 @@ SOLAR_ROLL_M = 100       # PV cable comes in 100 m rolls
 TUBE_M = 3.0             # standard conduit length
 SPARE_PCT = 5            # spare mounting hardware
 FEET_PER_SILICONE = 20   # one tube of roof sealant per this many feet (L brackets)
+EMT_STUBS_PER_INVERTER = 4   # short 1" EMT pieces joining the wire duct to each inverter (from the photo of his installs)
+EMT_STUB_LEN_M = 0.5
+MONITOR_CIRCUIT_M = 15       # monitoring outlet circuit: metres of each #12 conductor
 LUG_STEP = 5             # lugs are requested in fives
 SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
 PANEL_GAP_M = 0.02       # gap between modules in a row
@@ -263,20 +266,47 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
         c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
 
 
-def _project_kit(c: Collector, eq: dict, layout: dict) -> None:
+def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str]) -> None:
     """Items every project carries whatever its size (Oscar's rules): one enclosure, one surge
-    protector, roof sealant. Roof screws are not listed: the L brackets already come with theirs.
+    protector, roof sealant, the DC breaker box, the wire duct and its EMT stubs to the inverters,
+    and the monitoring outlet. Roof screws are not listed: the L brackets already come with theirs.
     The critical-loads sub-panel is supplied by the owner or builder, so it is not listed either."""
     if not eq.get("panel"):
         return
     c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
-          note="un gabinete para los breakers DC y AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
+          note="un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
     c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
+
+    strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
+    c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), 1, note="siempre va: aloja los breakers DC de los strings")
+    if strings * 2 > 5:
+        pending.append(f"El centro de carga Chint de 5 espacios solo aloja 2 breakers 2P de strings y el diseño tiene {strings}: agrega otro centro de carga.")
+
     counts = layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)
     feet = counts["feet"] if counts else 0
     c.add(_named("Silicon 3M (especificar color según color de las láminas del techo)", "Generales"),
           max(1, math.ceil(feet / FEET_PER_SILICONE)),
           note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1); cantidad por confirmar")
+
+    c.add(_named("Ducto metálico cuadrado 4x4", "Generales"), 1, note="mínimo 1: lleva el cableado general de los inversores (el cable de batería va por fuera del tubo)")
+    c.add(_named("Tapas para ducto metálico 4x4", "Generales"), 2, note="2 tapas finales por ducto (mínimo)")
+    inv_qty = int(eq.get("inverter_qty") or 1) if eq.get("inverter") else 0
+    stubs = inv_qty * EMT_STUBS_PER_INVERTER
+    if stubs:
+        why = f"{stubs} tramos cortos de EMT 1\" del ducto a los inversores ({inv_qty} × {EMT_STUBS_PER_INVERTER}); cantidad por confirmar"
+        c.add(_find("conduit_tube", material="EMT", trade="1"), math.ceil(stubs * EMT_STUB_LEN_M / TUBE_M), where="Ducto → inversores",
+              note=f"{stubs} tramos de {EMT_STUB_LEN_M:g} m en tubos de {TUBE_M:g} m")
+        c.add(_find("conduit_press_connector", material="EMT", trade="1"), stubs, where="Ducto → inversores", note=why)
+
+    kit = "toma de monitoreo (Ekrano/router): siempre va"
+    c.add(None, 1, name="Breaker 20A 1 polo CH (toma de monitoreo)", section="Generales", sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), note=kit)
+    c.add(None, 1, name="Toma doble 15A 125V", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
+    c.add(None, 1, name="Placa de acero inoxidable para toma doble", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
+    c.add(None, 1, name="Caja rectangular de intemperie 3 huecos 1/2\"", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
+    for color in ("rojo", "verde", "blanco"):
+        c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=f"Cable #12 AWG THHN, CU, color {color}", unit="m",
+              section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo",
+              note=f"{MONITOR_CIRCUIT_M} m para el circuito de la toma de monitoreo (fase, neutro y tierra)")
 
 
 def _pv_connectors(c: Collector, eq: dict, coupling: dict) -> None:
@@ -362,8 +392,7 @@ def _cables(c: Collector, branches: list[dict]) -> None:
         row = _find("tape", color=color)
         if row:
             c.add(row, 1, note=f"un rollo por color de conductor usado ({color})")
-    n_ties = max(1, math.ceil(total_m / 50))
-    c.add(_named("Gasas plásticas #8 (Negras)", "Generales"), n_ties, note="un paquete por cada 50 m de cable THHN", comment="Paquetes")
+    c.add(_named("Gasas plásticas #8 (Negras)", "Generales"), 1, note="un paquete (lo mínimo)", comment="Paquetes")
     c.add(_named("Kit barra de tierras", "Generales"), 1, note="uno por sistema")
 
 
@@ -447,7 +476,7 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     _equipment(c, eq, coupling)
     _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)
-    _project_kit(c, eq, layout)
+    _project_kit(c, eq, coupling, layout, pending)
     _pv_connectors(c, eq, coupling)
     if wiring_ctx.get("ready"):
         _cables(c, branches)
