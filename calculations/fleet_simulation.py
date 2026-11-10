@@ -42,7 +42,7 @@ STALE_HOURS = 24
 DATASET_VERSION = 2              # bump when the cached dataset gains fields; older caches are rebuilt in the background
 LOCAL_UTC_OFFSET_H = -6          # Costa Rica / the fleet's region (no daylight saving)
 SHIFT_MIN = 60                   # site bucket start -> hour-ending label, matches Open-Meteo's "average of the preceding hour"
-ETA_CHARGE = ETA_DISCHARGE = 0.975   # sqrt of the 0.95 round-trip default used by design_targets
+ETA_CHARGE = ETA_DISCHARGE = 0.98    # ~sqrt of the 0.96 round-trip default used by design_targets (0.9798)
 ETA_INVERTER = 0.96
 PHYSICAL_FLOOR_PCT = 10.0        # lowest level the fleet's off-grid banks really reach
 TARGET_FAIL_PCT = 2.0            # at most this share of days with unserved energy
@@ -285,6 +285,23 @@ def get_dataset() -> dict | None:
     if ds is None or ds.get("version") != DATASET_VERSION or time.time() - ds["built_at"] > STALE_HOURS * 3600:
         refresh(blocking=False)
     return ds
+
+
+def daytime_load_share(ds: dict | None = None, start_h: int = 7, end_h: int = 17) -> float | None:
+    """Median share of the daily load the fleet's sites draw while the sun is up (local `start_h`–`end_h`, default 07–17), from
+    the same hourly load series the simulation uses. None when the dataset is not available yet."""
+    ds = ds or get_dataset()
+    if not ds or not ds.get("loads"):
+        return None
+    shares = []
+    for load in ds["loads"].values():
+        total = float(load.clip(lower=0).sum())
+        if total <= 0:
+            continue
+        local_h = (load.index.hour + LOCAL_UTC_OFFSET_H) % 24
+        day = float(load.clip(lower=0)[(local_h >= start_h) & (local_h < end_h)].sum())
+        shares.append(day / total)
+    return float(np.median(shares)) if len(shares) >= 3 else None
 
 
 # ── the simulation ───────────────────────────────────────────────────────

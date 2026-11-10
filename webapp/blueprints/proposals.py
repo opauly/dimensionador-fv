@@ -217,13 +217,14 @@ def _generate_pdf_bytes(vid: str, proposal: dict, vquote: str) -> bytes:
     full_v = get_version(vid)
     blob = (full_v or {}).get("data", {})
     lang = blob.get("meta", {}).get("language", "es")
-    # Use the date the version was locked (or created) so archived PDFs show the original date.
-    raw_date = (full_v or {}).get("locked_at") or (full_v or {}).get("created_at") or ""
+    # The PDF carries the date it is generated (today) while the version is still open; once the version is locked its date
+    # freezes at the lock, so a sent quote keeps its issue date when it is downloaded again later.
+    raw_date = (full_v or {}).get("locked_at") if (full_v or {}).get("locked") else ""
     if raw_date:
         p = raw_date[:10].split("-")  # "2026-07-04" -> ["2026", "07", "04"]
         version_date = f"{p[2]}/{p[1]}/{p[0]}"
     else:
-        version_date = None
+        version_date = None                             # build_from_wizard_blob() uses today's date
     data = build_from_wizard_blob(blob, proposal, vquote, version_date=version_date)
     return generate_pdf(data, proposal.get("system_type", "grid_zero"), lang)
 

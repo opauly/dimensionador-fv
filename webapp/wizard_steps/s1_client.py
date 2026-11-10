@@ -15,6 +15,24 @@ note below for exactly which callers persist and which don't.
 from __future__ import annotations
 
 
+# What the client sent, kept with the draft so it can be consulted in any step (and by the AI helpers): an append-only list in
+# `client["requests"]`, each entry {"ts": ISO datetime, "source": one of REQUEST_SOURCES, "text": what was pasted}.
+REQUEST_SOURCES = ("WhatsApp", "Correo", "Llamada", "En persona", "Otro")
+
+
+def merge_requests(existing_client: dict | None, form) -> list[dict]:
+    """The draft's request log plus the entry typed in this form submit (when there is one). Never drops old entries."""
+    from datetime import datetime
+
+    log = [dict(e) for e in ((existing_client or {}).get("requests") or []) if isinstance(e, dict) and e.get("text")]
+    text = (form.get("request_text") or "").strip()
+    if text:
+        source = form.get("request_source") or "Otro"
+        log.append({"ts": datetime.now().isoformat(timespec="minutes"),
+                    "source": source if source in REQUEST_SOURCES else "Otro", "text": text})
+    return log
+
+
 def parse_form(form) -> dict:
     """`request.form` -> the six client fields (+ client_id, if a search
     result was actively selected), matching wizard/common.py:step2_client()'s
@@ -139,4 +157,6 @@ def build_context(blob: dict | None) -> dict:
             "nise": client.get("nise") or "N/A",
         },
         "prev_options": prev_options(client_id, name),
+        "client_requests": list(reversed([e for e in (client.get("requests") or []) if isinstance(e, dict) and e.get("text")])),
+        "request_sources": REQUEST_SOURCES,
     }

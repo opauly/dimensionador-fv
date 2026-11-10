@@ -31,8 +31,10 @@ _MONTHS = {
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
 }
 _LABELS = {
-    "es": {"gen": "Generación", "cons": "Consumo", "short": "Mes bajo cobertura", "recharge": "Recarga de batería"},
-    "en": {"gen": "Generation", "cons": "Consumption", "short": "Month below coverage", "recharge": "Battery recharge"},
+    "es": {"gen": "Generación", "cons": "Consumo", "short": "Mes bajo cobertura", "recharge": "Recarga de batería",
+           "direct": "Consumo diurno"},
+    "en": {"gen": "Generation", "cons": "Consumption", "short": "Month below coverage", "recharge": "Battery recharge",
+           "direct": "Daytime use"},
 }
 
 # Geometry — mirrors victron/report_svg.py's bar_chart_svg()
@@ -76,6 +78,7 @@ def monthly_coverage_svg(
     lang: str = "es",
     flag_shortfall: bool = True,
     recharge_kwh: list[float] | None = None,
+    direct_kwh: list[float] | None = None,
 ) -> str:
     """
     12-month "does this cover me all year?" chart. Green = estimated
@@ -104,6 +107,11 @@ def monthly_coverage_svg(
     consumption alone (never consumption+recharge) — recharge is surplus by
     definition, not part of the minimum the array must clear.
 
+    With `direct_kwh` (Off-Grid), the second bar is "what the array must supply": the daytime part of the load (`direct_kwh`)
+    plus `recharge_kwh`, the energy the battery needs to carry the night load. Together they are about the monthly
+    consumption, so the green generation bar standing above them reads as "enough for the load and for recharging the
+    batteries". (Stacking the whole consumption with the recharge counted the night load twice.)
+
     Returns "" when the data isn't usable (missing, wrong length, all zeros),
     so the template can omit the whole section.
     """
@@ -124,14 +132,21 @@ def monthly_coverage_svg(
 
     months = _MONTHS.get(lang, _MONTHS["es"])
     lab = _LABELS.get(lang, _LABELS["es"])
-    stack_totals = [c + r for c, r in zip(con, rec)] if rec else con
+    direct = None
+    if rec is not None and direct_kwh and len(direct_kwh) == 12:
+        try:
+            direct = [max(0.0, float(v)) for v in direct_kwh]
+        except (TypeError, ValueError):
+            direct = None
+    first = direct if direct is not None else con
+    stack_totals = [a + r for a, r in zip(first, rec)] if rec else con
     y_max = _nice_ceiling(max(max(gen), max(stack_totals)))
     slot_w = (SVG_W - BAR_LPAD) / 12.0
 
     def bar_h(v: float) -> float:
         return max(1.0, round(v / y_max * BAR_H_MAX, 1))
 
-    s = _legend(SVG_W - 8, lab, flag_shortfall and any(g < c for g, c in zip(gen, con)), rec is not None)
+    s = _legend(SVG_W - 8, lab, flag_shortfall and any(g < c for g, c in zip(gen, con)), rec is not None, direct is not None)
 
     # gridlines + y labels (0, ½, max)
     for val in (0.0, y_max / 2, y_max):
@@ -150,7 +165,8 @@ def monthly_coverage_svg(
               f"width='{_f(BAR_W)}' height='{_f(gh)}' fill='{gcolor}' rx='1'/>")
         cons_x = _f(cx + BAR_GAP / 2)
         if rec is not None:
-            ch, rh = bar_h(c), bar_h(c + rec[i])
+            base_v = direct[i] if direct is not None else c
+            ch, rh = bar_h(base_v), bar_h(base_v + rec[i])
             s += (f"<rect x='{cons_x}' y='{_f(_BASE_Y - ch)}' "
                   f"width='{_f(BAR_W)}' height='{_f(ch)}' fill='{MINT}' rx='1'/>"
                   f"<rect x='{cons_x}' y='{_f(_BASE_Y - rh)}' "
@@ -167,7 +183,7 @@ def monthly_coverage_svg(
             f"xmlns='http://www.w3.org/2000/svg'>{s}</svg>")
 
 
-def _legend(right_x: float, lab: dict, show_short: bool, show_recharge: bool) -> str:
+def _legend(right_x: float, lab: dict, show_short: bool, show_recharge: bool, daytime: bool = False) -> str:
     """Right-aligned legend, matching victron/report_svg.py's _two_bar_legend().
 
     Widths are estimated at 3.7 units/char — the same rough Arial metric the
@@ -175,7 +191,7 @@ def _legend(right_x: float, lab: dict, show_short: bool, show_recharge: bool) ->
     """
     CWID, SWATCH, TXTGAP, ITEMGAP = 3.7, 7.0, 3.0, 12.0
 
-    items = [(GREEN, lab["gen"]), (MINT, lab["cons"])]
+    items = [(GREEN, lab["gen"]), (MINT, lab["direct"] if daytime else lab["cons"])]
     if show_recharge:
         items.append((NAVY, lab["recharge"]))
     if show_short:

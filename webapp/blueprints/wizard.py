@@ -1579,7 +1579,7 @@ def paso8_pdf_descargar(vid):
     vquote = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), version["version_number"])
     pdf_bytes = _generate_pdf_bytes(vid, proposal, vquote)
     name = pdf_filename(vquote, proposal.get("client_name") or blob.get("client", {}).get("name", ""), lang_label)
-    return send_file(BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True, download_name=name)
+    return send_file(BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=False, download_name=name)
 
 
 @bp.route(f"/<vid>/paso/{STEP_REVISION}/bloquear", methods=["POST"])

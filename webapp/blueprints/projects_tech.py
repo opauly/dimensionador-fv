@@ -4,12 +4,13 @@ system's technical data, the wiring / breaker / PVC-conduit sizing, and a prelim
 materials derived from them.
 
 Everything here is *read from a saved quote version* (`draft.load()` works on locked versions
-too) — nothing is recomputed from the scenario engine. The project only owns two small things,
+too) — nothing is recomputed from the scenario engine. The project only owns a few small things,
 stored in `projects.tech_spec` (migration 052):
 
     version_id       which version of the project's proposal the tab reads (default: the latest
                      locked one, else the latest) — the promoted version can be a stale design
     wiring_lengths   cable run lengths measured on site, which refine the sizing
+    wiring_manual    the engineer's own breaker / gauge per branch, judged against the calculated one
     coupling         PV coupling of a hybrid design (DC controllers or AC-coupled PV inverter),
                      see webapp/wizard_steps/og_coupling.py
 
@@ -73,7 +74,7 @@ def render_panel(ctx: dict, *, message: str | None = None) -> str:
     system_type = project.get("system_type")
     wiring_ctx = d["wiring"]
     wiring_ctx.update(post_url=url_for("projects.tecnico_guardar", pid=project["id"]),
-                      form_target="#tech-panel", form_swap="outerHTML")
+                      form_target="#tech-panel", form_swap="outerHTML", manual_enabled=True)
 
     other_lines = [
         {"item": it.get("item"), "qty": it.get("qty"), "specs": it.get("specs") or ""}
@@ -113,6 +114,8 @@ def register(bp):
             spec["version_id"] = form["version_id"]
         if any(k in form for k in og_wiring.DEFAULT_LENGTHS):
             spec["wiring_lengths"] = og_wiring.lengths_from_form(form, spec.get("wiring_lengths"))
+        if form.get("manual_form"):
+            spec["wiring_manual"] = og_wiring.manual_from_form(form)
         cpl = og_coupling.from_form(form)
         if cpl is not None:
             spec["coupling"] = cpl

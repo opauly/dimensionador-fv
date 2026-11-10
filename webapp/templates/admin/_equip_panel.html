@@ -77,6 +77,12 @@
   <div style="margin-bottom:12px;">
     <a class="btn" hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1" hx-target="#subpanel" hx-push-url="true"
        href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?add=1">Agregar {{ kind_label }}</a>
+    <form hx-post="{{ url_for('admin.equipos_extraer', sub=sub) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-encoding="multipart/form-data"
+          hx-indicator="#ds-wait" style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;">
+      <input type="file" name="pdf" accept="application/pdf" required style="font-size:12px;max-width:210px;">
+      <button class="btn btn-outline" type="submit" title="Lee un datasheet en PDF, guarda el archivo y rellena el formulario del catálogo">📄 Extraer de datasheet</button>
+      <span id="ds-wait" class="htmx-indicator" style="font-size:12px;color:var(--muted);">leyendo el PDF…</span>
+    </form>
     <a class="btn btn-outline" href="{{ url_for('pricing.importar') }}" style="margin-left:8px;"
        title="Actualiza precios desde una proforma de proveedor en PDF">📄 Importar proforma</a>
   </div>
@@ -98,6 +104,7 @@
             <td>{{ it.model }}</td>
             {% for col in display_cols %}<td>{{ it[col.key] if it[col.key] not in (None, '') else '—' }}</td>{% endfor %}
             <td style="white-space:nowrap;">
+              {% if it.datasheet_path %}<a class="link-btn" href="{{ url_for('admin.equipos_datasheet', path=it.datasheet_path) }}" target="_blank" rel="noopener" style="margin-right:10px;" title="Abrir el datasheet guardado">PDF</a>{% endif %}
               <a class="link-btn" hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?edit={{ it.id }}"
                  hx-target="#subpanel" hx-push-url="true"
                  href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}?edit={{ it.id }}">Editar</a>

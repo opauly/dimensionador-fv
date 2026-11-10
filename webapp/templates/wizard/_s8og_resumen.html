@@ -26,9 +26,14 @@
   <div class="s8-sec">Técnico</div>
   <div class="s8-row">
     <div class="s8-kv"><div class="s8-kv-label">Sistema</div><div class="s8-kv-value">{{ '%.2f'|format(system_kw) }} kW</div></div>
+    <div class="s8-kv"><div class="s8-kv-label">Área de paneles</div><div class="s8-kv-value">{{ area_m2 }} m²</div>
+      {% if roof_fit %}<div class="s8-kv-sub">Techo {{ '%.0f'|format(roof_fit.roof_area_m2) }} m²</div>
+      <div class="s8-kv-sub"><b style="color:#15803d;">{{ roof_fit.fit if roof_fit.extra > 0 else roof_fit.panels }} caben</b></div>
+      {% if roof_fit.extra > 0 %}<div class="s8-kv-sub"><b style="color:#b45309;">{{ roof_fit.extra }} no caben</b> (~{{ '%.0f'|format(roof_fit.extra_area_m2) }} m² extra)</div>{% endif %}{% endif %}</div>
+  </div>
+  <div class="s8-row" style="margin-top:14px;">
     <div class="s8-kv"><div class="s8-kv-label">Paneles</div><div class="s8-kv-value">{{ panel_count }}</div>{% if panel_sub %}<div class="s8-kv-sub">{{ panel_sub }}</div>{% endif %}</div>
     <div class="s8-kv"><div class="s8-kv-label">Inversores</div><div class="s8-kv-value">{{ inv_qty }}</div>{% if inverter_sub %}<div class="s8-kv-sub">{{ inverter_sub }}</div>{% endif %}</div>
-    <div class="s8-kv"><div class="s8-kv-label">Área</div><div class="s8-kv-value">{{ area_m2 }} m²</div></div>
     <div class="s8-kv"><div class="s8-kv-label">Controlador(es)</div><div class="s8-kv-value">{{ cc_qty }}</div>{% if cc_sub %}<div class="s8-kv-sub">{{ cc_sub }}</div>{% endif %}</div>
     <div class="s8-kv"><div class="s8-kv-label">Baterías</div><div class="s8-kv-value">{{ battery_count }}</div>{% if battery_sub %}<div class="s8-kv-sub">{{ battery_sub }}</div>{% endif %}</div>
   </div>
@@ -36,8 +41,10 @@
   <div class="s8-hr"></div>
   <div class="s8-sec">Generación y autonomía</div>
   <div class="s8-row">
+    {% if daily_consumption_kwh %}<div class="s8-kv"><div class="s8-kv-label">Consumo diario</div><div class="s8-kv-value">{{ '%.1f'|format(daily_consumption_kwh) }} kWh/día</div></div>{% endif %}
     <div class="s8-kv"><div class="s8-kv-label">Generación diaria</div><div class="s8-kv-value">{{ '%.2f'|format(daily_generation_kwh) }} kWh/día</div></div>
     <div class="s8-kv"><div class="s8-kv-label">Banco de baterías</div><div class="s8-kv-value">{{ '%.2f'|format(battery_kwh) }} kWh</div></div>
+    {% if autonomy_days is not none %}<div class="s8-kv"><div class="s8-kv-label">Autonomía sin sol</div><div class="s8-kv-value">{{ '%.1f'|format(autonomy_days) }} días</div></div>{% endif %}
     <div class="s8-kv"><div class="s8-kv-label">Descarga</div><div class="s8-kv-value">{{ '%.2f'|format(discharge_pct) }}%</div></div>
     <div class="s8-kv"><div class="s8-kv-label">Aprovechamiento solar</div><div class="s8-kv-value">{{ '%d'|format(utilization_pct) ~ '%' if utilization_pct is not none else '—' }}</div></div>
   </div>

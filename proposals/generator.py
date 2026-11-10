@@ -270,6 +270,49 @@ HYBRID_DATA: dict = {
 
 # ── context builder ──────────────────────────────────────────────────────────
 
+def _roof_fit(blob: dict, is_off_grid: bool, panel_count: int, panel: dict):
+    if not is_off_grid:
+        return None
+    from calculations.design_targets import roof_fit_from_blob
+
+    return roof_fit_from_blob(blob, panel_count, panel)
+
+
+def _autonomy_figures(blob: dict, is_off_grid: bool, system_type: str, battery: dict, battery_bank: dict,
+                      consumption: dict, monthly_coverage: dict) -> dict:
+    """Usable battery energy, days of autonomy with no sun (Off-Grid) and the worst month's solar coverage of the load (Off-Grid),
+    for the PDF's second technical table. Any figure that cannot be computed is None and simply not shown."""
+    out = {"usable_kwh": None, "autonomy_days": None, "worst_month_cov": None}
+    if not is_off_grid:
+        return out
+    try:
+        from calculations import design_targets as dt
+
+        total = float(battery_bank.get("total_kwh_installed") or 0)
+        reserve = float(((blob.get("objectives") or {}).get("goals") or {}).get("reserve_soc_pct") or 25.0)
+        window = min(100.0 - reserve, float(battery.get("dod_pct") or 80.0))
+        if total > 0:
+            out["usable_kwh"] = total * window / 100.0
+            if system_type == "off_grid":
+                out["autonomy_days"] = dt.offgrid_autonomy_days_achieved(total, float(consumption.get("daily_kwh") or 0), window)
+        if system_type == "off_grid":
+            gen, con = monthly_coverage.get("generation"), monthly_coverage.get("consumption")
+            if gen and con and len(gen) == 12 and len(con) == 12:
+                out["worst_month_cov"] = min(g / c for g, c in zip(gen, con) if c > 0)
+    except Exception:                                   # noqa: BLE001 — extra figures, never block the PDF
+        pass
+    return out
+
+
+def _roof_fit_fmt(rf: dict | None):
+    """Roof figures for the PDF's technical table: panels that fit / do not fit the stated roof (None when no roof was stated)."""
+    if not rf:
+        return None
+    return {"panels": rf["panels"], "panel_w": f"{rf['panel_w']:.0f}", "fit": rf["fit"], "extra": rf["extra"],
+            "fit_kwp": f"{rf['fit_kwp']:.1f}", "extra_kwp": f"{rf['extra_kwp']:.1f}",
+            "roof_area_m2": f"{rf['roof_area_m2']:.0f}", "extra_area_m2": f"{rf['extra_area_m2']:.0f}"}
+
+
 def _build_context(data: dict, language: str) -> dict:
     """Flatten and format wizard data dict into Jinja2 template context."""
     from wizard.state import get_asset_b64
@@ -394,6 +437,10 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
             # None when the draft has no real daily PVGIS series to simulate
             # against (see wizard/off_grid.py: _og_monthly_coverage_and_sim()).
             "utilization_pct":        _pct(tech["utilization_pct"], 0) if tech.get("utilization_pct") is not None else "—",
+            "roof_fit":               _roof_fit_fmt(tech.get("roof_fit")),
+            "usable_kwh":             _kwh(tech["usable_kwh"], 1) if tech.get("usable_kwh") else None,
+            "autonomy_days":          f"{tech['autonomy_days']:.1f}" if tech.get("autonomy_days") else None,
+            "worst_month_cov":        f"{tech['worst_month_cov']:.1f}×" if tech.get("worst_month_cov") else None,
         },
         # Hybrid only — Off-Grid has no grid bill to compare against, so this
         # stays None there (guarded in the template with {% if hybrid_savings %}).
@@ -680,6 +727,9 @@ def build_from_wizard_blob(
             # projection. None (not 0) when a draft never ran "Calcular MPPT",
             # so the template renders "—" instead of a fake 0%.
             "self_consumption_pct": (equipment.get("projection") or {}).get("self_consumption_pct"),
+            # Off-Grid/Hybrid only: installed panels vs. the roof area stated in Objetivos (None when none was stated).
+            "roof_fit": _roof_fit(blob, is_off_grid, panel_count, panel),
+            **_autonomy_figures(blob, is_off_grid, system_type, equipment.get("battery") or {}, battery_bank, consumption, monthly_coverage),
         },
         # Hybrid only — set by wizard/off_grid.py Step 6 when grid-connected
         # with a known tariff; None (and unused) for Off-Grid/Grid Zero.
@@ -752,6 +802,7 @@ def generate_pdf(data: dict, system_type: str, language: str) -> bytes:
         # Grid Zero has no battery — recharge_kwh stays None there and the
         # chart falls back to its original plain consumption bar.
         recharge_kwh=_coverage.get("recharge"),
+        direct_kwh=_coverage.get("direct"),
     )
 
     html_str = template.render(**context)

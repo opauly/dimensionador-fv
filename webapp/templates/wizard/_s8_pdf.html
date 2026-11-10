@@ -15,7 +15,7 @@
 {% if pdf_error %}<p class="wiz-error">{{ pdf_error }}</p>{% endif %}
 {% if pdf_ready %}
   <p style="margin-top:8px;">
-    <a class="btn btn-outline" href="{{ url_for('wizard.paso8_pdf_descargar', vid=vid) }}" download>⬇ Descargar PDF ({{ pdf_lang_label }})</a>
+    <a class="btn btn-outline" href="{{ url_for('wizard.paso8_pdf_descargar', vid=vid) }}" target="_blank" rel="noopener">↗ Abrir PDF ({{ pdf_lang_label }})</a>
   </p>
 {% endif %}
 </div>

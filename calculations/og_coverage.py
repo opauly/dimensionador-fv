@@ -58,13 +58,32 @@ def og_monthly_coverage_and_sim(
         )
         if sim:
             days_in_month = [_cal.monthrange(pvgis_daily_year, m)[1] for m in range(1, 13)]
-            gen_m, cons_m, rec_m, idx = [], [], [], 0
+            from calculations.sizing_off_grid import _BATTERY_ROUND_TRIP_EFFICIENCY as _EFF
+
+            # What the array has to supply each month, without counting any energy twice: the part of the load used while
+            # the sun is up (`direct`) plus the energy that must go into the battery to carry the rest of the load through
+            # the night (`recharge` = night load grossed up for battery losses). `consumption` is the whole monthly load.
+            # The daytime share (07:00-17:00) comes from, in order: the draft's own `consumption.daytime_fraction`, the real
+            # fleet's median (the hourly load of the monitored sites), or 45 % (the same default the hybrid / Grid Zero
+            # wizards use) while the fleet data is not ready. There is no hourly load curve for the quoted home itself.
+            day_share = consumption.get("daytime_fraction")
+            if not day_share:
+                try:
+                    from calculations.fleet_shares import fleet_shares
+
+                    day_share = (fleet_shares() or {}).get("day")
+                except Exception:                       # noqa: BLE001 — chart detail, never block
+                    day_share = None
+            day_share = min(0.9, max(0.1, float(day_share or 0.45)))
+            gen_m, cons_m, direct_m, rec_m, idx = [], [], [], [], 0
             for d in days_in_month:
+                c = daily * d
                 gen_m.append(round(sum(daily_gen[idx:idx + d]), 1))
-                cons_m.append(round(daily * d, 1))
-                rec_m.append(round(sum(sim["daily_charge_in_kwh"][idx:idx + d]), 1))
+                cons_m.append(round(c, 1))
+                direct_m.append(round(c * day_share, 1))
+                rec_m.append(round(c * (1.0 - day_share) / _EFF, 1))
                 idx += d
-            monthly_coverage = {"generation": gen_m, "consumption": cons_m, "recharge": rec_m}
+            monthly_coverage = {"generation": gen_m, "consumption": cons_m, "direct": direct_m, "recharge": rec_m}
 
     if not monthly_coverage:
         pvgis_monthly = (site.get("pvgis_data") or {}).get("monthly_kwh_kwp", [])

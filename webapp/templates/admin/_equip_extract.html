@@ -1,0 +1,28 @@
+{# Result of "Extraer de datasheet": the variants Claude found in the PDF. Choosing one opens the normal catalog
+   form prefilled; nothing is saved until the engineer reviews it there. #}
+<div class="card" style="margin-bottom:16px;">
+  <p class="card-note" style="margin:0 0 8px;"><b>Extraer de datasheet · {{ kind_label }}</b></p>
+  {% if error %}
+    <p style="color:#B84345;font-size:13px;">{{ error }}</p>
+  {% else %}
+    <p class="card-note-sm" style="margin:0 0 10px;">
+      Se leyeron <b>{{ variants|length }}</b> variante(s) de <b>{{ filename }}</b> y el PDF quedó guardado. Elige la que quieres agregar:
+      revisas los valores en el formulario antes de guardar. Lo que el datasheet no trae queda en blanco.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      {% for v in variants %}
+        <form hx-post="{{ url_for('admin.equipos_extraer_usar', sub=sub) }}" hx-target="#subpanel" hx-swap="innerHTML"
+              style="display:flex;align-items:center;gap:10px;">
+          <input type="hidden" name="variant" value="{{ v.json }}">
+          <input type="hidden" name="datasheet_path" value="{{ path }}">
+          <button class="btn" type="submit">Usar</button>
+          <span style="font-size:13px;">{{ v.label }}</span>
+        </form>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <div style="margin-top:12px;">
+    <a hx-get="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}" hx-target="#subpanel" hx-push-url="true"
+       href="{{ url_for('admin.sub_view', section='equipos', sub=sub) }}" style="color:var(--muted);">Volver al catálogo</a>
+  </div>
+</div>

@@ -30,7 +30,8 @@ Return ONLY a JSON array — no markdown, no explanation:
     "width_m": 1.134,
     "height_m": 2.278,
     "warranty_product_yr": 12,
-    "warranty_power_yr": 30
+    "warranty_power_yr": 30,
+    "max_series_fuse_a": 25
   }
 ]
 
@@ -43,6 +44,8 @@ Field rules:
   Use the shorter dimension as width and the longer as height.
 - warranty_product_yr: product/workmanship warranty in years
 - warranty_power_yr: linear power output performance warranty in years
+- max_series_fuse_a: the module's "Maximum series fuse rating" / "Max. overcurrent protection rating" in A (integer),
+  from the electrical characteristics table. Null if it is not printed.
 - Use null for any field you cannot find with confidence
 """
 
@@ -68,6 +71,11 @@ Return ONLY a JSON array — no markdown, no explanation:
     "output_v": 240,
     "ac_output_current_a": 41.7,
     "ac_input_current_max_a": null,
+    "efficiency_pct": 96.7,
+    "cont_w_25c": null,
+    "peak_w": null,
+    "max_ocpd_a": 60,
+    "dc_fuse_a": null,
     "warranty_yr": 5
   }
 ]
@@ -90,9 +98,18 @@ Field rules:
   a separate spec from ac_output_current_a — it protects the grid/generator-facing input,
   not the inverter's own output. Null for grid-tie string inverters and microinverters
   (they have no AC input), and null for hybrid units where this isn't stated.
+- efficiency_pct: maximum efficiency in % (float, e.g. 96.7)
+- cont_w_25c: for BATTERY-BASED / hybrid inverters only — continuous output power in WATTS (not VA) at 25 °C
+  (e.g. "Cont. output power at 25 °C ... 4000 W"). Null for grid-tie string inverters and microinverters.
+- peak_w: peak / surge output power in W (hybrid inverters; null otherwise)
+- max_ocpd_a: for GRID-TIE string inverters — the "OCPD / AC breaker size" or "maximum output overcurrent protection"
+  in A at the model's nominal voltage (240 V column for a 208/240 V model; use the column matching output_v).
+  Null for hybrid inverters unless a maximum AC breaker is explicitly stated.
+- dc_fuse_a: recommended / maximum DC battery-side fuse in A if the document states it; usually null on a datasheet.
 - warranty_yr: standard product warranty in years (integer)
 - Use null for any field you cannot find with confidence
 - For multi-MPPT inverters, imax_mppt is the per-tracker value (not total)
+- When ac_output_current_a is listed for several voltages, use the value at output_v.
 """
 
 
@@ -181,6 +198,9 @@ Return ONLY a JSON array — no markdown, no explanation:
     "voltage_v": 48,
     "dod_pct": 90,
     "cycles": 6000,
+    "max_charge_a": 100,
+    "max_discharge_a": 100,
+    "fuse_a": null,
     "warranty_yr": 10
   }
 ]
@@ -194,6 +214,9 @@ Field rules:
 - dod_pct: the datasheet's own rated/recommended maximum depth of discharge in %
   (integer, e.g. 90 for 90%) — use the printed spec, do not assume a generic value
 - cycles: rated cycle life at the datasheet's stated DoD (integer)
+- max_charge_a / max_discharge_a: continuous (recommended or maximum) charge and discharge current in A (float);
+  if only "recommended" and "maximum" are given, use the continuous / maximum continuous value, not the peak
+- fuse_a: external fuse or breaker rating the datasheet recommends per battery in A, if stated; usually null
 - warranty_yr: product warranty in years (integer)
 - Use null for any field you cannot find with confidence
 """

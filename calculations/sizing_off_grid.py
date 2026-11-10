@@ -1126,7 +1126,8 @@ _RECHARGE_HEADROOM_COMFORTABLE = 1.4
 # arguments to generate_design_scenarios() below; neither is read from the
 # battery/inverter catalog because those tables don't carry an explicit
 # efficiency field today.
-_BATTERY_ROUND_TRIP_EFF_DEFAULT = 0.95
+# Battery round trip: 0.96 — the real fleet's median is 0.967 (11 installations, range 0.95-1.00; see scripts/fleet_calibration.py).
+_BATTERY_ROUND_TRIP_EFF_DEFAULT = 0.96
 _INVERTER_CONVERSION_EFF_DEFAULT = 0.96
 
 _DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]

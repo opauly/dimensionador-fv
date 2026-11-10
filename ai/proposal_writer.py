@@ -1,6 +1,8 @@
 from __future__ import annotations
 """AI-generated intro paragraph for proposals (ES + EN). Phase 4."""
 
+# Equipment brands/models are deliberately NOT facts: the intro is a short, general overview of what is quoted
+# (the model list is in the technical table of the same PDF).
 # Facts the model is allowed to mention, in the order they read naturally in a
 # proposal. Keys absent from system_params are simply skipped, which is what
 # lets one prompt serve all three wizards: Grid Zero passes savings/ROI and no
@@ -23,9 +25,7 @@ _FACT_LABELS_ES: list[tuple[str, str]] = [
     ("system_type",           "Tipo de sistema"),
     ("system_kw",             "Potencia del arreglo (kW)"),
     ("panel_count",           "Cantidad de paneles"),
-    ("panel_model",           "Modelo de panel"),
     ("inverter_count",        "Cantidad de inversores"),
-    ("inverter_model",        "Modelo de inversor"),
     ("battery_count",         "Cantidad de baterías"),
     ("battery_kwh",           "Capacidad del banco (kWh)"),
     ("autonomy_days",         "Días de autonomía"),
@@ -60,7 +60,8 @@ CONTEXTO DEL TIPO DE SISTEMA:
 {type_hint}
 
 REGLAS ESTRICTAS:
-- Escribe 2 a 3 oraciones, en un solo párrafo, sin viñetas ni encabezados. Máximo ~70 palabras en total. Sé conciso y ve directo al punto: menciona el sistema y sus componentes principales, sin repetir la misma cifra dos veces ni explicar de más.
+- Escribe 2 a 3 oraciones, en un solo párrafo, sin viñetas ni encabezados. Máximo ~60 palabras en total. Sé conciso y general: describe qué se cotiza (potencia del arreglo solar, capacidad del banco de baterías y, si aplica, la autonomía o el respaldo) y qué logra para el cliente, sin repetir la misma cifra dos veces ni explicar de más.
+- NO menciones marcas, modelos ni referencias de equipos, ni la cantidad de paneles, inversores o baterías: eso va en la tabla técnica. Habla del sistema a nivel general.
 - Empieza directo con el sistema, no con una frase de cortesía. Primera oración con esta forma: "La presente propuesta consiste en un sistema [tipo] de [potencia]..." (o equivalente). NUNCA empieces con "Con mucho gusto le presentamos", "Nos complace presentar", "Es un placer", "It is our pleasure to present" ni frases de cortesía similares.
 - Usa ÚNICAMENTE las cifras listadas arriba. NO inventes, NO estimes y NO agregues datos que no aparezcan (nada de precios, plazos, garantías, porcentajes ni ahorros que no estén en la lista).
 - Si un dato no está en la lista, simplemente no lo menciones.

@@ -7,7 +7,7 @@ def list_panels() -> list[dict]:
     result = (
         get_client()
         .table("panels")
-        .select("id, brand, model, wp, voc, vmp, isc, imp, temp_coeff_pmax, width_m, height_m, warranty_product_yr, warranty_power_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, wp, voc, vmp, isc, imp, temp_coeff_pmax, width_m, height_m, max_series_fuse_a, datasheet_path, warranty_product_yr, warranty_power_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -44,7 +44,7 @@ def list_inverters() -> list[dict]:
     result = (
         get_client()
         .table("inverters")
-        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, ac_out_rated_a, efficiency_pct, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, kw, type, vmax, vmin_mppt, vmax_mppt, imax_mppt, mppt_channels, phase, output_v, ac_output_current_a, ac_input_current_max_a, ac_out_rated_a, efficiency_pct, cont_w_25c, peak_w, max_ocpd_a, dc_fuse_a, datasheet_path, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -81,7 +81,7 @@ def list_batteries() -> list[dict]:
     result = (
         get_client()
         .table("batteries")
-        .select("id, brand, model, chemistry, capacity_kwh, capacity_ah, voltage_v, dod_pct, cycles, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, chemistry, capacity_kwh, capacity_ah, voltage_v, dod_pct, cycles, max_charge_a, max_discharge_a, fuse_a, datasheet_path, warranty_yr, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -118,7 +118,7 @@ def list_charge_controllers() -> list[dict]:
     result = (
         get_client()
         .table("charge_controllers")
-        .select("id, brand, model, type, vin_max, vout, imax_in, imax_out, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, type, vin_max, vout, imax_in, imax_out, datasheet_path, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )
@@ -155,7 +155,7 @@ def list_monitoring_devices() -> list[dict]:
     result = (
         get_client()
         .table("monitoring_devices")
-        .select("id, brand, model, compatible_with, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
+        .select("id, brand, model, compatible_with, datasheet_path, cost_usd, cost_iva_rate, price_updated_at, price_source, notes")
         .order("brand")
         .execute()
     )

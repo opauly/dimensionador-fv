@@ -378,8 +378,13 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
     if string_a < need:
         add("warn", f"Breaker de string {string_a} A es menor que 1.56 × Isc = {need:.1f} A.")
     else:
-        add("info", f"Breaker de string {string_a} A ≥ 1.56 × Isc ({need:.1f} A). Confirmar que no pase el fusible serie máximo del módulo (no está en el catálogo) "
-                    f"y que su tensión nominal CC cubra el Voc del string ({cpl['check']['voc_string']:.0f} V).")
+        ms = float(panel.get("max_series_fuse_a") or 0)
+        if ms and string_a > ms:
+            add("warn", f"Breaker de string {string_a} A supera la protección máxima en serie del módulo ({ms:g} A, datasheet).")
+        series_txt = (f"protección máxima en serie del módulo {ms:g} A: cumple" if ms
+                      else "falta cargar en el catálogo la protección máxima en serie del módulo (datasheet)")
+        add("info", f"Breaker de string {string_a} A ≥ 1.56 × Isc ({need:.1f} A); {series_txt}. "
+                    f"Confirmar que su tensión nominal CC cubra el Voc del string ({cpl['check']['voc_string']:.0f} V).")
     if fr:
         add("info", f"Q3 (Fronius): 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A.")
     if answers.get("lynx") == "power_in":
@@ -392,7 +397,10 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
     note = _abbreviated_note(eq)
     if note:
         out.append(note)
-    add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería).")
+    if eq.get("battery", {}).get("fuse_a"):
+        add("info", f"Fusibles MEGA de las baterías: {int(float(eq['battery']['fuse_a']))} A según el datasheet de la batería.")
+    else:
+        add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería): falta el dato en el catálogo.")
     add("info", "El sub-panel de cargas críticas lo pone el propietario o constructor y no va en la lista; en la lista están los breakers Q1, Q2 y Q3 (Q4 y los circuitos del sub-panel quedan a su cargo).")
     if answers.get("export") == "grid_zero":
         add("info", "Grid Zero requiere el UTP Fronius ↔ Ekrano (incluido en la lista de materiales).")

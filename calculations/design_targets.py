@@ -93,23 +93,71 @@ def pv_sizing(
     return target_daily_kwh, deliverable_per_kw, target_system_kw
 
 
-# Roof capacity. A ~600 W module is ~1.13 x 2.38 m (2.7 m2) -> ~0.22 kWp per m2 of panel. Only part of a roof plane
-# can take panels (edges/setbacks, vents, skylights, shading, access), hence the packing factor. Both are first-pass
-# planning values, shown to the user as assumptions — the real layout is settled at Equipos.
-ROOF_PANEL_DENSITY_KWP_M2 = 0.22
-ROOF_PACKING_FACTOR = 0.70
-ROOF_REFERENCE_PANEL_W = 600
+# Roof capacity. How many panels fit = usable roof area / the footprint of one panel (its real length x width). Only part of a
+# roof plane can take panels (edges / setbacks, vents, skylights, shading, access), hence the usable share. All three are
+# Objetivos goals the user can edit; these are the first-pass defaults (a ~620 W module is about 2.2 x 1.15 m).
+ROOF_DEFAULT_PANEL_LEN_M = 2.2
+ROOF_DEFAULT_PANEL_WID_M = 1.15
+ROOF_DEFAULT_PACKING_PCT = 85.0
 
 
-def roof_capacity_kwp(roof_area_m2: float | None) -> float | None:
-    """kWp that fit on `roof_area_m2` of roof (None/<=0 -> None)."""
-    if roof_area_m2 is None or roof_area_m2 <= 0:
+def roof_geometry(goals: dict | None) -> tuple[float, float, float]:
+    """(panel length m, panel width m, usable roof share %) from the Objetivos goals, defaults where blank."""
+    g = goals or {}
+    return (float(g.get("roof_panel_len_m") or ROOF_DEFAULT_PANEL_LEN_M), float(g.get("roof_panel_wid_m") or ROOF_DEFAULT_PANEL_WID_M),
+            float(g.get("roof_packing_pct") or ROOF_DEFAULT_PACKING_PCT))
+
+
+def roof_panels_fit(roof_area_m2: float | None, panel_len_m: float, panel_wid_m: float, packing_pct: float) -> int | None:
+    """Whole panels of `panel_len_m` x `panel_wid_m` that fit in `roof_area_m2` at `packing_pct` % usable (None/<=0 area -> None)."""
+    if roof_area_m2 is None or roof_area_m2 <= 0 or panel_len_m <= 0 or panel_wid_m <= 0:
         return None
-    return roof_area_m2 * ROOF_PACKING_FACTOR * ROOF_PANEL_DENSITY_KWP_M2
+    return int(roof_area_m2 * (packing_pct / 100.0) // (panel_len_m * panel_wid_m))
 
 
-def roof_panel_count(kwp: float) -> int:
-    return int(kwp * 1000.0 // ROOF_REFERENCE_PANEL_W)
+def roof_capacity_kwp(roof_area_m2: float | None, panel_w: float | None, panel_len_m: float, panel_wid_m: float,
+                      packing_pct: float) -> float | None:
+    """kWp that fit on the roof (whole panels x their wattage). None when no roof area or no panel wattage."""
+    n = roof_panels_fit(roof_area_m2, panel_len_m, panel_wid_m, packing_pct)
+    if n is None or not panel_w:
+        return None
+    return n * float(panel_w) / 1000.0
+
+
+def roof_panel_count(kwp: float, panel_w: float) -> int:
+    """Whole panels of `panel_w` watts that make up `kwp`."""
+    return int(kwp * 1000.0 // panel_w)
+
+
+def roof_fit(roof_area_m2: float | None, panel_count: int, panel_w: float, panel_len_m: float, panel_wid_m: float,
+             packing_pct: float) -> dict | None:
+    """How many of the INSTALLED panels (`panel_count` x `panel_w` watts, each `panel_len_m` x `panel_wid_m`) fit on the stated roof,
+    and how many need extra space (and about how many m2). None when no roof area is stated or nothing is installed."""
+    cap_panels = roof_panels_fit(roof_area_m2, panel_len_m, panel_wid_m, packing_pct)
+    if cap_panels is None or panel_count <= 0 or not panel_w or panel_w <= 0:
+        return None
+    fit = min(panel_count, cap_panels)
+    extra = panel_count - fit
+    m2_per_panel = panel_len_m * panel_wid_m / (packing_pct / 100.0)
+    return {"roof_area_m2": roof_area_m2, "capacity_panels": cap_panels, "capacity_kwp": cap_panels * panel_w / 1000.0, "panel_w": panel_w,
+            "panels": panel_count, "fit": fit, "extra": extra, "fit_kwp": fit * panel_w / 1000.0, "extra_kwp": extra * panel_w / 1000.0,
+            "extra_area_m2": extra * m2_per_panel}
+
+
+def roof_fit_from_blob(blob: dict, panel_count, panel: dict | None) -> dict | None:
+    """`roof_fit` for a draft/version blob: roof area and usable share come from the confirmed Objetivos goals (Off-Grid / Hybrid
+    only), the panel's wattage and real size from the chosen catalog panel."""
+    try:
+        goals = (((blob or {}).get("objectives") or {}).get("goals") or {})
+        area = goals.get("roof_area_m2")
+        panel = panel or {}
+        w, h = float(panel.get("width_m") or 0), float(panel.get("height_m") or 0)
+        len_m, wid_m, packing = roof_geometry(goals)
+        if w > 0 and h > 0:
+            len_m, wid_m = max(w, h), min(w, h)
+        return roof_fit(float(area) if area else None, int(panel_count or 0), float(panel.get("wp") or 0), len_m, wid_m, packing)
+    except (TypeError, ValueError):
+        return None
 
 
 def inverter_required_kw(peak_kw: float, loading_target_pct: float) -> float:

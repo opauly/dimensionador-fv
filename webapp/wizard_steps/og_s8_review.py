@@ -139,6 +139,22 @@ def generate_intro_text(blob: dict, vid: str) -> str:
 # ── build_context ────────────────────────────────────────────────────────
 
 
+def _autonomy_days(blob: dict, battery_kwh: float, battery: dict) -> float | None:
+    """Days the installed bank carries the average daily load with no sun at all (Off-Grid only; informational)."""
+    try:
+        from calculations import design_targets as dt
+        from webapp.wizard_steps import s6_objetivos
+
+        sp = s6_objetivos.sweet_spot(blob)
+        if sp is None or sp["system_type"] != "off_grid" or not battery_kwh:
+            return None
+        reserve = float(getattr(sp["goal_obj"], "reserve_soc_pct", None) or 25.0)
+        dod = float(battery.get("dod_pct") or 80.0)
+        return dt.offgrid_autonomy_days_achieved(battery_kwh, float(sp["inputs"]["daily_kwh"]), min(100.0 - reserve, dod))
+    except Exception:                                   # noqa: BLE001 — summary extra, never break the review
+        return None
+
+
 def build_context(blob: dict, vid: str) -> dict:
     blob = blob or {}
     meta = blob.get("meta") or {}
@@ -179,6 +195,7 @@ def build_context(blob: dict, vid: str) -> dict:
         "inv_qty": tech["inverter_count"],
         "inverter_sub": inverter_sub,
         "area_m2": tech["area_m2"],
+        "roof_fit": tech.get("roof_fit"),
         "cc_qty": equipment.get("charge_controller_qty", 1),
         "cc_sub": cc_sub,
         "battery_count": battery_bank.get("battery_count", 0),
@@ -187,6 +204,8 @@ def build_context(blob: dict, vid: str) -> dict:
         "daily_generation_kwh": tech.get("daily_generation_kwh", 0),
         "battery_kwh": tech.get("battery_kwh", 0),
         "discharge_pct": tech.get("discharge_pct", 0),
+        "autonomy_days": _autonomy_days(blob, tech.get("battery_kwh", 0), battery),
+        "daily_consumption_kwh": (blob.get("consumption") or {}).get("daily_kwh"),
         "utilization_pct": tech.get("utilization_pct"),
         # ── Facturación estimada (Hybrid only) ──
         "hybrid_savings": hybrid_savings,

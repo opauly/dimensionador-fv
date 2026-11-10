@@ -52,6 +52,7 @@ def monthly_coverage_fig(
     consumption_kwh: list[float],
     recharge_kwh: list[float] | None = None,
     flag_shortfall: bool = True,
+    direct_kwh: list[float] | None = None,
 ):
     """
     Interactive Plotly twin of proposals/charts.py's monthly_coverage_svg() —
@@ -81,14 +82,16 @@ def monthly_coverage_fig(
         x=MONTHS_ES, y=generation_kwh, name="Generación", marker_color=gen_colors,
         offsetgroup=0, hovertemplate="%{x}<br>Generación: %{y:,.0f} kWh<extra></extra>",
     ))
+    second = direct_kwh if (direct_kwh and recharge_kwh) else consumption_kwh
+    second_name = "Consumo diurno" if (direct_kwh and recharge_kwh) else "Consumo"
     fig.add_trace(go.Bar(
-        x=MONTHS_ES, y=consumption_kwh, name="Consumo", marker_color=MINT,
-        offsetgroup=1, hovertemplate="%{x}<br>Consumo: %{y:,.0f} kWh<extra></extra>",
+        x=MONTHS_ES, y=second, name=second_name, marker_color=MINT,
+        offsetgroup=1, hovertemplate=f"%{{x}}<br>{second_name}: %{{y:,.0f}} kWh<extra></extra>",
     ))
     if recharge_kwh:
         fig.add_trace(go.Bar(
             x=MONTHS_ES, y=recharge_kwh, name="Recarga de batería", marker_color=NAVY,
-            offsetgroup=1, base=consumption_kwh,
+            offsetgroup=1, base=second,
             hovertemplate="%{x}<br>Recarga de batería: %{y:,.0f} kWh<extra></extra>",
         ))
     fig.update_layout(
@@ -140,25 +143,29 @@ def _margin_pct_color(pct: float) -> str:
     return BRAND_GREEN
 
 
-def gz_margin_bars_fig(items: list[tuple[str, float]]):
+def gz_margin_bars_fig(items: list[tuple[str, float]], soft: tuple[str, ...] = ()):
     """Grid Zero Step 6's "Margen de diseño" horizontal bar chart — how close
     the chosen design sits to the inverter's Voc/corriente-per-MPPT ceilings.
     Extracted verbatim from wizard/grid_zero.py:step6_equipment() (L1076-1095).
-    `items` is `[(label, pct_of_limit), ...]`."""
+    `items` is `[(label, pct_of_limit), ...]`. Labels in `soft` are limits that are NOT faults when exceeded (PV power over a
+    controller's maximum only clips the output): past 100 % they get a light blue bar and a "se limita" tag, never red."""
     import plotly.graph_objects as go
+
+    def _color(label, v):
+        return ("#93c5fd" if v > 100 else "#86efac") if label in soft else _margin_pct_color(v)
 
     fig = go.Figure(go.Bar(
         x=[v for _, v in items],
         y=[k for k, _ in items],
         orientation="h",
-        marker_color=[_margin_pct_color(v) for _, v in items],
-        text=[f"{v:.0f}%" for _, v in items],
+        marker_color=[_color(k, v) for k, v in items],
+        text=[f"{v:.0f}%" + (" · se limita la salida" if (k in soft and v > 100) else "") for k, v in items],
         textposition="outside",
     ))
     fig.add_vline(x=100, line_dash="dash", line_color="#9ca3af")
     fig.update_layout(
-        xaxis=dict(title="% del límite", range=[0, max(110, max(v for _, v in items) * 1.15)]),
-        height=160,
+        xaxis=dict(title="% del límite", range=[0, max(110, max(v for _, v in items) * (1.45 if soft else 1.15))]),
+        height=40 + 40 * len(items),
         margin=dict(t=10, b=10, l=10, r=30),
     )
     return fig

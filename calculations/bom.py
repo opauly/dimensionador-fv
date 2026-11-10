@@ -78,8 +78,17 @@ def system_rows(eq: dict, coupling: dict | None, wiring_ctx: dict) -> list[dict]
         rows.append({"item": "Pernos / roscas para Lynx Power In", "qty": inputs * BOLTS_PER_INPUT,
                      "note": f"{BOLTS_PER_INPUT} por entrada (+ y −)"})
     if bat_qty:
-        rows.append({"item": "Fusible MEGA de batería (calibre por definir)", "qty": bat_qty,
-                     "note": "uno por batería en la barra Lynx; calibre según manual de la batería"})
+        fuse_a = (eq.get("battery") or {}).get("fuse_a")           # catalog: fuse the battery maker calls for
+        try:
+            fuse_a = int(float(fuse_a)) if fuse_a else None
+        except (TypeError, ValueError):
+            fuse_a = None
+        if fuse_a:
+            rows.append({"item": f"Fusible MEGA de batería {fuse_a} A", "qty": bat_qty, "amps": fuse_a,
+                         "note": f"uno por batería en la barra Lynx; {fuse_a} A según el datasheet de la batería"})
+        else:
+            rows.append({"item": "Fusible MEGA de batería (calibre por definir)", "qty": bat_qty,
+                         "note": "uno por batería en la barra Lynx; calibre según manual de la batería"})
     if eq.get("monitoring"):
         utp = max(inv_qty - 1, 0) + (1 if inv_qty else 0) + (1 if coupling.get("ac") else 0) + 1
         parts = ([f"{inv_qty - 1} VE.Bus entre inversores"] if inv_qty > 1 else []) + (["1 inversor ↔ GX"] if inv_qty else []) \

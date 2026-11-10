@@ -1,4 +1,4 @@
-"""PV coupling choice for Hybrid designs: DC-coupled (charge controllers, what the sizing engine
+"""PV coupling choice for Off-Grid and Hybrid designs: DC-coupled (charge controllers, what the sizing engine
 designs) or AC-coupled (a Fronius-class string inverter on the AC-OUT side of the Victron units).
 
 The sizing engine in the Equipos step is DC-coupled and untouched; this module keeps the coupling
@@ -92,6 +92,10 @@ def resolve(eq: dict, saved: dict | None) -> dict:
 
     qty = cfg["pv_inverter_qty"] or 1
     d_strings, d_series = C.default_layout(panel_count, int(chosen.get("mppt_channels") or 1) * qty)
+    # The Equipos scenario was sized for this coupling: when its saved layout holds the same panels, use it as the default.
+    eq_strings, eq_series = int(eq.get("n_strings") or 0), int(eq.get("panels_per_string") or 0)
+    if eq.get("coupling") == "ac" and eq_strings and eq_series and eq_strings * eq_series == panel_count:
+        d_strings, d_series = eq_strings, eq_series
     strings = cfg["strings"] or d_strings
     series = cfg["modules_per_string"] or d_series
     inv = eq.get("inverter") or {}

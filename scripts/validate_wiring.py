@@ -45,6 +45,19 @@ check("OG C92 AC gauge", W.initial_gauge(design_ac), "10")
 check("OG C94 AC OCPD (A)", W.ocpd_size(design_ac), 30)
 check("OG C97 AC Vd initial (V)", round(W.vdrop_ac("10", i_ac, 30.0), 3), 4.191, 2e-3)
 
+# ── EGC by T250.122 (rating of the protective device), not T250.66 ─────────────
+check("T250.122: 25 A breaker -> 10 AWG", W.egc_gauge_ocpd(25, "10", "10"), "10")
+check("T250.122: 60 A -> 10 AWG", W.egc_gauge_ocpd(60, "6", "6"), "10")
+check("T250.122: 70 A -> 8 AWG", W.egc_gauge_ocpd(70, "4", "4"), "8")
+check("T250.122: 90 A -> 8 AWG", W.egc_gauge_ocpd(90, "3", "3"), "8")
+check("T250.122: 200 A -> 6 AWG", W.egc_gauge_ocpd(200, "3/0", "3/0"), "6")
+check("T250.122(B): phases 10 -> 6 for voltage drop, 60 A (10 AWG ground) grows in proportion", W.egc_gauge_ocpd(60, "10", "6"), "6")
+eb = W.size_branch("ac", kind="ac", qty=1, current_a=41.67, factor=1.25, v_ref=240.0, length_m=10.0, hot=2)
+check("size_branch AC 60 A: ground 10 AWG (T250.122), not 8 (T250.66)", eb["egc"], "10")
+check("size_branch rows carry ampacity and rule", all(r.get("rule") and "ampacity" in r for r in eb["conductors"]), True)
+tiny = W.size_branch("tiny", kind="ac", qty=1, current_a=30.0, factor=1.25, v_ref=240.0, length_m=5.0, hot=2, ocpd_override=100)
+check("EGC never larger than the phase conductors (250.122(A))", T_i := (W.T.GAUGE_ORDER.index(tiny["egc"]) <= W.T.GAUGE_ORDER.index(tiny["ugc"])), True)
+
 # ── Conduit: RHW-2 UGC 8 AWG + EGC 4 AWG = 98.64 mm2 -> PVC A metric 16 (1/2 in) ──
 total = W.conductor_area("8") + W.conductor_area("4")
 check("OG E116 conductor total (mm2)", round(total, 2), 98.64)
@@ -65,7 +78,7 @@ check("above largest table ampacity -> None", W.initial_gauge(9999.0), None)
 check("above 6000 A OCPD -> None", W.ocpd_size(7000), None)
 b = W.size_branch("t", kind="dc", qty=1, current_a=31.72, factor=1.5625, v_ref=161.8, length_m=15.0)
 check("size_branch PV (2 strings of 600 W panels): UGC", b["ugc"], "8")
-check("size_branch PV: conduit trade size", b["conduit"]["trade"], "3/4")
+check("size_branch PV: conduit trade size (EGC by T250.122: 8 AWG + 10 AWG ground)", b["conduit"]["trade"], "1/2")
 
 # ── BOM assembly (calculations/bom.py) on a hand-checkable branch ──────────────
 from calculations import bom as B  # noqa: E402
@@ -93,7 +106,7 @@ check("AC Vd judged on 120 V (36.75 A, 8 AWG, 10 m) %", ab["vd_pct"], 1.32, 0.01
 meters = B.conductor_rows([nb, ab], "RHW-2")
 tot = {r["item"]: r["meters"] for r in meters}
 check("BOM: AC 8 AWG live+neutral = 2 inverters x 2 conductors x 10 m + DC pair 2x2x15", tot["Conductor Cu RHW-2 8 AWG — activos / neutro"], 40.0 + 60.0)
-check("BOM: AC ground = 2 inverters x 1 x 10 m (DC has none)", tot["Conductor Cu RHW-2 8 AWG — tierra (EGC)"], 20.0)
+check("BOM: AC ground = 2 inverters x 1 x 10 m (DC has none); 50 A breaker -> 10 AWG by T250.122", tot["Conductor Cu RHW-2 10 AWG — tierra (EGC)"], 20.0)
 
 # ── Breaker ceilings and the AC design bases ───────────────────────────────────
 check("'95 A or less' -> largest standard size <= 95 A", W.ocpd_size_max(95), 90)
@@ -116,6 +129,38 @@ f3 = W.size_branch("big", kind="dc", qty=1, current_a=250.0, factor=1.25, v_ref=
 check("design above the largest fuse -> flagged, no rating", (f3["ocpd_a"], f3["ok"]), (None, False))
 rows = B.protection_rows([f1, f2, {**ao, "protection": "breaker"}])
 check("BOM fuse label has no poles and names the bus", any("Fusible CC 200 A (barra Lynx Power In)" == r["item"] for r in rows), True)
+
+# ── Datasheet limits and the engineer's manual values ──────────────────────────
+from calculations import datasheet_limits as DL  # noqa: E402
+
+mp = DL.multi_limits("MultiPlus-II 48/5000/70-95")
+check("MultiPlus-II 48/5000/70-95 datasheet: 4000 W continuous, 9000 W peak, 95 A AC in", (mp["cont_w_25c"], mp["peak_w"], mp["ac_in_a"]), (4000, 9000, 95))
+check("Multi AC currents at 120 V: 41.7 A continuous (5000 VA), 75 A peak (9000 W)", (mp["ac_cont_a"], mp["ac_peak_a"]), (41.7, 75.0))
+check("Fronius Primo 10.0-1 @240 V: 41.6 A out, 60 A OCPD", tuple(DL.fronius_limits("Primo 10.0-1").values()), (41.6, 60))
+check("Fronius Primo 15.0-1 @240 V: 62.5 A out, 80 A OCPD", tuple(DL.fronius_limits("Fronius Primo 15.0-1").values()), (62.5, 80))
+
+base_ac = W.size_branch("fr", kind="ac", qty=1, current_a=41.6, factor=1.25, v_ref=240.0, length_m=10.0, hot=2)
+base_ac["max_ocpd_a"] = 60
+b1 = W.apply_manual(dict(base_ac), {"ocpd_a": 70})
+check("manual 70 A above the Fronius max OCPD (60 A) -> dangerous", (b1["manual"]["ocpd_ok"], b1["manual"]["ok"]), (False, False))
+b2 = W.apply_manual(dict(base_ac), {"ocpd_a": 60, "ugc": "4"})
+check("manual 60 A on a LARGER gauge than calculated -> safe", (b2["manual"]["ocpd_ok"], b2["manual"]["ugc_ok"]), (True, True))
+check("manual ground follows the manual breaker (T250.122, 60 A -> 10 AWG)", b2["egc"], "10")
+b3 = W.apply_manual(dict(base_ac), {"ugc": "10"})
+check("manual 10 AWG (35 A) under a 52 A design current -> dangerous", b3["manual"]["ugc_ok"], False)
+b4 = W.apply_manual(dict(base_ac), {"ocpd_a": 50})
+check("manual 50 A below the 52 A design current -> trips on normal load", b4["manual"]["ocpd_ok"], False)
+dcb = W.size_branch("bat->inv", kind="dc", qty=1, current_a=81.4, factor=1.25, v_ref=51.2, length_m=2.0, hot=2, egc_included=False, protection="fuse", ocpd_choices=(100, 125, 200, 250))
+check("calculated: 81.4 A x 1.25 = 101.7 A -> 125 A fuse on 2 AWG (115 A, 240.4(B))", (dcb["ocpd_a"], dcb["ugc"]), (125, "2"))
+b5 = W.apply_manual(dict(dcb), {"ocpd_a": 250, "ugc": "2"})
+check("manual 250 A fuse on 2 AWG: more than NEC 240.4(B) lets the cable carry -> dangerous", (b5["manual"]["ocpd_ok"], b5["manual"]["ugc_ok"]), (False, False))
+lim = W.size_branch("ac in", kind="ac", qty=2, current_a=95.0, factor=1.0, v_ref=120.0, length_m=10.0, hot=1, neutral=1, ocpd_override=90)
+lim["limited"], lim["max_ocpd_a"] = True, 90
+b6 = W.apply_manual(dict(lim), {"ocpd_a": 70})
+check("manufacturer-limited AC in: a lower breaker (70 A) just caps the input -> safe", b6["manual"]["ocpd_ok"], True)
+b7 = W.apply_manual(dict(lim), {"ugc": "4"})
+check("AC in: 4 AWG (85 A) with the 90 A breaker is allowed by 240.4(B) -> safe", b7["manual"]["ugc_ok"], True)
+check("no manual values -> branch untouched", W.apply_manual(dict(base_ac), {})["ocpd_a"], base_ac["ocpd_a"])
 
 print("\n" + ("ALL WIRING CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

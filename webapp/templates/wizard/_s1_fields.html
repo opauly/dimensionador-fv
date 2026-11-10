@@ -21,6 +21,29 @@
     <div><label class="flabel">NISE (número de cliente en distribuidora)</label><input class="finput" type="text" name="nise" value="{{ client.nise }}"></div>
   </div>
 
+  <h4 class="section-title" style="font-size:15px;margin-top:18px;">Pedido del cliente</h4>
+  <p class="card-note-sm">Pega lo que el cliente envió (WhatsApp, correo, llamada). Se guarda con fecha y origen para consultarlo en cualquier paso.</p>
+  <div class="fgrid" style="grid-template-columns:200px 1fr;align-items:start;">
+    <div>
+      <label class="flabel">Origen</label>
+      <select class="finput" name="request_source">{% for s in request_sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select>
+    </div>
+    <div>
+      <label class="flabel">Texto</label>
+      <textarea class="finput" name="request_text" rows="5" placeholder="Pega aquí el mensaje o tus notas de la llamada…" style="width:100%;resize:vertical;"></textarea>
+    </div>
+  </div>
+  {% if client_requests %}
+    <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;">Pedidos guardados ({{ client_requests|length }})</summary>
+      {% for e in client_requests %}
+        <div style="margin:8px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
+          <div style="font-size:0.74rem;color:#6b7280;margin-bottom:4px;"><b>{{ e.source }}</b> · {{ e.ts.replace('T', ' ') }}</div>
+          <div style="white-space:pre-wrap;font-size:0.85rem;max-height:220px;overflow:auto;">{{ e.text }}</div>
+        </div>
+      {% endfor %}
+    </details>
+  {% endif %}
+
   {% include "wizard/_s1_prev.html" %}
 
   {% if not client.name %}<p class="wiz-note">* El nombre del cliente es requerido.</p>{% endif %}

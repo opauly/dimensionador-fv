@@ -38,13 +38,13 @@ def load(project: dict) -> dict:
         out["empty"] = "La cotización de este proyecto no tiene versiones."
         return out
     blob = draft.load(chosen["id"])
-    eq = blob.get("equipment") or {}
+    eq = og_wiring.fresh_equipment(blob.get("equipment") or {})      # current catalog rows (datasheet fields added after the design)
     out.update(blob=blob, eq=eq)
     if not eq.get("panel"):
         out["empty"] = "La versión elegida todavía no tiene equipos seleccionados."
         return out
     if project.get("system_type") in ("off_grid", "hybrid"):
-        out["wiring"] = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"))
+        out["wiring"] = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"), spec.get("wiring_manual") or {})
     elif project.get("system_type") == "grid_zero":
         from webapp.wizard_steps import gz_wiring
 

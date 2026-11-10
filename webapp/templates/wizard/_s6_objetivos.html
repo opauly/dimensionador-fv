@@ -21,6 +21,18 @@
 .obj-spot th:first-child, .obj-spot td:first-child { text-align:left; }
 .obj-spot td { padding:8px 12px; border-bottom:1px solid #eef0f3; text-align:right; white-space:nowrap; }
 .obj-spot td.mid { font-weight:700; color:#166534; background:#f0fdf4; }
+.obj-spot tr.sub td { padding:4px 12px; font-size:0.82rem; border-bottom:1px dashed #eef0f3; }
+.obj-spot tr.sub td:first-child { padding-left:28px; color:#6b7280; }
+.obj-spot tr.sub.extra td { background:#fffbeb; color:#92400e; font-weight:600; }
+.obj-spot tr.sub.extra td:first-child { border-left:3px solid #f59e0b; }
+.obj-spot tr.sub.extra td.mid { background:#fef3c7; color:#92400e; }
+.obj-real { margin-top:16px; border:2px solid #bfdbfe; background:#f8fbff; border-radius:12px; padding:12px 16px 14px; }
+.obj-real-head { margin:0 0 4px; font-size:0.78rem; font-weight:700; letter-spacing:0.05em; color:#1d4ed8; }
+.obj-real-head .obj-unit { font-weight:400; letter-spacing:0; }
+.obj-real-sec { margin-top:10px; padding-top:10px; border-top:1px dashed #bfdbfe; }
+.obj-real-sec:first-of-type { border-top:0; padding-top:0; }
+.obj-tag { font-size:0.66rem; font-weight:700; letter-spacing:0.05em; border-radius:4px; padding:1px 6px; vertical-align:1px; }
+.obj-tag.measured { background:#dcfce7; color:#166534; } .obj-tag.calc { background:#e0e7ff; color:#3730a3; }
 .obj-spot .u { color:#9ca3af; font-size:0.78rem; margin-left:3px; }
 .obj-note { font-size:0.78rem; color:#6b7280; margin:3px 0; }
 .obj-warn { font-size:0.82rem; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:7px 10px; margin:10px 0; }
@@ -30,7 +42,7 @@
 <p class="card-note" style="margin:0 0 4px;"><b>Objetivos de diseño</b></p>
 <p class="card-note-sm" style="margin:0 0 6px;">
   Define qué debe lograr el sistema. Abajo verás una recomendación sin equipo elegido (el «punto óptimo» para estas metas y estas
-  cargas, con un piso y un techo); en el paso de Equipos se compara lo que elijas contra ella. Este paso es obligatorio.
+  cargas, con un mínimo y un máximo); en el paso de Equipos se compara lo que elijas contra ella. Este paso es obligatorio.
 </p>
 
 {% if from_default and not confirmed %}
@@ -55,8 +67,7 @@
 </div>
 {% endif %}
 
-<div class="obj-grid">
-  {% for f in fields %}
+{% macro obj_field(f) %}
   <div class="obj-field">
     <label class="flabel">{{ f.label }}</label>
     <div class="obj-input">
@@ -74,7 +85,9 @@
     {% if f.error %}<div class="obj-err">{{ f.error }}</div>{% endif %}
     {% if f.help %}<div class="obj-help">{{ f.help }}</div>{% endif %}
   </div>
-  {% endfor %}
+{% endmacro %}
+<div class="obj-grid">
+  {% for f in fields if not f.advanced %}{{ obj_field(f) }}{% endfor %}
 
   {% if system_type == 'hybrid' %}
   <div class="obj-field">
@@ -93,9 +106,15 @@
   {% endif %}
 </div>
 
+{% if fields|selectattr('advanced')|list %}
+<details style="margin:6px 0 10px;"><summary style="cursor:pointer;font-size:12.5px;">Ajustes finos (margen y cobertura FV)</summary>
+  <div class="obj-grid">{% for f in fields if f.advanced %}{{ obj_field(f) }}{% endfor %}</div>
+</details>
+{% endif %}
+
 {% if system_type == 'grid_zero' %}
   <p class="obj-note">Fracción de consumo diurno estimada: <b>{{ daytime_fraction_pct }}%</b>{% if daytime_note %} — {{ daytime_note[:230] }}{{ '…' if daytime_note|length > 230 else '' }}{% endif %}.
-     Techo alcanzable sin baterías: <b>{{ '%.1f'|format(ceiling_pct) }}%</b>.</p>
+     Máximo alcanzable sin baterías: <b>{{ '%.1f'|format(ceiling_pct) }}%</b>.</p>
 {% endif %}
 
 {% if needs_ack %}
@@ -112,20 +131,22 @@
     {% for m in inputs_missing %}<p class="wiz-error" style="margin:4px 0;">{{ m }}</p>{% endfor %}
   {% elif block %}
     <table>
-      <thead><tr><th></th><th>Piso</th><th>Punto óptimo</th><th>Techo</th></tr></thead>
+      <thead><tr><th></th><th>Mínimo</th><th>Punto óptimo</th><th>Máximo</th></tr></thead>
       <tbody>
         {% for r in block.rows %}
-        <tr>
-          <td>{{ r.label }}</td>
-          <td>{{ r["values"][0] }}<span class="u">{{ r.unit }}</span></td>
-          <td class="mid">{{ r["values"][1] }}<span class="u">{{ r.unit }}</span></td>
-          <td>{{ r["values"][2] }}<span class="u">{{ r.unit }}</span></td>
+        <tr{% if r.sub %} class="sub {{ r.sub }}"{% endif %}>
+          <td>{% if r.sub %}↳ {% endif %}{{ r.label }}</td>
+          {% for v in r["values"] %}<td{% if loop.index == 2 %} class="mid"{% endif %}>{{ v }}{% if v != "—" %}<span class="u">{{ r.unit }}</span>{% endif %}</td>{% endfor %}
         </tr>
         {% endfor %}
       </tbody>
     </table>
-    <p class="obj-note" style="margin-top:8px;">Bajo el <b>piso</b> las metas no se cumplen; sobre el <b>techo</b> el equipo adicional ya es sobredimensionamiento.</p>
-    {% for n in block.notes %}<p class="obj-note">{{ n }}</p>{% endfor %}
+    <p class="obj-note" style="margin-top:8px;"><b>{{ block.headline }}</b></p>
+    {% for w in block.warnings %}<div class="obj-warn" style="margin:6px 0;">⚠ {{ w }}</div>{% endfor %}
+    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Cómo se calculó</summary>
+      <p class="obj-note">Bajo el <b>mínimo</b> las metas no se cumplen; sobre el <b>máximo</b> el equipo adicional ya es sobredimensionamiento.</p>
+      {% for n in block.details %}<p class="obj-note">{{ n }}</p>{% endfor %}
+    </details>
   {% else %}
     <p class="obj-note">Corrige los objetivos marcados para ver la recomendación.</p>
   {% endif %}
@@ -133,13 +154,13 @@
 
 {% if fleet %}
 {% set ref = fleet.ref %}
-<div class="obj-spot card" style="margin-top:12px;">
-  <p class="card-note" style="margin:0 0 6px;"><b>Referencia de la flota real</b>
-    <span class="obj-unit">— sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} ya instalados y monitoreados</span></p>
+<div class="obj-real">
+<p class="obj-real-head">DATOS REALES DE LA FLOTA <span class="obj-unit">— sistemas monitoreados con VRM; de aquí salen las dos tarjetas de abajo</span></p>
+<div class="obj-spot obj-real-sec">
+  <p class="card-note" style="margin:0 0 6px;"><b>Qué usan los sistemas reales</b> <span class="obj-tag measured">MEDIDO</span>
+    <span class="obj-unit">— sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} ya instalados</span></p>
   {% if ref.comparable %}
-    <p class="obj-note" style="margin-top:0;">{{ ref.comparable|length }} sistema(s) del mismo tipo (el tamaño no importa: se usa cómo se relacionan paneles, batería e inversor con el consumo), con consumo medido de
-      {{ '%.1f'|format(ref.load_range.min) }}–{{ '%.1f'|format(ref.load_range.max) }} kWh/día (el tuyo: {{ '%.1f'|format(fleet.daily_kwh) }}).
-      {{ ref.verdicts.sano }} sano(s), {{ ref.verdicts.estresado }} estresado(s), {{ ref.verdicts.sobredimensionado }} sobredimensionado(s), {{ ref.verdicts.respaldo }} solo respaldo.</p>
+    <p class="obj-note" style="margin-top:0;">{{ ref.comparable|length }} sistema(s) del mismo tipo ya instalados ({{ ref.verdicts.sano }} sano(s)). Qué usan ellos para un consumo como el tuyo ({{ '%.1f'|format(fleet.daily_kwh) }} kWh/día):</p>
     {% if ref.suggestion %}
       {% set sg = ref.suggestion %}
       <table>
@@ -149,6 +170,16 @@
               <td>{{ '%.1f'|format(fleet.formula.kwp) }}<span class="u">kWp</span></td>
               <td class="mid">{{ '%.1f'|format(sg.kwp.median) }}<span class="u">kWp</span></td>
               <td>{{ '%.1f'|format(sg.kwp.p25) }}–{{ '%.1f'|format(sg.kwp.p75) }}<span class="u">kWp</span></td></tr>
+          {% if fleet.roof_kwp %}{% set cap = fleet.roof_kwp %}
+          <tr class="sub ok"><td>↳ Caben en el techo</td>
+              <td>{{ '%.1f'|format([fleet.formula.kwp, cap]|min) }}<span class="u">kWp</span></td>
+              <td class="mid">{{ '%.1f'|format([sg.kwp.median, cap]|min) }}<span class="u">kWp</span></td>
+              <td>{% if sg.kwp.p25 >= cap %}{{ '%.1f'|format(cap) }}{% else %}{{ '%.1f'|format(sg.kwp.p25) }}–{{ '%.1f'|format([sg.kwp.p75, cap]|min) }}{% endif %}<span class="u">kWp</span></td></tr>
+          <tr class="sub extra"><td>↳ NO caben (necesitan espacio extra)</td>
+              <td>{% if fleet.formula.kwp > cap %}{{ '%.1f'|format(fleet.formula.kwp - cap) }}<span class="u">kWp</span>{% else %}—{% endif %}</td>
+              <td class="mid">{% if sg.kwp.median > cap %}{{ '%.1f'|format(sg.kwp.median - cap) }}<span class="u">kWp</span>{% else %}—{% endif %}</td>
+              <td>{% if sg.kwp.p75 > cap %}{{ '%.1f'|format([sg.kwp.p25 - cap, 0]|max) }}–{{ '%.1f'|format(sg.kwp.p75 - cap) }}<span class="u">kWp</span>{% else %}—{% endif %}</td></tr>
+          {% endif %}
           <tr><td>Batería (capacidad nominal)</td>
               <td>{{ '%.1f'|format(fleet.formula.battery_kwh) }}<span class="u">kWh</span></td>
               <td class="mid">{{ '%.1f'|format(sg.battery_nominal_kwh.median) }}<span class="u">kWh</span></td>
@@ -161,6 +192,11 @@
           {% endif %}
         </tbody>
       </table>
+    {% elif ref.note %}
+      <p class="obj-note">{{ ref.note }}</p>
+    {% endif %}
+    <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12.5px;">Ver detalle</summary>
+    {% if ref.suggestion %}{% set sg = ref.suggestion %}
       {% if sg.kwp_fit and sg.battery_fit %}
       <p class="obj-note" style="margin-top:8px;">Cómo crece el tamaño con el consumo en la flota sana ({{ sg.n }} sistemas): si el consumo se duplica,
         los paneles crecen ≈{{ '%.0f'|format(sg.kwp_fit.growth_per_doubling_pct) }}% y la batería ≈{{ '%.0f'|format(sg.battery_fit.growth_per_doubling_pct) }}%
@@ -172,8 +208,6 @@
         {{ '%.2f'|format(sg.battery_per_kwh_day.median) }} kWh de batería por cada kWh/día. Confianza <b>{{ sg.confidence }}</b>
         (n = {{ sg.n }} sistema(s) sano(s)){% if sg.n < 3 %} — pocos datos: es una referencia, no una norma{% endif %}.</p>
       {% endif %}
-    {% elif ref.note %}
-      <p class="obj-note">{{ ref.note }}</p>
     {% endif %}
     {% if ref.inverter and ref.inverter.fit %}
       {% set iv = ref.inverter %}
@@ -199,6 +233,7 @@
         </tbody>
       </table>
     </details>
+      </details>
   {% else %}
     <p class="obj-note">No hay sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} monitoreados con un consumo parecido
       con kWp, batería y días suficientes.</p>
@@ -206,120 +241,86 @@
   <p class="obj-note" style="margin-top:6px;opacity:.75;">Solo se usan sitios con kWp, batería y tipo de sistema registrados ({{ fleet.coverage.used }} en uso; {{ fleet.coverage.no_metadata }} monitoreados quedan fuera por no tener esos datos{% if fleet.coverage.too_few_days %}, {{ fleet.coverage.too_few_days }} por tener menos de 30 días completos{% endif %}). Datos medidos por VRM desde mayo 2026. Muestra pequeña: úsalo para contrastar la fórmula, no para reemplazarla.</p>
 </div>
 
-{% if fleet.sim and system_type == 'off_grid' %}
+{% if fleet.sim %}
 {% set sm = fleet.sim %}
-<div class="obj-spot card" style="margin-top:12px;">
-  <p class="card-note" style="margin:0 0 6px;"><b>Simulación con datos reales</b>
-    <span class="obj-unit">— tu diseño puesto a prueba con el clima y los patrones de consumo de la flota (datos cada 15 min)</span></p>
+<div class="obj-spot obj-real-sec">
+  <p class="card-note" style="margin:0 0 6px;"><b>Simulación con tu consumo</b> <span class="obj-tag calc">CALCULADO</span>
+    <span class="obj-unit">— tus paneles y tu consumo puestos contra el clima y los consumos medidos en la flota. El veredicto final se ve en Equipos, con el equipo que elijas.</span></p>
   {% if sm.pending %}
-    <p class="obj-note">La simulación se está preparando (la primera vez tarda cerca de un minuto). Recarga la página en un momento.</p>
+    <p class="obj-note">Se está preparando (la primera vez tarda cerca de un minuto). Recarga en un momento.</p>
   {% elif sm.unavailable %}
-    <p class="obj-note">Todavía no hay al menos 2 sistemas aislados cuyo comportamiento la simulación reproduzca bien; sin eso no se simula.</p>
+    <p class="obj-note">Todavía no hay datos suficientes para simular.</p>
   {% else %}
-    <p class="obj-note" style="margin-top:0;">Con tu consumo esperado ({{ '%.1f'|format(sm.daily_kwh) }} kWh/día) y {{ '%.1f'|format(sm.kwp) }} kWp de paneles, la batería
-      mínima que cumple (máximo 2 % de días sin energía y sin rachas de más de 2 días) es:</p>
-    <table>
-      <tbody>
-        <tr><td>Usando el banco hasta el 10 %</td>
-            <td class="mid">{% if sm.battery_min_physical %}{{ '%.0f'|format(sm.battery_min_physical) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
-        <tr><td>Sin tocar tu reserva de {{ '%.0f'|format(sm.reserve_pct) }} %</td>
-            <td class="mid">{% if sm.battery_min_reserve %}{{ '%.0f'|format(sm.battery_min_reserve) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
-      </tbody>
-    </table>
-    {% if sm.compare %}
-    <table style="margin-top:8px;">
-      <thead><tr><th>Si instalas…</th><th>Batería</th><th>Días sin energía</th><th>Días que tocan la reserva</th><th>Racha máx. sin energía</th></tr></thead>
-      <tbody>{% for c in sm.compare %}
-        <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
-            <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
-            <td>{{ '%.1f'|format(c.fail_pct_physical) }} %</td><td>{{ '%.1f'|format(c.fail_pct_reserve) }} %</td>
-            <td>{{ '%.0f'|format(c.streak_p90) }} día(s)</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    {% if sm.kwp_min %}
-      <p class="obj-note" style="margin-top:8px;">Paneles: con una batería de {{ '%.0f'|format(sm.kwp_min_for_battery) }} kWh ya se cumple desde ≈{{ '%.1f'|format(sm.kwp_min) }} kWp
-        (tu diseño usa {{ '%.1f'|format(sm.kwp) }} kWp). Más paneles casi no cambian el resultado: lo que limita es guardar energía para la noche y los días nublados.</p>
-    {% endif %}
-    {% if sm.max_case %}
-      <p class="obj-note">Si todo se usara al máximo declarado ({{ '%.1f'|format(sm.max_case.daily_kwh) }} kWh/día): batería mínima
-        {% if sm.max_case.battery_min_physical %}{{ '%.0f'|format(sm.max_case.battery_min_physical) }} kWh (hasta el 10 %){% else %}—{% endif %}
-        {% if sm.max_case.battery_min_reserve %}/ {{ '%.0f'|format(sm.max_case.battery_min_reserve) }} kWh (sin tocar la reserva){% endif %}.</p>
-    {% endif %}
-    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Cómo se calculó y sus límites</summary>
-      <p class="obj-note">{{ sm.scenarios }} escenarios ({{ sm.locations }} ubicaciones con su clima real × {{ sm.patterns }} patrones de consumo de sitios reales, escalados a tu consumo),
-        {{ sm.days }} días-escenario entre {{ sm.window[0].strftime('%d/%m/%Y') }} y {{ sm.window[1].strftime('%d/%m/%Y') }}. Respuesta solar {{ '%.2f'|format(sm.k) }} kW por kWp y kW/m²,
-        calibrada en {{ sm.accepted|length }} sistema(s) aislado(s) cuya simulación reproduce su batería real
-        (error medio {% for v in sm.accepted %}{{ '%.0f'|format(v.rmse_pct) }}{{ ' y ' if not loop.last }}{% endfor %} puntos de carga).</p>
-      <p class="obj-note">Límites: son ~90 días de la época lluviosa (no incluye el verano); el patrón de consumo viene de otros clientes, no de los hábitos de esta casa;
-        el cálculo es por hora, no ve picos cortos. Úsalo para contrastar la fórmula, no para reemplazarla.</p>
-    </details>
-  {% endif %}
-</div>
-{% endif %}
-
-{% if fleet.sim and system_type == 'hybrid' %}
-{% set sm = fleet.sim %}
-<div class="obj-spot card" style="margin-top:12px;">
-  <p class="card-note" style="margin:0 0 6px;"><b>Simulación con datos reales</b>
-    <span class="obj-unit">— tu diseño híbrido puesto a prueba con el clima, los patrones de consumo y los cortes de red reales de la flota</span></p>
-  {% if sm.pending %}
-    <p class="obj-note">La simulación se está preparando (la primera vez tarda cerca de un minuto). Recarga la página en un momento.</p>
-  {% elif sm.unavailable %}
-    <p class="obj-note">Todavía no hay datos suficientes para simular (se necesita calibrar la respuesta solar en al menos 2 sistemas aislados).</p>
-  {% else %}
-    <p class="obj-note" style="margin-top:0;">Con tu carga crítica de {{ '%.1f'|format(sm.daily_kwh) }} kWh/día, {{ '%.1f'|format(sm.kwp) }} kWp de paneles y una reserva de
-      {{ '%.0f'|format(sm.reserve_pct) }} %, la batería mínima que cumple cada meta es:</p>
-    <table>
-      <tbody>
-        <tr><td>Cubrir la noche (18:00–06:00) en {{ '%.0f'|format(sm.night_target) }} % de las noches</td>
-            <td class="mid">{% if sm.battery_min_nights %}{{ '%.0f'|format(sm.battery_min_nights) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
-        <tr><td>Aguantar {{ '%.0f'|format(sm.outage_target) }} % de los cortes de red reales</td>
-            <td class="mid">{% if not sm.outages.enough %}—{% elif sm.battery_min_backup %}{{ '%.0f'|format(sm.battery_min_backup) }}<span class="u">kWh</span>{% else %}más de {{ '%.0f'|format(sm.daily_kwh * 6) }}<span class="u">kWh</span>{% endif %}</td></tr>
-      </tbody>
-    </table>
-    {% if sm.compare %}
-    <table style="margin-top:8px;">
-      <thead><tr><th>Si instalas…</th><th>Batería</th><th>Noches cubiertas</th><th>Cortes reales que aguanta</th><th>Respaldo típico / peor 10 %</th><th>Red que sigues comprando</th></tr></thead>
-      <tbody>{% for c in sm.compare %}
-        <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
-            <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
-            <td>{{ '%.0f'|format(c.nights_ok_pct) }} %</td>
-            <td>{% if c.outage_cover_pct is not none %}{{ '%.0f'|format(c.outage_cover_pct) }} %{% else %}—{% endif %}</td>
-            <td>{% if c.backup_median_h is not none %}{{ '%.0f'|format(c.backup_median_h) }} h / {{ '%.0f'|format(c.backup_p10_h) }} h{% else %}—{% endif %}</td>
-            <td>{{ '%.0f'|format(c.import_pct) }} %{% if c.import_pct_adj is not none %} <span class="obj-unit">(real típico ≈{{ '%.0f'|format(c.import_pct_adj) }} %)</span>{% endif %}</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    {% if sm.kwp_curve %}
-    <table style="margin-top:8px;">
-      <thead><tr><th>Paneles (con batería de {{ '%.0f'|format(sm.kwp_curve_battery) }} kWh)</th><th>Red que sigues comprando</th><th>Noches cubiertas</th></tr></thead>
-      <tbody>{% for r in sm.kwp_curve %}
-        <tr{% if r.factor == 1.0 %} style="font-weight:600;"{% endif %}><td>{{ '%.1f'|format(r.kwp) }}<span class="u">kWp</span>{% if r.factor == 1.0 %} (tu diseño){% endif %}</td>
-            <td>{{ '%.0f'|format(r.import_pct) }} %{% if r.import_pct_adj is not none %} <span class="obj-unit">(real típico ≈{{ '%.0f'|format(r.import_pct_adj) }} %)</span>{% endif %}</td>
-            <td>{{ '%.0f'|format(r.nights_ok_pct) }} %</td></tr>{% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    <p class="obj-note" style="margin-top:8px;">
-      {% if sm.outages.enough %}Cortes de red medidos en la flota híbrida: {{ sm.outages.n }} en {{ sm.outages.sites }} sitios; la mitad dura hasta {{ '%.1f'|format(sm.outages.median_h) }} h y el 90 % hasta {{ '%.0f'|format(sm.outages.p90_h) }} h{% if sm.outages.longer %} ({{ sm.outages.longer }} cortes de más de 3 días no se cuentan){% endif %}.
-      {% else %}Solo hay {{ sm.outages.n }} cortes de red registrados todavía; se necesitan al menos 8 para calcular el respaldo.{% endif %}
-      El respaldo se calcula sin contar el sol durante el corte y con la batería usable hasta el 10 %.</p>
-    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Cómo se calculó y sus límites</summary>
-      <p class="obj-note">{{ sm.scenarios }} escenarios ({{ sm.locations }} ubicaciones con su clima real × {{ sm.patterns }} patrones de consumo de sitios reales, escalados a tu carga),
-        {{ sm.days }} días-escenario entre {{ sm.window[0].strftime('%d/%m/%Y') }} y {{ sm.window[1].strftime('%d/%m/%Y') }}. Respuesta solar {{ '%.2f'|format(sm.k) }} kW por kWp y kW/m²
-        (calibrada en sistemas aislados; en los híbridos sale entre {{ '%.2f'|format(sm.k_sites|min) if sm.k_sites else '—' }} y {{ '%.2f'|format(sm.k_sites|max) if sm.k_sites else '—' }}).
-        La batería sirve la carga hasta la reserva y la red cubre el resto.</p>
-      {% if sm.gap_pts is not none %}
-      <p class="obj-note">La simulación supone un manejo ideal. En {{ sm.gap_sites }} sistemas híbridos que sí cargan y descargan su batería a diario, la red aportó en la práctica
-        {{ '%.0f'|format(sm.gap_pts) }} puntos más de la carga que en la simulación (entre {{ '%.0f'|format(sm.gap_range[0]) }} y {{ '%.0f'|format(sm.gap_range[1]) }}). Por eso se muestra también el valor “real típico”; las noches cubiertas son igual de optimistas.</p>
+    {% set fo = (sm.compare|selectattr('name', 'equalto', 'formula')|list|first) if sm.compare else none %}
+    {% if system_type == 'off_grid' %}
+      {% if sm.battery_min_physical %}
+      <p class="obj-note" style="font-size:0.9rem;color:inherit;margin-top:0;">Con {{ '%.1f'|format(sm.kwp) }} kWp{% if sm.roof_capped %} (lo que cabe en el techo){% endif %} y {{ '%.1f'|format(sm.daily_kwh) }} kWh/día,
+        la batería mínima es <b>{{ '%.0f'|format(sm.battery_min_physical) }} kWh</b> usando el banco hasta 10 %,
+        o <b>{{ '%.0f'|format(sm.battery_min_reserve) if sm.battery_min_reserve else '—' }} kWh</b> sin tocar el margen de {{ '%.0f'|format(sm.reserve_pct) }} %.
+        {% if fo %}La fórmula da {{ '%.0f'|format(fo.battery) }} kWh.{% endif %}</p>
+      {% else %}
+      <p class="obj-note" style="font-size:0.9rem;color:#991b1b;margin-top:0;">Con {{ '%.1f'|format(sm.kwp) }} kWp{% if sm.roof_capped %} (lo que cabe en el techo){% endif %} para {{ '%.1f'|format(sm.daily_kwh) }} kWh/día,
+        ninguna batería cumple la meta: los paneles no alcanzan para recargarla. Hacen falta más paneles (o menos consumo).
+        {% if fo %}La fórmula da {{ '%.0f'|format(fo.battery) }} kWh, pensada para {{ '%.1f'|format(fleet.formula.kwp) }} kWp.{% endif %}</p>
       {% endif %}
-      <p class="obj-note">Límites: ~90 días de la época lluviosa; pocos cortes de red registrados; el patrón de consumo viene de otros clientes; el cálculo es por hora, no ve picos cortos.
+    {% else %}
+      <p class="obj-note" style="font-size:0.9rem;color:inherit;margin-top:0;">Con {{ '%.1f'|format(sm.kwp) }} kWp{% if sm.roof_capped %} (lo que cabe en el techo){% endif %} y {{ '%.1f'|format(sm.daily_kwh) }} kWh/día de carga crítica,
+        la batería mínima es <b>{{ '%.0f'|format(sm.battery_min_nights) if sm.battery_min_nights else '—' }} kWh</b> para cubrir la noche
+        {% if sm.outages.enough %}y <b>{{ '%.0f'|format(sm.battery_min_backup) if sm.battery_min_backup else '—' }} kWh</b> para aguantar los cortes de red{% endif %}.
+        {% if fo %}La fórmula da {{ '%.0f'|format(fo.battery) }} kWh.{% endif %}</p>
+    {% endif %}
+    <details style="margin-top:6px;"><summary style="cursor:pointer;font-size:12.5px;">Ver detalle</summary>
+    {% if system_type == 'off_grid' %}
+      {% if sm.compare %}
+      <table style="margin-top:8px;">
+        <thead><tr><th>Si instalas…</th><th>Batería</th><th>Días con apagón</th><th>Días que tocan el margen</th><th>Racha máx.</th></tr></thead>
+        <tbody>{% for c in sm.compare %}
+          <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
+              <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
+              <td>{{ '%.1f'|format(c.fail_pct_physical) }} %</td><td>{{ '%.1f'|format(c.fail_pct_reserve) }} %</td>
+              <td>{{ '%.0f'|format(c.streak_p90) }} día(s)</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if sm.kwp_min %}<p class="obj-note" style="margin-top:8px;">Paneles: con {{ '%.0f'|format(sm.kwp_min_for_battery) }} kWh de batería ya se cumple desde ≈{{ '%.1f'|format(sm.kwp_min) }} kWp. Más paneles casi no cambian el resultado.</p>{% endif %}
+      {% if sm.max_case %}<p class="obj-note">Con el consumo máximo declarado ({{ '%.1f'|format(sm.max_case.daily_kwh) }} kWh/día): batería mínima
+        {{ '%.0f'|format(sm.max_case.battery_min_physical) if sm.max_case.battery_min_physical else '—' }} kWh (hasta 10 %) /
+        {{ '%.0f'|format(sm.max_case.battery_min_reserve) if sm.max_case.battery_min_reserve else '—' }} kWh (sin tocar el margen).</p>{% endif %}
+      <p class="obj-note">Meta: apagón en máximo 2 % de los días y ninguno de más de 2 días seguidos.</p>
+    {% else %}
+      {% if sm.compare %}
+      <table style="margin-top:8px;">
+        <thead><tr><th>Si instalas…</th><th>Batería</th><th>Noches cubiertas</th><th>Cortes reales que aguanta</th><th>Red que sigues comprando</th></tr></thead>
+        <tbody>{% for c in sm.compare %}
+          <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
+              <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
+              <td>{{ '%.0f'|format(c.nights_ok_pct) }} %</td>
+              <td>{% if c.outage_cover_pct is not none %}{{ '%.0f'|format(c.outage_cover_pct) }} %{% else %}—{% endif %}</td>
+              <td>{{ '%.0f'|format(c.import_pct) }} %{% if c.import_pct_adj is not none %} <span class="obj-unit">(real típico ≈{{ '%.0f'|format(c.import_pct_adj) }} %)</span>{% endif %}</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if sm.kwp_curve %}
+      <table style="margin-top:8px;">
+        <thead><tr><th>Paneles (con {{ '%.0f'|format(sm.kwp_curve_battery) }} kWh)</th><th>Red que sigues comprando</th><th>Noches cubiertas</th></tr></thead>
+        <tbody>{% for r in sm.kwp_curve %}
+          <tr{% if r.factor == 1.0 %} style="font-weight:600;"{% endif %}><td>{{ '%.1f'|format(r.kwp) }}<span class="u">kWp</span></td>
+              <td>{{ '%.0f'|format(r.import_pct) }} %</td><td>{{ '%.0f'|format(r.nights_ok_pct) }} %</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <p class="obj-note" style="margin-top:8px;">Metas: {{ '%.0f'|format(sm.night_target) }} % de las noches cubiertas y {{ '%.0f'|format(sm.outage_target) }} % de los cortes reales aguantados.
+        {% if sm.outages.enough %}Cortes medidos: {{ sm.outages.n }} en {{ sm.outages.sites }} sitios (la mitad dura hasta {{ '%.1f'|format(sm.outages.median_h) }} h).{% else %}Solo hay {{ sm.outages.n }} cortes registrados; se necesitan 8 para calcular el respaldo.{% endif %}
+        {% if sm.gap_pts is not none %}La simulación es ideal: en la práctica la red aporta ≈{{ '%.0f'|format(sm.gap_pts) }} puntos más de la carga.{% endif %}</p>
+    {% endif %}
+      <p class="obj-note">Cómo: {{ sm.scenarios }} escenarios ({{ sm.locations }} ubicaciones × {{ sm.patterns }} patrones de consumo), {{ sm.days }} días-escenario entre
+        {{ sm.window[0].strftime('%d/%m/%Y') }} y {{ sm.window[1].strftime('%d/%m/%Y') }}. Límites: solo ~90 días de época lluviosa, consumos de otros clientes, cálculo por hora.
         Úsalo para contrastar la fórmula, no para reemplazarla.</p>
     </details>
   {% endif %}
 </div>
 {% endif %}
+</div>
 {% endif %}
 
 {% if errors %}

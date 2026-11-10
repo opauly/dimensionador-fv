@@ -276,9 +276,9 @@ def calc_mppt(blob: dict) -> dict:
     loads = ((blob.get("scratch") or {}).get("s5") or {}).get("loads_data") or []
     location = site.get("city") or "Costa Rica"
 
-    from ai.daytime_fraction import estimate_daytime_fraction_ai
+    from calculations.fleet_shares import daytime_fraction_for
 
-    fraction, note = estimate_daytime_fraction_ai(loads, location)
+    fraction, note = daytime_fraction_for(loads, location)      # the real fleet's median, the AI estimate only as fallback
     daytime_kwh = avg_kwh * fraction
     target_kw = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
 
@@ -579,7 +579,19 @@ def build_context(blob: dict) -> dict:
             "oversized": self_consumption_pct < 50,
         }
 
+    # Goals-vs-design check (Phase 24 Step 4): the chosen design against the Objetivos sweet spot. Informational.
+    goals_check_ctx = None
+    if chosen_ctx:
+        from webapp.wizard_steps import goals_check
+
+        goals_check_ctx = goals_check.build(blob, {
+            "system_kw": float(chosen_ctx["system_kw"]),
+            "inverter_kw": float(selected_inverter.get("kw") or 0),
+            "reduction_pct": float(chosen_ctx["proj"]["coverage"]),
+        })
+
     return {
+        "goals_check": goals_check_ctx,
         "panels": panels, "inverters": inverters, "monitoring_devices": monitoring_devices,
         "selected_panel": selected_panel, "selected_inverter": selected_inverter,
         "selected_monitoring": selected_monitoring,

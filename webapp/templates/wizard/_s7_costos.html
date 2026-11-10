@@ -22,6 +22,20 @@
 .s7-price-shown { text-align:right; white-space:nowrap; }
 .s7-no-margin { font-size:0.68rem; color:#9ca3af; }
 .s7-pct-total { text-align:right; white-space:nowrap; color:#6b7280; font-size:0.85rem; }
+.s7-cost-table { table-layout:fixed; width:100%; }
+.s7-cost-table tbody td, .s7-cost-table thead td { padding-left:8px; padding-right:8px; }
+.s7-cost-table td:nth-child(1), .s7-cost-table td:nth-child(2) { width:22%; }
+.s7-cost-table td:nth-child(3) { width:9%; }
+.s7-cost-table td:nth-child(4) { width:12%; }
+.s7-cost-table td:nth-child(5) { width:10%; }
+.s7-cost-table td:nth-child(6) { width:8%; }
+.s7-cost-table td:nth-child(7) { width:8%; }
+.s7-cost-table td:nth-child(8) { width:24%; }
+.s7-cost-table td:nth-child(9) { width:5%; text-align:center; padding-right:16px; }
+.s7-cost-table.s7-lang-en .sp-es, .s7-cost-table.s7-lang-es .sp-en { display:none; }
+.s7-cost-table td:nth-child(9) .btn { padding:2px 8px; min-width:0; font-size:0.8rem; line-height:1.2; }
+.s7-cost-table.s7-lang-en td:nth-child(1), .s7-cost-table.s7-lang-es td:nth-child(2) { display:none; }
+.s7-cost-table .finput { width:100%; min-width:0; box-sizing:border-box; }
 </style>
 
 <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px;">
@@ -48,7 +62,7 @@
       {%- if margin_suggestion %} Sugerido a partir de {{ margin_suggestion.n }} proyecto{{ 's' if margin_suggestion.n != 1 else '' }} {{ 'de este mismo tipo de sistema' if margin_suggestion.same_type else 'de otros tipos de sistema (sin historial propio aún)' }} — ajustable.{% endif %}</span>
   </div>
   <div class="dtable-wrap">
-    <table class="dtable">
+    <table class="dtable s7-cost-table s7-lang-{{ language }}">
       <thead><tr>
         <td>Descripción (ES)</td><td>Descripción (EN)</td><td>Qty</td>
         <td>Costo real (USD)</td><td>Precio mostrado</td><td title="Participación de este ítem en el TOTAL de la cotización — cifra interna, no aparece en el PDF.">% del Total</td><td>IVA</td><td>Especificaciones</td><td></td>
@@ -59,8 +73,7 @@
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item" value="{{ row.item }}"></td>
           <td><input class="finput" type="text" name="r-{{ loop.index0 }}-item_en" value="{{ row.item_en }}"></td>
           <td><input class="finput" type="number" min="0" step="1" name="r-{{ loop.index0 }}-qty" value="{{ row.qty if row.qty is not none else '' }}"></td>
-          <td><input class="finput" type="number" min="0" step="any" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}">
-            {% if row.price_note %}<div class="s7-no-margin" style="{{ 'color:#a15c1b;' if row.price_stale else '' }}max-width:230px;" title="Fecha y fuente del precio guardado en el catálogo">{{ '⚠ ' if row.price_stale else '' }}{{ row.price_note }}</div>{% endif %}
+          <td><input class="finput" type="number" min="0" step="any" name="r-{{ loop.index0 }}-unit_cost" value="{{ row.unit_cost }}"{% if row.effort_note %} title="{{ row.effort_note }}"{% endif %}>
           </td>
           <td class="s7-price-shown">
             ${{ '{:,.2f}'.format(row.unit_price_shown) }}
@@ -74,7 +87,7 @@
               {% endfor %}
             </select>
           </td>
-          <td><input class="finput" type="text" name="r-{{ loop.index0 }}-specs" value="{{ row.specs }}"></td>
+          <td><input class="finput sp-es" type="text" name="r-{{ loop.index0 }}-specs" value="{{ row.specs }}"><input class="finput sp-en" type="text" name="r-{{ loop.index0 }}-specs_en" value="{{ row.specs_en if row.specs_en is not none else row.specs }}"></td>
           <td>
             <button class="btn btn-outline" type="button" title="Quitar fila"
                     hx-post="{{ url_for('wizard.paso7_fila_quitar', vid=vid) }}"

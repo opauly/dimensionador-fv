@@ -261,6 +261,7 @@
 <hr>
 
 {% if chosen %}
+  {% include "wizard/_goals_check.html" %}
   <h4 class="section-title" style="font-size:15px;">Validación del diseño</h4>
   <div class="s6-banner {{ 'ok' if chosen.is_valid else 'bad' }}">
     {{ '✅ Configuración válida' if chosen.is_valid else '❌ Configuración inválida' }}

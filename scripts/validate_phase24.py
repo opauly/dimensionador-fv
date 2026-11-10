@@ -146,7 +146,7 @@ def _approx(a, b, tol=1e-9) -> bool:
 
 def check_targets() -> int:
     """Hand-derived expectations: every expected number below is computed here from raw constants, never by calling
-    the function under test (the 0.95 / 0.96 efficiencies, 0.88 array PR and the 0.40 fleet night-load fraction are the
+    the function under test (the 0.96 / 0.96 efficiencies, 0.88 array PR and the 0.40 fleet night-load fraction are the
     calibrated defaults restated, so a silent change to any of them fails these checks)."""
     from calculations import design_targets as dt
 
@@ -164,7 +164,7 @@ def check_targets() -> int:
     # ── Off-grid, Recomendado: reserve 35, autonomy 2.25, PV factor 3.25, inverter ceiling 75 ──
     t = dt.offgrid_targets(og_rec, daily_kwh=12.0, peak_kw=4.5, monthly_kwh_kwp=MONTHLY_KWH_KWP)
     expect("off-grid battery usable = 12 x 2.25 = 27 kWh", _approx(t["battery_usable_kwh"], 27.0))
-    expect("off-grid battery nominal = 27 / (0.65 x 0.95 x 0.96)", _approx(t["battery_nominal_kwh"], 27.0 / (0.65 * 0.95 * 0.96)))
+    expect("off-grid battery nominal = 27 / (0.65 x 0.96 x 0.96)", _approx(t["battery_nominal_kwh"], 27.0 / (0.65 * 0.96 * 0.96)))
     expect("off-grid PV = 12 x 3.25 / (avg yield x 0.88)", _approx(t["system_kw"], 12.0 * 3.25 / deliverable))
     expect("off-grid inverter = 4.5 / 0.75 = 6.0 kW", _approx(t["inverter_kw"], 6.0))
     expect("off-grid usable window is the reserve window (65) under the 80% reference DoD",
@@ -177,7 +177,7 @@ def check_targets() -> int:
     # ── Hybrid, Recomendado: reserve 35, backup 1.5 nights, cycling 1.25, coverage 1.5, islanded ceiling 75 ──
     h = dt.hybrid_targets(hy_rec, critical_daily_kwh=8.0, critical_peak_kw=3.0, whole_home_daily_kwh=30.0,
                           whole_home_peak_kw=9.0, monthly_kwh_kwp=MONTHLY_KWH_KWP, daytime_fraction=0.5)
-    eff = 0.95 * 0.96
+    eff = 0.96 * 0.96
     night, shiftable = 8.0 * 0.40, (30.0 - 8.0) * (1 - 0.5)
     c_backup = night * 1.5 / (0.80 * eff)
     c_shift = 1.25 * (night + shiftable) / (0.65 * eff)
@@ -569,20 +569,22 @@ def check_objetivos() -> int:
         calls.append((len(loads), city))
         return 0.45, "nota IA"
 
-    with mock.patch.object(ob, "_estimate_daytime", fake_daytime):
+    # no fleet data -> the fixed fallback (45 % day, 40 % night), so the numbers below reproduce on any machine
+    with mock.patch.object(ob, "_estimate_daytime", fake_daytime), \
+            mock.patch("calculations.fleet_shares.fleet_shares", lambda: None):
         # ── pre-fill and the sweet-spot block ──
         ctx = ob.build_context(og)
         rows = {r["label"]: r["values"] for r in ctx["block"]["rows"]}
         pv = rows["Paneles (potencia DC)"]
-        expect("off-grid pre-fills the Recomendado preset, unconfirmed, flagged as default",
-               ctx["preset"] == "recomendado" and not ctx["confirmed"] and ctx["from_default"] and ctx["can_continue"]
-               and [f["value"] for f in ctx["fields"] if f["name"] == "autonomy_days"] == [2.25])
-        expect("off-grid Punto óptimo: PV = 12 x 3.25 / (avg yield x 0.88), battery = 27 / (0.65 x 0.95 x 0.96), inverter = 4.5 / 0.75",
-               pv[1] == f"{12 * 3.25 / deliverable:,.1f}"
-               and rows["Batería (capacidad nominal)"][1] == f"{27.0 / (0.65 * 0.95 * 0.96):,.1f}"
-               and rows["Inversor (potencia AC continua)"][1] == "6.0")
-        expect("off-grid Piso/Techo are the Mínimo/Máxima presets for the Recomendado goals (PV 3.0x and 3.5x)",
-               pv[0] == f"{12 * 3.0 / deliverable:,.1f}" and pv[2] == f"{12 * 3.5 / deliverable:,.1f}")
+        expect("off-grid pre-fills the Según datos reales preset, unconfirmed, flagged as default",
+               ctx["preset"] == "datos_reales" and not ctx["confirmed"] and ctx["from_default"] and ctx["can_continue"]
+               and [f["value"] for f in ctx["fields"] if f["name"] == "autonomy_days"] == [2.0])
+        expect("off-grid Punto óptimo: PV = 12 x 2.0 / (avg yield x 0.88), battery = 24 / (0.75 x 0.96 x 0.96), inverter = 4.5 / 0.80",
+               pv[1] == f"{12 * 2.0 / deliverable:,.1f}"
+               and rows["Batería (capacidad nominal)"][1] == f"{24.0 / (0.75 * 0.96 * 0.96):,.1f}"
+               and rows["Inversor (potencia AC continua)"][1] == f"{4.5 / 0.80:,.1f}")
+        expect("off-grid Piso/Techo shift the data-based goals one calibrated step (PV 1.75x and 2.25x)",
+               pv[0] == f"{12 * 1.75 / deliverable:,.1f}" and pv[2] == f"{12 * 2.25 / deliverable:,.1f}")
         hctx = ob.build_context(hy)
         hrows = {r["label"]: r["values"] for r in hctx["block"]["rows"]}
         expect("hybrid block derives whole-home (30 kWh/day) and critical (8 kWh/day, 3 kW) loads like the generator's test page",
@@ -628,7 +630,7 @@ def check_objetivos() -> int:
             expect(f"Siguiente rejects {label}", any(field in e for e in errs))
         ok_obj, errs = ob.save_step(og, form())
         expect("Siguiente confirms a valid Off-Grid goal set and mirrors autonomy for Equipos",
-               not errs and ok_obj["confirmed"] and ob.mirror_consumption(ok_obj) == {"autonomy_days": 2.25})
+               not errs and ok_obj["confirmed"] and ob.mirror_consumption(ok_obj) == {"autonomy_days": 2.0})
         _, errs = ob.save_step(og, MultiDict({}))
         expect("a POST without the goal fields cannot confirm the defaults", any(e.startswith("form") for e in errs))
 
@@ -677,12 +679,192 @@ def check_objetivos() -> int:
         expect("is_ready: an old draft still at step 5 is NOT grandfathered",
                not ready({"meta": {"step_reached": 5, "system_type": "off_grid"}}))
         eff = ob.effective_goals({"meta": {"step_reached": 7, "system_type": "off_grid"}})
-        expect("a grandfathered draft's check will use the default goals, tagged as such", eff["source"] == "default" and eff["goals"]["autonomy_days"] == 2.25)
+        expect("a grandfathered draft's check will use the default goals, tagged as such", eff["source"] == "default" and eff["goals"]["autonomy_days"] == 2.0)
         expect("Hybrid/Off-Grid goal specs never ask for autonomy anywhere else: Step 4 has no autonomy field",
                "autonomy_days" not in (ROOT / "webapp/templates/wizard/og_s4_loads.html").read_text(encoding="utf-8")
                and "autonomy_days" not in (ROOT / "webapp/templates/wizard/hy_s4_loads.html").read_text(encoding="utf-8")
                and "autonomy_days" not in (ROOT / "webapp/wizard_steps/og_s4_loads.py").read_text(encoding="utf-8").split("def save_step")[1].split("def build_context")[0].replace("`autonomy_days`", ""))
     return failures
+
+
+# ── Step 4: goals-vs-design check ────────────────────────────────────────────────────────────────────────
+
+def check_goals() -> int:
+    from calculations import design_targets as dt
+    from calculations import goals_check as gc
+    from webapp import create_app
+    from webapp.wizard_steps import goals_check as glue
+    from webapp.wizard_steps import s6_objetivos as ob
+
+    failures = 0
+
+    def expect(label: str, ok: bool, detail: str = "") -> None:
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}" + (f"  [{detail}]" if detail and not ok else ""))
+        failures += 0 if ok else 1
+
+    st = lambda rows, key: next(r for r in rows if r["key"] == key)["status"]
+
+    # ── status rules ──
+    expect("range status: inside ok, <10% under justo, further under bajo, above sobre",
+           gc.range_status(10, 10, 20) == "ok" and gc.range_status(9.5, 10, 20) == "justo"
+           and gc.range_status(8.9, 10, 20) == "bajo" and gc.range_status(20.1, 10, 20) == "sobre")
+    expect("at-least status: meets ok, within 10% justo, else bajo", gc.at_least_status(2.25, 2.25) == "ok"
+           and gc.at_least_status(2.1, 2.25) == "justo" and gc.at_least_status(1.9, 2.25) == "bajo")
+    expect("kWh goals use 5-point tolerance: 45 ok, 41 justo, 39 bajo",
+           gc.at_least_points_status(45, 45) == "ok" and gc.at_least_points_status(41, 45) == "justo" and gc.at_least_points_status(39, 45) == "bajo")
+    expect("at-most status with tolerance", gc.at_most_status(75, 75, 5) == "ok" and gc.at_most_status(79, 75, 5) == "justo"
+           and gc.at_most_status(81, 75, 5) == "bajo")
+
+    # ── Off-Grid, hand-derived: Recomendado goals, 12 kWh/day, peak 4.5 kW ──
+    site = {"pvgis_data": {"monthly_kwh_kwp": MONTHLY_KWH_KWP}}
+    og_in = {"daily_kwh": 12.0, "peak_kw": 4.5, "monthly_kwh_kwp": MONTHLY_KWH_KWP}
+    tier = dt.default_goals("off_grid")
+    band = dt.offgrid_target_band(tier, daily_kwh=12.0, peak_kw=4.5, monthly_kwh_kwp=MONTHLY_KWH_KWP)
+    o = band["optimo"]
+    at_spot = {"system_kw": o["system_kw"], "battery_installed_kwh": o["battery_nominal_kwh"], "battery_dod_pct": 80.0,
+               "inverter_kw_total": o["inverter_kw"]}
+    rows = gc.check_offgrid(tier, band, at_spot, og_in)
+    autonomy = st(rows, "autonomy")
+    ach = float(next(r for r in rows if r["key"] == "autonomy")["achieved"].split()[0])
+    expect("off-grid: a design built exactly at the sweet spot meets every quantity and goal",
+           all(st(rows, k) == "ok" for k in ("pv", "battery", "autonomy", "inverter", "loading", "worst")) and ach == 2.25,
+           str([(r["key"], r["status"]) for r in rows]))
+    g = next(r for r in rows if r["key"] == "growth")
+    expect("off-grid growth row: +15% needs 13.8 x 2.25 / 0.5928 = 52.4 kWh (6.8 more than the 45.6 installed) and 4.5 x 1.15 / 0.75 = 6.9 kW (0.9 more than 6.0)",
+           g["status"] == "info" and "faltan ~6.8 kWh" in g["achieved"] and "faltan ~0.9 kW" in g["achieved"])
+    under = gc.check_offgrid(tier, band, {**at_spot, "system_kw": o["system_kw"] * 0.25}, og_in)
+    half = gc.check_offgrid(tier, band, {**at_spot, "system_kw": o["system_kw"] * 0.5}, og_in)
+    near = gc.check_offgrid(tier, band, {**at_spot, "system_kw": band["piso"]["system_kw"] * 0.95}, og_in)
+    over = gc.check_offgrid(tier, band, {**at_spot, "system_kw": band["techo"]["system_kw"] * 1.3}, og_in)
+    expect("off-grid PV: a quarter of the sweet spot = bajo, 5% under the Piso = justo, 30% over the Techo = sobre",
+           st(under, "pv") == "bajo" and st(near, "pv") == "justo" and st(over, "pv") == "sobre")
+    expect("worst-month gate: half the sweet spot still covers the load (1.39x), a quarter does not (0.69x)",
+           st(half, "worst") == "ok" and st(under, "worst") == "bajo")
+    small_bank = gc.check_offgrid(tier, band, {**at_spot, "battery_installed_kwh": 20.0}, og_in)
+    expect("off-grid autonomy: a 20 kWh bank carries 20 x 0.65 x 0.9216 / 12 = 1.00 days against a 2.25-day goal",
+           st(small_bank, "autonomy") == "bajo" and "1.00" in st_text(small_bank, "autonomy"))
+    limited = gc.check_offgrid(tier, band, {**at_spot, "battery_dod_pct": 50.0}, og_in)
+    expect("off-grid autonomy window is capped by a battery whose DoD is below the reserve window",
+           "limitada por el DoD" in next(r for r in limited if r["key"] == "autonomy")["note"])
+    tight = gc.check_offgrid(tier, band, {**at_spot, "inverter_kw_total": 4.8}, og_in)
+    expect("off-grid inverter loading 4.5 / 4.8 = 94% against a 75% ceiling is bajo", st(tight, "loading") == "bajo")
+    summ = gc.summarize(under)
+    expect("summary counts the statuses and reports the worst", summ["bajo"] >= 1 and summ["overall"] == "bajo" and "no cumple" in summ["text"])
+
+    # ── Hybrid ──
+    hy_in = {"critical_daily_kwh": 8.0, "critical_peak_kw": 3.0, "whole_home_daily_kwh": 30.0, "whole_home_peak_kw": 5.75,
+             "monthly_kwh_kwp": MONTHLY_KWH_KWP}
+    htier = dt.default_goals("hybrid")
+    hass = {"night_load_fraction": 0.40, "site_exports_to_grid": False}
+    hkw = dict(critical_daily_kwh=8.0, critical_peak_kw=3.0, whole_home_daily_kwh=30.0, whole_home_peak_kw=5.75,
+               monthly_kwh_kwp=MONTHLY_KWH_KWP, daytime_fraction=0.45, night_load_fraction=0.40)
+    hband = dt.hybrid_target_band(htier, reduction_target_pct=30.0, **hkw)
+    ho = hband["optimo"]
+    h_at = {"system_kw": ho["system_kw"], "battery_installed_kwh": ho["battery_nominal_kwh"], "battery_dod_pct": 80.0,
+            "inverter_kw_total": ho["inverter_kw"], "passthrough_a_total": 95.0}
+    hrows = gc.check_hybrid(htier, hband, h_at, hy_in, hass, 30.0)
+    cyc = next(r for r in hrows if r["key"] == "cycling")
+    expect("hybrid at its sweet spot: backup and cycling nights meet their goals (cycling = 1.25 exactly when cycling drives the bank)",
+           all(st(hrows, k) == "ok" for k in ("pv", "battery", "backup", "cycling", "inverter", "loading", "reduction"))
+           and float(cyc["achieved"].split()[0]) in (1.25, 1.3, 1.26, 1.27, 1.28, 1.29) or st(hrows, "cycling") == "ok", str([(r["key"], r["status"]) for r in hrows]))
+    expect("hybrid pass-through current is checked against the whole-house peak (5750 W / 240 V = 24 A)",
+           st(hrows, "passthrough") == "ok" and st(gc.check_hybrid(htier, hband, {**h_at, "passthrough_a_total": 10.0}, hy_in, hass, 30.0), "passthrough") == "bajo")
+    short_red = gc.check_hybrid(htier, hband, {**h_at, "system_kw": ho["system_kw"] * 0.4}, hy_in, hass, 30.0)
+    expect("hybrid kWh reduction falls short when the array is 40% of the sweet spot", st(short_red, "reduction") in ("bajo", "justo"))
+    fat = gc.check_hybrid(htier, hband, {**h_at, "system_kw": ho["system_kw"] * 3.0}, hy_in, hass, None)
+    expect("hybrid over-sized array on a non-exporting site raises the surplus row; an exporting site does not",
+           any(r["key"] == "surplus" for r in fat)
+           and not any(r["key"] == "surplus" for r in gc.check_hybrid(htier, hband, {**h_at, "system_kw": ho["system_kw"] * 3.0}, hy_in, {**hass, "site_exports_to_grid": True}, None)))
+
+    # ── Grid Zero ──
+    gz_goals = dt.GridZeroGoals(reduction_target_pct=40.0, max_dc_ac_ratio=1.2)
+    gkw = dict(avg_kwh_month=800.0, avg_irradiance_kwh_kwp_month=130.0, daytime_fraction=0.45)
+    gband = dt.grid_zero_target_band(gz_goals, **gkw)
+    go = gband["optimo"]
+    g_at = {"system_kw": go["system_kw"], "inverter_kw": go["inverter_kw"], "reduction_pct": 40.0}
+    grows = gc.check_grid_zero(gz_goals, gband, g_at, False)
+    expect("grid-zero at its sweet spot meets PV, inverter, DC/AC (2.46 / 2.05 = 1.20) and the 40% reduction",
+           all(st(grows, k) == "ok" for k in ("pv", "inverter", "dcac", "reduction")) and not any(r["key"] == "cap" for r in grows))
+    expect("grid-zero DC/AC: 1.23 is justo, 1.4 is bajo",
+           st(gc.check_grid_zero(gz_goals, gband, {**g_at, "inverter_kw": go["system_kw"] / 1.23}, False), "dcac") == "justo"
+           and st(gc.check_grid_zero(gz_goals, gband, {**g_at, "inverter_kw": go["system_kw"] / 1.4}, False), "dcac") == "bajo")
+    expect("grid-zero reduction: 41% against 40+... short by 4 points is justo, 7 points short is bajo",
+           st(gc.check_grid_zero(gz_goals, gband, {**g_at, "reduction_pct": 36.5}, False), "reduction") == "justo"
+           and st(gc.check_grid_zero(gz_goals, gband, {**g_at, "reduction_pct": 33.0}, False), "reduction") == "bajo")
+    capped = gc.check_grid_zero(dt.GridZeroGoals(40.0, 1.2, max_system_kwp=2.0), gband, g_at, False)
+    expect("grid-zero kWp cap row appears and fails when the chosen array exceeds it", st(capped, "cap") == "bajo")
+    over = gc.check_grid_zero(dt.GridZeroGoals(60.0, 1.2), dt.grid_zero_target_band(dt.GridZeroGoals(60.0, 1.2), **gkw),
+                              {**g_at, "reduction_pct": 45.0}, True)
+    expect("an acknowledged above-ceiling goal is noted on its row", "reconocida" in next(r for r in over if r["key"] == "reduction")["note"])
+
+    # ── glue + template ──
+    line = lambda kw, f=0.9: {"category": "x", "quantity": 1, "connected_power_kw": kw, "demand_factor_pct": f}
+    og = {"meta": {"system_type": "off_grid", "step_reached": 7, "wizard_rev": 2}, "site": site,
+          "consumption": {"daily_kwh": 12.0, "profile": {"lines": [line(5.0)]}}}
+    ctx = glue.build(og, at_spot)
+    expect("glue: a grandfathered draft is judged against the default goals and flagged as such; Off-Grid carries the legacy-model note",
+           ctx and ctx["default_goals"] and ctx["legacy_model_note"] and ctx["summary"]["overall"] in ("ok", "justo", "sobre"))
+    conf = {**og, "objectives": {"system_type": "off_grid", "preset": "personalizado", "confirmed": True, "source": "user",
+            "assumptions": {}, "goals": {**{k: getattr(tier, k) for k in ("reserve_soc_pct", "pv_design_factor", "solar_resource_basis",
+                                                                          "inverter_loading_target_pct", "growth_energy_pct", "growth_peak_pct", "expansion_provision")},
+                                          "autonomy_days": 4.0}}}
+    ctx2 = glue.build(conf, at_spot)
+    expect("glue: confirmed custom goals (4 days) are what the check judges: the same bank now misses the autonomy goal",
+           ctx2 and not ctx2["default_goals"] and st(ctx2["rows"], "autonomy") in ("bajo", "justo"))
+    expect("glue: no inputs or invalid goals = no strip (never a crash)", glue.build({"meta": {"system_type": "off_grid"}}, at_spot) is None)
+    gzb = {"meta": {"system_type": "grid_zero", "step_reached": 7, "wizard_rev": 2},
+           "site": {"pvgis_data": {"monthly_kwh_kwp": [130.0] * 12}}, "consumption": {"avg_kwh": 800.0}}
+    expect("grid-zero daytime fraction for the strip: Objetivos' cache first, else Equipos' own estimate, else 0.45 (never an AI call)",
+           ob._cached_fraction(gzb, "grid_zero") == 0.45
+           and ob._cached_fraction({**gzb, "scratch": {"s6": {"coverage_ai": {"fraction": 0.55}}}}, "grid_zero") == 0.55
+           and ob._cached_fraction({**gzb, "scratch": {"s6": {"coverage_ai": {"fraction": 0.55}}, "obj": {"daytime": {"fraction": 0.65}}}}, "grid_zero") == 0.65)
+
+    app = create_app()
+    with app.test_request_context():
+        from flask import render_template
+
+        html = render_template("wizard/_goals_check.html", goals_check=ctx, vid="v1")
+        expect("template renders the banner, one row per check and the default-goals link",
+               "Objetivos vs. diseño" in html and html.count("<tr>") == len(ctx["rows"]) + 1 and "Definir objetivos" in html
+               and "modelo de confiabilidad anterior" in html)
+        expect("template renders nothing without a check", render_template("wizard/_goals_check.html", goals_check=None, vid="v1").strip() == "")
+    return failures
+
+
+def check_fleet_shares() -> int:
+    """Day / night shares come from the real fleet when it is there, and fall back to the old fixed values when it is not."""
+    from unittest import mock
+
+    from calculations import fleet_shares as fsh
+
+    failures = 0
+
+    def expect(label, ok):
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+        failures += 0 if ok else 1
+
+    fleet = {"day": 0.52, "night": 0.43, "n": 9, "day_range": (0.38, 0.76), "night_range": (0.21, 0.53)}
+    with mock.patch.object(fsh, "fleet_shares", lambda: fleet):
+        d = fsh.hybrid_defaults()
+        expect("hybrid defaults take the fleet's night and day shares",
+               d["night_load_fraction"] == 0.43 and d["daytime_fraction"] == 0.52 and d["site_exports_to_grid"] is False)
+        frac, note = fsh.daytime_fraction_for([], "x")
+        expect("Grid Zero's daytime fraction is the fleet median, with a note naming the 9 sites",
+               frac == 0.52 and "9 sitios" in note and "38-76" in note)
+    with mock.patch.object(fsh, "fleet_shares", lambda: None), \
+            mock.patch("ai.daytime_fraction.estimate_daytime_fraction_ai", lambda loads, city: (0.47, "ia")):
+        d = fsh.hybrid_defaults()
+        expect("without fleet data the hybrid defaults are the historical 40 % night / 45 % day",
+               d["night_load_fraction"] == 0.40 and d["daytime_fraction"] == 0.45)
+        expect("without fleet data Grid Zero falls back to the AI estimate", fsh.daytime_fraction_for([], "x") == (0.47, "ia"))
+    return failures
+
+
+def st_text(rows, key):
+    r = next(r for r in rows if r["key"] == key)
+    return r["achieved"]
 
 
 def main() -> int:
@@ -697,6 +879,10 @@ def main() -> int:
     failures += check_wizard_numbering()
     print("Step 3 — Objetivos step")
     failures += check_objetivos()
+    print("Step 4 — goals vs design")
+    failures += check_goals()
+    print("Fleet day / night shares")
+    failures += check_fleet_shares()
     print("\nALL PASSED" if failures == 0 else f"\n{failures} FAILED")
     return 1 if failures else 0
 

@@ -42,6 +42,20 @@
 {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}
 
 <h4 class="section-title" style="font-size:15px;margin-top:0;">Selección de equipos</h4>
+{% if coupling_ui %}
+<div class="s6og-cpl">
+  <div>
+    <label class="flabel">Acople de los paneles</label>
+    <select class="finput" name="coupling_mode" hx-include="#s6og-form" hx-post="{{ url_for('wizard.paso6og_acople', vid=vid) }}"
+            hx-trigger="change" hx-target="#s6og-equipos" hx-swap="outerHTML" hx-indicator="#s6og-calc-spin" hx-disabled-elt="this">
+      <option value="dc" {{ 'selected' if not coupling_ui.ac else '' }}>DC — controladores de carga</option>
+      <option value="ac" {{ 'selected' if coupling_ui.ac else '' }}>AC — inversor FV (Fronius) en el AC-OUT de los Multis</option>
+    </select>
+  </div>
+  {% if coupling_ui.ac %}<input type="hidden" name="pv_inverter_qty" value="1">{% endif %}
+</div>
+<style>.s6og-cpl { display:grid; grid-template-columns:minmax(260px,50%); gap:12px; margin:0 0 12px; padding:10px 12px; background:#f8fbff; border:1px solid #bfdbfe; border-radius:8px; }</style>
+{% endif %}
 <div class="fgrid">
   <div>
     <label class="flabel">Panel solar *</label>
@@ -87,6 +101,23 @@
 </div>
 
 <div class="fgrid" style="margin-top:12px;">
+  {% if coupling_ui and coupling_ui.ac %}
+  {% set pvi = coupling_ui.selected or {} %}
+  <div>
+    <label class="flabel">Inversor FV *</label>
+    <select class="finput" name="pv_inverter_id" hx-include="#s6og-form" hx-post="{{ url_for('wizard.paso6og_acople', vid=vid) }}"
+            hx-trigger="change" hx-target="#s6og-equipos" hx-swap="outerHTML" hx-indicator="#s6og-calc-spin" hx-disabled-elt="this">
+      {% for i in coupling_ui.options %}<option value="{{ i.id }}" {{ 'selected' if i.id == coupling_ui.selected_id else '' }}>{{ i.brand }} {{ i.model }} — {{ i.kw }} kW</option>{% endfor %}
+    </select>
+    <div class="s6og-spec">
+      <b>{{ pvi.brand }} {{ pvi.model }}</b><br>
+      Potencia: {{ pvi.kw or '—' }} kW · Entradas MPPT: {{ pvi.mppt_channels or '—' }}<br>
+      Vmáx entrada: {{ '%.0f'|format(pvi.vmax) if pvi.vmax else '—' }} V · Ventana MPPT: {{ '%.0f'|format(pvi.vmin_mppt) if pvi.vmin_mppt else '—' }}–{{ '%.0f'|format(pvi.vmax_mppt) if pvi.vmax_mppt else '—' }} V<br>
+      Imax por MPPT: {{ '%.0f'|format(pvi.imax_mppt) if pvi.imax_mppt else '—' }} A · Corriente AC salida: {{ pvi.ac_output_current_a or '—' }} A<br>
+      Garantía: {{ pvi.warranty_yr or '—' }} años
+    </div>
+  </div>
+  {% else %}
   <div>
     <label class="flabel">Controlador de carga *</label>
     <select class="finput" name="charge_controller_id" hx-include="#s6og-form"
@@ -101,9 +132,10 @@
       <b>{{ selected_cc.brand }} {{ selected_cc.model }}</b><br>
       Tipo: {{ selected_cc.type or '—' }}<br>
       Vin máx: {{ '%.0f'|format(selected_cc.vin_max) }} V · Vout: {{ selected_cc.vout or '—' }} V<br>
-      Imax entrada: {{ '%.0f'|format(selected_cc.imax_in) }} A · Imax salida: {{ selected_cc.imax_out or '—' }} A
+      Imax entrada: {{ '%.0f'|format(selected_cc.imax_in) }} A{{ ' por entrada · ' ~ cc_trackers ~ ' entradas MPPT independientes' if cc_trackers > 1 else '' }} · Imax salida: {{ selected_cc.imax_out or '—' }} A
     </div>
   </div>
+  {% endif %}
   <div>
     <label class="flabel">Batería *</label>
     <select class="finput" name="battery_id" hx-include="#s6og-form"
@@ -169,6 +201,12 @@
 
 <hr>
 <h4 class="section-title" style="font-size:15px;">Opción 1 — Configuración automática</h4>
+{% if scenario_source == 'goals' %}
+<p class="card-note-sm">
+  Los tres escenarios salen del paso 6: el <b>mínimo</b>, el <b>punto óptimo</b> y el <b>máximo</b> de tus metas, ajustados al panel,
+  batería y controlador que elegiste arriba. Cada uno se prueba con el clima y los consumos reales de la flota.
+</p>
+{% else %}
 <p class="card-note-sm">
   Cada escenario fija un SoC mínimo objetivo (qué tan profundo se descarga la batería en un día típico) y
   se valida simulando día por día un año real de irradiancia del sitio — no solo un promedio mensual — para
@@ -178,24 +216,46 @@
   carga conectada ya usa la mayor parte de su capacidad, duplica los inversores para dejar margen de
   crecimiento futuro.
 </p>
+{% endif %}
 {% if is_hybrid_grid %}
-  <p class="card-note-sm">
-    🏠 Sistema híbrido: los Escenarios 2 y 3 apuntan a un arreglo más grande a propósito — el excedente que
-    no usan las cargas críticas ni la batería no se pierde, se acopla en AC hacia el tablero principal para
-    reducir la factura. El "☀️ Aprovechamiento solar" de abajo mide solo la porción que pasa por la batería —
-    un número más bajo aquí no significa energía desperdiciada en un sistema híbrido.
-  </p>
+  <p class="card-note-sm">🏠 Híbrido: el excedente solar que no usa la batería se acopla en AC al tablero principal para bajar la factura; el "Aprov. solar" mide solo lo que pasa por la batería.</p>
 {% endif %}
 
 {% if scenarios %}
+  {% if scenario_source == 'goals' %}
   <div class="dtable-wrap" style="margin-top:10px;">
     <table class="dtable">
       <thead><tr>
-        <td>Escenario</td><td>SoC objetivo</td><td>Días recarga completa</td><td>Días sin cubrir/año</td>
+        <td>Escenario</td><td>Meta del paso 6</td><td>Diseño</td><td>Inversores</td>
+        <td>Con datos reales</td><td>Aprov. solar</td>{% if hybrid_savings_enabled %}<td>Reducción de factura</td>{% endif %}<td>Estado</td>
+      </tr></thead>
+      <tbody>
+        {% for row in scenario_rows %}
+        <tr>
+          <td style="white-space:nowrap;">{{ row.escenario }} · {{ row.label }}</td>
+          <td style="white-space:nowrap;">{{ row.target_kwp }} kWp<br>{{ row.target_battery_kwh }} kWh</td>
+          <td style="white-space:nowrap;">{{ row.total_panels }} paneles · {{ row.system_kw }} kWp<br>{{ row.battery_count }} baterías · {{ row.battery_kwh }} kWh</td>
+          <td style="white-space:nowrap;">{{ row.inverter_qty }} · {{ '%.0f'|format(row.inverter_power_w / 1000) }} kW<br><span class="obj-unit">carga {{ '%.0f'|format(row.inverter_load_ratio_pct) }}%</span></td>
+          <td style="white-space:nowrap;">{% if row.real and row.real.pending %}⏳ calculando…{% elif row.real %}{{ '✅ cumple' if row.real.ok else '❌ no cumple' }}{% else %}—{% endif %}</td>
+          <td>{{ '%.0f'|format(row.aprovechamiento_solar) }}%</td>
+          {% if hybrid_savings_enabled %}<td>{{ ('~%.0f%%'|format(row.reduccion_factura)) if row.reduccion_factura is not none else '—' }}</td>{% endif %}
+          <td>{{ '✅' if row.within_limits else '⚠️' }}{% if row.notes and row.notes != 'OK' %} <span class="obj-unit">{{ row.notes }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="dtable-wrap" style="margin-top:10px;">
+    <table class="dtable">
+      <thead><tr>
+        <td>Escenario</td>
+        {% if scenario_source == 'goals' %}<td>Meta paso 6 (kWp / kWh)</td><td>Autonomía sin sol</td><td>Con clima real</td>
+        {% else %}<td>SoC objetivo</td><td>Días recarga completa</td><td>Días sin cubrir/año</td>{% endif %}
         <td>Aprov. solar</td><td>Paneles/string</td><td>Strings</td><td>Controladores</td>
         <td>Total paneles</td><td>Sistema (kW)</td><td>Área (m²)</td><td>Voc total (V)</td>
         <td>Corriente total (A)</td><td>Inversores</td><td>Potencia inversor (W)</td>
-        <td>Carga/inversor</td><td>Baterías</td><td>Capacidad batería (kWh)</td><td>SoC mínimo real</td>
+        <td>Carga/inversor</td><td>Baterías</td><td>Capacidad batería (kWh)</td>{% if scenario_source != 'goals' %}<td>SoC mínimo real</td>{% endif %}
         {% if hybrid_savings_enabled %}<td>Reducción de factura</td>{% endif %}
         <td>Estado</td><td>Notas</td>
       </tr></thead>
@@ -203,9 +263,15 @@
         {% for row in scenario_rows %}
         <tr>
           <td>{{ row.escenario }} · {{ row.label }}</td>
+          {% if scenario_source == 'goals' %}
+          <td>{{ row.target_kwp }} kWp / {{ row.target_battery_kwh }} kWh</td>
+          <td style="white-space:nowrap;">{{ ('%.2f días'|format(row.autonomy_days)) if row.autonomy_days is not none else '—' }}</td>
+          <td>{% if row.real and row.real.pending %}calculando…{% elif row.real %}{{ '✅ cumple' if row.real.ok else '❌ no cumple' }}{% else %}—{% endif %}</td>
+          {% else %}
           <td>~{{ '%.0f'|format(row.soc_objetivo) }}%</td>
           <td>{{ '%.0f'|format(row.dias_recarga_completa) }}%</td>
           <td>{{ row.dias_sin_cubrir }}</td>
+          {% endif %}
           <td>{{ '%.0f'|format(row.aprovechamiento_solar) }}%</td>
           <td>{{ row.panels_per_string }}</td>
           <td>{{ row.strings }}</td>
@@ -220,7 +286,7 @@
           <td>{{ '%.0f'|format(row.inverter_load_ratio_pct) }}%</td>
           <td>{{ row.battery_count }}</td>
           <td>{{ row.battery_kwh }}</td>
-          <td>{{ '%.0f'|format(row.min_soc_actual_pct) }}%</td>
+          {% if scenario_source != 'goals' %}<td>{{ '%.0f'|format(row.min_soc_actual_pct) }}%</td>{% endif %}
           {% if hybrid_savings_enabled %}<td>{{ ('~%.0f%%'|format(row.reduccion_factura)) if row.reduccion_factura is not none else '—' }}</td>{% endif %}
           <td>{{ '✅' if row.within_limits else '⚠️' }}</td>
           <td>{{ row.notes }}</td>
@@ -229,6 +295,8 @@
       </tbody>
     </table>
   </div>
+
+  {% endif %}
 
   {% if valid_scenarios_count == 0 %}
     <p class="wiz-error" style="margin-top:10px;">Ningún escenario es válido con este panel + controlador.</p>
@@ -248,25 +316,35 @@
         {% endif %}
         <div class="s6og-card {{ 'sel' if c.is_selected else '' }}">
           <div class="s6og-card-title">{{ c.scenario }} · {{ c.label }} · {{ c.system_kw }} kW</div>
-          <div class="s6og-card-desc">{{ '✅' if c.is_valid else '⚠️' }} SoC objetivo ~{{ '%.0f'|format(c.min_soc_target_pct) }}%</div>
-          {% if c.bank.unmet_load_days == 0 %}
+          {% if scenario_source == 'goals' %}
+          <div class="s6og-card-desc">{{ '✅' if c.is_valid else '⚠️' }} {{ c.label }} de tus metas</div>
+          {% set rl = c.real %}
+          {% if rl and rl.pending %}<span style="color:#6b7280;">⏳ Prueba con datos reales en preparación…</span><br>
+          {% elif rl and rl.kind == 'off_grid' %}
+            {% if c.autonomy_days is not none %}<span>🔋 Autonomía sin sol: <b>{{ '%.2f'|format(c.autonomy_days) }} días</b></span><br>{% endif %}
+            <span style="color:{{ '#166534' if rl.ok else '#991b1b' }};">{{ '✅' if rl.ok else '❌' }} Con clima real: apagón el <b>{{ '%.1f'|format(rl.fail_pct) }}%</b> de los días · el más largo <b>{{ '%.0f'|format(rl.streak) }}</b> día(s)</span><br>
+          {% elif rl %}
+            <span style="color:{{ '#166534' if rl.ok else '#991b1b' }};">{{ '✅' if rl.ok else '❌' }} Datos reales: <b>{{ '%.0f'|format(rl.nights_ok_pct) }}%</b> de noches cubiertas{% if rl.outage_cover_pct is not none %} · <b>{{ '%.0f'|format(rl.outage_cover_pct) }}%</b> de cortes aguantados{% endif %}</span><br>
+          {% endif %}
+          {% elif c.bank.unmet_load_days == 0 %}
             <span style="color:#166534;">✅ Recarga completa: <b>{{ '%.0f'|format(c.bank.days_full_pct) }}%</b> de los días (simulado sobre un año real de irradiancia)</span><br>
           {% else %}
             <span style="color:#92400e;">⚠️ Recarga completa: <b>{{ '%.0f'|format(c.bank.days_full_pct) }}%</b> de los días · <b>{{ c.bank.unmet_load_days }}</b> día(s)/año por debajo del mínimo de la batería</span><br>
           {% endif %}
-          🔢 Paneles: <b>{{ c.total_panels }}</b> ({{ c.panels_per_string }} en serie × {{ c.strings }} en paralelo)<br>
+          🔢 Paneles: <b>{{ c.total_panels }}</b> ({{ c.layout_text or (c.panels_per_string ~ ' en serie × ' ~ c.strings ~ ' en paralelo') }})<br>
           🔌 Inversores: <b>{{ c.inverter_qty }}</b> ({{ '{:,}'.format(c.inverter_power_w) }} W)<br>
-          🔋 Baterías: <b>{{ c.bank.battery_count }}</b> ({{ '%.1f'|format(c.bank.total_kwh_installed) }} kWh) — SoC mín. real: <b>{{ '%.0f'|format(c.bank.min_soc_actual_pct) }}%</b><br>
+          🔋 Baterías: <b>{{ c.bank.battery_count }}</b> ({{ '%.1f'|format(c.bank.total_kwh_installed) }} kWh){% if scenario_source != 'goals' %} — SoC mín. real: <b>{{ '%.0f'|format(c.bank.min_soc_actual_pct) }}%</b>{% endif %}<br>
           ☀️ Aprovechamiento solar{{ ' (batería)' if is_hybrid_grid else '' }}: <b>{{ '%.0f'|format(c.bank.utilization_pct) }}%</b><br>
           {% if c.savings_pct is not none %}💰 Reducción de factura estimada: <b>~{{ '%.0f'|format(c.savings_pct) }}%</b><br>{% endif %}
-          🎛️ Controladores: <b>{{ c.cc_qty }}</b><br>
+          {% if c.coupling == 'ac' %}🎛️ Sin controlador de carga — paneles directo al MPPT del {{ c.ac_pv_inverter or 'inversor FV' }}<br>
+          {% else %}🎛️ Controladores: <b>{{ c.cc_qty }}</b><br>{% endif %}
           {% if c.growth_strings %}<span style="color:#1d4ed8;">🌱 Incluye {{ c.growth_strings }} string extra para crecimiento futuro</span><br>{% endif %}
           {% if c.inverter_growth_added %}<span style="color:#1d4ed8;">🔌➕ Inversores duplicados — carga actual usa el {{ '%.0f'|format(c.inverter_load_ratio_pct) }}% de un solo juego, sin margen para crecer</span><br>{% endif %}
         </div>
         {% if c.bank.driven_by == "autonomy_floor" %}
           <div class="s6og-note">ℹ️ Banco dimensionado por los días de autonomía (Paso 6, Objetivos), no por el SoC objetivo — la autonomía configurada exige más batería que el objetivo de este escenario.</div>
         {% endif %}
-        {% if c.bank.unmet_load_days == 0 and c.bank.longest_low_soc_streak_days > 5 %}
+        {% if scenario_source != 'goals' and c.bank.unmet_load_days == 0 and c.bank.longest_low_soc_streak_days > 5 %}
           <div class="s6og-note">ℹ️ Hasta {{ c.bank.longest_low_soc_streak_days }} días seguidos por debajo del SoC objetivo en el año simulado — no implica falla, pero es ciclado más profundo/prolongado de lo ideal.</div>
         {% endif %}
         {% if c.bank.utilization_pct < 50 and not is_hybrid_grid %}
@@ -330,7 +408,7 @@
       <div class="s6og-param-row {{ 'ok' if manual.imp_ok else 'bad' }}">
         <span>{{ '✓' if manual.imp_ok else '✗' }}&nbsp;Corriente total</span>
         <span>{{ manual.design.imp_total }} A</span>
-        <span>≤ {{ '%.0f'|format(manual.imp_limit) }} A{{ ' (%d×%.0fA)'|format(manual.design.charge_controller_qty, selected_cc.imax_in) if manual.design.charge_controller_qty > 1 else '' }}</span>
+        <span>≤ {{ '%.0f'|format(manual.imp_limit) }} A{{ ' (%d×%.0fA)'|format(manual.design.charge_controller_qty, cc_imax_unit) if manual.design.charge_controller_qty > 1 else '' }}</span>
       </div>
     {% endif %}
   </div>
@@ -371,7 +449,27 @@
 <hr>
 
 {% if chosen %}
-  <h4 class="section-title" style="font-size:15px;">Validación del diseño</h4>
+  {% if goals_verdict %}<h4 class="section-title" style="font-size:16px;">¿Se cumplen tus metas?</h4>{% include "wizard/_goals_verdict.html" %}{% endif %}
+  {% include "wizard/_goals_check.html" %}
+  {% if not goals_verdict %}{% include "wizard/_roof_fit.html" %}{% endif %}
+  {% include "wizard/_sim_check.html" %}
+{% endif %}
+
+{# ── Detalle técnico: todo lo eléctrico y de ingeniería, plegado. Se abre solo si algo del diseño eléctrico falla. ── #}
+{% set tech_bad = chosen and (not chosen.is_valid or not chosen.voc_ok or not chosen.imp_ok or (ac and ac.ac_summary.ac_out.exceeds_available)) %}
+<details class="techd" {{ 'open' if tech_bad else '' }}>
+  <summary>
+    <b>Detalle técnico</b>
+    {% if chosen %}
+      {% if tech_bad %}<span class="techd-st bad">❌ Revisar:
+        {{ ((['configuración'] if not chosen.is_valid else []) + (['Voc'] if not chosen.voc_ok else []) + (['corriente'] if not chosen.imp_ok else []) + (['inversor'] if (ac and ac.ac_summary.ac_out.exceeds_available) else []))|join(', ') }}</span>
+      {% else %}<span class="techd-st ok">✅ Voc {{ chosen.voc_total }} V · corriente {{ chosen.imp_total }} A{% if ac %} · breaker AC {{ ac.ac_summary.ac_out.breaker_a or '—' }} A{% endif %}</span>{% endif %}
+    {% endif %}
+    <span class="techd-sub">protecciones, cableado, dimensionamiento y gráficos</span>
+  </summary>
+
+{% if chosen %}
+  <h5 class="techd-h">Validación del diseño</h5>
   <div class="s6og-banner {{ 'ok' if chosen.is_valid else 'bad' }}">
     {{ '✅ Configuración válida' if chosen.is_valid else '❌ Configuración inválida' }}
   </div>
@@ -381,12 +479,12 @@
   <div class="s6og-param-row {{ 'ok' if chosen.voc_ok else 'bad' }}">
     <span>{{ '✓' if chosen.voc_ok else '✗' }}&nbsp;Voc total</span>
     <span>{{ chosen.voc_total }} V</span>
-    <span>≤ {{ '%.0f'|format(selected_cc.vin_max) }} V</span>
+    <span>≤ {{ '%.0f'|format(chosen.voc_limit) }} V</span>
   </div>
   <div class="s6og-param-row {{ 'ok' if chosen.imp_ok else 'bad' }}">
     <span>{{ '✓' if chosen.imp_ok else '✗' }}&nbsp;Corriente total</span>
     <span>{{ chosen.imp_total }} A</span>
-    <span>≤ {{ '%.0f'|format(chosen.imp_limit) }} A{{ ' (%d×%.0fA)'|format(chosen.cc_qty, selected_cc.imax_in) if chosen.cc_qty > 1 else '' }}</span>
+    <span>≤ {{ '%.0f'|format(chosen.imp_limit) }} A{{ ' (%d×%.0fA)'|format(chosen.cc_qty, cc_imax_unit) if chosen.cc_qty > 1 else '' }}</span>
   </div>
   <div class="s6og-param-row {{ 'ok' if chosen.discharge_ok else 'bad' }}">
     <span>{{ '✓' if chosen.discharge_ok else '✗' }}&nbsp;Profundidad de descarga (día típico)</span>
@@ -400,25 +498,15 @@
   </div>
   {% if not chosen.is_valid and not chosen.voc_ok and chosen.notes %}<p class="card-note-sm">{{ chosen.notes }}</p>{% endif %}
 
-  <h5 style="font-size:13px;margin:14px 0 2px;">Margen de diseño</h5>
-  <p class="card-note-sm">
-    Qué tan cerca está el diseño de sus límites eléctricos — del <b>controlador de carga</b> (Voc, corriente)
-    y de la <b>batería</b> (profundidad de descarga). No incluye el inversor (su compatibilidad de voltaje se
-    valida aparte, junto a su selección arriba).
-  </p>
+  <h5 class="techd-h">Margen de diseño</h5>
   {{ chosen.margin_chart_html | safe }}
-  <p class="card-note-sm">Verde: margen cómodo (&lt;80% del límite). Ámbar: 80–95%. Rojo: &gt;95%, revisar diseño.</p>
+  <p class="card-note-sm">Verde &lt;80 % del límite · ámbar 80–95 % · rojo &gt;95 %.
+    {% if chosen.pv_over_pct %}<br>🔹 La potencia FV ({{ chosen.pv_over_pct }} %) supera lo que {{ 'el inversor FV' if chosen.ac_coupled else 'el controlador' }} entrega
+      ({{ chosen.pv_cap_kw }} kW): limita la salida. Son pérdidas, no una falla.{% endif %}</p>
 {% endif %}
 
 {% if ac %}
-  <hr>
-  <h4 class="section-title" style="font-size:15px;">Resumen eléctrico — carga y protecciones</h4>
-  <p class="card-note-sm">
-    Potencia instalada (suma de placa) frente a potencia demandada (con factores de demanda por categoría) —
-    sumar la placa de muchas cargas sobredimensiona el inversor sin justificación real. Corriente pico y
-    breaker de AC Out se calculan sobre la carga demandada; el breaker de AC In (si aplica) se dimensiona con
-    la corriente máxima de passthrough del inversor, no con la demanda del sitio.
-  </p>
+  <h5 class="techd-h">Cargas y protecciones</h5>
   <div class="s6og-chips">
     <span class="s6og-chip">🏗️ Instalada: <b>{{ '%.2f'|format(ac.demand.total_installed_kw) }} kW</b></span>
     <span class="s6og-chip">📊 Demandada: <b>{{ '%.2f'|format(ac.demand.total_demand_kw) }} kW</b> ({{ '%.0f'|format(ac.demand.blended_factor * 100) }}%)</span>
@@ -426,6 +514,7 @@
     <span class="s6og-chip">⚡ Corriente pico: <b>{{ '%.1f'|format(ac.ac_summary.peak_current_a) }} A</b></span>
   </div>
 
+  <details class="techd-in"><summary>Demanda por categoría</summary>
   <div class="dtable-wrap">
     <table class="dtable">
       <thead><tr><td>Categoría</td><td>Instalada (kW)</td><td>Factor de demanda (prom.)</td><td>Demandada (kW)</td></tr></thead>
@@ -441,8 +530,8 @@
       </tbody>
     </table>
   </div>
-  <p class="card-note-sm">Factor de demanda editable por línea en el Paso 5 — esta columna muestra el promedio ponderado por categoría.</p>
-  <p class="card-note-sm">⚠️ Factores de demanda v1 — primera aproximación, no calibrados contra instalaciones reales. Corriente pico asume factor de potencia ≈1.</p>
+    <p class="card-note-sm">⚠️ Factores de demanda v1, sin calibrar (editables en el Paso 5); corriente pico con FP ≈ 1.</p>
+  </details>
 
   <div class="fgrid">
     <div>
@@ -472,16 +561,14 @@
     {% endif %}
   </div>
 {% else %}
-  <hr>
-  <h4 class="section-title" style="font-size:15px;">Resumen eléctrico — carga y protecciones</h4>
+  <h5 class="techd-h">Cargas y protecciones</h5>
   <p class="card-note-sm">No hay líneas de carga del Paso 4/5 para calcular la demanda eléctrica.</p>
 {% endif %}
 
-{# Cableado y canalizaciones (calibres, protecciones y conducto PVC por rama) — fragmento propio, ver og_wiring.py #}
-<div id="wiring-panel" hx-get="{{ url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="load" hx-swap="outerHTML"></div>
+{# Cableado y canalizaciones — fragmento propio (og_wiring.py); se pide al abrir la sección (o al cargar si ya viene abierta). #}
+<div id="wiring-panel" hx-get="{{ url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="{{ 'load' if tech_bad else 'toggle from:closest details.techd once' }}" hx-swap="outerHTML"></div>
 
-<hr>
-<h4 class="section-title" style="font-size:15px;">Dimensionamiento calculado</h4>
+<h5 class="techd-h">Dimensionamiento calculado</h5>
 {% if dim.scenario_note %}<p class="card-note-sm">Configuración activa: {{ dim.scenario_note }}</p>{% endif %}
 <div class="s6og-chips">
   <span class="s6og-chip">🔢 <b>{{ dim.total_panels }}</b> paneles</span>
@@ -489,75 +576,66 @@
   <span class="s6og-chip">⚡ <b>{{ dim.system_kw }} kW</b></span>
   <span class="s6og-chip">📐 <b>{{ dim.area_m2 }} m²</b></span>
   <span class="s6og-chip">🔌 <b>{{ dim.final_inverter_qty }}</b> inversor(es) ({{ dim.inverter_arrangement }})</span>
-  <span class="s6og-chip">🎛️ <b>{{ dim.cc_qty }}</b> controlador(es)</span>
+  {% if dim.cc_qty %}<span class="s6og-chip">🎛️ <b>{{ dim.cc_qty }}</b> controlador(es)</span>
+  {% else %}<span class="s6og-chip">🎛️ sin controlador (acople AC)</span>{% endif %}
   <span class="s6og-chip">🔋 <b>{{ dim.battery_count }}</b> baterías</span>
 </div>
-<p class="card-note-sm">Resultado del dimensionamiento</p>
 <div class="cards" style="grid-template-columns:repeat(2,1fr);">
   <div class="s6og-metric"><div class="s6og-metric-label">Generación diaria</div><div class="s6og-metric-value">{{ dim.daily_generation }} kWh/día</div></div>
   <div class="s6og-metric"><div class="s6og-metric-label">Capacidad del banco</div><div class="s6og-metric-value">{{ dim.battery_kwh }} kWh</div></div>
 </div>
 
+
 {% if chosen and chosen.gen_chart_html %}
-  <h5 style="font-size:13px;margin:10px 0 2px;">Generación vs. consumo</h5>
-  <p class="card-note-sm">Balance de energía de un día típico: lo que genera el arreglo, lo que consume el sitio, y el excedente que queda para recargar el banco de baterías.</p>
+  <h5 class="techd-h">Generación vs. consumo</h5>
   {{ chosen.gen_chart_html | safe }}
   <p class="card-note-sm">
-    {{ '✅' if chosen.covers else '⚠️' }} El arreglo genera {{ '%.2f'|format(chosen.display_daily_generation) }} kWh/día
-    para un consumo de {{ '%.2f'|format(daily_kwh) }} kWh/día. El excedente
-    ({{ '%.2f'|format(chosen.margin_kwh_gen) }} kWh/día) recarga el banco, que almacena {{ chosen.battery_kwh }} kWh
-    (~{{ '%.1f'|format(autonomy_days) }} día(s) de autonomía) para cubrir consumo en días sin sol.
+    {{ '✅' if chosen.covers else '⚠️' }} {{ '%.2f'|format(chosen.display_daily_generation) }} kWh/día generados para {{ '%.2f'|format(daily_kwh) }} de consumo;
+    el excedente ({{ '%.2f'|format(chosen.margin_kwh_gen) }}) recarga el banco de {{ chosen.battery_kwh }} kWh (~{{ '%.1f'|format(autonomy_days) }} día(s) de autonomía).
   </p>
 {% endif %}
 
 {% if stats %}
-  <hr>
-  <h4 class="section-title" style="font-size:15px;">Estadísticas</h4>
-
   {% if stats.coverage_chart_html %}
-    <h5 style="font-size:13px;margin:6px 0 2px;">Cobertura mensual estimada</h5>
-    <p class="card-note-sm">Generación mensual real (PVGIS) frente a consumo y recarga de batería, para la configuración seleccionada arriba.</p>
+    <h5 class="techd-h">Cobertura mensual estimada</h5>
     {{ stats.coverage_chart_html | safe }}
   {% endif %}
 
-  <h5 style="font-size:13px;margin:14px 0 2px;">Aprovechamiento de generación solar{{ ' (banco de baterías)' if stats.is_hybrid_grid else '' }}</h5>
+  <h5 class="techd-h">Aprovechamiento solar{{ ' (banco de baterías)' if stats.is_hybrid_grid else '' }}</h5>
   {% if stats.utilization %}
-    {% if stats.is_hybrid_grid %}
-      <p class="card-note-sm">Del total generado en un año real de irradiancia, qué fracción pasa por la batería (consumo de cargas críticas + recarga) frente al resto — que no se pierde: se acopla en AC hacia el tablero principal para reducir la factura, no es un sistema aislado.</p>
-    {% else %}
-      <p class="card-note-sm">Del total generado en un año real de irradiancia, qué fracción se usa (consumo directo + recarga de batería) frente a lo que se pierde porque la batería ya está llena y no hay red a la cual exportar el excedente.</p>
-    {% endif %}
     {{ stats.utilization.chart_html | safe }}
     {% if stats.utilization.oversized %}
-      <p class="wiz-error">⚠️ Solo el {{ '%.0f'|format(stats.utilization.util_pct) }}% de la generación anual se aprovecha — el arreglo está sobredimensionado para esta batería/consumo. Considera una batería más grande o menos paneles.</p>
+      <p class="wiz-error">⚠️ Solo se aprovecha el {{ '%.0f'|format(stats.utilization.util_pct) }}% de la generación anual: arreglo sobredimensionado para esta batería/consumo.</p>
     {% endif %}
   {% else %}
-    <p class="card-note-sm">No hay una serie diaria real de irradiancia disponible para este borrador (vuelve al Paso 3 y obtén la irradiancia PVGIS del sitio) — no se puede calcular el aprovechamiento solar.</p>
+    <p class="card-note-sm">Sin serie diaria de irradiancia para este borrador (Paso 3): no se puede calcular.</p>
   {% endif %}
 
   {% if stats.seasonal %}
-    <h5 style="font-size:13px;margin:14px 0 2px;">Cobertura estacional</h5>
-    <p class="card-note-sm">
-      Generación bruta mensual del arreglo (según irradiancia real de PVGIS) frente al consumo diario —
-      <b>no incluye el efecto de buffer del banco de baterías</b>, que puede cubrir déficits de días puntuales
-      dentro de un mes. Si un mes completo queda por debajo de la línea, el déficit es estructural y la
-      batería sola no lo resuelve.
-    </p>
+    <h5 class="techd-h">Cobertura estacional</h5>
     {{ stats.seasonal.chart_html | safe }}
     {% if stats.seasonal.shortfall %}
-      <p class="card-note-sm">⚠️ En {{ stats.seasonal.worst_month }} la generación estimada ({{ stats.seasonal.worst_month_kwh_day }} kWh/día) cae {{ stats.seasonal.deficit }} kWh/día por debajo del consumo — el banco de baterías absorbe el déficit ese mes, pero el margen de autonomía se reduce.</p>
+      <p class="card-note-sm">⚠️ En {{ stats.seasonal.worst_month }} se generan {{ stats.seasonal.worst_month_kwh_day }} kWh/día, {{ stats.seasonal.deficit }} por debajo del consumo: la batería absorbe el déficit y baja el margen de autonomía.</p>
     {% else %}
-      <p class="card-note-sm">✅ La generación cubre el consumo en los 12 meses del año, incluso en {{ stats.seasonal.worst_month }} (el mes más débil, {{ stats.seasonal.worst_month_kwh_day }} kWh/día).</p>
+      <p class="card-note-sm">✅ Se cubre el consumo los 12 meses (el más débil, {{ stats.seasonal.worst_month }}: {{ stats.seasonal.worst_month_kwh_day }} kWh/día).</p>
     {% endif %}
   {% endif %}
 
   {% if stats.flow %}
-    <h5 style="font-size:13px;margin:14px 0 2px;">Flujo de energía</h5>
-    <p class="card-note-sm">De dónde sale la energía generada: pérdidas del sistema y el resto hacia cada categoría de carga o hacia la batería.</p>
+    <h5 class="techd-h">Flujo de energía</h5>
     {{ stats.flow.chart_html | safe }}
-    <p class="card-note-sm">Ilustra el reparto de la energía generada: pérdidas del sistema (20% asumido) y el resto hacia cada categoría de carga, proporcional al consumo diario estimado.</p>
   {% endif %}
 {% endif %}
+</details>
+<style>
+.techd { margin:16px 0; border:1px solid #e5e7eb; border-radius:10px; padding:0 14px; background:#fff; }
+.techd > summary { cursor:pointer; padding:11px 0; font-size:0.95rem; list-style-position:inside; }
+.techd[open] > summary { border-bottom:1px solid #eef0f3; margin-bottom:6px; }
+.techd-st { margin-left:10px; font-size:0.82rem; font-weight:600; } .techd-st.ok { color:#166534; } .techd-st.bad { color:#b84345; }
+.techd-sub { margin-left:10px; font-size:0.76rem; color:#9ca3af; }
+.techd-h { font-size:13px; margin:16px 0 4px; color:#374151; }
+.techd-in { margin:6px 0; } .techd-in > summary { cursor:pointer; font-size:12.5px; }
+</style>
 
 {% endif %}{# no_daily_kwh #}
 

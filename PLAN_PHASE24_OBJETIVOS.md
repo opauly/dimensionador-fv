@@ -359,7 +359,21 @@ by direct URL, and by an htmx action route; editing a goal after confirming bloc
 and shows the "objetivos por defecto" note; Off-Grid has exactly one autonomy value; a kWh goal above the achievable ceiling
 requires the acknowledgement.
 
-**Step 4 — The goals-vs-design check strip.**
+**Step 4 — The goals-vs-design check strip.** **— ✅ built and verified 2026-10-06** (`calculations/goals_check.py` pure rows,
+`webapp/wizard_steps/goals_check.py` glue, `_goals_check.html` at the top of both Equipos pages' chosen-design section; informational,
+never blocks Siguiente. Rows — Off-Grid: PV, battery, autonomy achieved vs goal, inverter size, inverter loading vs ceiling,
+worst-month coverage, growth readiness; Hybrid: PV, battery, backup nights, cycling nights, islanded inverter and loading,
+pass-through current, optional kWh reduction, non-exporting surplus; Grid Zero: PV, inverter, DC/AC, kWh reduction, optional kWp
+cap. Every achieved figure is the sweet-spot formula solved for an installed design (`offgrid_autonomy_days_achieved`,
+`hybrid_nights_achieved`, `hybrid_reduction_pct`), so block and strip cannot disagree. Status: Cumple / Justo (≤10% under the Piso or
+the goal, ≤5 points for kWh goals, DC/AC ±0.05) / No cumple / Sobre el techo — **tolerances are provisional**, to be tuned once real
+quotes have been compared. Grid Zero judges the reduction with Equipos' own projection of the chosen design; the sweet spot's
+daytime fraction is Objetivos' cache, else Equipos' own estimate, else 0.45 — never an AI call. Harness now 141 checks (hand-derived
+rows for all three types, status boundaries, glue, template). Live: the Grid Zero QA draft's 7.4 kWp manual design reads "sobre el techo"
+against a 2.1 kWp sweet spot (a draft that never confirmed objectives is judged on the defaults and says so, with a link); the Off-Grid
+QA draft's 4-panel design reads PV ❌, battery ⚠️, autonomy 1.57 vs 2.25 days ❌, inverter oversized, growth short ~6.4 kWh. Two of the
+harness's first-run failures were wrong expectations in the test, not the code.)
+*Original scope:*
 *Build:* strip component placed with the Equipos step; per-goal achieved values wired from the chosen equipment/scenario; the
 explicit "legacy scenario vs calibrated goals" note under Q1-A.
 *Validate:* a design that clearly meets, one that clearly misses, one borderline — per system type — each hand-computed.

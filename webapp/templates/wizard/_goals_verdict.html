@@ -1,0 +1,30 @@
+{# One verdict + one compact table for the chosen design (Off-Grid / Hybrid): goal rows, roof fit and the real-data simulation,
+   grouped by where they come from. Row notes are tooltips, not text. Informational; never blocks Siguiente. Styles: _goals_check.html. #}
+{% if goals_verdict %}
+{% set gv = goals_verdict %}
+<div class="gck-banner {{ gv.overall }}" style="font-size:0.95rem;margin:6px 0 10px;">
+  <b>{{ {'ok': '✅', 'justo': '⚠️', 'bajo': '❌'}[gv.overall] }} {{ gv.headline }}</b>
+  <span style="font-weight:400;font-size:0.85rem;"> {{ gv.summary }}</span>
+</div>
+<div class="gck" style="overflow-x:auto;">
+  <table class="gv-table">
+    <thead><tr><th>Qué se evalúa</th><th class="r">Tu diseño</th><th class="r">Meta</th>{% if gv.fleet %}<th class="r">Flota real</th>{% endif %}<th>Resultado</th></tr></thead>
+    <tbody>
+      {% set ns = namespace(src='') %}
+      {% for r in gv.rows %}
+      {% if r.source != ns.src %}{% set ns.src = r.source %}
+      <tr class="gv-group {{ r.source|lower }}"><td colspan="{{ 5 if gv.fleet else 4 }}">{{ {'Metas': 'Metas del paso 6', 'Techo': 'Techo', 'Simulación': 'Simulación con clima y consumos reales (calculada)'}[r.source] }}</td></tr>
+      {% endif %}
+      <tr{% if r.note %} title="{{ r.note }}"{% endif %}>
+        <td>{{ r.label }}</td>
+        <td class="r">{{ r.achieved }}</td>
+        <td class="r">{{ r.target }}</td>
+        {% if gv.fleet %}<td class="r" style="color:#1d4ed8;">{{ gv.fleet.get(r.key, '') if r.key else '' }}</td>{% endif %}
+        <td class="st {{ r.status }}">{{ {'ok': '✅', 'justo': '⚠️', 'bajo': '❌', 'sobre': '⚠️', 'info': 'ℹ️'}[r.status] }} {{ r.status_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if gv.hint %}<p class="gck-foot">{{ gv.hint }}</p>{% endif %}
+</div>
+{% endif %}

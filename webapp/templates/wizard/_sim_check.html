@@ -1,0 +1,50 @@
+{# Real-data verdict for the chosen equipment (Off-Grid / Hybrid). Rendered inside the Equipos fragment from `sim_check`;
+   informational only, never blocks Siguiente. #}
+{% if sim_check %}
+{% set sc = sim_check %}
+<style>
+.simc { margin:10px 0; }
+.simc-banner { font-size:0.9rem; border-radius:6px; padding:8px 12px; border:1px solid; font-weight:600; }
+.simc-banner.ok { background:#f0fdf4; border-color:#bbf7d0; color:#166534; }
+.simc-banner.bad { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
+.simc-banner.wait { background:#f9fafb; border-color:#e5e7eb; color:#6b7280; font-weight:400; }
+.simc-stats { display:flex; gap:10px; flex-wrap:wrap; margin:8px 0; }
+.simc-stat { flex:1 1 150px; border:1px solid #e5e7eb; border-radius:6px; padding:8px 12px; }
+.simc-stat .v { font-size:1.15rem; font-weight:700; }
+.simc-stat .v.ok { color:#166534; } .simc-stat .v.bad { color:#b84345; }
+.simc-stat .l { font-size:0.74rem; color:#6b7280; }
+.simc-foot { font-size:0.76rem; color:#6b7280; margin:4px 0; }
+</style>
+{% if not goals_verdict %}<h4 class="section-title" style="font-size:15px;">Simulación con clima y consumos reales <span style="font-size:0.66rem;font-weight:700;background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;vertical-align:1px;">CALCULADO</span></h4>{% endif %}
+<div class="simc">
+  {% if sc.pending %}{% if not goals_verdict %}
+    <div class="simc-banner wait">Se está preparando la prueba con datos reales (la primera vez tarda cerca de un minuto). Cambia o recarga en un momento.</div>{% endif %}
+  {% else %}
+    {% if not goals_verdict %}
+    <div class="simc-banner {{ 'ok' if sc.ok else 'bad' }}">
+      {% if sc.ok %}✅ Con clima y consumos reales, este equipo cumple.{% else %}❌ No cumple en {{ sc.fails|join(' ni en ') }}.{% endif %}
+      <span style="font-weight:400;">({{ '%.1f'|format(sc.kwp) }} kWp · {{ '%.1f'|format(sc.battery) }} kWh · {{ '%.1f'|format(sc.daily_kwh) }} kWh/día)</span>
+    </div>
+    <div class="simc-stats">
+    {% if sc.kind == 'off_grid' %}
+      <div class="simc-stat"><div class="v {{ 'ok' if sc.fail_pct <= sc.fail_target else 'bad' }}">{{ '%.1f'|format(sc.fail_pct) }} %</div><div class="l">de los días con apagón (meta ≤ {{ '%.0f'|format(sc.fail_target) }} %)</div></div>
+      <div class="simc-stat"><div class="v {{ 'ok' if sc.streak <= sc.streak_target else 'bad' }}">{{ '%.0f'|format(sc.streak) }} día(s)</div><div class="l">apagón más largo (meta ≤ {{ sc.streak_target }})</div></div>
+      <div class="simc-stat"><div class="v">{{ '%.0f'|format(sc.battery_min) if sc.battery_min else '—' }} kWh</div><div class="l">batería mínima que cumple (instalada: {{ '%.0f'|format(sc.battery) }})</div></div>
+      <div class="simc-stat"><div class="v">{{ '%.1f'|format(sc.reserve_days_pct) }} %</div><div class="l">de los días tocan el margen de {{ '%.0f'|format(sc.reserve_pct) }} %</div></div>
+    {% else %}
+      <div class="simc-stat"><div class="v {{ 'ok' if sc.nights_ok_pct >= sc.night_target else 'bad' }}">{{ '%.0f'|format(sc.nights_ok_pct) }} %</div><div class="l">de las noches cubiertas (meta ≥ {{ '%.0f'|format(sc.night_target) }} %)</div></div>
+      <div class="simc-stat"><div class="v {{ 'ok' if sc.outage_cover_pct is none or sc.outage_cover_pct >= sc.outage_target else 'bad' }}">{% if sc.outage_cover_pct is not none %}{{ '%.0f'|format(sc.outage_cover_pct) }} %{% else %}—{% endif %}</div><div class="l">de los cortes de red reales que aguanta (meta ≥ {{ '%.0f'|format(sc.outage_target) }} %)</div></div>
+      <div class="simc-stat"><div class="v">{{ '%.0f'|format(sc.import_pct) }} %</div><div class="l">de la carga que sigues comprando{% if sc.import_pct_adj is not none %} (real típico ≈{{ '%.0f'|format(sc.import_pct_adj) }} %){% endif %}</div></div>
+      <div class="simc-stat"><div class="v">{{ '%.0f'|format(sc.battery_min_nights) if sc.battery_min_nights else '—' }}{% if sc.outages_enough %} / {{ '%.0f'|format(sc.battery_min_backup) if sc.battery_min_backup else '—' }}{% endif %} kWh</div><div class="l">batería mínima para la noche{% if sc.outages_enough %} / los cortes{% endif %} (instalada: {{ '%.0f'|format(sc.battery) }})</div></div>
+    {% endif %}
+    </div>
+    {% endif %}
+    <details><summary style="cursor:pointer;font-size:12.5px;">{% if goals_verdict %}Cómo se calculó la simulación{% else %}Cómo se calculó{% endif %}</summary>
+      <p class="simc-foot">{{ sc.scenarios }} escenarios (clima real de varias ubicaciones × consumos de sitios reales escalados a tu consumo), {{ sc.days }} días-escenario entre
+        {{ sc.window[0].strftime('%d/%m/%Y') }} y {{ sc.window[1].strftime('%d/%m/%Y') }}. {% if sc.kind == 'off_grid' %}Usa la batería hasta el 10 %.{% endif %}
+        {% if sc.kind == 'hybrid' %}El respaldo no cuenta el sol durante el corte, y la simulación es ideal (en la práctica la red aporta más).{% endif %}
+        Límites: solo ~90 días de época lluviosa, consumos de otros clientes, cálculo por hora. Informativo: no bloquea el paso.</p>
+    </details>
+  {% endif %}
+</div>
+{% endif %}

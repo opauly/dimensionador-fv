@@ -227,6 +227,78 @@ def _resolve_pvgis_daily(blob: dict, vid: str | None) -> tuple[list[float], dict
 # ── manual-mode projection (do-not-drop item 2's manual-mode utilization) ─
 
 
+_GOAL_SCENARIO_LABELS = {"1": "Mínimo", "2": "Punto óptimo", "3": "Máximo"}
+
+
+def _goal_scenarios(blob: dict, panel: dict, cc: dict, battery: dict, daily_kwh: float, pvgis_daily_series,
+                    base_inverter_qty: int, inverter_kw: float, dod_pct: float) -> list[dict] | None:
+    """Scenarios 1/2/3 sized from the Objetivos step's own Piso / Punto óptimo / Techo (Off-Grid / Hybrid), so Equipos and
+    Objetivos can never disagree about what "the design" is: kWp and battery kWh come from the same band the step-6 table
+    shows, snapped to the chosen panel / battery / controller. Same dict shape the legacy generator returns, so everything
+    downstream (cards, manual defaults, chosen block, Step 8) works unchanged. None when the goals can't be evaluated (the
+    caller then falls back to the legacy generator). Never gates anything: `within_limits` is only the electrical check."""
+    import math
+    from calculations import design_targets as dt
+    from calculations.mppt import find_array_for_pv_inverter, find_array_per_controller
+    from webapp.wizard_steps import og_coupling, s6_objetivos
+
+    sp = s6_objetivos.sweet_spot(blob)
+    if sp is None or sp["system_type"] not in ("off_grid", "hybrid") or not pvgis_daily_series or len(pvgis_daily_series) < 300:
+        return None
+    inputs, goal_obj = sp["inputs"], sp["goal_obj"]
+    peak_kw = float(inputs.get("peak_kw") if sp["system_type"] == "off_grid" else inputs.get("critical_peak_kw") or 0)
+    loading_target = float(getattr(goal_obj, "inverter_loading_target_pct", None)
+                           or getattr(goal_obj, "inverter_islanded_loading_target_pct", None) or 80.0)
+    reserve = float(getattr(goal_obj, "reserve_soc_pct", None) or 25.0)
+    capacity = float(battery["capacity_kwh"])
+    # AC-coupled hybrid: the panels go straight to the MPPT inputs of a Fronius-class string inverter, no charge controller.
+    cpl = og_coupling.from_blob(blob)
+    pv_options = og_coupling.pv_inverter_options() if cpl["mode"] == "ac" else []
+    out = []
+    for key, col_name in (("1", "piso"), ("2", "optimo"), ("3", "techo")):
+        col = sp["band"][col_name]
+        if cpl["mode"] == "ac":
+            from calculations.coupling import suggest_pv_inverter
+
+            pv_inv = next((i for i in pv_options if i["id"] == cpl["pv_inverter_id"]), None) \
+                or suggest_pv_inverter(pv_options, float(col["system_kw"]))
+            array = find_array_for_pv_inverter(panel, pv_inv, float(col["system_kw"]), qty=cpl["pv_inverter_qty"] or 1) if pv_inv else None
+        else:
+            array = find_array_per_controller(panel, cc, float(col["system_kw"]), max_cc=_MAX_CHARGE_CONTROLLERS)
+        if array is None:
+            continue
+        count = max(1, math.ceil(float(col["battery_nominal_kwh"]) / capacity))
+        total_kwh = round(count * capacity, 2)
+        gen = [v * array["system_kw"] * _DERATING for v in pvgis_daily_series]
+        sim = simulate_battery_soc(gen, daily_kwh, total_kwh, dod_pct, reserve)
+        daily_gen = array["system_kw"] * (sum(pvgis_daily_series) / len(pvgis_daily_series)) * _DERATING
+        bank = {
+            "battery_count": count, "total_kwh_installed": total_kwh,
+            "discharge_pct": round(min(100.0, daily_kwh / total_kwh * 100), 2) if total_kwh > 0 else 0.0,
+            "min_soc_actual_pct": sim["min_soc_actual_pct"], "days_full_pct": sim["days_full_pct"],
+            "unmet_load_days": sim["unmet_load_days"], "longest_low_soc_streak_days": sim["longest_low_soc_streak_days"],
+            "utilization_pct": sim["utilization_pct"], "driven_by": "goals",
+        }
+        # Autonomy with no solar at all: usable battery energy / daily load (what the client asks for as "N días de autonomía").
+        autonomy = dt.offgrid_autonomy_days_achieved(total_kwh, daily_kwh, min(100.0 - reserve, dod_pct)) if sp["system_type"] == "off_grid" else None
+        inv_qty = base_inverter_qty
+        rec = dt.inverter_qty_recommended(peak_kw, inverter_kw, loading_target) if peak_kw > 0 else None
+        if rec and rec > inv_qty:
+            inv_qty = rec + (rec % 2 if base_inverter_qty % 2 == 0 else 0)     # split-phase stays in pairs
+        ratio = round(peak_kw / (inv_qty * inverter_kw) * 100, 1) if inv_qty * inverter_kw > 0 else 0.0
+        out.append({
+            "scenario": key, "label": _GOAL_SCENARIO_LABELS[key], "min_soc_target_pct": reserve,
+            "max_unmet_load_days": None, "growth_strings": 0, "battery": bank,
+            "inverter_qty": inv_qty, "inverter_power_w": round(inv_qty * inverter_kw * 1000),
+            "inverter_load_ratio_pct": ratio, "inverter_headroom_tight": ratio > loading_target, "inverter_growth_added": False,
+            "target_kwp": round(float(col["system_kw"]), 2), "target_battery_kwh": round(float(col["battery_nominal_kwh"]), 1),
+            "coupling": cpl["mode"], "autonomy_days": autonomy,
+            "avg_daily_generation_kwh": round(daily_gen, 2),
+            **array,
+        })
+    return out or None
+
+
 def _og_scenario_projection(
     combo: dict,
     avg_peak_sun_hours: float,
@@ -410,7 +482,13 @@ def _compute(blob: dict, vid: str | None = None) -> dict:
     # switch, wired but inert for pure Off-Grid.
     is_hybrid_grid = bool(consumption.get("grid_connected"))
     scenario_defs = _HYBRID_RELIABILITY_SCENARIO_DEFS if is_hybrid_grid else None
-    scenarios = (
+    # Scenarios 1/2/3 come from the Objetivos step's Piso / Punto óptimo / Techo; the legacy reliability generator is only the
+    # fallback for a draft whose goals can't be evaluated (invalid goals / missing inputs) — see `_goal_scenarios`.
+    scenarios = _goal_scenarios(
+        blob, panel, cc, battery, daily_kwh, pvgis_daily_series, base_inverter_qty, float(inverter.get("kw") or 0), dod_pct,
+    )
+    scenario_source = "goals" if scenarios else "legacy"
+    scenarios = scenarios or (
         generate_reliability_scenarios(
             panel, cc, battery, daily_kwh, pvgis_daily_series, autonomy_days,
             base_inverter_qty, float(inverter.get("kw") or 0), total_connected_load_kw,
@@ -507,7 +585,7 @@ def _compute(blob: dict, vid: str | None = None) -> dict:
         "base_inverter_qty": base_inverter_qty, "base_inverter_power_w": base_inverter_power_w,
         "is_hybrid_grid": is_hybrid_grid,
         "hybrid_savings_enabled": hybrid_savings_enabled, "whole_home_avg_kwh_month": whole_home_avg_kwh_month,
-        "scenarios": scenarios, "using_manual": using_manual,
+        "scenarios": scenarios, "scenario_source": scenario_source, "using_manual": using_manual,
         "selected_scenario_label": selected_scenario_label, "valid_scenarios": valid_scenarios,
         "m_series": m_series, "m_strings": m_strings, "m_battery_count": m_battery_count,
         "m": m, "mp": mp,
@@ -603,6 +681,7 @@ def save_step(blob: dict, vid: str | None = None) -> dict | None:
         "battery_id": c["battery"]["id"], "battery": c["battery"],
         "charge_controller_id": c["cc"]["id"], "charge_controller": c["cc"],
         "charge_controller_qty": c["cc_qty"],
+        "coupling": (c["chosen"] or {}).get("coupling"),         # "ac" when the saved layout was sized for the string inverter
         "inverter_qty": c["final_inverter_qty"],
         "monitoring_id": monitoring["id"] if monitoring else None, "monitoring": monitoring,
         "energy_meter_id": (c.get("energy_meter") or {}).get("id"), "energy_meter": c.get("energy_meter"),
@@ -648,6 +727,10 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         }
 
     panel, inverter, battery, cc, monitoring = c["panel"], c["inverter"], c["battery"], c["cc"], c["monitoring"]
+    from calculations.datasheet_limits import controller_trackers
+
+    cc_trackers = controller_trackers(cc)                       # independent PV inputs per unit (RS 450/200: 4)
+    cc_imax_unit = float(cc["imax_in"]) * cc_trackers           # input current of one unit, all trackers together
     consumption, site, profile = c["consumption"], c["site"], c["profile"]
     daily_kwh, autonomy_days, dod_pct = c["daily_kwh"], c["autonomy_days"], c["dod_pct"]
     avg_peak_sun_hours = c["avg_peak_sun_hours"]
@@ -666,8 +749,12 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
     selected_scenario_label = c["selected_scenario_label"]
     scenario_rows = []
     scenario_cards = []
+    from webapp.wizard_steps import sim_check as _sim_check
     for s in scenarios:
         bank = s["battery"]
+        # Goal-driven scenarios are confirmed against the real fleet (weather + load patterns); informational, best-effort.
+        real = _sim_check.build(blob, {"system_kw": s["system_kw"], "battery_installed_kwh": bank["total_kwh_installed"]}) \
+            if c["scenario_source"] == "goals" else None
         scenario_rows.append({
             "escenario": s["scenario"], "label": s["label"],
             "soc_objetivo": s["min_soc_target_pct"],
@@ -684,6 +771,8 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "min_soc_actual_pct": bank["min_soc_actual_pct"],
             "reduccion_factura": _savings(s["system_kw"]) if hybrid_savings_enabled else None,
             "within_limits": s["within_limits"], "notes": s["notes"],
+            "target_kwp": s.get("target_kwp"), "target_battery_kwh": s.get("target_battery_kwh"), "real": real,
+            "layout_text": s.get("layout_text"), "coupling": s.get("coupling"), "autonomy_days": s.get("autonomy_days"),
         })
         scenario_cards.append({
             "scenario": s["scenario"], "label": s["label"], "system_kw": s["system_kw"],
@@ -698,13 +787,15 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "total_panels": s["total_panels"], "panels_per_string": s["panels_per_string"], "strings": s["strings"],
             "inverter_qty": s["inverter_qty"], "inverter_power_w": s["inverter_power_w"],
             "savings_pct": _savings(s["system_kw"]) if hybrid_savings_enabled else None,
+            "real": real, "layout_text": s.get("layout_text"), "coupling": s.get("coupling"), "autonomy_days": s.get("autonomy_days"),
+            "ac_pv_inverter": (s.get("ac_limits") or {}).get("pv_inverter"),
         })
 
     # ── Manual design (Opción 2) ──────────────────────────────────────────
     m, mp = c["m"], c["mp"]
     manual_ctx = None
     if m is not None:
-        imp_limit_m = cc["imax_in"] * m["charge_controller_qty"]
+        imp_limit_m = cc_imax_unit * m["charge_controller_qty"]
         manual_ctx = {
             "series": c["m_series"], "strings": c["m_strings"], "battery_count": c["m_battery_count"],
             "design": m, "voc_ok": m["voc_total"] <= cc["vin_max"], "imp_ok": m["imp_total"] <= imp_limit_m,
@@ -729,13 +820,23 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         "Split-phase 120/240V (master/slave)" if split_phase["requires_split_phase"]
         else f"{consumption.get('voltage_v', 120):.0f}V"
     )
-    panel_arrangement = f"{panels_per_string} en serie × {n_strings} en paralelo" if chosen else "—"
+    panel_arrangement = (chosen.get("layout_text") or f"{panels_per_string} en serie × {n_strings} en paralelo") if chosen else "—"
 
     chosen_ctx = None
     if chosen:
-        voc_ok = chosen["voc_total"] <= cc["vin_max"]
-        imp_limit = cc["imax_in"] * cc_qty
-        imp_ok = chosen["imp_total"] <= imp_limit
+        ac_lim = chosen.get("ac_limits")                       # AC-coupled: no charge controller, the Fronius MPPT limits apply
+        voc_limit = float(ac_lim["vmax"]) if ac_lim else float(cc["vin_max"])
+        imp_limit = (float(ac_lim["imax_mppt"]) if ac_lim else cc_imax_unit * cc_qty)
+        voc_ok = chosen["voc_total"] <= voc_limit
+        imp_ok = chosen["imp_total"] <= imp_limit if imp_limit else True
+        limit_who = "inversor FV" if ac_lim else "controlador"
+        # PV power vs. what the unit(s) can turn into output. Over 100 % is clipping (losses), not a fault: shown softly, never fails the design.
+        from calculations.datasheet_limits import controller_max_pv_w
+
+        pv_cap_w = (float(ac_lim.get("kw") or 0) * 1000.0) if ac_lim else ((controller_max_pv_w(cc) or 0) * cc_qty)
+        pv_pct = (chosen["system_kw"] * 1000.0 / pv_cap_w * 100) if pv_cap_w else None
+        pv_label = "Potencia FV (vs. inversor FV)" if ac_lim else "Potencia FV (vs. máx. del controlador)"
+        pv_power_item = [(pv_label, pv_pct)] if pv_pct is not None else []
 
         min_safe_soc_pct = round(100 - dod_pct, 1)
         # Do-not-drop item 2's core requirement: min_soc_actual_pct comes
@@ -753,11 +854,12 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         from webapp.figures import fig_to_fragment, gz_margin_bars_fig, og_generation_vs_consumption_fig
 
         margin_items = [
-            ("Voc del arreglo (vs. controlador)", (chosen["voc_total"] / cc["vin_max"] * 100) if cc["vin_max"] else 0),
-            ("Corriente del arreglo (vs. controlador)", (chosen["imp_total"] / imp_limit * 100) if imp_limit else 0),
+            (f"Voc del arreglo (vs. {limit_who})", (chosen["voc_total"] / voc_limit * 100) if voc_limit else 0),
+            (f"Corriente del arreglo (vs. {limit_who})", (chosen["imp_total"] / imp_limit * 100) if imp_limit else 0),
+            *pv_power_item,
             ("Profundidad de descarga (vs. batería)", (battery_bank["discharge_pct"] / dod_pct * 100) if dod_pct else 0),
         ]
-        margin_chart_html = fig_to_fragment(gz_margin_bars_fig(margin_items))
+        margin_chart_html = fig_to_fragment(gz_margin_bars_fig(margin_items, soft=(pv_label,)))
 
         gen_chart_html = None
         margin_kwh_gen = round(max(0, display_daily_generation - daily_kwh), 2)
@@ -769,7 +871,11 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         chosen_ctx = {
             "scenario_note": "manual" if chosen["scenario"] == "M" else f"Escenario {chosen['scenario']} · {chosen['label']}",
             "voc_ok": voc_ok, "imp_ok": imp_ok, "is_valid": is_valid,
-            "voc_total": chosen["voc_total"], "imp_total": chosen["imp_total"], "imp_limit": imp_limit,
+            "voc_total": chosen["voc_total"], "imp_total": chosen["imp_total"], "imp_limit": imp_limit, "voc_limit": voc_limit,
+            "ac_coupled": bool(ac_lim), "limit_who": limit_who,
+            "pv_over_pct": round(pv_pct) if (pv_pct is not None and pv_pct > 100) else None,
+            "pv_cap_kw": round(pv_cap_w / 1000.0, 1) if pv_cap_w else None, "pv_cap_label": pv_label,
+            "pv_inverter_label": ac_lim["pv_inverter"] if ac_lim else None,
             "cc_qty": cc_qty, "cc_brand_model": f"{cc['brand']} {cc['model']}",
             "discharge_pct": battery_bank["discharge_pct"], "discharge_ok": discharge_ok,
             "min_safe_soc_pct": min_safe_soc_pct, "design_min_soc_pct": design_min_soc_pct,
@@ -817,7 +923,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         "total_panels": actual_panel_count, "panel_arrangement": panel_arrangement,
         "system_kw": display_array_kw, "area_m2": display_area_m2,
         "final_inverter_qty": final_inverter_qty, "inverter_arrangement": inverter_arrangement,
-        "cc_qty": cc_qty or 1, "battery_count": battery_bank["battery_count"],
+        "cc_qty": cc_qty if (chosen and chosen.get("coupling") == "ac") else (cc_qty or 1), "battery_count": battery_bank["battery_count"],
         "daily_generation": display_daily_generation, "battery_kwh": battery_bank["total_kwh_installed"],
     }
 
@@ -838,6 +944,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             coverage_chart_html = fig_to_fragment(monthly_coverage_fig(
                 step6_coverage.get("generation"), step6_coverage.get("consumption"),
                 recharge_kwh=step6_coverage.get("recharge"), flag_shortfall=True,
+                direct_kwh=step6_coverage.get("direct"),
             ))
 
         utilization_ctx = None
@@ -898,13 +1005,73 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "is_hybrid_grid": is_hybrid_grid,
         }
 
+    # Goals-vs-design check (Phase 24 Step 4): the chosen design against the Objetivos sweet spot. Informational.
+    goals_check_ctx = None
+    if chosen is not None:
+        from webapp.wizard_steps import goals_check
+
+        inverter_qty = int(c["final_inverter_qty"] or 1)
+        rating_a = inverter.get("ac_input_current_max_a")
+        goals_check_ctx = goals_check.build(blob, {
+            "system_kw": float(c["display_array_kw"]),
+            "battery_installed_kwh": float(c["battery_bank"].get("total_kwh_installed") or 0),
+            "battery_dod_pct": float(battery.get("dod_pct") or 80),
+            "inverter_kw_total": float(inverter.get("kw") or 0) * inverter_qty,
+            "passthrough_a_total": float(rating_a) * inverter_qty if rating_a else None,
+        })
+
+    if goals_check_ctx is not None and c["scenario_source"] == "goals":
+        goals_check_ctx["legacy_model_note"] = False          # scenarios 1/2/3 now come from these very goals
+
+    # Real-data verdict for the same chosen design (fleet simulation; informational, never blocks).
+    sim_check_ctx = None
+    if chosen is not None:
+        from webapp.wizard_steps import sim_check
+
+        sim_check_ctx = sim_check.build(blob, {
+            "system_kw": float(c["display_array_kw"]),
+            "battery_installed_kwh": float(c["battery_bank"].get("total_kwh_installed") or 0),
+        })
+
+    # Installed panels vs. the roof area stated in Objetivos (informational; None when no roof area was stated).
+    roof_fit_ctx = None
+    if chosen is not None:
+        from calculations.design_targets import roof_fit_from_blob
+
+        roof_fit_ctx = roof_fit_from_blob(blob, c["actual_panel_count"], panel)
+
+    # One verdict that combines the three informational checks above (goals table, real-data simulation, roof fit).
+    goals_verdict_ctx = None
+    if chosen is not None:
+        from webapp.wizard_steps import goals_verdict
+
+        goals_verdict_ctx = goals_verdict.build(blob, goals_check_ctx, sim_check_ctx, roof_fit_ctx)
+
+    # PV coupling selector at the top of Equipos (Off-Grid and Hybrid): DC with charge controllers, or AC with a string inverter.
+    coupling_ui = None
+    if (blob.get("meta") or {}).get("system_type") in ("off_grid", "hybrid"):
+        from calculations.coupling import suggest_pv_inverter
+        from webapp.wizard_steps import og_coupling
+
+        cpl = og_coupling.from_blob(blob)
+        options = og_coupling.pv_inverter_options() if cpl["mode"] == "ac" else []
+        sel = next((i for i in options if i["id"] == cpl["pv_inverter_id"]), None) or \
+            (suggest_pv_inverter(options, display_array_kw) if options else None)
+        coupling_ui = {"ac": cpl["mode"] == "ac", "options": options, "selected_id": sel["id"] if sel else None, "selected": sel}
+
     return {
+        "goals_check": goals_check_ctx,
+        "coupling_ui": coupling_ui,
+        "scenario_source": c["scenario_source"],
+        "sim_check": sim_check_ctx,
+        "roof_fit": roof_fit_ctx,
+        "goals_verdict": goals_verdict_ctx,
         "no_catalog": False, "no_daily_kwh": False,
         "panels": c["panels"], "inverters": c["inverters"], "batteries": c["batteries"],
         "charge_controllers": c["charge_controllers"], "monitoring_devices": c["monitoring_devices"],
         "selected_panel": panel, "selected_inverter": inverter, "selected_battery": battery,
-        "selected_cc": cc, "selected_monitoring": monitoring,
         "energy_meters": c.get("energy_meters") or [], "selected_energy_meter": c.get("energy_meter"),
+        "selected_cc": cc, "selected_monitoring": monitoring, "cc_trackers": cc_trackers, "cc_imax_unit": cc_imax_unit,
         "panel_area": c["panel_area"], "split_phase": split_phase,
         "is_hybrid_grid": is_hybrid_grid,
         "daily_kwh": daily_kwh, "autonomy_days": autonomy_days,

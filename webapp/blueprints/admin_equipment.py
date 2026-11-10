@@ -77,12 +77,16 @@ def _panel_fields(src):
         {"key": "imp", "label": "Imp (A)", "type": "number", "step": "0.01", "value": src.get("imp", "")},
         {"key": "temp_coeff_pmax", "label": "Coef. temp. Pmax (%/°C)", "type": "number", "step": "0.001",
          "value": src.get("temp_coeff_pmax", -0.35)},
+        {"key": "max_series_fuse_a", "label": "Fusible máx. en serie / protección (A)", "type": "number", "step": "1", "value": src.get("max_series_fuse_a", ""),
+         "help": "Del datasheet del módulo; aplica también a un breaker en serie. Vacío = no se verifica."},
         {"key": "width_m", "label": "Ancho (m)", "type": "number", "step": "0.0001", "value": src.get("width_m", "")},
         {"key": "height_m", "label": "Alto (m)", "type": "number", "step": "0.0001", "value": src.get("height_m", "")},
         {"key": "warranty_product_yr", "label": "Garantía producto (años)", "type": "number", "step": "1",
          "value": src.get("warranty_product_yr", 12)},
         {"key": "warranty_power_yr", "label": "Garantía potencia (años)", "type": "number", "step": "1",
          "value": src.get("warranty_power_yr", 25)},
+        {"key": "datasheet_path", "label": "Datasheet (ruta en el almacenamiento)", "type": "text", "value": src.get("datasheet_path", "") or "",
+         "help": "Archivo en el bucket privado solar-tool, p. ej. datasheets/inversores/multiplus-ii-120v.pdf."},
     ]
 
 
@@ -91,7 +95,8 @@ def _panel_payload(form):
         "brand": form.get("brand", "").strip(), "model": form.get("model", "").strip(),
         "wp": int(_f(form, "wp", 0)), "voc": _fo(form, "voc"), "vmp": _fo(form, "vmp"),
         "isc": _fo(form, "isc"), "imp": _fo(form, "imp"),
-        "temp_coeff_pmax": _fo(form, "temp_coeff_pmax"),
+        "temp_coeff_pmax": _fo(form, "temp_coeff_pmax"), "max_series_fuse_a": _fo(form, "max_series_fuse_a"),
+        "datasheet_path": (form.get("datasheet_path") or "").strip() or None,
         "width_m": _fo(form, "width_m"), "height_m": _fo(form, "height_m"),
         "warranty_product_yr": _i(form, "warranty_product_yr", 12),
         "warranty_power_yr": _i(form, "warranty_power_yr", 25),
@@ -128,7 +133,16 @@ def _inverter_fields(src):
          "value": src.get("ac_out_rated_a", ""),
          "help": "Con la red presente la salida también lleva el passthrough; es el tope del breaker de salida (MultiPlus-II 5k: 115 A)."},
         {"key": "efficiency_pct", "label": "Eficiencia máxima (%)", "type": "number", "step": "0.1", "value": src.get("efficiency_pct", "")},
+        {"key": "cont_w_25c", "label": "Potencia continua a 25 °C (W)", "type": "number", "step": "10", "value": src.get("cont_w_25c", ""),
+         "help": "En vatios (el kW del catálogo es la potencia en VA). Define la corriente DC de batería a inversor."},
+        {"key": "peak_w", "label": "Potencia pico (W)", "type": "number", "step": "10", "value": src.get("peak_w", "")},
+        {"key": "max_ocpd_a", "label": "Breaker AC máximo del fabricante (A)", "type": "number", "step": "1", "value": src.get("max_ocpd_a", ""),
+         "help": "Inversores FV: tabla «OCPD/AC breaker size» del datasheet. Vacío = no se verifica."},
+        {"key": "dc_fuse_a", "label": "Fusible DC recomendado por el fabricante (A)", "type": "number", "step": "1", "value": src.get("dc_fuse_a", ""),
+         "help": "Lado de batería, del manual. Vacío = no se verifica."},
         {"key": "warranty_yr", "label": "Garantía (años)", "type": "number", "step": "1", "value": src.get("warranty_yr", 5)},
+        {"key": "datasheet_path", "label": "Datasheet (ruta en el almacenamiento)", "type": "text", "value": src.get("datasheet_path", "") or "",
+         "help": "Archivo en el bucket privado solar-tool, p. ej. datasheets/inversores/multiplus-ii-120v.pdf."},
     ]
 
 
@@ -141,6 +155,8 @@ def _inverter_payload(form):
         "output_v": _fo(form, "output_v"), "ac_output_current_a": _fo(form, "ac_output_current_a"),
         "ac_input_current_max_a": _fo(form, "ac_input_current_max_a"),
         "ac_out_rated_a": _fo(form, "ac_out_rated_a"), "efficiency_pct": _fo(form, "efficiency_pct"),
+        "cont_w_25c": _fo(form, "cont_w_25c"), "peak_w": _fo(form, "peak_w"), "max_ocpd_a": _fo(form, "max_ocpd_a"),
+        "dc_fuse_a": _fo(form, "dc_fuse_a"), "datasheet_path": (form.get("datasheet_path") or "").strip() or None,
         "warranty_yr": _i(form, "warranty_yr", 5),
     }
 
@@ -161,7 +177,13 @@ def _battery_fields(src):
         {"key": "voltage_v", "label": "Voltaje (V) *", "type": "number", "step": "1", "value": src.get("voltage_v", 48)},
         {"key": "dod_pct", "label": "Descarga máxima DoD (%)", "type": "number", "step": "1", "value": src.get("dod_pct", 80)},
         {"key": "cycles", "label": "Ciclos", "type": "number", "step": "100", "value": src.get("cycles", "")},
+        {"key": "max_charge_a", "label": "Corriente de carga continua máx. (A)", "type": "number", "step": "1", "value": src.get("max_charge_a", "")},
+        {"key": "max_discharge_a", "label": "Corriente de descarga continua máx. (A)", "type": "number", "step": "1", "value": src.get("max_discharge_a", "")},
+        {"key": "fuse_a", "label": "Fusible recomendado por batería (A)", "type": "number", "step": "1", "value": src.get("fuse_a", ""),
+         "help": "Del manual de la batería (fusible MEGA en el Lynx). Vacío = «por definir» en la lista."},
         {"key": "warranty_yr", "label": "Garantía (años)", "type": "number", "step": "1", "value": src.get("warranty_yr", 10)},
+        {"key": "datasheet_path", "label": "Datasheet (ruta en el almacenamiento)", "type": "text", "value": src.get("datasheet_path", "") or "",
+         "help": "Archivo en el bucket privado solar-tool, p. ej. datasheets/inversores/multiplus-ii-120v.pdf."},
     ]
 
 
@@ -172,6 +194,8 @@ def _battery_payload(form):
         "capacity_kwh": _f(form, "capacity_kwh", 0), "capacity_ah": _fo(form, "capacity_ah"),
         "voltage_v": _f(form, "voltage_v", 48), "dod_pct": _i(form, "dod_pct", 80),
         "cycles": _fo(form, "cycles"), "warranty_yr": _i(form, "warranty_yr", 10),
+        "max_charge_a": _fo(form, "max_charge_a"), "max_discharge_a": _fo(form, "max_discharge_a"), "fuse_a": _fo(form, "fuse_a"),
+        "datasheet_path": (form.get("datasheet_path") or "").strip() or None,
     }
 
 
@@ -192,6 +216,8 @@ def _cc_fields(src):
         {"key": "vout", "label": "Vout (V)", "type": "number", "step": "1", "value": src.get("vout", "")},
         {"key": "imax_in", "label": "Imax entrada (A) *", "type": "number", "step": "0.1", "value": src.get("imax_in", "")},
         {"key": "imax_out", "label": "Imax salida (A)", "type": "number", "step": "0.1", "value": src.get("imax_out", "")},
+        {"key": "datasheet_path", "label": "Datasheet (ruta en el almacenamiento)", "type": "text", "value": src.get("datasheet_path", "") or "",
+         "help": "Se llena solo al importar un PDF; también puedes escribirla."},
     ]
 
 
@@ -200,6 +226,7 @@ def _cc_payload(form):
         "brand": form.get("brand", "").strip(), "model": form.get("model", "").strip(),
         "type": form.get("type", "MPPT"), "vin_max": _f(form, "vin_max", 0), "vout": _fo(form, "vout"),
         "imax_in": _f(form, "imax_in", 0), "imax_out": _fo(form, "imax_out"),
+        "datasheet_path": (form.get("datasheet_path") or "").strip() or None,
     }
 
 
@@ -216,6 +243,8 @@ def _monitoring_fields(src):
         {"key": "model", "label": "Modelo *", "type": "text", "value": src.get("model", "")},
         {"key": "compatible_with", "label": "Compatible con", "type": "text", "value": src.get("compatible_with", ""),
          "help": "Ej.: Victron Cerbo GX, Victron Ekrano GX"},
+        {"key": "datasheet_path", "label": "Datasheet (ruta en el almacenamiento)", "type": "text", "value": src.get("datasheet_path", "") or "",
+         "help": "Se llena solo al importar un PDF; también puedes escribirla."},
     ]
 
 
@@ -223,6 +252,7 @@ def _monitoring_payload(form):
     return {
         "brand": form.get("brand", "").strip(), "model": form.get("model", "").strip(),
         "compatible_with": form.get("compatible_with", "").strip() or None,
+        "datasheet_path": (form.get("datasheet_path") or "").strip() or None,
     }
 
 
@@ -295,7 +325,7 @@ def render_equipos_panel(sub, request):
 def _display_rows(spec, items):
     rows = []
     for it in items:
-        row = {"id": it["id"], "brand": it.get("brand"), "model": it.get("model")}
+        row = {"id": it["id"], "brand": it.get("brand"), "model": it.get("model"), "datasheet_path": it.get("datasheet_path")}
         for key, label, fmt in spec["display_cols"]:
             v = it.get(key)
             row[key] = fmt(v) if fmt else v
@@ -314,7 +344,117 @@ def _render(spec, sub, items, form_mode, existing, error, dup, pending_form=None
     )
 
 
+# ── "Extraer de datasheet": a PDF -> the catalog form, prefilled (ported from the Streamlit admin) ─────────────
+
+_PARSERS = {"paneles": "parse_panel_datasheet", "inversores": "parse_inverter_datasheet", "baterias": "parse_battery_datasheet",
+            "controladores": "parse_charge_controller_datasheet", "monitoreo": "parse_monitoring_datasheet"}
+_MAX_PDF_BYTES = 20 * 1024 * 1024
+_BUCKET = "solar-tool"
+
+
+def _storage_name(name: str) -> str:
+    """ASCII-safe storage key part (Supabase rejects accents and spaces in a key)."""
+    import re
+    import unicodedata
+
+    base = unicodedata.normalize("NFKD", name or "datasheet").encode("ascii", "ignore").decode("ascii")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._") or "datasheet"
+    return base if base.lower().endswith(".pdf") else base + ".pdf"
+
+
+def _variant_label(sub, v):
+    bits = [f"{v.get('brand') or ''} {v.get('model') or ''}".strip()]
+    for key, unit in (("wp", " Wp"), ("kw", " kW"), ("capacity_kwh", " kWh"), ("imax_out", " A")):
+        if v.get(key) not in (None, ""):
+            bits.append(f"{v[key]}{unit}")
+    return " · ".join(bits)
+
+
+def _clean_variant(v: dict) -> dict:
+    """Drop what the model could not find (null) so the form shows blanks, not the text 'None'."""
+    return {k: val for k, val in (v or {}).items() if val not in (None, "")}
+
+
+def register_extract(bp):
+    @bp.route("/equipos/<sub>/extraer", methods=["POST"])
+    def equipos_extraer(sub):
+        """Upload a datasheet PDF: store it, let Claude read the specs, show the variants found."""
+        import json
+
+        specs = _specs()
+        if sub not in specs or sub not in _PARSERS:
+            abort(404)
+        spec = specs[sub]
+        f = request.files.get("pdf")
+        data = f.read() if f else b""
+        error = None
+        if not data:
+            error = "Elige un PDF."
+        elif not data.startswith(b"%PDF"):
+            error = "El archivo no es un PDF."
+        elif len(data) > _MAX_PDF_BYTES:
+            error = "El PDF pesa más de 20 MB."
+        variants = []
+        if not error:
+            from calculations import datasheet_parser as DP
+
+            try:
+                variants = getattr(DP, _PARSERS[sub])(data)
+            except Exception as exc:                      # AI / network / bad JSON: report, never 500
+                error = f"No se pudo leer el datasheet: {exc}"
+        path = None
+        if not error:
+            import hashlib
+
+            from database.supabase_client import get_client
+
+            path = f"datasheets/{sub}/{hashlib.sha1(data).hexdigest()[:8]}-{_storage_name(f.filename)}"
+            try:
+                get_client().storage.from_(_BUCKET).upload(
+                    path=path, file=data, file_options={"content-type": "application/pdf", "upsert": "true"})
+            except Exception as exc:
+                error = f"Se leyó el datasheet pero no se pudo guardar el PDF: {exc}"
+        if error:
+            return render_template("admin/_equip_extract.html", sub=sub, kind_label=spec["kind_label"], error=error, variants=[], path=None)
+        rows = [{"label": _variant_label(sub, v), "json": json.dumps(_clean_variant(v), ensure_ascii=False)} for v in variants]
+        return render_template("admin/_equip_extract.html", sub=sub, kind_label=spec["kind_label"], error=None, variants=rows, path=path,
+                               filename=f.filename)
+
+    @bp.route("/equipos/<sub>/extraer/usar", methods=["POST"])
+    def equipos_extraer_usar(sub):
+        """The chosen variant opens the usual 'Nuevo' form, prefilled; saving goes through equipos_save
+        (duplicate check included), so nothing reaches the catalog until the engineer reviews and saves."""
+        import json
+
+        specs = _specs()
+        if sub not in specs or sub not in _PARSERS:
+            abort(404)
+        spec = specs[sub]
+        try:
+            variant = json.loads(request.form.get("variant") or "{}")
+        except ValueError:
+            variant = {}
+        variant["datasheet_path"] = request.form.get("datasheet_path") or None
+        existing = {k: v for k, v in variant.items() if v not in (None, "")}
+        return _render(spec, sub, spec["list_fn"](), "add", existing, error=None, dup=None)
+
+    @bp.route("/equipos/datasheet")
+    def equipos_datasheet():
+        """Open a stored datasheet through a short-lived signed URL (the bucket is private)."""
+        path = request.args.get("path", "")
+        if not path.startswith("datasheets/") or ".." in path:
+            abort(404)
+        from database.supabase_client import get_client
+
+        try:
+            url = get_client().storage.from_(_BUCKET).create_signed_url(path, 600)
+            return redirect(url.get("signedURL") or url.get("signedUrl"))
+        except Exception:
+            abort(404)
+
+
 def register(bp):
+    register_extract(bp)
     @bp.route("/equipos/<sub>/save", methods=["POST"])
     def equipos_save(sub):
         specs = _specs()

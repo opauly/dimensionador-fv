@@ -1,0 +1,61 @@
+{# Objetivos vs. diseño (Phase 24 Step 4). Rendered inside the Equipos fragments from `goals_check`, so it follows
+   every selection change. Informational only — never blocks Siguiente. #}
+{% if goals_check %}
+<style>
+.gck-banner { font-size:0.85rem; border-radius:6px; padding:7px 11px; margin:8px 0; border:1px solid; }
+.gck-banner.ok { background:#f0fdf4; border-color:#bbf7d0; color:#166534; }
+.gck-banner.justo, .gck-banner.sobre { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+.gck-banner.bajo { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
+.gck table { border-collapse:collapse; width:100%; font-size:0.86rem; }
+.gck th { text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; color:#6b7280; padding:5px 10px; border-bottom:2px solid #e5e7eb; }
+.gck td { padding:7px 10px; border-bottom:1px solid #eef0f3; vertical-align:top; }
+.gck td.num { white-space:nowrap; }
+.gv-table { table-layout:auto; font-size:0.84rem; }
+.gv-table th, .gv-table td { padding:5px 8px; }
+.gv-table th.r, .gv-table td.r { text-align:right; white-space:nowrap; }
+.gv-table td { vertical-align:middle; }
+.gv-table td:first-child { width:36%; }
+.gv-table .st { white-space:nowrap; }
+.gv-table tr.gv-group td { background:#f9fafb; font-size:0.7rem; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:#6b7280; padding:4px 8px; border-bottom:1px solid #e5e7eb; }
+.gv-table tr.gv-group.simulación td { background:#eef2ff; color:#3730a3; } .gv-table tr.gv-group.techo td { background:#fffbeb; color:#92400e; }
+.gck .st { font-weight:700; white-space:nowrap; }
+.gck .st.ok { color:#166534; } .gck .st.justo, .gck .st.sobre { color:#b45309; } .gck .st.bajo { color:#b84345; } .gck .st.info { color:#6b7280; }
+.gck .note { font-size:0.74rem; color:#9ca3af; margin-top:2px; }
+.gck-src { display:inline-block; margin-left:7px; font-size:0.62rem; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; border-radius:4px; padding:0 5px; vertical-align:1px; background:#f3f4f6; color:#6b7280; }
+.gck-src.simulación { background:#e0e7ff; color:#3730a3; } .gck-src.techo { background:#fef3c7; color:#92400e; }
+.gck-foot { font-size:0.78rem; color:#6b7280; margin:5px 0; }
+</style>
+{% if not goals_verdict %}<h4 class="section-title" style="font-size:15px;">Objetivos vs. diseño</h4>{% endif %}
+<div class="gck">
+  {% if not goals_verdict %}
+  <div class="gck-banner {{ goals_check.summary.overall }}">
+    Tu selección frente a los objetivos y a la recomendación sin equipo del paso 6: <b>{{ goals_check.summary.text }}</b>.
+  </div>
+
+  <table>
+    <thead><tr><th>Qué se evalúa</th><th>Tu diseño</th><th>Punto óptimo / meta</th>{% if goals_verdict and goals_verdict.fleet %}<th>Flota real</th>{% endif %}<th>Rango</th><th>Resultado</th></tr></thead>
+    <tbody>
+      {% for r in goals_check.rows %}
+      <tr>
+        <td>{{ r.label }}{% if r.note %}<div class="note">{{ r.note }}</div>{% endif %}</td>
+        <td class="num">{{ r.achieved }}</td>
+        <td class="num">{{ r.target }}</td>
+        {% if goals_verdict and goals_verdict.fleet %}<td class="num" style="color:#1d4ed8;">{{ goals_verdict.fleet.get(r.key, '—') }}</td>{% endif %}
+        <td class="num">{{ r.band }}</td>
+        <td class="st {{ r.status }}">{{ {'ok': '✅', 'justo': '⚠️', 'bajo': '❌', 'sobre': '⚠️', 'info': 'ℹ️'}[r.status] }} {{ r.status_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if goals_check.default_goals %}
+    <p class="gck-foot">⚠️ Estás viendo los objetivos por defecto — este borrador no confirmó objetivos propios.
+      <a href="{{ url_for('wizard.paso', vid=vid, n=6) }}">Definir objetivos</a>.</p>
+  {% else %}
+    <p class="gck-foot"><a href="{{ url_for('wizard.paso', vid=vid, n=6) }}">Revisar los objetivos</a></p>
+  {% endif %}
+  {% if goals_check.legacy_model_note %}
+    <p class="gck-foot">ℹ️ Los escenarios automáticos de este paso (1/2/3) siguen usando el modelo de confiabilidad anterior y no se derivan de estos objetivos: un escenario válido puede no cumplirlos.</p>
+  {% endif %}
+</div>
+{% endif %}

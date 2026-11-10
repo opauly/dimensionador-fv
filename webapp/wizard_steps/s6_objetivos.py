@@ -34,6 +34,22 @@ GRANDFATHER_FROM_STEP = 7
 
 PRESET_LABELS = {"minimo": "Mínimo aceptable", "recomendado": "Recomendado", "maximo": "Máxima autonomía + crecimiento"}
 _PRESET_INDEX = {"minimo": 0, "recomendado": 1, "maximo": 2}
+# "Según datos reales" (Off-Grid only): the values the real-data simulation supports — autonomy 2 days and ~2x PV coverage already meet
+# "98% of days with energy, no stretch over 2 days" (more PV barely helps beyond that); margin and inverter ceiling are policy, so
+# they take the "Mínimo aceptable" neighbourhood. Everything else (hidden goals) follows the "Recomendado" tier.
+DEFAULT_ROOF_PANEL_W = 620.0      # pre-filled value of the editable "Potencia del panel de referencia" field (the user owns the number)
+DATA_PRESET = "datos_reales"
+_DATA_PRESET_LABEL = "Según datos reales"
+_DATA_PRESET_GOALS = {"off_grid": {"reserve_soc_pct": 25.0, "autonomy_days": 2.0, "pv_design_factor": 2.0, "inverter_loading_target_pct": 80.0}}
+
+
+def _preset_keys(system_type: str) -> list[str]:
+    """Preset buttons for a system type, in display order."""
+    return ([DATA_PRESET] if system_type in _DATA_PRESET_GOALS else []) + list(PRESET_LABELS)
+
+
+def _preset_label(key: str) -> str:
+    return _DATA_PRESET_LABEL if key == DATA_PRESET else PRESET_LABELS[key]
 
 _EXPANSION_OPTIONS = [("none", "Ninguna"), ("one", "Una"), ("two", "Dos")]
 
@@ -45,26 +61,34 @@ FIELD_SPECS: dict[str, list[dict]] = {
         {"name": "autonomy_days", "label": "Días de autonomía", "unit": "días", "kind": _N, "step": 0.25,
          "help": "Días de consumo que el banco de baterías debe cubrir sin generación solar."},
         {"name": "reserve_soc_pct", "label": "Margen ante falla de FV", "unit": "%", "kind": _N, "step": 5,
-         "help": "Capacidad que se compra y no se planifica dentro de la autonomía — tolerancia a una falla de la generación, no una 'reserva SoC' que el sistema aislado no tiene."},
+         "help": "Batería extra que no cuentas en la autonomía, por si falla la generación. Más margen = batería más grande (35 % pide ≈40 % más batería que 10 %). Sugerido: 20–35 %."},
         {"name": "pv_design_factor", "label": "Cobertura FV", "unit": "× consumo diario", "kind": _N, "step": 0.05,
-         "help": "Energía diaria que debe entregar el arreglo, como múltiplo del consumo diario. Se dimensiona con el rendimiento promedio anual."},
+         "help": "Cuántas veces el consumo diario debe producir el arreglo. Más cobertura = más paneles. Con datos reales de la flota suele bastar 2–2.7×."},
         {"name": "solar_resource_basis", "label": "Base del recurso solar", "unit": "", "kind": _S,
          "options": [("average_month", "Mes promedio"), ("worst_month", "Peor mes")],
          "help": "Contra qué mes se verifica que el arreglo cumpla su objetivo (no cambia el tamaño recomendado)."},
-        {"name": "inverter_loading_target_pct", "label": "Techo de carga del inversor", "unit": "% del pico", "kind": _N, "step": 1,
-         "help": "Máximo de la potencia continua del inversor que puede usar el pico simultáneo; deja margen para arranques y cargas futuras."},
+        {"name": "inverter_loading_target_pct", "label": "Límite de carga del inversor", "unit": "% del pico", "kind": _N, "step": 1,
+         "help": "El inversor se calcula como pico ÷ este %. Más bajo = inversor más grande y más margen para arranques de motores."},
         {"name": "growth_energy_pct", "label": "Crecimiento de energía", "unit": "%", "kind": _N, "step": 1,
-         "help": "Aumento esperado del consumo. Se reporta como preparación para crecer; no agranda el equipo."},
+         "help": "Solo informativo: se reporta, no cambia el tamaño del equipo."},
         {"name": "growth_peak_pct", "label": "Crecimiento de potencia pico", "unit": "%", "kind": _N, "step": 1,
-         "help": "Aumento esperado de la demanda pico. Se reporta como preparación para crecer."},
+         "help": "Solo informativo: se reporta, no cambia el tamaño del equipo."},
         {"name": "expansion_provision", "label": "Provisión de expansión", "unit": "strings libres", "kind": _S,
          "options": _EXPANSION_OPTIONS, "help": "Entradas de controlador / strings reservados para ampliar el arreglo."},
         {"name": "roof_area_m2", "label": "Área de techo disponible (opcional)", "unit": "m²", "kind": _N, "step": 1, "optional": True,
          "help": "Área del techo donde caben paneles. Con ella se muestra cuántos kWp caben y se compara con el objetivo; déjala vacía si no se conoce."},
+        {"name": "roof_panel_w", "label": "Potencia del panel de referencia", "unit": "W", "kind": _N, "step": 10, "optional": True,
+         "help": "Potencia de los paneles que piensas usar. Solo sirve para contar cuántos caben en el techo; el panel real se elige en Equipos."},
+        {"name": "roof_panel_len_m", "label": "Largo del panel", "unit": "m", "kind": _N, "step": 0.05, "optional": True, "advanced": True,
+         "help": "Medida real del panel de referencia (el panel elegido en Equipos usa sus propias medidas)."},
+        {"name": "roof_panel_wid_m", "label": "Ancho del panel", "unit": "m", "kind": _N, "step": 0.05, "optional": True, "advanced": True,
+         "help": "Medida real del panel de referencia."},
+        {"name": "roof_packing_pct", "label": "Techo aprovechable", "unit": "%", "kind": _N, "step": 5, "optional": True, "advanced": True,
+         "help": "Parte del área del techo que puede llevar paneles (sin bordes, ventilas, sombras ni pasillos)."},
     ],
     "hybrid": [
         {"name": "reserve_soc_pct", "label": "Reserva de SoC", "unit": "%", "kind": _N, "step": 5,
-         "help": "Piso de carga que el inversor reserva para un corte de red (solo se libera si falla la red)."},
+         "help": "Carga mínima que el inversor reserva para un corte de red (solo se libera si falla la red)."},
         {"name": "backup_nights", "label": "Noches de respaldo", "unit": "noches", "kind": _N, "step": 0.25,
          "help": "Noches de la carga crítica que la batería debe sostener durante un corte."},
         {"name": "cycling_nights", "label": "Noches de ciclado", "unit": "noches", "kind": _N, "step": 0.05,
@@ -74,7 +98,7 @@ FIELD_SPECS: dict[str, list[dict]] = {
          "help": "Se registra, pero esta versión del modelo siempre dimensiona con las cargas críticas."},
         {"name": "pv_coverage", "label": "Cobertura FV objetivo", "unit": "× carga servida", "kind": _N, "step": 0.05,
          "help": "Energía diaria del arreglo como múltiplo de la carga que sirve el sistema. Sobre ~1.75× un sitio que no exporta no la aprovecha."},
-        {"name": "inverter_islanded_loading_target_pct", "label": "Techo de carga del inversor (isla)", "unit": "% del pico crítico", "kind": _N, "step": 1,
+        {"name": "inverter_islanded_loading_target_pct", "label": "Límite de carga del inversor (isla)", "unit": "% del pico crítico", "kind": _N, "step": 1,
          "help": "Máximo de la potencia del inversor que puede usar el pico de las cargas críticas durante un corte."},
         {"name": "growth_energy_pct", "label": "Crecimiento de energía", "unit": "%", "kind": _N, "step": 1, "help": ""},
         {"name": "growth_peak_pct", "label": "Crecimiento de potencia pico", "unit": "%", "kind": _N, "step": 1, "help": ""},
@@ -82,6 +106,14 @@ FIELD_SPECS: dict[str, list[dict]] = {
          "options": _EXPANSION_OPTIONS, "help": ""},
         {"name": "roof_area_m2", "label": "Área de techo disponible (opcional)", "unit": "m²", "kind": _N, "step": 1, "optional": True,
          "help": "Área del techo donde caben paneles. Con ella se muestra cuántos kWp caben y se compara con el objetivo; déjala vacía si no se conoce."},
+        {"name": "roof_panel_w", "label": "Potencia del panel de referencia", "unit": "W", "kind": _N, "step": 10, "optional": True,
+         "help": "Potencia de los paneles que piensas usar. Solo sirve para contar cuántos caben en el techo; el panel real se elige en Equipos."},
+        {"name": "roof_panel_len_m", "label": "Largo del panel", "unit": "m", "kind": _N, "step": 0.05, "optional": True, "advanced": True,
+         "help": "Medida real del panel de referencia (el panel elegido en Equipos usa sus propias medidas)."},
+        {"name": "roof_panel_wid_m", "label": "Ancho del panel", "unit": "m", "kind": _N, "step": 0.05, "optional": True, "advanced": True,
+         "help": "Medida real del panel de referencia."},
+        {"name": "roof_packing_pct", "label": "Techo aprovechable", "unit": "%", "kind": _N, "step": 5, "optional": True, "advanced": True,
+         "help": "Parte del área del techo que puede llevar paneles (sin bordes, ventilas, sombras ni pasillos)."},
         {"name": "reduction_target_pct", "label": "Reducción de kWh objetivo (opcional)", "unit": "% del consumo", "kind": _N, "step": 5, "optional": True,
          "help": "Meta de energía de la red que el sistema debe evitar, sobre el consumo de toda la casa. Déjala vacía si solo importa la cobertura."},
     ],
@@ -94,6 +126,18 @@ FIELD_SPECS: dict[str, list[dict]] = {
          "help": "Límite de kWp por techo, presupuesto u otra razón. Déjalo vacío si no hay."},
     ],
 }
+
+# Off-Grid margin and PV coverage are hard to pick up front; the preset buttons fill them, so they live under "Ajustes finos".
+for _sp in FIELD_SPECS["off_grid"]:
+    if _sp["name"] in ("reserve_soc_pct", "pv_design_factor"):
+        _sp["advanced"] = True
+
+# Growth, expansion, the solar-resource basis and the hybrid battery basis only feed reports or are ignored by the model (they never
+# change the recommended equipment), so they are not
+# asked for: the tier keeps the preset's values (see `_preset_goals`) and the form never sends them.
+_HIDDEN_GOALS = {"growth_energy_pct", "growth_peak_pct", "expansion_provision", "solar_resource_basis", "battery_basis"}
+for _st in list(FIELD_SPECS):
+    FIELD_SPECS[_st] = [_sp for _sp in FIELD_SPECS[_st] if _sp["name"] not in _HIDDEN_GOALS]
 
 _TIER_CLASS = {"off_grid": OffGridDesignTier, "hybrid": HybridDesignTier}
 
@@ -131,6 +175,8 @@ def _tier_from_goals(system_type: str, goals: dict):
 
 
 def _preset_goals(system_type: str, preset: str) -> dict:
+    if preset == DATA_PRESET:
+        return {**_preset_goals(system_type, "recomendado"), **_DATA_PRESET_GOALS[system_type]}
     tier = dt.goal_presets(system_type)[_PRESET_INDEX[preset]]
     goals = {k: getattr(tier, k) for k in _tier_field_names(system_type)}
     if system_type == "hybrid":
@@ -142,20 +188,34 @@ def _default_goals(system_type: str, daytime_fraction: float) -> dict:
     if system_type == "grid_zero":
         g = dt.grid_zero_default_goals(daytime_fraction)
         return {"reduction_target_pct": g.reduction_target_pct, "max_dc_ac_ratio": g.max_dc_ac_ratio, "max_system_kwp": None}
-    return {**_preset_goals(system_type, "recomendado"), "roof_area_m2": None}
+    return {**_preset_goals(system_type, _default_preset(system_type)), "roof_area_m2": None, "roof_panel_w": DEFAULT_ROOF_PANEL_W,
+            "roof_panel_len_m": dt.ROOF_DEFAULT_PANEL_LEN_M, "roof_panel_wid_m": dt.ROOF_DEFAULT_PANEL_WID_M, "roof_packing_pct": dt.ROOF_DEFAULT_PACKING_PCT}
+
+
+def _default_preset(system_type: str) -> str:
+    return DATA_PRESET if system_type in _DATA_PRESET_GOALS else "recomendado"
+
+
+def _hybrid_daytime() -> float:
+    """Hybrid's daytime share of consumption: the fleet's median (historical 45 % until the fleet data is ready)."""
+    from calculations.fleet_shares import hybrid_defaults
+
+    return hybrid_defaults()["daytime_fraction"]
 
 
 def _default_assumptions(system_type: str) -> dict:
     if system_type != "hybrid":
         return {}
-    return {"night_load_fraction": dt.HYBRID_ASSUMPTION_DEFAULTS["night_load_fraction"],
-            "site_exports_to_grid": dt.HYBRID_ASSUMPTION_DEFAULTS["site_exports_to_grid"]}
+    from calculations.fleet_shares import hybrid_defaults
+
+    d = hybrid_defaults()                               # the fleet's measured night share (historical 40 % until it is ready)
+    return {"night_load_fraction": d["night_load_fraction"], "site_exports_to_grid": d["site_exports_to_grid"]}
 
 
 def _match_preset(system_type: str, goals: dict) -> str:
     if system_type == "grid_zero":
         return "personalizado"
-    for key in PRESET_LABELS:
+    for key in _preset_keys(system_type):
         want = _preset_goals(system_type, key)
         if all(goals.get(k) == v for k, v in want.items() if k != "reduction_target_pct"):
             return key
@@ -166,9 +226,10 @@ def _match_preset(system_type: str, goals: dict) -> str:
 
 
 def _estimate_daytime(loads: list, city: str) -> tuple[float, str]:
-    from ai.daytime_fraction import estimate_daytime_fraction_ai
+    """The real fleet's median daytime share when available, else the AI estimate from the loads list."""
+    from calculations.fleet_shares import daytime_fraction_for
 
-    return estimate_daytime_fraction_ai(loads, city)
+    return daytime_fraction_for(loads, city)
 
 
 def _daytime(blob: dict, vid: str | None) -> dict:
@@ -274,11 +335,21 @@ def _status(system_type: str, goals: dict, assumptions: dict, daytime_fraction: 
     roof = goals.get("roof_area_m2")
     if roof is not None and roof <= 0:
         errors.append("roof_area_m2: debe ser mayor que 0 o quedar vacío")
+    panel_w = goals.get("roof_panel_w")
+    if panel_w is not None and not (200 <= panel_w <= 1000):
+        errors.append(f"roof_panel_w: debe estar entre 200 y 1000 W (recibido {panel_w:g})")
+    elif panel_w is None and roof is not None and roof > 0:
+        errors.append("roof_panel_w: falta la potencia del panel para contar cuántos caben en el techo")
+    for key, lo, hi, label in (("roof_panel_len_m", 0.5, 3.5, "largo del panel (m)"), ("roof_panel_wid_m", 0.5, 2.0, "ancho del panel (m)"),
+                               ("roof_packing_pct", 30, 100, "techo aprovechable (%)")):
+        v = goals.get(key)
+        if v is not None and not (lo <= v <= hi):
+            errors.append(f"{key}: {label} debe estar entre {lo:g} y {hi:g} (recibido {v:g})")
     needs_ack, ceiling = False, None
     if system_type == "hybrid":
         r = goals.get("reduction_target_pct")
         lo, hi = dt.GOAL_RANGES["grid_zero"]["reduction_target_pct"]
-        ceiling = dt.grid_zero_ceiling_pct(dt.HYBRID_ASSUMPTION_DEFAULTS["daytime_fraction"])
+        ceiling = dt.grid_zero_ceiling_pct(_hybrid_daytime())
         if r is not None:
             if not (lo <= r <= hi):
                 errors.append(f"reduction_target_pct: debe estar entre {lo:g} y {hi:g} (recibido {r:g})")
@@ -314,25 +385,32 @@ def _raw_band(system_type: str, goals: dict, assumptions: dict, inputs: dict, da
                                       monthly_kwh_kwp=inputs["monthly_kwh_kwp"]), tier
     kw = dict(critical_daily_kwh=inputs["critical_daily_kwh"], critical_peak_kw=inputs["critical_peak_kw"],
               whole_home_daily_kwh=inputs["whole_home_daily_kwh"], whole_home_peak_kw=inputs["whole_home_peak_kw"],
-              monthly_kwh_kwp=inputs["monthly_kwh_kwp"], daytime_fraction=dt.HYBRID_ASSUMPTION_DEFAULTS["daytime_fraction"],
+              monthly_kwh_kwp=inputs["monthly_kwh_kwp"], daytime_fraction=_hybrid_daytime(),
               night_load_fraction=assumptions.get("night_load_fraction"))
     return dt.hybrid_target_band(tier, reduction_target_pct=goals.get("reduction_target_pct"), **kw), tier
 
 
 def _roof_rows_notes(cols: list, goals: dict, inputs: dict, daily_kwh: float | None):
-    """(extra row | None, notes) for the optional roof-area goal. The uncapped target stays on its own row; this row shows what
+    """(extra rows (list) | None, notes, short warning | None) for the optional roof-area goal. The uncapped target stays on its own row; this row shows what
     the roof can hold next to it, and the note says what the cap does to PV coverage."""
-    cap = dt.roof_capacity_kwp(goals.get("roof_area_m2"))
+    panel_w = goals.get("roof_panel_w")
+    len_m, wid_m, packing = dt.roof_geometry(goals)
+    cap = dt.roof_capacity_kwp(goals.get("roof_area_m2"), panel_w, len_m, wid_m, packing)
     if cap is None:
-        return None, []
-    values = [(_fmt(min(c["system_kw"], cap)) + (" ▼" if c["system_kw"] > cap + 1e-9 else "")) for c in cols]
-    row = {"label": "Paneles que caben en el techo", "unit": "kWp", "values": values}
-    n_panels = dt.roof_panel_count(cap)
-    notes = [f"Techo de {_fmt(goals['roof_area_m2'], 0)} m² ≈ {_fmt(cap)} kWp (~{n_panels} paneles de {dt.ROOF_REFERENCE_PANEL_W} W; "
-             f"supone {_fmt(dt.ROOF_PACKING_FACTOR * 100, 0)}% del área aprovechable y {dt.ROOF_PANEL_DENSITY_KWP_M2} kWp/m²)."]
+        return None, [], None
+    fit = [_fmt(min(c["system_kw"], cap)) for c in cols]
+    extra = [(_fmt(c["system_kw"] - cap) if c["system_kw"] > cap + 1e-9 else "—") for c in cols]
+    row = [{"label": "Caben en el techo", "unit": "kWp", "values": fit, "sub": "ok"},
+           {"label": "NO caben (necesitan espacio extra)", "unit": "kWp", "values": extra, "sub": "extra"}]
+    n_panels = dt.roof_panels_fit(goals.get("roof_area_m2"), len_m, wid_m, packing)
+    notes = [f"Techo de {_fmt(goals['roof_area_m2'], 0)} m² con {_fmt(packing, 0)}% aprovechable y paneles de {_fmt(len_m, 2)} × {_fmt(wid_m, 2)} m: "
+             f"caben {n_panels} paneles de {_fmt(panel_w, 0)} W ≈ {_fmt(cap)} kWp. La cantidad real se define con el panel que elijas en Equipos."]
     optimo = cols[1]["system_kw"]
+    warn = None
     if optimo > cap + 1e-9:
-        msg = f"El punto óptimo ({_fmt(optimo)} kWp) NO cabe en el techo: el máximo es {_fmt(cap)} kWp (▼)."
+        warn = (f"El punto óptimo ({_fmt(optimo)} kWp) no cabe en el techo: máximo {_fmt(cap)} kWp"
+                + (f" (≈{n_panels} paneles de {_fmt(panel_w, 0)} W)." if n_panels is not None else "."))
+        msg = f"El punto óptimo ({_fmt(optimo)} kWp) NO cabe en el techo: el máximo es {_fmt(cap)} kWp."
         monthly = inputs.get("monthly_kwh_kwp") or []
         if daily_kwh and len(monthly) == 12:
             ys = dt.daily_yield_stats(monthly)
@@ -342,8 +420,9 @@ def _roof_rows_notes(cols: list, goals: dict, inputs: dict, daily_kwh: float | N
             msg += (f" Con ese tope la cobertura FV es {_fmt(cov, 2)}× el consumo diario (objetivo {_fmt(optimo * ys.avg_daily_yield * pr / daily_kwh, 2)}×) "
                     f"y en el peor mes el arreglo cubre {_fmt(worst, 2)}×. Opciones: más batería, generador/red de apoyo, "
                     "reducir cargas o instalar parte en suelo.")
+            warn += f" Con ese tope la cobertura baja a {_fmt(cov, 2)}× el consumo (objetivo {_fmt(optimo * ys.avg_daily_yield * pr / daily_kwh, 2)}×)."
         notes.append(msg)
-    return row, notes
+    return row, notes, warn
 
 
 def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, daytime_fraction: float) -> dict | None:
@@ -358,14 +437,15 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             {"label": "Inversor (potencia AC)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
             {"label": "Reducción de kWh que entrega", "unit": "%", "values": [_fmt(c["reduction_pct"]) for c in cols]},
         ]
-        notes = [f"Techo alcanzable sin baterías: {_fmt(band['optimo']['ceiling_pct'])}% — solo el consumo diurno "
+        notes = [f"Máximo alcanzable sin baterías: {_fmt(band['optimo']['ceiling_pct'])}% — solo el consumo diurno "
                  f"({_fmt(daytime_fraction * 100, 0)}% del total) puede servirse con solar sin exportar.",
                  "Modelo de promedio mensual con cero exportación, el mismo que usa el paso de Equipos."]
         if not band["optimo"]["attainable"]:
-            notes.append("La meta excede ese techo: el tamaño mostrado entrega el techo, no la meta.")
+            notes.append("La meta excede ese máximo: el tamaño mostrado entrega el máximo, no la meta.")
         if band["optimo"]["capped_by_max_kwp"]:
             notes.append("El tope de tamaño limita el sistema; la reducción mostrada es la que entrega ese tope.")
-        return {"rows": rows, "notes": notes}
+        return {"rows": rows, "notes": notes, "headline": notes[0], "warnings": notes[2:],
+                "details": [notes[1]]}
 
     tier = goal_obj
     if system_type == "off_grid":
@@ -375,9 +455,9 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             {"label": "Batería (capacidad nominal)", "unit": "kWh", "values": [_fmt(c["battery_nominal_kwh"]) for c in cols]},
             {"label": "Inversor (potencia AC continua)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
         ]
-        roof_row, roof_notes = _roof_rows_notes(cols, goals, inputs, inputs["daily_kwh"])
+        roof_row, roof_notes, roof_warn = _roof_rows_notes(cols, goals, inputs, inputs["daily_kwh"])
         if roof_row:
-            rows.insert(1, roof_row)
+            rows[1:1] = roof_row
         a = band["optimo"]["assumptions"]
         notes = [f"Consumo {_fmt(inputs['daily_kwh'])} kWh/día · pico {_fmt(inputs['peak_kw'])} kW.", *roof_notes,
                  f"Batería con DoD de referencia {_fmt(a['reference_battery_dod_pct'], 0)}% (ventana usable {_fmt(a['usable_window_pct'], 0)}%); "
@@ -391,7 +471,10 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             mx = dt.offgrid_targets(tier, daily_kwh=dmax, peak_kw=inputs["peak_kw"], monthly_kwh_kwp=inputs["monthly_kwh_kwp"])
             notes.insert(1, f"Base de consumo: USO ESPERADO ({_fmt(inputs['daily_kwh'])} kWh/día). Si todo se usara al máximo declarado: "
                             f"{_fmt(dmax)} kWh/día → {_fmt(mx['system_kw'])} kWp de paneles y {_fmt(mx['battery_nominal_kwh'])} kWh de batería (punto óptimo).")
-        return {"rows": rows, "notes": notes,
+        warnings = ([roof_warn] if roof_warn else []) + (["En el peor mes el arreglo recomendado no alcanza a cubrir el consumo diario."]
+                                                          if not band["optimo"]["worst_month_covers_load"] else [])
+        details = [n for n in notes[1:] if not n.startswith("En el peor mes el arreglo recomendado")]
+        return {"rows": rows, "notes": notes, "headline": notes[0], "warnings": warnings, "details": details,
                 "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
     # hybrid
@@ -402,9 +485,9 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
         {"label": "Inversor (potencia AC, en isla)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
         {"label": "Reducción de kWh que entrega", "unit": "%", "values": [_fmt(c["kwh_reduction_pct_at_size"]) for c in cols]},
     ]
-    roof_row, roof_notes = _roof_rows_notes(cols, goals, inputs, None)
+    roof_row, roof_notes, roof_warn = _roof_rows_notes(cols, goals, inputs, None)
     if roof_row:
-        rows.insert(1, roof_row)
+        rows[1:1] = roof_row
     a = band["optimo"]["assumptions"]
     notes = [*roof_notes,
              f"Carga crítica {_fmt(inputs['critical_daily_kwh'])} kWh/día (pico {_fmt(inputs['critical_peak_kw'])} kW); "
@@ -415,7 +498,10 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
              f"Paneles definidos por: {'meta de reducción de kWh' if band['optimo']['pv_driven_by'] == 'kwh_reduction' else 'cobertura FV'}."]
     if not assumptions.get("site_exports_to_grid") and tier.pv_coverage > dt.NON_EXPORTING_COVERAGE_CEILING:
         notes.append(f"Cobertura {_fmt(tier.pv_coverage, 2)}× supera ~{dt.NON_EXPORTING_COVERAGE_CEILING}×: un sitio que no exporta no aprovecharía el excedente.")
-    return {"rows": rows, "notes": notes,
+    n_roof = len(roof_notes)
+    warnings = ([roof_warn] if roof_warn else []) + [n for n in notes if n.startswith("Cobertura ") and "no exporta" in n]
+    details = [n for n in notes[n_roof + 1:] if n not in warnings] + list(roof_notes[:1])
+    return {"rows": rows, "notes": notes, "headline": notes[n_roof], "warnings": warnings, "details": details,
             "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
 
@@ -434,6 +520,10 @@ def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, go
             return {"pending": True}
         optimo = block.get("optimo") or {}
         kwp = float(optimo.get("kwp") or 0)
+        roof = dt.roof_capacity_kwp(goals.get("roof_area_m2"), goals.get("roof_panel_w"), *dt.roof_geometry(goals))
+        roof_capped = bool(roof and kwp > roof + 1e-9)
+        if roof_capped:
+            kwp = float(roof)                       # the sun can only fill the panels that fit
         if not kwp or not ds.get("k"):
             return {"unavailable": True, "validation": ds.get("validation") or []}
         fleet_battery = ((ref.get("suggestion") or {}).get("battery_nominal_kwh") or {}).get("median")
@@ -443,7 +533,7 @@ def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, go
             res = fs.design_hybrid(ds, float(inputs["critical_daily_kwh"]), kwp, reserve_pct=reserve, compare_batteries=compare)
             if res is None:
                 return {"unavailable": True, "validation": ds.get("validation") or []}
-            res["kind"] = "hybrid"
+            res["kind"], res["roof_capped"] = "hybrid", roof_capped
             res["accepted"] = [v for v in res["validation"] if v["accepted"]]
             return res
         daily = float(inputs["daily_kwh"])
@@ -456,7 +546,7 @@ def _simulation_block(system_type: str, inputs: dict, block: dict, ref: dict, go
             mx = fs.design(ds, float(dmax), kwp * dmax / daily, reserve_pct=reserve)
             res["max_case"] = None if mx is None else {"daily_kwh": float(dmax), "battery_min_physical": mx["battery_min_physical"],
                                                        "battery_min_reserve": mx["battery_min_reserve"]}
-        res["kind"] = "off_grid"
+        res["kind"], res["roof_capped"] = "off_grid", roof_capped
         res["accepted"] = [v for v in res["validation"] if v["accepted"]]
         return res
     except Exception:
@@ -481,6 +571,7 @@ def _fleet_block(system_type: str, inputs: dict, block: dict | None, goals: dict
     sites = sorted(ref["comparable"], key=lambda x: x["avg_load_kwh"])
     sim = _simulation_block(system_type, inputs, block, ref, goals or {})
     return {"ref": ref, "sim": sim, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
+            "roof_kwp": dt.roof_capacity_kwp((goals or {}).get("roof_area_m2"), (goals or {}).get("roof_panel_w"), *dt.roof_geometry(goals)),
             "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"], "inverter": x["inverter_kw"],
                        "peak_kw": (x["peak_max_w"] / 1000.0) if x["peak_max_w"] else None,
                        "low_soc": x["low_soc_days_pct"], "cycles": x["cycles_per_day"], "verdict": x["verdict"],
@@ -502,7 +593,7 @@ def _current(blob: dict, system_type: str, daytime_fraction: float) -> dict:
                 "confirmed": bool(stored.get("confirmed")), "ack_ceiling_pct": stored.get("ack_ceiling_pct"),
                 "source": stored.get("source", "user"), "stored": True}
     return {"goals": _default_goals(system_type, daytime_fraction), "assumptions": _default_assumptions(system_type),
-            "preset": "sugerido" if system_type == "grid_zero" else "recomendado", "confirmed": False,
+            "preset": "sugerido" if system_type == "grid_zero" else _default_preset(system_type), "confirmed": False,
             "ack_ceiling_pct": None, "source": "default", "stored": False}
 
 
@@ -510,7 +601,7 @@ def _daytime_fraction(blob: dict, system_type: str, vid: str | None) -> tuple[fl
     if system_type == "grid_zero":
         d = _daytime(blob, vid)
         return float(d["fraction"]), d.get("note", "")
-    return dt.HYBRID_ASSUMPTION_DEFAULTS["daytime_fraction"], ""
+    return _hybrid_daytime(), ""
 
 
 def build_context(blob: dict, vid: str | None = None) -> dict:
@@ -533,7 +624,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
     return {
         "system_type": system_type,
         "fields": fields,
-        "presets": ([{"key": k, "label": v, "active": cur["preset"] == k} for k, v in PRESET_LABELS.items()]
+        "presets": ([{"key": k, "label": _preset_label(k), "active": cur["preset"] == k} for k in _preset_keys(system_type)]
                     if system_type != "grid_zero" else []),
         "preset": cur["preset"],
         "assumptions": assumptions,
@@ -565,7 +656,7 @@ def recalc(blob: dict, form, vid: str | None = None) -> dict:
     cur = _current(blob, system_type, fraction)
 
     preset = (form.get("apply_preset") or "").strip()
-    if preset in PRESET_LABELS and system_type != "grid_zero":
+    if system_type != "grid_zero" and preset in _preset_keys(system_type):
         goals = {**cur["goals"], **_preset_goals(system_type, preset)}
         assumptions = cur["assumptions"]
         preset_name = preset

@@ -86,10 +86,9 @@
   <thead>
     <tr>
       <th>Potencia<br>instalada (kW)</th>
-      <th>Área de techo<br>(m2)</th>
+      {% if not technical.roof_fit %}<th>Área de paneles<br>(m2)</th>{% endif %}
       <th>Energía diaria<br>estimada (kWh)</th>
-      <th>Capacidad de<br>batería @10h (kWh)</th>
-      <th>Descarga máxima<br>de batería</th>
+      {% if technical.worst_month_cov %}<th>Cobertura solar del<br>peor mes</th>{% endif %}
       <th>Aprovechamiento<br>solar</th>
       {% if hybrid_savings %}<th>Reducción<br>de factura</th>{% endif %}
       <th class="th-wp">Precio<br>$/Wp</th>
@@ -98,13 +97,42 @@
   <tbody>
     <tr>
       <td>{{ technical.system_kw }}</td>
-      <td>{{ technical.area_m2 }}</td>
+      {% if not technical.roof_fit %}<td>{{ technical.area_m2 }}</td>{% endif %}
       <td>{{ technical.daily_generation_kwh }}</td>
-      <td>{{ technical.battery_kwh }}</td>
-      <td>{{ technical.discharge_pct }}</td>
+      {% if technical.worst_month_cov %}<td>{{ technical.worst_month_cov }}</td>{% endif %}
       <td>{{ technical.utilization_pct }}</td>
       {% if hybrid_savings %}<td>~{{ hybrid_savings.savings_pct }}</td>{% endif %}
       <td class="td-wp">{{ cost_per_wp }}</td>
+    </tr>
+  </tbody>
+</table>
+{% set rf = technical.roof_fit %}
+<table class="tech-table" style="margin-top:-2pt;">
+  <thead>
+    <tr>
+      <th rowspan="{{ 2 if rf else 1 }}">Capacidad de<br>batería @10h (kWh)</th>
+      {% if technical.usable_kwh %}<th rowspan="{{ 2 if rf else 1 }}">Capacidad utilizable<br>de baterías (kWh)</th>{% endif %}
+      {% if technical.autonomy_days %}<th rowspan="{{ 2 if rf else 1 }}">Autonomía sin<br>sol (días)</th>{% endif %}
+      <th rowspan="{{ 2 if rf else 1 }}">Descarga máxima<br>de batería</th>
+      {% if rf %}<th colspan="2">Techo (~{{ rf.roof_area_m2 }} m²)</th>{% endif %}
+    </tr>
+    {% if rf %}<tr><th>Paneles que caben</th><th>Paneles que no caben</th></tr>{% endif %}
+  </thead>
+  <tbody>
+    <tr>
+      <td>{{ technical.battery_kwh }}</td>
+      {% if technical.usable_kwh %}<td>{{ technical.usable_kwh }}</td>{% endif %}
+      {% if technical.autonomy_days %}<td>{{ technical.autonomy_days }}</td>{% endif %}
+      <td>{{ technical.discharge_pct }}</td>
+      {% if rf %}
+        {% if rf.extra > 0 %}
+        <td>{{ rf.fit }} paneles ({{ rf.fit_kwp }} kWp)</td>
+        <td>{{ rf.extra }} paneles ({{ rf.extra_kwp }} kWp)<br><span style="font-size:6.5pt;color:#666;">~{{ rf.extra_area_m2 }} m² de espacio adicional</span></td>
+        {% else %}
+        <td>{{ rf.panels }} paneles ({{ rf.fit_kwp }} kWp) — Todos caben</td>
+        <td>Ninguno</td>
+        {% endif %}
+      {% endif %}
     </tr>
   </tbody>
 </table>
