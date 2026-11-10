@@ -313,6 +313,16 @@ def _roof_fit_fmt(rf: dict | None):
             "roof_area_m2": f"{rf['roof_area_m2']:.0f}", "extra_area_m2": f"{rf['extra_area_m2']:.0f}"}
 
 
+def _date_for_language(date_str: str, language: str) -> str:
+    """The quote's dd/mm/yyyy date, shown month-first (mm/dd/yyyy) on an English quote and day-first on a Spanish one."""
+    if language == "es":
+        return date_str
+    parts = str(date_str).split("/")
+    if len(parts) == 3 and all(p.isdigit() for p in parts):
+        return f"{parts[1]}/{parts[0]}/{parts[2]}"
+    return date_str
+
+
 def _build_context(data: dict, language: str) -> dict:
     """Flatten and format wizard data dict into Jinja2 template context."""
     from wizard.state import get_asset_b64
@@ -337,7 +347,7 @@ def _build_context(data: dict, language: str) -> dict:
         "signature_b64":       get_asset_b64("signature"),
         "signature_white_b64": get_asset_b64("signature_white"),
         "isotipo_white_b64":   get_asset_b64("isotipo_white"),
-        "date":           data["date"],
+        "date":           _date_for_language(data["date"], language),
         "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],
         "system_type_label": data["system_type_label"],
@@ -419,7 +429,7 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
         "signature_b64":       get_asset_b64("signature"),
         "signature_white_b64": get_asset_b64("signature_white"),
         "isotipo_white_b64":   get_asset_b64("isotipo_white"),
-        "date":           data["date"],
+        "date":           _date_for_language(data["date"], language),
         "quote_number":   data.get("quote_number", ""),
         "client":         data["client"],
         "system_type_label": data["system_type_label"],
