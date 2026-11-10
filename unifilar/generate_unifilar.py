@@ -52,7 +52,7 @@ DEFAULTS = {
         "lynx": "power_in",            # "power_in" o "power_in_distributor"
         "cables_note": ["Cables batería a Power In (+ / -):", "no listados en BOM, por definir"],
     },
-    "gx": {"label": "EKRANO GX", "power_breaker": "QDC 2P", "power_note": "+ / - por definir"},
+    "gx": {"label": "EKRANO GX", "power_note": ["+ / - #12 AWG", "(fusible interno)"]},
     "export": "grid_zero",             # "grid_zero" o "inyeccion"
     "subpanel": {
         "q2": "2P", "q4": "circuitos críticos", "spd": "SPD SDSA 1175",
@@ -328,7 +328,7 @@ def _hybrid_ac(c, h, cfg):
         txt(730, 260, 'Excedentes a la red vía AC-IN', 6.5, 'Helvetica', GRAY)
         txt(730, 246, '(según permiso de la distribuidora)', 6, 'Helvetica', GRAY)
     seg([(590, 286), (660, 286)], RED, 1.1); seg([(590, 282), (660, 282)], black, 1.1)
-    breaker(625, 284, vert=True); txt(625, 295, GX["power_breaker"], 6, 'Helvetica', black); lab(625, 266, GX["power_note"], GRAY)
+    [lab(625, 270 - 7 * i, t, GRAY) for i, t in enumerate(GX["power_note"])]
 
     CN = cfg["comms_notes"]
     if dist:
@@ -691,7 +691,7 @@ def _off_grid(c, h, cfg):
     box(gx0, 235, 140, 60, LGRAY)
     txt(gx0 + 70, 281, GX["label"], 8, 'Helvetica-Bold'); txt(gx0 + 70, 270, 'Monitoreo y control', 6.5, 'Helvetica', GRAY)
     seg([(bar_end, 286), (gx0, 286)], RED, 1.1); seg([(bar_end, 282), (gx0, 282)], black, 1.1)
-    breaker((bar_end + gx0) / 2, 284, vert=True); txt((bar_end + gx0) / 2, 295, GX["power_breaker"], 6, 'Helvetica', black)
+    [lab((bar_end + gx0) / 2, 270 - 7 * i, t, GRAY) for i, t in enumerate(GX["power_note"])]
     CN = cfg["comms_notes"]
     seg([(545, my), (545, 330 if n_mp == 2 else 340), (gx0 + 50, 330 if n_mp == 2 else 340), (gx0 + 50, 295)], BLUE, 1.1, (4, 2))
     txt(692, (334 if n_mp == 2 else 344), CN["vebus"], 6, 'Helvetica', BLUE, 'r')

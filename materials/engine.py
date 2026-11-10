@@ -37,7 +37,8 @@ EMT_TUBES_PER_INVERTER = 1   # linear rule from his purchase: one 3 m tube per i
 GZ_RUN_FALLBACK_M = 10.0     # Grid Zero: when the wiring lengths are not available (same as the wiring default)
 GZ_LINK_FALLBACK_M = 2.0
 CHINT_STRINGS = 2            # 2-pole string breakers that fit in one Chint DC 5-space box
-GX_BREAKER_A = 16            # smallest stocked DC breaker, for the Ekrano/Cerbo supply
+GX_CABLE_GAUGE = "12"        # Ekrano/Cerbo supply cable (Oscar: #12 or #14, a few metres); #12 is the gauge already stocked for monitoring
+GX_CABLE_M = 3
 MONITOR_CIRCUIT_M = 15       # monitoring outlet circuit: metres of each #12 conductor
 LUG_STEP = 5             # lugs are requested in fives
 SHRINK_M_PER_LUG = 0.08  # heat-shrink per lug end (DC battery cables)
@@ -381,10 +382,11 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
           sibling=_named("Centro de carga Chint DC 5 espacios", "Generales"), note="2 por proyecto, como en la cotización de MAZ")
     if chint > 1:
         pending.append(f"Cada centro de carga Chint de 5 espacios aloja 2 breakers 2P de strings; el diseño tiene {strings} strings, así que van {chint} cajas.")
-    if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power from the Lynx bus through a small DC breaker (drawn as QDC)
-        c.add(_find("breaker_dc_din", amps=GX_BREAKER_A, poles=2), 1, name=f"Breaker DC para riel DIN {GX_BREAKER_A}A 2P", section="Paneles solares",
-              sibling=_find("breaker_dc_din", amps=32, poles=2), comment="ALIMENTACIÓN EKRANO/CERBO · POR CONFIRMAR AMPERAJE",
-              note="protege la alimentación DC del Ekrano/Cerbo desde la barra Lynx (el «QDC 2P» del unifilar); se usa el menor calibre comercial DC")
+    if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power straight from the Lynx bus (internal fuse, no breaker)
+        for color in ("rojo", "negro"):
+            c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=f"Cable #{GX_CABLE_GAUGE} AWG THHN, CU, color {color}", unit="m",
+                  section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=GX_CABLE_GAUGE, color="negro"), where="Alimentación Ekrano/Cerbo",
+                  note=f"{GX_CABLE_M} m de #{GX_CABLE_GAUGE} para alimentar el Ekrano/Cerbo desde la barra Lynx (+ rojo, - negro); lleva fusible interno, sin breaker")
 
     counts = layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)
     feet = counts["feet"] if counts else 0

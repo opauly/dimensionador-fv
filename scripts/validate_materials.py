@@ -200,7 +200,7 @@ check("duct 4x4 x1 + 2 end caps", (_by["Ducto metálico cuadrado 4x4"]["qty"], _
 check("PG-21 cable glands x2", _by["Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)"]["qty"], 2)
 check("EMT stubs to the 2 inverters: 2 tubes, 8 pressure connectors", (_by['Tuberia 1" / EMT']["qty"], _by['Conector de presión 1" EMT']["qty"]), (2, 8))
 check("monitoring outlet kit", [_by[n]["qty"] for n in ("Breaker 20A 1 polo CH (toma de monitoreo)", "Toma doble 15A 125V", "Placa de acero inoxidable para toma doble", 'Caja rectangular de intemperie 3 huecos 1/2"')], [1, 1, 1, 1])
-check("monitoring circuit: #12 red / green / white, 15 m each", [_by[f"Cable #12 AWG THHN, CU, color {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [15, 15, 15])
+check("monitoring circuit: #12 red / green / white, 15 m each (+3 m red for the Ekrano supply)", [_by[f"Cable #12 AWG THHN, CU, color {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [18, 15, 15])
 check("ties: one pack", _by["Gasas plásticas #8 (Negras)"]["qty"], 1)
 check("solar strings go in at least 1 in conduit", [b["conduit"]["trade"] for b in CTX["branches"] if b.get("key") == "pv_strings"], ["1"])
 check("no 3 AWG anywhere in the sized branches", any(b.get("ugc") in ("3", "1") for b in CTX["branches"]), False)
@@ -345,7 +345,9 @@ check("hybrid AC: Q1, Q2 and Q3 breakers of the drawing are on the list",
 check("hybrid AC: string breakers of the drawing = list", (_qty(_lh, f"Breaker DC para riel DIN {_amps(_ch['pv']['string_breaker'])}A"), _ch["pv"]["strings"]), (_ch["pv"]["strings"], _ch["pv"]["strings"]))
 check("hybrid AC: batteries, Multis and SPD of the drawing are on the list", (_lh["Batería Pylontech Fidus"]["qty"], _lh["Inversor Multiplus 5000 120V"]["qty"], "Supresor de Picos SDSA 1175" in _lh), (_ch["battery"]["count"], 2, True))
 check("hybrid AC: one Mega fuse per battery plus one per Multi", _qty(_lh, "Fusible Mega"), _ch["battery"]["count"] + 2)
-check("hybrid AC: the Ekrano supply breaker (QDC) is on the list, flagged to confirm", (_qty(_lh, "Breaker DC para riel DIN 16A"), _lh["Breaker DC para riel DIN 16A 2P"]["comment"]), (1, "ALIMENTACIÓN EKRANO/CERBO · POR CONFIRMAR AMPERAJE"))
+check("hybrid AC: no breaker for the Ekrano (internal fuse), but its #12 supply cable (3 m red + 3 m black) is on the list",
+      (_qty(_lh, "Breaker DC para riel DIN 16A"), any("Alimentación Ekrano/Cerbo" in w for ln in _lh.values() for w in ln.get("wheres") or []),
+       _lh["Cable #12 AWG THHN, CU, color negro"]["qty"]), (0, True, 3))
 check("hybrid AC: the meter in the drawing is on the list with its CTs", ("Medidor VM-3P75CT" in _lh, _lh["Transformador de Corriente 100A:333mV"]["qty"]), (True, 2))
 # DC-coupled
 _ld = _list({**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, dc_ctx)
@@ -361,7 +363,7 @@ _cgz, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"},
 check("grid zero: generation-base breaker, string breakers and SPD of the drawing are on the list",
       (f"Breaker {_amps(_cgz['base']['breaker'])}A compatible con base para medidor" in _lg, _qty(_lg, "Breaker DC para riel DIN 32A"), "Supresor de Picos SDSA 1175" in _lg), (True, _cgz["pv"]["strings"], True))
 check("grid zero: the meter and its CTs in the drawing are on the list (2 TC)", ("Fronius Smart Meter WR 100-600 V-3" in _lg, _lg["Transformador de Corriente 100A:333mV"]["qty"], _cgz["meter"]["ct_label"]), (True, 2, "2 TC"))
-check("grid zero: no Ekrano supply breaker (no GX)", _qty(_lg, "Breaker DC para riel DIN 16A"), 0)
+check("grid zero: no Ekrano supply cable (no GX)", any("Alimentación Ekrano/Cerbo" in w for ln in _lg.values() for w in ln.get("wheres") or []), False)
 check("grid zero: the link cable of the drawing is on the list", all(f"Cable {_g}" for _g in _cgz["base"]["link_conductors"]) and any("Base de generación → base de consumo" in w for ln in _lg.values() for w in ln.get("wheres") or []), True)
 # Chint boxes follow the strings (a 5-space box holds two 2-pole breakers)
 check("Chint DC boxes: 2 strings -> 1, 3 -> 2, 12 -> 6",

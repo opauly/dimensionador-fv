@@ -82,7 +82,7 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Cable del Fronius Smart Meter:** Ethernet cat6e (Modbus RS485 al inversor). Las donas van justo después del medidor de consumo, así que el cable cubre el tramo
   «Fronius → base de generación» + «Base de generación → base de consumo» (largos de Técnico) + 10 % de desperdicio, de a 5 m.
 - **Centros de carga Chint DC:** una caja de 5 espacios aloja 2 breakers 2P de strings; van ⌈strings ÷ 2⌉ cajas (el unifilar lo rotula «Chint 5 espacios × n»).
-- **Breaker de alimentación del Ekrano/Cerbo** (el «QDC 2P» del unifilar): breaker DC 2P de 16 A, el menor calibre comercial, con comentario «POR CONFIRMAR AMPERAJE». No va en Grid Zero.
+- **Alimentación del Ekrano/Cerbo:** sin breaker (lleva fusible interno); solo un poco de cable #12 AWG (3 m rojo + 3 m negro) desde la barra Lynx. No va en Grid Zero.
 - **Medidor VM en la cotización:** si se elige en Equipos, sale como línea «Medidor de energía» (precio del catálogo; $0 hasta que se cargue el precio en Admin → Monitoreo).
 - **Unifilar:** tres dibujos (`unifilar/generate_unifilar.py`): híbrido acoplado en AC, acople DC (off-grid o híbrido: strings → centro de carga DC → controladores MPPT →
   Lynx Power In → Multis → sub-panel) y Grid Zero (strings → centro de carga DC → Fronius → base de medidor de generación, interconectada con la base de medición de consumo → tablero principal). El medidor VM se dibuja en paralelo en
