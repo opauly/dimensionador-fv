@@ -24,7 +24,7 @@ from collections import OrderedDict
 from calculations import bom as B
 from calculations import nec_tables as T
 from calculations import wiring as W
-from calculations.meter_cts import ct_count
+from calculations.meter_cts import ct_count, uses_cts
 from materials.catalog import CATALOG, SECTIONS
 
 WASTE = 0.10             # cut-offs and slack on cable and conduit
@@ -366,9 +366,10 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     The critical-loads sub-panel is supplied by the owner or builder, so it is not listed either."""
     if not eq.get("panel"):
         return
-    if not grid_zero:
+    if not grid_zero or uses_cts(eq.get("monitoring")):       # Grid Zero only needs it for the Fronius Smart Meter and its terminals
         c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
-              note="un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
+              note=("un gabinete para el Fronius Smart Meter (Grid Zero); medida base 50x40x20" if grid_zero
+                    else "un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20"))
     c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
     c.add(_named("Riel DIN perforado 35x15mm", "Generales"), 1, note="uno por proyecto: para los breakers y bornes del gabinete")
     c.add(_named("Terminal para riel din", "Generales"), 1, note="uno por proyecto")

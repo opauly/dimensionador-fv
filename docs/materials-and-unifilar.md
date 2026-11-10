@@ -79,6 +79,7 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Fronius Smart Meter (Grid Zero):** es una opción de monitoreo del paso Equipos (modelo WR 100-600 V-3, migración 061). Lleva transformadores de corriente («donas»,
   Fronius Smart Meter CT V de 100/250/400 A, 333 mV), uno por fase: 2 en monofásico, 3 en trifásico (`calculations/meter_cts.py`). En la lista salen con el comentario
   «POR VERIFICAR TAMAÑO» y en la cotización como línea «Transformadores de corriente» (precio de `monitoring_devices.ct_cost_usd`, $0 hasta cargarlo).
+- **Gabinete en Grid Zero:** Grid Zero no lleva gabinete salvo con el Fronius Smart Meter: ahí va el mismo 50x40x20 de siempre («POR CONFIRMAR MEDIDA»), donde se instala el medidor.
 - **Cable del Fronius Smart Meter:** Ethernet cat6e (Modbus RS485 al inversor). Las donas van justo después del medidor de consumo, así que el cable cubre el tramo
   «Fronius → base de generación» + «Base de generación → base de consumo» (largos de Técnico) + 10 % de desperdicio, de a 5 m.
 - **Centros de carga Chint DC:** una caja de 5 espacios aloja 2 breakers 2P de strings; van ⌈strings ÷ 2⌉ cajas (el unifilar lo rotula «Chint 5 espacios × n»).

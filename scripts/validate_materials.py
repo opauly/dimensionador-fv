@@ -294,6 +294,8 @@ check("CTs: one per phase (split-phase 2, three-phase 3), none for a meter witho
 check("CTs: a design saved before the column existed is still recognised by its model", ct_count({"model": "Smart Meter WR 100-600 V-3"}, _PRIMO), 2)
 _gsm = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
 check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
+check("grid zero list: the Smart Meter goes in the usual 50x40x20 cabinet, flagged to confirm", (_gsm["Gabinete metálico 50x40x20"]["qty"], _gsm["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
+check("grid zero list: no cabinet without the Smart Meter", "Gabinete metálico 50x40x20" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
 check("grid zero list: no CTs without the Smart Meter", "Transformador de Corriente 100A:333mV" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
 check("grid zero wiring: the link run has the same conductors as the generation-base run and no breaker of its own",
       (_gb["gz_link"]["ugc"] == _gb["gz_ac"]["ugc"], _gb["gz_link"]["ocpd_a"]), (True, None))
