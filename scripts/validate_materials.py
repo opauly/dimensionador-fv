@@ -61,10 +61,13 @@ check("catalog has the 171 master lines", len(CATALOG), 171)
 check("catalog keys are unique", len({r["key"] for r in CATALOG}), 171)
 check("every cable / conduit / fuse pattern is tagged", sum(1 for r in CATALOG if r.get("kind")), 94)
 
-# ── Without a roof layout the mounting is not guessed ──────────────────────────
+# ── Without a roof layout each string is one row; with no strings either, the mounting is not guessed ──
 r, by = lines()
-check("no layout -> no rails", "Rieles (largueros)" in by, False)
-check("no layout -> pending note", any("layout del techo" in p for p in r["pending"]), True)
+check("no layout -> one string per row: rails are calculated", by["Rieles (largueros)"]["qty"], 9)
+check("no layout but strings known -> nothing pending about the layout", any("layout del techo" in p for p in r["pending"]), False)
+r, by = lines(ctx={**CTX, "coupling": {**CTX["coupling"], "strings": 0}})
+check("no layout and no strings -> no rails", "Rieles (largueros)" in by, False)
+check("no layout and no strings -> pending note", any("layout del techo" in p for p in r["pending"]), True)
 
 # ── María José, 2 rows of 8 in portrait ─────────────────────────────────────────
 r, by = lines(LAYOUT)
@@ -83,13 +86,13 @@ check("Lynx bars 2 / bolts 12 (she bought 3 bars / 12 bolts: open question)", (q
 check("UTP 4 / VE.CAN 1 (she bought 4 / 1)", (q("Cable UTP normal"), q("Cable UTP tipo A")), (4, 1))
 check("tape: one roll per colour used (4)", sum(1 for n in by if n.startswith("Tape color")), 4)
 check("Fronius is a new line, not in the master list", (q("Inversor Fronius Primo 10.0-1"), by["Inversor Fronius Primo 10.0-1"]["in_master"]), (1, False))
-check("string breaker follows the design: 25 A DC, 2 (new line)", (q("Breaker DC para riel DIN 25A 2P"), by["Breaker DC para riel DIN 25A 2P"]["in_master"]), (2, False))
+check("string breaker follows the design: 32 A DC x2 (in the master list)", (q("Breaker DC para riel DIN 32A 2P"), by["Breaker DC para riel DIN 32A 2P"]["in_master"]), (2, True))
 check("AC in: two 120 V Multis share one 2-pole 90 A breaker", q("Breaker AC para riel DIN 90A 2P"), 1)
 check("AC out 70 A 2P x1, Fronius 60 A 2P x1", (q("Breaker AC para riel DIN 70A 2P"), q("Breaker AC para riel DIN 60A 2P")), (1, 1))
 check("battery-to-Multi fuses: Mega 125 A x2 (4000 W continuous / 0.96 / 51.2 V x 1.25 = 102 A) + battery fuses by definir x4",
       (q("Fusible Mega 125A"), q("Fusible Mega de batería (calibre por definir)")), (2, 4))
 check("ground by breaker (T250.122), one per raceway: #8 green = AC out 10 m + AC in 10 m, +10 % -> 25", q("Cable #8 AWG THHN, CU, color verde"), 25)
-check("ground by breaker: #10 green = PV 15 m + Fronius 10 m (25 A and 60 A breakers), +10 % -> 30", q("Cable #10 AWG THHN, CU, color verde"), 30)
+check("ground by breaker: #10 green = PV 15 m + Fronius 10 m (32 A and 60 A breakers), +10 % -> 30", q("Cable #10 AWG THHN, CU, color verde"), 30)
 check("no #3 AWG cable is asked for (dealers do not stock it): AC in uses #2", ("Cable #3 AWG THHN, CU, color negro" in by, "Cable #2 AWG THHN, CU, color negro" in by), (False, True))
 check("#4 black THHN is a master line, 15 m", (by["Cable #4 AWG THHN, CU, color negro"]["in_master"], q("Cable #4 AWG THHN, CU, color negro")), (True, 15))
 check("heat-shrink for the DC lugs (#2 AWG), 1 m minimum", q("Termoencogible para cable #2 rojo"), 1)
@@ -129,7 +132,7 @@ cfg, prob = CB.build_config(project, d, {})
 check("both questions block the drawing until answered", (cfg, len(prob["blockers"])), (None, 2))
 ans = {"export": "grid_zero", "lynx": "power_in"}
 cfg, prob = CB.build_config(project, d, ans)
-check("drawn from the sized design: string breaker / wire", (cfg["pv"]["string_breaker"], cfg["pv"]["dc_wire"]), ("25 A 2P DC", "#10 AWG SOLAR"))
+check("drawn from the sized design: string breaker / wire", (cfg["pv"]["string_breaker"], cfg["pv"]["dc_wire"]), ("32 A 2P DC", "#10 AWG SOLAR"))
 check("Q3 Fronius breaker and conductors", (cfg["fronius"]["ac_breaker"], cfg["fronius"]["ac_conductors"]), ("2P 60 A", ["L1 #6 AWG negro", "L2 #6 AWG rojo", "T #10 AWG verde"]))
 check("Q1 from the manual limit: 2P 90 A on #2 AWG (no #3 sold)", (cfg["multis"]["ac_in_breaker"], cfg["multis"]["ac_in_conductors"][0]), ("2P 90 A", "L1 #2 AWG negro"))
 check("DC to the Multis uses the sized cable", (cfg["multis"]["dc_pos"], cfg["multis"]["dc_neg"]), ("+ #2 AWG rojo", "- #2 AWG negro"))
@@ -156,7 +159,12 @@ check("layout_from_blob reads scratch.roof_layout", ME.layout_from_blob({"scratc
 wiz = {"rows": 2, "orientation": "landscape"}
 check("wizard layout reaches the list", ME.build_list(EQ, CTX, {}, wiz)["layout"]["rows"], 2)
 check("project layout wins over the wizard's", ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 3}}}, wiz)["layout"]["rows"], 3)
-check("no layout anywhere leaves mounting pending", any("layout del techo" in x for x in ME.build_list(EQ, CTX, {}, None)["pending"]), True)
+check("no layout: one string per row (2 strings -> 2 rows, 8 modules each)", (ME.build_list(EQ, CTX, {}, None)["layout"]["rows"], ME.build_list(EQ, CTX, {}, None)["counts"]["per_row"]), (2, 8))
+_nostr = {**CTX, "coupling": {**CTX["coupling"], "strings": 0}}
+check("no layout and no strings leaves mounting pending", any("layout del techo" in x for x in ME.build_list(EQ, _nostr, {}, None)["pending"]), True)
+check("a row count typed by the user wins over the strings", ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 4}}}, None)["layout"]["rows"], 4)
+_r = ME.layout_counts(PANEL, 16, {"rows": 2, "orientation": "portrait", "rail_len_m": 4.7, "foot_spacing_m": 1.0})
+check("string of 8 modules is 9.21 m: 2 rails of 4.7 m + 1 splice per rail line, 4 rail lines", (_r["row_len_m"], _r["rails"], _r["splices"]), (9.21, 8, 4))
 
 # Batch-1 rules: one enclosure (size to confirm), one SPD, roof sealant by feet; no roof screws, no sub-panel.
 _res = ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 2}}}, None)

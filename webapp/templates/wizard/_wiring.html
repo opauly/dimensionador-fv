@@ -26,8 +26,17 @@
 </style>
 
 <h5 style="font-size:13px;margin:14px 0 2px;">Cableado y canalizaciones</h5>
-{% if can_couple %}
-  {# PV coupling (hybrid only). Separate form from the cable lengths so each posts only its own fields. #}
+{% if can_couple and roof %}
+  {# In the wizard the coupling is chosen at the top of Equipos; here it is only reported. #}
+  {% if coupling.ac and coupling.check %}
+    <ul class="wr-checks">
+      {% for c in coupling.check.checks %}
+        <li class="{{ 'ok' if c.ok else ('bad' if c.ok is false else 'warn') }}"><span>{{ '✓' if c.ok else ('✗' if c.ok is false else '⚠') }}</span> {{ c.label }}: {{ c.detail }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% elif can_couple %}
+  {# PV coupling (Off-Grid and Hybrid). Separate form from the cable lengths so each posts only its own fields. #}
   <form id="wr-cpl" class="wr-cpl" hx-post="{{ post_url or url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change delay:300ms"
         hx-target="{{ form_target or '#wiring-panel' }}" hx-swap="{{ form_swap or 'outerHTML' }}">
     <div class="wr-cpl-row">
@@ -66,10 +75,10 @@
   <form id="wr-roof" class="wr-cpl" hx-post="{{ url_for('wizard.paso6og_techo', vid=vid) }}" hx-trigger="change delay:400ms"
         hx-target="#wiring-panel" hx-swap="outerHTML">
     <h5 style="font-size:13px;margin:14px 0 2px;">Techo y montaje</h5>
-    <p class="card-note-sm">¿Cómo van a quedar los {{ roof.n_panels }} módulos en el techo? Con esto se calculan rieles, patas y clamps de la lista de materiales; el cableado no cambia.</p>
+    <p class="card-note-sm">¿Cómo van a quedar los {{ roof.n_panels }} módulos en el techo? Si lo dejas vacío, cada string es una fila (2 rieles por string). Con esto se calculan rieles, uniones, patas y clamps de la lista de materiales; el cableado no cambia.</p>
     <div class="wr-cpl-row">
       <div class="wr-cpl-num"><label for="wr-rows">Filas de paneles</label>
-        <input id="wr-rows" type="number" min="1" max="{{ roof.n_panels }}" name="layout_rows" value="{{ roof.layout.rows or '' }}" placeholder="p. ej. 2"></div>
+        <input id="wr-rows" type="number" min="1" max="{{ roof.n_panels }}" name="layout_rows" value="{{ '' if roof.layout.rows_auto else (roof.layout.rows or '') }}" placeholder="{{ (roof.layout.rows ~ ' (un string por fila)') if roof.layout.rows_auto else 'p. ej. 2' }}"></div>
       <div><label for="wr-orient">Orientación</label>
         <select id="wr-orient" name="layout_orientation">
           <option value="portrait" {{ 'selected' if roof.layout.orientation != 'landscape' else '' }}>Vertical (portrait)</option>
@@ -85,7 +94,7 @@
     {% elif not roof.has_dims %}
       <p class="card-note-sm wr-bad">Este panel no tiene medidas (ancho/alto) en el catálogo, así que no se pueden calcular los rieles.</p>
     {% else %}
-      <p class="card-note-sm">Sin las filas, la lista de materiales deja el montaje pendiente.</p>
+      <p class="card-note-sm">Sin filas ni strings definidos, la lista de materiales deja el montaje pendiente.</p>
     {% endif %}
   </form>
 {% endif %}
@@ -140,6 +149,63 @@
     </table>
   </div>
 
+  <details class="wr-details">
+    <summary>Conductores por tramo (fases, neutro y tierra)</summary>
+    <div class="dtable-wrap">
+      <table class="dtable wr-table">
+        <thead><tr><td>Tramo</td><td>Conductor</td><td>Cant.</td><td>Calibre</td><td>Ampacidad</td><td>Cómo se define</td></tr></thead>
+        <tbody>
+        {% for b in branches %}{% if b.ugc %}{% for r in b.conductors %}
+          <tr>
+            <td>{% if loop.first %}<b>{{ b.label }}</b>{% endif %}</td>
+            <td>{{ {'UGC': 'Fases' if (r.count > 1 or b.kind == 'ac') else 'Fases', 'Neutro': 'Neutro', 'EGC': 'Tierra'}[r.role] if b.kind == 'ac' else ({'UGC': '+ / −', 'EGC': 'Tierra'}[r.role]) }}</td>
+            <td>{{ r.count }}</td>
+            <td><span class="wr-big">{{ r.label }}</span></td>
+            <td>{{ '%g'|format(r.ampacity) ~ ' A' if r.ampacity else '—' }}</td>
+            <td class="wr-sub">{{ r.rule }}</td>
+          </tr>
+        {% endfor %}{% endif %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  {% if manual_enabled %}
+  <details class="wr-details" {% if has_manual %}open{% endif %}>
+    <summary>Valores manuales (tu escogencia) y verificación{% if has_manual %} · activos{% endif %}</summary>
+    <p class="card-note-sm">Deja en blanco para usar el calculado. Si pones un valor, el plano, el conducto y la lista usan el tuyo, y aquí se marca
+      ✓ si es seguro (incluye un calibre mayor que el calculado) o ✗ si es peligroso: calibre que no cubre la carga, breaker o fusible por encima de lo que
+      protege al cable o del máximo del fabricante, o por debajo de la corriente de diseño.</p>
+    <form hx-post="{{ post_url }}" hx-trigger="change delay:600ms" hx-target="{{ form_target }}" hx-swap="{{ form_swap }}">
+      <input type="hidden" name="manual_form" value="1">
+      <div class="dtable-wrap">
+        <table class="dtable wr-table">
+          <thead><tr><td>Tramo</td><td colspan="3">Breaker / fusible (A)</td><td colspan="3">Calibre de fases</td></tr>
+            <tr><td></td><td>Calculado</td><td>Manual</td><td></td><td>Calculado</td><td>Manual</td><td></td></tr></thead>
+          <tbody>
+          {% for b in branches %}{% if b.ugc and b.key %}
+            {% set calc_a = b.calc.ocpd_a if b.calc else b.ocpd_a %}
+            {% set calc_g = b.calc.ugc if b.calc else b.ugc %}
+            <tr>
+              <td><b>{{ b.label }}</b>
+                {% if b.manual %}{% for m in b.manual.msgs %}<div class="wr-sub {{ 'wr-bad' if not b.manual.ok else '' }}">{{ m }}</div>{% endfor %}{% endif %}
+                {% if b.max_ocpd_a %}<div class="wr-sub">Máx. del fabricante: {{ b.max_ocpd_a }} A</div>{% endif %}</td>
+              <td>{{ calc_a }} A <span class="wr-sub">{{ 'fusible' if b.protection == 'fuse' else 'breaker' }}</span></td>
+              <td><input type="number" min="1" step="1" style="width:5.5em" name="man_ocpd_{{ b.key }}" value="{{ b.manual.ocpd_a if b.manual and b.manual.ocpd_a else '' }}"></td>
+              <td>{% if b.manual and b.manual.ocpd_a %}{% if b.manual.ocpd_ok %}<b style="color:#1a7f37" title="Seguro">✓</b>{% else %}<b class="wr-bad" title="Peligroso">✗</b>{% endif %}{% endif %}</td>
+              <td>{{ calc_g|replace('/', '/') }} AWG</td>
+              <td><select name="man_ugc_{{ b.key }}"><option value="">—</option>
+                {% for g, lab in gauge_options %}<option value="{{ g }}" {{ 'selected' if b.manual and b.manual.ugc == g else '' }}>{{ lab }}</option>{% endfor %}</select></td>
+              <td>{% if b.manual and b.manual.ugc %}{% if b.manual.ugc_ok %}<b style="color:#1a7f37" title="Seguro">✓</b>{% else %}<b class="wr-bad" title="Peligroso">✗</b>{% endif %}{% endif %}</td>
+            </tr>
+          {% endif %}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+  </details>
+  {% endif %}
+
   {% if ac_missing %}
     <p class="card-note-sm">Sin líneas de carga del Paso 4/5 no se puede dimensionar la rama AC.</p>
   {% endif %}
@@ -154,7 +220,7 @@
         <li><b>Conductor total por calibre</b> (todas las ramas, incluye tierra): {% for label, m in meter_rows %}{{ label }} {{ m|round(1) }} m{{ ' · ' if not loop.last }}{% endfor %}.</li>
       {% endif %}
       <li>Sin derating por temperatura ambiente ni por más de 3 conductores en el conducto; sin caja combinadora de varios pares por controlador; eficiencia del inversor 95 % (no está en el catálogo).</li>
-      <li>La tierra (EGC) sigue la hoja de Excel: T250.66 sobre el calibre inicial, agrandada en proporción si el conductor sube por caída de tensión.</li>
+      <li>La tierra (EGC) sale de la T250.122 según el breaker o fusible que protege el tramo (nunca mayor que las fases), agrandada en proporción si las fases suben por caída de tensión (250.122(B)). La hoja de Excel usaba la T250.66, que es de electrodos de puesta a tierra.</li>
       <li>Guía de diseño: el calibre final lo confirma el ingeniero responsable.</li>
     </ul>
   </details>

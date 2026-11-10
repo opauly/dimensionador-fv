@@ -42,7 +42,7 @@
     <input type="hidden" name="action" value="inputs">
     <b style="font-size:12.5px;">Layout del techo</b>
     <div class="ls-grid">
-      <div><label for="ls-rows">Filas de paneles</label><input id="ls-rows" type="number" min="1" name="layout_rows" value="{{ layout.rows or '' }}" placeholder="p. ej. 2"></div>
+      <div><label for="ls-rows">Filas de paneles</label><input id="ls-rows" type="number" min="1" name="layout_rows" value="{{ '' if layout.rows_auto else (layout.rows or '') }}" placeholder="{{ (layout.rows ~ ' (un string por fila)') if layout.rows_auto else 'p. ej. 2' }}"></div>
       <div><label for="ls-or">Orientación</label>
         <select id="ls-or" name="layout_orientation">
           <option value="portrait" {{ 'selected' if layout.orientation != 'landscape' else '' }}>Vertical (portrait)</option>

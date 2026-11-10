@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import math
 
-# Standard DC breaker ratings of the DIN-rail family Pauly buys for PV strings (NB1-63DC), so a
-# string breaker is proposed from stock sizes instead of the AC list the workbook uses.
-DC_BREAKER_SIZES_A = (10, 16, 20, 25, 32, 40, 50, 63)
+# DC breaker ratings the dealers actually sell for PV strings (DIN rail, NB1-63DC family): there is
+# no 25 A. A string breaker is proposed from these instead of the AC list the workbook uses.
+DC_BREAKER_SIZES_A = (16, 20, 32, 40, 63)
 
 # Practice floor for PV string cable: Pauly buys #10 AWG solar cable for every array, even when the
 # ampacity would allow #12.

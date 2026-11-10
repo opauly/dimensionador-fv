@@ -49,7 +49,7 @@ check("17 modules: Voc 819 V over the 800 V window", bad["ok"], False)
 check("PV inverter bigger than the Multis is flagged", C.check_strings(PANEL, {**FRONIUS, "kw": 12.0}, 2, 8, hybrid_kw_total=10.0)["ok"], False)
 check("suggest: smallest Fronius with kW >= 95 % of 9.6 kWp",
       C.suggest_pv_inverter([{**FRONIUS, "kw": 8.2, "id": "a"}, FRONIUS, {**FRONIUS, "kw": 6.0, "id": "b"}], 9.6)["id"], "fr10")
-check("Fronius AC current 10 kW / 240 V", round(C.pv_inverter_ac_current_a(FRONIUS), 2), 41.67)
+check("Fronius AC current Primo 10.0-1 @240 V: datasheet 41.6 A (not 10 kW / 240 V = 41.67)", round(C.pv_inverter_ac_current_a(FRONIUS), 2), 41.6)
 
 # ── Wiring: AC-coupled branches ────────────────────────────────────────────────
 EQ = {"panel": PANEL, "panel_count": 16, "battery": BAT, "battery_bank": {"battery_count": 4}, "inverter": MP,
@@ -67,16 +67,17 @@ check("AC mode: no charge-controller branches", any("controlador" in k.lower() f
 pv, ac = by["Paneles → inversor FV (strings)"], by["Inversor FV → sub-panel de cargas críticas"]
 check("one PV run per string", pv["qty"], 2)
 check("string current is one string's Isc", pv["current_a"], 15.86)
-check("string breaker: 15.86 x 1.5625 = 24.8 A -> 25 A DC breaker", pv["ocpd_a"], 25)
+check("string breaker: 15.86 x 1.5625 = 24.8 A -> 32 A (no 25 A exists)", pv["ocpd_a"], 32)
 check("PV cable floor: #10 although ampacity allows #12", pv["ugc"], "10")
 check("PV run: 2 conductors + ground", [(r["role"], r["count"]) for r in pv["conductors"]], [("UGC", 2), ("EGC", 1)])
-check("PV ground follows the #10 floor, not the ampacity gauge (T250.66 -> 8 AWG)", pv["egc"], "8")
+check("PV ground by the 32 A string breaker (T250.122 -> 10 AWG)", pv["egc"], "10")
 check("Fronius AC: 41.7 A x 1.25 = 52 A -> 60 A 2-pole breaker (diagram: 2P 60 A)", ac["ocpd_a"], 60)
 check("Fronius AC conductor: L1 + L2 + ground, no neutral", [(r["role"], r["count"]) for r in ac["conductors"]], [("UGC", 2), ("EGC", 1)])
 check("Fronius AC gauge from 52 A design", ac["ugc"], "6")
 check("DC mode still gives controller branches", any("controlador" in b["label"].lower()
       for b in og_wiring.build_context({**BLOB, "scratch": {}})["branches"]), True)
-check("off-grid design ignores a saved AC choice", og_wiring.build_context({**BLOB, "meta": {"system_type": "off_grid"}})["coupling"]["ac"], False)
+check("off-grid design can be AC-coupled too (no charge controllers)", og_wiring.build_context({**BLOB, "meta": {"system_type": "off_grid"}})["coupling"]["ac"], True)
+check("a grid-zero draft never gets the coupling choice", og_wiring.build_context({**BLOB, "meta": {"system_type": "grid_zero"}})["can_couple"], False)
 check("lengths keep a hidden value", og_wiring.lengths_from_form({"pv_cc_m": "20"}, {"cc_bat_m": 4.0})["cc_bat_m"], 4.0)
 
 # ── BOM system rows ────────────────────────────────────────────────────────────

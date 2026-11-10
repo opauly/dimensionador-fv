@@ -299,6 +299,7 @@ def nueva_post():
         ), 400
 
     result = s1_client.resolve_client(result)
+    result["requests"] = s1_client.merge_requests(None, request.form)
 
     from database.proposals_db import create_proposal
 
@@ -394,6 +395,7 @@ def paso_post(vid, n):
             return _render_step(vid, n, {**blob, "client": result},
                                  error="El nombre del cliente es requerido.")
         result = s1_client.resolve_client(result)
+        result["requests"] = s1_client.merge_requests(blob.get("client"), request.form)
         blob = draft.patch(vid, "client", result)
         from database.proposals_db import get_version, update_proposal_client
 
@@ -1200,6 +1202,23 @@ def paso6og_equipo(vid):
     return _s6og_render(vid, blob)
 
 
+@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/acople", methods=["POST"])
+def paso6og_acople(vid):
+    """PV coupling choice (Off-Grid / Hybrid): DC (charge controllers) or AC (string inverter), picked at the top of Equipos so the
+    scenarios are sized for it. Saved in the same scratch key the wiring panel and the project's Técnico tab read."""
+    guard = _guard(vid, STEP_EQUIPOS)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    if (blob.get("meta") or {}).get("system_type") in ("off_grid", "hybrid"):
+        cpl = og_coupling.from_form(request.form)
+        if cpl is not None:
+            # A new coupling or inverter invalidates a hand-edited string layout from the old one.
+            cpl["strings"] = cpl["modules_per_string"] = None
+            blob = draft.patch(vid, "scratch", {og_coupling.SCRATCH_KEY: cpl})
+    return _s6og_render(vid, blob)
+
+
 @bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/og/escenario/<label>", methods=["POST"])
 def paso6og_escenario(vid, label):
     guard = _guard(vid, STEP_EQUIPOS)
@@ -1255,7 +1274,7 @@ def paso6_objetivos_recalcular(vid):
 # lengths in blob["scratch"]["wiring"].
 
 
-def _roof_context(blob: dict) -> dict | None:
+def _roof_context(blob: dict, coupling: dict | None = None) -> dict | None:
     """The roof-layout question under the wiring block: the saved answer, the module count it applies
     to and the mounting counts it gives. None until a panel is chosen (nothing to lay out yet)."""
     from materials import engine
@@ -1264,13 +1283,14 @@ def _roof_context(blob: dict) -> dict | None:
     panel, n_panels = eq.get("panel") or {}, int(eq.get("panel_count") or 0)
     if not (panel and n_panels):
         return None
-    layout = {**engine.DEFAULT_LAYOUT, **engine.layout_from_blob(blob)}
+    layout = engine.with_default_rows({**engine.DEFAULT_LAYOUT, **engine.layout_from_blob(blob)}, engine.string_count(eq, coupling))
     return {"layout": layout, "n_panels": n_panels, "counts": engine.layout_counts(panel, n_panels, layout),
             "has_dims": bool(panel.get("width_m") and panel.get("height_m"))}
 
 
 def _wiring_render(vid: str, blob: dict):
-    return render_template("wizard/_wiring.html", vid=vid, roof=_roof_context(blob), **og_wiring.build_context(blob))
+    ctx = og_wiring.build_context(blob)
+    return render_template("wizard/_wiring.html", vid=vid, roof=_roof_context(blob, ctx.get("coupling")), **ctx)
 
 
 @bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/techo", methods=["POST"])

@@ -5,7 +5,7 @@ Deterministic: every quantity comes from the design (equipment counts), the wiri
 
 Output lines are keyed to Oscar's master checklist (`materials/catalog.py`) when the item exists
 there, so the export lands on the same rows he already sends to dealers. A part the design needs
-that the master list does not carry (a 25 A DC breaker, a 3/0 cable) is added as a new line
+that the master list does not carry (a 16 A DC breaker, a 3/0 cable) is added as a new line
 flagged `in_master=False` instead of being dropped or forced onto a wrong row.
 
 Edits live in the project (`tech_spec["materials"]`) and are applied on top of the computed list,
@@ -220,6 +220,18 @@ def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
             c.add(_named("Cable UTP tipo A", "Victron Energy"), r["qty"], note=r["note"] + " (cable VE.CAN)")
 
 
+def string_count(eq: dict, coupling: dict | None) -> int:
+    coupling = coupling or {}
+    return int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
+
+
+def with_default_rows(layout: dict, strings: int) -> dict:
+    """Without an answer, each string is one row of modules (two rails per string). `rows_auto`
+    tells the screens the number came from the design and not from the user."""
+    auto = not layout.get("rows") and strings > 0
+    return {**layout, "rows": strings if auto else layout.get("rows"), "rows_auto": auto}
+
+
 def layout_counts(panel: dict, n_panels: int, layout: dict) -> dict | None:
     """Rails, feet and clamps for `rows` rows of modules (two rails under each row)."""
     rows = int(layout.get("rows") or 0)
@@ -248,10 +260,11 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
         return
     counts = layout_counts(panel, n_panels, layout)
     if counts is None:
-        pending.append("Falta el layout del techo (filas de paneles y orientación): rieles, patas y clamps no se calculan sin él.")
+        pending.append("Falta el layout del techo (filas de paneles): rieles, patas y clamps no se calculan sin él.")
         return
     spare = 1 + SPARE_PCT / 100
-    desc = (f"{counts['rows']} fila(s) de {counts['per_row']} módulos ({layout['orientation']}), "
+    desc = (f"{counts['rows']} fila(s) de {counts['per_row']} módulos ({layout['orientation']})"
+            f"{', un string por fila' if layout.get('rows_auto') else ''}, "
             f"{counts['row_len_m']} m por fila, 2 rieles por fila")
     for name, key, base, why in (
         ("Rieles (largueros)", "rails", counts["rails"], f"{desc}; rieles de {layout['rail_len_m']} m"),
@@ -470,6 +483,7 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     layout = {**DEFAULT_LAYOUT, **clean_layout(base_layout), **clean_layout(mat.get("layout"))}
     opts = {**DEFAULT_OPTIONS, **(mat.get("options") or {})}
     coupling = wiring_ctx.get("coupling") or {}
+    layout = with_default_rows(layout, string_count(eq, coupling))
     branches = wiring_ctx.get("branches") or []
     pending: list[str] = []
 
