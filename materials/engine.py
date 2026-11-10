@@ -22,6 +22,7 @@ import math
 from collections import OrderedDict
 
 from calculations import bom as B
+from calculations import nec_tables as T
 from calculations import wiring as W
 from materials.catalog import CATALOG, SECTIONS
 
@@ -92,6 +93,9 @@ ALIASES = {
 }
 CT_PER_METER = 2   # split-phase: one current transformer per line
 METER_CT_KEY = "interconexion-transformador-de-corriente-100a-333mv"
+METER_BASE_KEY = "interconexion-base-para-medidor-monofasica-con-interruptor-principal-tipo-parche-clase-100-combo-base"
+METER_BREAKER_KEY = "interconexion-breaker-30a-compatible-con-base-para-medidor"
+PADLOCK_KEY = "interconexion-candado-pequeno-para-base-medidor"
 
 _SECTION_RANK = {s: i for i, s in enumerate(SECTIONS)}
 _BY_NAME = {(r["section"], r["name"]): r for r in CATALOG}
@@ -172,7 +176,38 @@ def _slug(s: str) -> str:
 
 # ── Rules ──────────────────────────────────────────────────────────────────────
 
-def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = None) -> None:
+def grid_zero_equipment(eq: dict) -> dict:
+    """A Grid Zero design stores the array in `chosen_scenario` (string inverter, no batteries or controllers);
+    the list reads the same keys as the other system types, so copy them up."""
+    ch = eq.get("chosen_scenario") or {}
+    return {**eq, "panel_count": int(eq.get("panel_count") or ch.get("total_panels") or 0),
+            "n_strings": int(eq.get("n_strings") or ch.get("strings") or 0),
+            "panels_per_string": int(eq.get("panels_per_string") or ch.get("panels_per_string") or 0), "inverter_qty": 1}
+
+
+def _interconnection(c: Collector, eq: dict) -> None:
+    """Grid Zero only: meter base with main switch, the breaker that feeds the grid from the inverter
+    (125 % of the inverter's maximum output current, next standard size) and the padlock."""
+    inv = eq.get("inverter") or {}
+    c.add(_BY_KEY[METER_BASE_KEY], 1, note="base de medidor con interruptor principal: solo Grid Zero")
+    out_a = float(inv.get("ac_output_current_a") or 0)
+    sizes = list(T.OCPD_SIZES_A)
+    if out_a > 0:
+        amps = next((a for a in sizes if a >= out_a * 1.25), sizes[-1])
+        why = f"125 % de la corriente máxima del inversor ({out_a:g} A), tamaño comercial siguiente"
+        comment = None
+    else:
+        amps, why, comment = 30, "sin corriente máxima del inversor en el catálogo: se asume 30 A", "POR CONFIRMAR AMPERAJE"
+    max_a = float(inv.get("max_ocpd_a") or 0)
+    if max_a and amps > max_a:
+        amps, why = int(max_a), why + f"; limitado al breaker máximo del fabricante ({max_a:g} A)"
+    row = _BY_KEY[METER_BREAKER_KEY] if amps == 30 else None
+    c.add(row, 1, name=f"Breaker {amps}A compatible con base para medidor", section="Generales", group="Interconexión",
+          sibling=_BY_KEY[METER_BREAKER_KEY], comment=comment, note=why)
+    c.add(_BY_KEY[PADLOCK_KEY], 1, note="candado para la base de medidor")
+
+
+def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = None, grid_zero: bool = False) -> None:
     panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
     bat, cc, mon = eq.get("battery") or {}, eq.get("charge_controller") or {}, eq.get("monitoring") or {}
     model = lambda it: f"{it.get('brand', '')} {it.get('model', '')}".strip()  # noqa: E731
@@ -180,6 +215,14 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
     if panel and n_panels:
         c.add(_named("Paneles solares", "Paneles solares"), n_panels, source="diseño", comment=model(panel),
               note=f"{n_panels} módulos del diseño")
+    if grid_zero:
+        if inv:
+            c.add(None, 1, name=f"Inversor {model(inv)}", section="Paneles solares", source="diseño",
+                  comment=f"{inv.get('kw')} kW · Grid Zero", note="inversor de strings del diseño")
+        if eq.get("monitoring"):
+            c.add(None, 1, name=model(eq["monitoring"]), section="Generales", group="Monitoreo", source="diseño",
+                  sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"))
+        return
     if inv:
         qty = int(eq.get("inverter_qty") or 1)
         row = match_equipment(inv)
@@ -294,15 +337,16 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
         c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
 
 
-def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str]) -> None:
+def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str], grid_zero: bool = False) -> None:
     """Items every project carries whatever its size (Oscar's rules): one enclosure, one surge
     protector, roof sealant, the DC breaker box, the wire duct and its EMT stubs to the inverters,
     and the monitoring outlet. Roof screws are not listed: the L brackets already come with theirs.
     The critical-loads sub-panel is supplied by the owner or builder, so it is not listed either."""
     if not eq.get("panel"):
         return
-    c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
-          note="un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
+    if not grid_zero:
+        c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
+              note="un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20")
     c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
     c.add(_named("Riel DIN perforado 35x15mm", "Generales"), 1, note="uno por proyecto: para los breakers y bornes del gabinete")
     c.add(_named("Terminal para riel din", "Generales"), 1, note="uno por proyecto")
@@ -321,6 +365,8 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
           max(1, math.ceil(feet / FEET_PER_SILICONE)),
           note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1)")
 
+    if grid_zero:      # no Victron units: no wire duct to them, no EMT stubs, no monitoring outlet
+        return
     c.add(_named("Ducto metálico cuadrado 4x4", "Generales"), 1, note="mínimo 1: lleva el cableado general de los inversores (el cable de batería va por fuera del tubo)")
     c.add(_named("Tapas para ducto metálico 4x4", "Generales"), 2, note="2 tapas finales por ducto (mínimo)")
     inv_qty = int(eq.get("inverter_qty") or 1) if eq.get("inverter") else 0
@@ -491,7 +537,7 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout: dict | None = None) -> dict:
+def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout: dict | None = None, system_type: str | None = None) -> dict:
     """{'lines': [...], 'pending': [...], 'layout': {...}, 'options': {...}, 'counts': {...}}.
 
     `wiring_ctx` is `og_wiring.build_context(...)`; `spec` the project's tech_spec (edits live in
@@ -499,6 +545,9 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     its Lista tab wins over it, key by key. Lines are in master-list order, new lines at the end of
     their group."""
     mat = ((spec or {}).get("materials")) or {}
+    grid_zero = system_type == "grid_zero"
+    if grid_zero:
+        eq = grid_zero_equipment(eq)
     layout = {**DEFAULT_LAYOUT, **clean_layout(base_layout), **clean_layout(mat.get("layout"))}
     opts = {**DEFAULT_OPTIONS, **(mat.get("options") or {})}
     coupling = wiring_ctx.get("coupling") or {}
@@ -507,10 +556,13 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     pending: list[str] = []
 
     c = Collector()
-    _equipment(c, eq, coupling, wiring_ctx.get("lengths"))
-    _system(c, eq, coupling, wiring_ctx)
+    _equipment(c, eq, coupling, wiring_ctx.get("lengths"), grid_zero)
+    if grid_zero:
+        _interconnection(c, eq)
+    else:
+        _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)
-    _project_kit(c, eq, coupling, layout, pending)
+    _project_kit(c, eq, coupling, layout, pending, grid_zero)
     _pv_connectors(c, eq, coupling)
     if wiring_ctx.get("ready"):
         _cables(c, branches)
@@ -519,8 +571,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     else:
         pending.append("El cableado todavía no se puede dimensionar (" + (wiring_ctx.get("reason") or "faltan datos del diseño")
                        + "): cables, protecciones y tubería quedan fuera.")
-    pending.append("Por definir en cada proyecto (no salen del diseño): cajas y registros, riel DIN y strut, tubería flexible. "
-                   "Agrégalos con «Agregar línea». El sub-panel de cargas críticas lo pone el propietario o constructor.")
+    pending.append(("Lo que no sale del diseño se agrega con «Agregar línea». "
+                    + ("" if grid_zero else "El sub-panel de cargas críticas lo pone el propietario o constructor.")).strip())
 
     lines = apply_edits(list(c.lines.values()), mat)
     return {"lines": lines, "pending": pending, "layout": layout, "options": opts,

@@ -22,8 +22,7 @@ lista de compra. Todo es determinista; no hay LLM en ninguna cifra.
   `scratch.roof_layout` de la versión. La lista lo usa como base; lo que el proyecto guarde en su pestaña Lista gana, clave por clave.
 - Excel: `materials/export_xlsx.py`, mismo encabezado y filas de sección/grupo que la hoja maestra; columnas de
   proveedores y Bodega vacías; solo líneas con cantidad.
-- **Por definir en cada proyecto** (la lista lo avisa, se agregan a mano): gabinetes y cajas, centro de carga del
-  sub-panel, SPD, riel DIN y strut, tornillería de techo, tubería flexible.
+- **Fuera de la lista (se agregan a mano si hace falta):** cajas de registro y empalmes, tubería flexible Biex y canasta (ya no se usan).
 
 ### Parámetros de las reglas (ajustables en `materials/engine.py`)
 
@@ -67,6 +66,11 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **Medidor de energía (VM-3P75CT):** se elige en Equipos («Medidor de energía», opcional; híbrido y off-grid). Trae 2 transformadores de
   corriente (comentario «POR VERIFICAR TAMAÑO») y cable de red Ethernet cat6e del largo del tramo gabinete → tablero eléctrico (el de «Red → entrada AC»), del medidor al GX. El catálogo lo guarda en `monitoring_devices` con
   `device_kind = 'meter'` (migración 059, datos del datasheet y PDF guardado) y no sale en la lista de monitoreo.
+- **Fusible de batería:** Fidus carga máximo 100 A, así que el fusible Mega es de 125 A (migración 060: `max_charge_a` y `fuse_a` en el catálogo).
+- **Techo:** MC4 y la tierra se amarra a los rieles con su accesorio de grounding; de ahí directo a los breakers DC, sin cajas ni empalmes.
+- **Grid Zero:** sin Victron, baterías ni Lynx. Lleva paneles, montaje, inversor de strings, centro de carga DC, SPD, riel DIN/strut, silicón y la
+  interconexión: base de medidor con interruptor principal (1), breaker compatible (125 % de la corriente máxima del inversor, tamaño comercial
+  siguiente; casi siempre el Fronius) y candado (1). El cableado de Grid Zero todavía no se dimensiona.
 - **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
 - **Mínimos:** un paquete de amarras; las gazas salen de la distancia de la tubería, sin repuesto.

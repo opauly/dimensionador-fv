@@ -201,5 +201,23 @@ _run = CTX["lengths"]["ac_in_m"]
 check("cat6e as long as the cabinet -> panel run (+waste, 5 m steps)", _bym["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to(_run * (1 + ME.WASTE), ME.CABLE_STEP_M))
 check("no meter: no cat6e", "Cable de red Ethernet cat6e" in _by, False)
 
+# Batch-6 rules: Fidus fuse 125 A (max charge 100 A); Grid Zero list has no Victron / batteries / Lynx and carries the interconnection items.
+_EQF = {**EQ, "battery": {**EQ["battery"], "fuse_a": 125, "max_charge_a": 100}}
+_byf = {ln["name"]: ln for ln in ME.build_list(_EQF, CTX, {"materials": {"layout": {"rows": 2}}}, None)["lines"] if ln["qty"]}
+check("Fidus fuse: 125 A, 4 batteries + 2 battery-to-Multi runs share the same Mega 125 A line", _byf["Fusible Mega 125A"]["qty"], 6)
+check("no 'por definir' fuse once the battery has its fuse", any("calibre por definir" in n for n in _byf), False)
+_PRIMO = {"brand": "Fronius", "model": "Primo 8.2-1", "kw": 8.2, "ac_output_current_a": 34.2, "max_ocpd_a": 45}
+_GZ = {"panel": PANEL, "inverter": _PRIMO, "chosen_scenario": {"total_panels": 12, "strings": 2, "panels_per_string": 6}}
+_gz = ME.build_list(_GZ, {"ready": False, "reason": "x", "branches": []}, {}, None, "grid_zero")
+_bg = {ln["name"]: ln for ln in _gz["lines"] if ln["qty"]}
+check("grid zero: panels and inverter come from the chosen scenario", (_bg["Paneles solares"]["qty"], _bg["Inversor Fronius Primo 8.2-1"]["qty"]), (12, 1))
+check("grid zero: 45 A breaker (125 % of 34.2 A) for the meter base, base x1, padlock x1",
+      (_bg["Breaker 45A compatible con base para medidor"]["qty"], _bg["Base para medidor monofásica con interruptor principal tipo parche, clase 100 (Combo base)"]["qty"], _bg["Candado pequeño para base medidor"]["qty"]), (1, 1, 1))
+check("grid zero: no Victron, Lynx, fuses, duct, cabinet or monitoring kit", any(("Lynx" in n or "Fusible" in n or "Ducto" in n or "Gabinete" in n or "toma de monitoreo" in n or "Victron" in ln["section"]) for n, ln in _bg.items()), False)
+check("grid zero: still carries rails, Chint DC box and SPD", all(n in _bg for n in ("Rieles (largueros)", "Centro de carga Chint DC 5 espacios", "Supresor de Picos SDSA 1175")), True)
+_gz30 = ME.build_list({**_GZ, "inverter": {**_PRIMO, "ac_output_current_a": 20.8, "max_ocpd_a": 30}}, {"ready": False, "branches": []}, {}, None, "grid_zero")
+check("grid zero: a 20.8 A inverter takes the master 30 A breaker line", any(ln["name"] == "Breaker 30A compatible con base para medidor" and ln["in_master"] for ln in _gz30["lines"] if ln["qty"]), True)
+check("hybrid list has no interconnection base", any("Base para medidor" in n for n in _by), False)
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -37,7 +37,8 @@ def _build(project: dict):
     d = projects_design.load(project)
     if d["empty"]:
         return d, None
-    return d, engine.build_list(d["eq"], d["wiring"], d["spec"], engine.layout_from_blob(d["blob"]))
+    return d, engine.build_list(d["eq"], d["wiring"], d["spec"], engine.layout_from_blob(d["blob"]),
+                                                  project.get("system_type"))
 
 
 def render_panel(ctx: dict, *, message: str | None = None) -> str:
