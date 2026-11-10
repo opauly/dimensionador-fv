@@ -75,6 +75,7 @@ CONDUIT_MATERIALS = ("PVC", "EMT", "none")
 WHERE = {
     "pv_strings": "Strings FV", "pv_cc": "Paneles → controlador", "pv_inv_ac": "Fronius → sub-panel",
     "cc_bat": "Controlador → baterías", "bat_inv": "Baterías → inversores", "ac_out": "AC Out", "ac_in": "AC In",
+    "pv_dc_inv": "Breakers CC → Fronius", "gz_ac": "Fronius → base de medidor",
 }
 
 # Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
@@ -185,7 +186,7 @@ def grid_zero_equipment(eq: dict) -> dict:
             "panels_per_string": int(eq.get("panels_per_string") or ch.get("panels_per_string") or 0), "inverter_qty": 1}
 
 
-def _interconnection(c: Collector, eq: dict) -> None:
+def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None) -> None:
     """Grid Zero only: meter base with main switch, the breaker that feeds the grid from the inverter
     (125 % of the inverter's maximum output current, next standard size) and the padlock."""
     inv = eq.get("inverter") or {}
@@ -201,6 +202,9 @@ def _interconnection(c: Collector, eq: dict) -> None:
     max_a = float(inv.get("max_ocpd_a") or 0)
     if max_a and amps > max_a:
         amps, why = int(max_a), why + f"; limitado al breaker máximo del fabricante ({max_a:g} A)"
+    sized = next((b for b in branches or [] if b.get("key") == "gz_ac" and b.get("ocpd_a")), None)
+    if sized:       # the wiring sizing already holds it (manual override included)
+        amps, why, comment = int(sized["ocpd_a"]), f"el del tramo «{sized['label']}» (125 % de la corriente máxima del inversor, tamaño comercial siguiente)", None
     row = _BY_KEY[METER_BREAKER_KEY] if amps == 30 else None
     c.add(row, 1, name=f"Breaker {amps}A compatible con base para medidor", section="Generales", group="Interconexión",
           sibling=_BY_KEY[METER_BREAKER_KEY], comment=comment, note=why)
@@ -422,13 +426,13 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
                     if i >= b.get("raceways", b["qty"]):
                         continue            # a shared pipe carries one ground for all its runs
                     put("cable_thhn", g, "verde", n * L, where, 2 * n)
-                elif key in ("pv_strings", "pv_cc"):
+                elif key in ("pv_strings", "pv_cc", "pv_dc_inv"):
                     put("cable_solar", g, "rojo", L, where)
                     put("cable_solar", g, "negro", L, where)
                 elif key in ("cc_bat", "bat_inv"):
                     put("cable_thhn", g, "rojo", L, where, 2)
                     put("cable_thhn", g, "negro", L, where, 2)
-                elif key == "pv_inv_ac":
+                elif key in ("pv_inv_ac", "gz_ac"):
                     put("cable_thhn", g, "negro", L, where, 2)
                     put("cable_thhn", g, "rojo", L, where, 2)
                 elif r["role"] == "Neutro":
@@ -478,7 +482,7 @@ def _cables(c: Collector, branches: list[dict]) -> None:
 def _protections(c: Collector, branches: list[dict], opts: dict) -> None:
     for b in branches:
         amps, key, where = b.get("ocpd_a"), b.get("key"), WHERE.get(b.get("key"), b["label"])
-        if not amps:
+        if not amps or key == "gz_ac":      # Grid Zero: the AC breaker sits in the meter base (see _interconnection)
             continue
         hot = next((r["count"] for r in b.get("conductors") or [] if r["role"] == "UGC"), 2)
         if b.get("protection") == "fuse":
@@ -558,7 +562,7 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     c = Collector()
     _equipment(c, eq, coupling, wiring_ctx.get("lengths"), grid_zero)
     if grid_zero:
-        _interconnection(c, eq)
+        _interconnection(c, eq, branches)
     else:
         _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)

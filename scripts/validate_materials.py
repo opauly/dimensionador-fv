@@ -142,11 +142,30 @@ check("her 32 A string breaker reaches the drawing", cfg32["pv"]["string_breaker
 check("only drawable characters in the labels", all(ch not in str(cfg) for ch in "→−≥≤"), True)
 check("engineering notes stay out of the config", "warnings" in prob and "warnings" not in cfg, True)
 check("review list mentions the 95 A input limit", any("95 A" in w["text"] for w in prob["warnings"]), True)
-_, off = CB.build_config({**project, "system_type": "off_grid"}, d, ans)
-check("off-grid project is out of scope", any("híbridos" in b for b in off["blockers"]), True)
-dc_ctx = og_wiring.build_context({**BLOB, "scratch": {}})
-_, dcp = CB.build_config(project, {"eq": EQ, "wiring": dc_ctx, "blob": BLOB}, ans)
-check("DC coupling is out of scope", any("acople AC" in b for b in dcp["blockers"]), True)
+CC = {"brand": "Victron Energy", "model": "SmartSolar MPPT 250/100", "type": "MPPT", "vin_max": 250.0, "imax_in": 35.0, "imax_out": 100.0}
+EQ_DC = {**EQ, "charge_controller": CC, "charge_controller_qty": 1, "panels_per_string": 8, "n_strings": 2}
+BLOB_DC = {"meta": {"system_type": "hybrid"}, "equipment": EQ_DC, "scratch": {}, "site": BLOB["site"]}
+dc_ctx = og_wiring.build_context(BLOB_DC)
+check("DC coupling picks the off-grid drawing", CB.drawing_kind(project, dc_ctx), "off_grid")
+d_dc = {"eq": EQ_DC, "wiring": dc_ctx, "blob": BLOB_DC}
+_, nolynx = CB.build_config(project, d_dc, {})
+check("off-grid drawing asks the Lynx question but not the injection one", [("Bus DC" in b) for b in nolynx["blockers"]], [True])
+cfg_dc, prob_dc = CB.build_config(project, d_dc, {"lynx": "power_in"})
+check("off-grid config: 2 inverters, 1 controller, 4 batteries, no grid-in without an AC-in run",
+      (cfg_dc["kind"], cfg_dc["multis"]["qty"], cfg_dc["controllers"]["count"], cfg_dc["battery"]["count"], bool(cfg_dc["grid_in"]) == bool(CB._branch(dc_ctx["branches"], "ac_in"))),
+      ("off_grid", 2, 1, 4, True))
+check("off-grid controller output cable is the sized one", cfg_dc["controllers"]["out_pos"].startswith("+ #"), True)
+_, dist = CB.build_config(project, d_dc, {"lynx": "power_in_distributor"})
+check("off-grid drawing refuses the Distributor variant", any("Distributor" in b for b in dist["blockers"]), True)
+out_dc = io.BytesIO()
+from unifilar.generate_unifilar import build as _build_dc  # noqa: E402
+_build_dc(cfg_dc, out_dc)
+check("off-grid PDF renders", out_dc.getvalue()[:4], b"%PDF")
+cfg_m, _ = CB.build_config(project, {"eq": {**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, "wiring": dc_ctx, "blob": BLOB_DC}, {"lynx": "power_in"})
+check("energy meter reaches the off-grid drawing", (cfg_m["meter"] or {}).get("title"), "MEDIDOR VM-3P75CT")
+cfg_h, _ = CB.build_config(project, {"eq": {**EQ, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, "wiring": CTX, "blob": BLOB}, ans)
+check("energy meter reaches the hybrid AC drawing", (cfg_h["meter"] or {}).get("title"), "MEDIDOR VM-3P75CT")
+check("no meter selected: nothing drawn", (CB.build_config(project, d, ans)[0] or {}).get("meter"), None)
 from unifilar.generate_unifilar import build  # noqa: E402
 out = io.BytesIO()
 build(cfg, out)
@@ -218,6 +237,28 @@ check("grid zero: still carries rails, Chint DC box and SPD", all(n in _bg for n
 _gz30 = ME.build_list({**_GZ, "inverter": {**_PRIMO, "ac_output_current_a": 20.8, "max_ocpd_a": 30}}, {"ready": False, "branches": []}, {}, None, "grid_zero")
 check("grid zero: a 20.8 A inverter takes the master 30 A breaker line", any(ln["name"] == "Breaker 30A compatible con base para medidor" and ln["in_master"] for ln in _gz30["lines"] if ln["qty"]), True)
 check("hybrid list has no interconnection base", any("Base para medidor" in n for n in _by), False)
+
+# ── Grid Zero: NEC wiring, list and drawing ────────────────────────────────────
+from webapp.wizard_steps import gz_wiring  # noqa: E402
+GZ_BLOB = {"meta": {"system_type": "grid_zero"}, "site": BLOB["site"],
+           "equipment": {"panel": PANEL, "inverter": FRONIUS, "chosen_scenario": {"total_panels": 16, "strings": 2, "panels_per_string": 8, "voc_total": 385.0}}}
+GZ = gz_wiring.build_context(GZ_BLOB)
+_gb = {b["key"]: b for b in GZ["branches"]}
+check("grid zero wiring: three runs (strings, DC breakers -> inverter, inverter -> meter base)", list(_gb), ["pv_strings", "pv_dc_inv", "gz_ac"])
+check("grid zero: DC breakers -> inverter has no breaker of its own", _gb["pv_dc_inv"]["ocpd_a"], None)
+check("grid zero: string run is #10 solar in 1 in conduit", (_gb["pv_strings"]["ugc"], _gb["pv_strings"]["conduit"]["trade"]), ("10", "1"))
+check("grid zero: meter-base breaker is 125 % of the inverter current, capped by the manufacturer", (_gb["gz_ac"]["ocpd_a"], _gb["gz_ac"].get("max_ocpd_a")), (60, 60))
+GZ_EQ = GZ_BLOB["equipment"]
+_gzl = {ln["name"]: ln for ln in engine.build_list(GZ_EQ, GZ, {}, None, "grid_zero")["lines"] if ln["qty"]}
+check("grid zero list: DC string breakers counted once (2)", _gzl["Breaker DC para riel DIN 32A 2P"]["qty"], 2)
+check("grid zero list: the AC breaker is the meter-base one, not a DIN breaker", (any(n.startswith("Breaker AC para riel DIN") for n in _gzl), _gzl["Breaker 60A compatible con base para medidor"]["qty"]), (False, 1))
+check("grid zero list: solar cable for both DC runs and 240 V cable to the meter base", ("Cable #10 AWG - SOLAR rojo" in _gzl, any("THHN" in n and "negro" in n for n in _gzl)), (True, True))
+cfg_gz, prob_gz = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": GZ_EQ, "wiring": GZ, "blob": GZ_BLOB}, {})
+check("grid zero drawing needs no questions", (cfg_gz["kind"], prob_gz["blockers"]), ("grid_zero", []))
+check("grid zero drawing: base breaker and strings from the sized design", (cfg_gz["base"]["breaker"], cfg_gz["pv"]["strings"], cfg_gz["pv"]["string_breaker"]), ("2P 60 A", 2, "32 A 2P DC"))
+out_gz = io.BytesIO()
+_build_dc(cfg_gz, out_gz)
+check("grid zero PDF renders", out_gz.getvalue()[:4], b"%PDF")
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

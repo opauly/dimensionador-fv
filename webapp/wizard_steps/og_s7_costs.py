@@ -134,7 +134,7 @@ def _load_service_defaults(system_type: str = "off_grid") -> list[dict]:
 
 def _get_current_prices(
     panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
-    system_type: str = "off_grid", kwp: float = 0.0,
+    system_type: str = "off_grid", kwp: float = 0.0, meter: dict | None = None,
 ) -> dict:
     """Fetch live prices from DB for equipment + service defaults, falling
     back to each dict's own (possibly stale) `cost_usd` if the DB call
@@ -191,6 +191,16 @@ def _get_current_prices(
             prices["Monitoreo::note"] = price_note((r.data or {}).get("price_updated_at"), (r.data or {}).get("price_source"))
         except Exception:
             prices["Monitoreo"] = round(float(monitoring.get("cost_usd") or 0), 2)
+    if meter:          # energy meter (VM-3P75CT) chosen in Equipos: its own quote line
+        try:
+            from database.supabase_client import get_client
+
+            r = (get_client().table("monitoring_devices")
+                 .select("cost_usd, price_updated_at, price_source").eq("id", meter["id"]).single().execute())
+            prices["Medidor de energía"] = round(float((r.data or {}).get("cost_usd") or 0), 2)
+            prices["Medidor de energía::note"] = price_note((r.data or {}).get("price_updated_at"), (r.data or {}).get("price_source"))
+        except Exception:
+            prices["Medidor de energía"] = round(float(meter.get("cost_usd") or 0), 2)
     for svc in _load_service_defaults(system_type):
         prices[svc["item"]] = service_unit_cost(svc, kwp)
         if svc.get("price_updated_at"):
@@ -200,12 +210,12 @@ def _get_current_prices(
 
 def _refresh_prices_core(
     line_items: list[dict], panel: dict, inverter: dict, battery: dict, cc: dict, monitoring: dict | None,
-    system_type: str = "off_grid", kwp: float = 0.0,
+    system_type: str = "off_grid", kwp: float = 0.0, meter: dict | None = None,
 ) -> tuple[list[dict], int]:
     """(updated_line_items, n_changed) — do-not-drop item 25: ONLY
     `unit_cost` is touched; qty, iva_pct, specs and custom (non-catalog)
     rows are returned untouched."""
-    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp)
+    price_map = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp, meter)
     updated, changes = [], 0
     for li in line_items:
         new_li = dict(li)
@@ -235,6 +245,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
     battery = equipment.get("battery") or {}
     cc = equipment.get("charge_controller") or {}
     monitoring = equipment.get("monitoring")
+    meter = equipment.get("energy_meter")
     split_phase = equipment.get("split_phase") or {}
 
     panel_count = equipment.get("panel_count", 0)
@@ -250,7 +261,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
 
     from pricing.service_rates import kwp_from_blob
 
-    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp_from_blob(blob))
+    live_prices = _get_current_prices(panel, inverter, battery, cc, monitoring, system_type, kwp_from_blob(blob), meter)
     items: list[dict] = []
 
     if panel:
@@ -297,6 +308,15 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "iva_pct": _catalog_iva(monitoring),
             "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
             "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
+        })
+    if meter:
+        items.append({
+            "item": "Medidor de energía", "item_en": "Energy meter",
+            "qty": 1,
+            "unit_cost": live_prices.get("Medidor de energía", 0.0),
+            "iva_pct": _catalog_iva(meter),
+            "specs": f"{meter.get('brand','')} {meter.get('model','')}".strip(),
+            "specs_en": f"{meter.get('brand','')} {meter.get('model','')}".strip(),
         })
     # Phase 23: "Estructura de montaje" used to be hardcoded here (Off-Grid/
     # Hybrid only). Migration 049 folded it into `service_defaults` for all
@@ -453,10 +473,11 @@ def refresh_prices(blob: dict) -> tuple[dict, int]:
     battery = equipment.get("battery") or {}
     cc = equipment.get("charge_controller") or {}
     monitoring = equipment.get("monitoring")
+    meter = equipment.get("energy_meter")
     current = blob.get("costs", {}).get("line_items") or _seed_line_items(blob)
     from pricing.service_rates import kwp_from_blob
 
-    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring, _system_type(blob), kwp_from_blob(blob))
+    updated, n_changed = _refresh_prices_core(current, panel, inverter, battery, cc, monitoring, _system_type(blob), kwp_from_blob(blob), meter)
     return _finalize(blob, updated), n_changed
 
 

@@ -1,5 +1,5 @@
 from __future__ import annotations
-"""Unifilar tab — the single-line diagram (PDF, one sheet) of an AC-coupled hybrid project.
+"""Unifilar tab — the single-line diagram (PDF, one sheet): hybrid AC-coupled, DC-coupled (off-grid or hybrid) or Grid Zero.
 
 The drawing is `unifilar/generate_unifilar.py` (the `unifilar-hibrido-ac` skill); its configuration is
 built from the same sized design the Técnico tab and the materials list read
@@ -31,8 +31,10 @@ def render_panel(ctx: dict, *, message: str | None = None) -> str:
     if d["empty"]:
         return render_template("projects/_unifilar.html", pid=project["id"], empty=d["empty"])
     cfg, problems = CB.build_config(project, d, answers, string_a)
+    kind = CB.drawing_kind(project, d["wiring"])
     return render_template(
         "projects/_unifilar.html", pid=project["id"], empty=None, answers=answers, cfg=cfg, problems=problems,
+        kind=kind, kind_text=CB.KIND_TEXT.get(kind, ""),
         export_choices=CB.EXPORT_CHOICES, lynx_choices=CB.LYNX_CHOICES, message=message,
         pdf_name=_pdf_name(project, d) if cfg else None, ready=cfg is not None,
     )

@@ -61,6 +61,7 @@ DEFAULT_LENGTHS = {
     "bat_inv_m": 2.0,    # battery bank -> inverter
     "ac_out_m": 10.0,    # inverter -> AC panel
     "ac_in_m": 10.0,     # grid -> inverter AC input
+    "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
 }
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → controlador",

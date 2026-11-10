@@ -18,14 +18,17 @@
   <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
 {% else %}
   <p class="un-h" style="margin-top:6px;">Diagrama unifilar</p>
-  <p class="card-note-sm">Sistema híbrido acoplado en AC: Fronius en el AC-OUT de dos MultiPlus-II en split-phase, baterías en Lynx Power In y Ekrano GX. El dibujo sale de los mismos calibres y breakers del dimensionamiento de la pestaña Técnico (el mismo origen de la lista de materiales). Los pendientes y revisiones se muestran aquí y no se dibujan en el plano.</p>
+  <p class="card-note-sm">{{ kind_text }} El dibujo sale de los mismos calibres y breakers del dimensionamiento de la pestaña Técnico (el mismo origen de la lista de materiales). Los pendientes y revisiones se muestran aquí y no se dibujan en el plano.</p>
 
   <form hx-post="{{ url_for('projects.unifilar_guardar', pid=pid) }}" hx-trigger="change delay:400ms" hx-target="#uni-panel" hx-swap="outerHTML">
     <div class="un-grid">
+      {% if kind == 'hybrid_ac' %}
       <div class="{{ 'un-ask' if not answers.export else '' }}"><label for="un-export">Inyección a la red</label>
         <select id="un-export" name="export"><option value="">— elegir —</option>
           {% for val, lab in export_choices %}<option value="{{ val }}" {{ 'selected' if answers.export == val else '' }}>{{ lab }}</option>{% endfor %}
         </select></div>
+      {% endif %}
+      {% if kind in ('hybrid_ac', 'off_grid') %}
       <div class="{{ 'un-ask' if not answers.lynx else '' }}"><label for="un-lynx">Bus DC de baterías</label>
         <select id="un-lynx" name="lynx"><option value="">— elegir —</option>
           {% for val, lab in lynx_choices %}<option value="{{ val }}" {{ 'selected' if answers.lynx == val else '' }}>{{ lab }}</option>{% endfor %}
@@ -33,6 +36,7 @@
       <div><label for="un-q4">Uso del sub-panel (Q4)</label><input id="un-q4" type="text" name="q4" value="{{ answers.q4 }}"></div>
       <div><label for="un-l1">Cargas críticas (línea 1)</label><input id="un-l1" type="text" name="loads1" value="{{ answers.loads1 }}"></div>
       <div><label for="un-l2">Cargas críticas (línea 2)</label><input id="un-l2" type="text" name="loads2" value="{{ answers.loads2 }}"></div>
+      {% endif %}
       <div><label><input type="checkbox" name="spd" value="1" {{ 'checked' if answers.spd else '' }}> Lleva supresor de picos (SPD)</label>
         <input type="text" name="spd_label" value="{{ answers.spd_label }}" style="margin-top:4px;"></div>
       <div><label for="un-rev">Revisión</label><input id="un-rev" type="text" name="revision" value="{{ answers.revision }}">

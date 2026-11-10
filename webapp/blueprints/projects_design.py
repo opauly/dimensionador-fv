@@ -45,7 +45,11 @@ def load(project: dict) -> dict:
         return out
     if project.get("system_type") in ("off_grid", "hybrid"):
         out["wiring"] = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"))
+    elif project.get("system_type") == "grid_zero":
+        from webapp.wizard_steps import gz_wiring
+
+        out["wiring"] = gz_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("wiring_manual") or {})
     else:
-        out["wiring"] = {"ready": False, "reason": "El cableado automático está disponible para sistemas Off-Grid e Híbridos; Grid Zero se agregará después.",
+        out["wiring"] = {"ready": False, "reason": "El cableado automático está disponible para sistemas Off-Grid, Híbridos y Grid Zero.",
                          "branches": []}
     return out
