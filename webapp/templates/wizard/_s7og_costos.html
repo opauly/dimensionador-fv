@@ -25,16 +25,16 @@
 .s7-pct-total { text-align:right; white-space:nowrap; color:#6b7280; font-size:0.85rem; }
 .s7-cost-table { table-layout:fixed; width:100%; }
 .s7-cost-table tbody td, .s7-cost-table thead td { padding-left:8px; padding-right:8px; }
-.s7-cost-table td:nth-child(1), .s7-cost-table td:nth-child(2) { width:22%; }
-.s7-cost-table td:nth-child(3) { width:9%; }
-.s7-cost-table td:nth-child(4) { width:12%; }
-.s7-cost-table td:nth-child(5) { width:10%; }
-.s7-cost-table td:nth-child(6) { width:8%; }
-.s7-cost-table td:nth-child(7) { width:8%; }
-.s7-cost-table td:nth-child(8) { width:24%; }
-.s7-cost-table td:nth-child(9) { width:5%; text-align:center; padding-right:16px; }
+.s7-cost-table td:nth-child(1), .s7-cost-table td:nth-child(2) { width:19%; }
+.s7-cost-table td:nth-child(3) { width:8%; }
+.s7-cost-table td:nth-child(4) { width:11%; }
+.s7-cost-table td:nth-child(5), .s7-cost-table td:nth-child(6) { width:9%; }
+.s7-cost-table td:nth-child(7) { width:7%; }
+.s7-cost-table td:nth-child(8) { width:8%; }
+.s7-cost-table td:nth-child(9) { width:21%; }
+.s7-cost-table td:nth-child(10) { width:5%; text-align:center; padding-right:16px; }
 .s7-cost-table.s7-lang-en .sp-es, .s7-cost-table.s7-lang-es .sp-en { display:none; }
-.s7-cost-table td:nth-child(9) .btn { padding:2px 8px; min-width:0; font-size:0.8rem; line-height:1.2; }
+.s7-cost-table td:nth-child(10) .btn { padding:2px 8px; min-width:0; font-size:0.8rem; line-height:1.2; }
 .s7-cost-table.s7-lang-en td:nth-child(1), .s7-cost-table.s7-lang-es td:nth-child(2) { display:none; }
 .s7-cost-table .finput { width:100%; min-width:0; box-sizing:border-box; }
 </style>
@@ -66,7 +66,7 @@
     <table class="dtable s7-cost-table s7-lang-{{ language }}">
       <thead><tr>
         <td>Descripción (ES)</td><td>Descripción (EN)</td><td>Qty</td>
-        <td>Costo real (USD)</td><td>Precio mostrado</td><td title="Participación de este ítem en el TOTAL de la cotización — cifra interna, no aparece en el PDF.">% del Total</td><td>IVA</td><td>Especificaciones</td><td></td>
+        <td>Costo real (USD)</td><td>Precio mostrado</td><td title="Precio mostrado más el IVA de esa línea — lo que paga el cliente por unidad. Cifra interna, el PDF sigue mostrando el precio sin IVA.">Precio con IVA</td><td title="Participación de este ítem en el TOTAL de la cotización — cifra interna, no aparece en el PDF.">% del Total</td><td>IVA</td><td>Especificaciones</td><td></td>
       </tr></thead>
       <tbody>
         {% for row in rows %}
@@ -80,6 +80,7 @@
             ${{ '{:,.2f}'.format(row.unit_price_shown) }}
             {% if not row.markup_eligible %}<div class="s7-no-margin">sin margen</div>{% endif %}
           </td>
+          <td class="s7-price-shown">${{ '{:,.2f}'.format(row.unit_price_shown * (1 + (row.iva_pct or 0))) }}</td>
           <td class="s7-pct-total">{{ '%.1f'|format(row.pct_of_total or 0) }}%</td>
           <td>
             <select class="finput" name="r-{{ loop.index0 }}-iva" title="IVA aplicable a este producto/servicio">
