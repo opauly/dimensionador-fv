@@ -172,7 +172,7 @@ def _slug(s: str) -> str:
 
 # ── Rules ──────────────────────────────────────────────────────────────────────
 
-def _equipment(c: Collector, eq: dict, coupling: dict) -> None:
+def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = None) -> None:
     panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
     bat, cc, mon = eq.get("battery") or {}, eq.get("charge_controller") or {}, eq.get("monitoring") or {}
     model = lambda it: f"{it.get('brand', '')} {it.get('model', '')}".strip()  # noqa: E731
@@ -209,7 +209,12 @@ def _equipment(c: Collector, eq: dict, coupling: dict) -> None:
               note="medidor de energía elegido en Equipos")
         c.add(_BY_KEY[METER_CT_KEY], CT_PER_METER, comment="POR VERIFICAR TAMAÑO",
               note=f"{CT_PER_METER} transformadores de corriente para el medidor (uno por línea)")
-        c.add(_named("Cable UTP normal", "Victron Energy"), 1, note="medidor → Cerbo/Ekrano GX o router (Ethernet o VE.Can)")
+        # Ethernet from the meter (at the electrical panel) to the Cerbo/Ekrano in the cabinet: same run as grid -> inverters.
+        run = float((lengths or {}).get("ac_in_m") or 0)
+        if run > 0:
+            c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name="Cable de red Ethernet cat6e", unit="m", section="Generales",
+                  group="Monitoreo", sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"), where="Medidor → Cerbo/Ekrano GX",
+                  note=f"{run:g} m del tramo gabinete → tablero eléctrico (largo de «Red → entrada AC») + {int(WASTE * 100)} % de desperdicio, de a {CABLE_STEP_M:g} m")
 
 
 def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
@@ -502,7 +507,7 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     pending: list[str] = []
 
     c = Collector()
-    _equipment(c, eq, coupling)
+    _equipment(c, eq, coupling, wiring_ctx.get("lengths"))
     _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)
     _project_kit(c, eq, coupling, layout, pending)

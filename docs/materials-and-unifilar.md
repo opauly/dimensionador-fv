@@ -65,7 +65,7 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - **También siempre:** 1 riel DIN perforado, 1 terminal para riel DIN y 1 riel strut perfil bajo.
 - **Cerbo o Ekrano GX:** lo define el selector «Monitoreo» del paso Equipos; la lista pone el que se eligió.
 - **Medidor de energía (VM-3P75CT):** se elige en Equipos («Medidor de energía», opcional; híbrido y off-grid). Trae 2 transformadores de
-  corriente (comentario «POR VERIFICAR TAMAÑO») y 1 cable UTP al GX o router. El catálogo lo guarda en `monitoring_devices` con
+  corriente (comentario «POR VERIFICAR TAMAÑO») y cable de red Ethernet cat6e del largo del tramo gabinete → tablero eléctrico (el de «Red → entrada AC»), del medidor al GX. El catálogo lo guarda en `monitoring_devices` con
   `device_kind = 'meter'` (migración 059, datos del datasheet y PDF guardado) y no sale en la lista de monitoreo.
 - **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.

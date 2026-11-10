@@ -196,7 +196,10 @@ _resm = ME.build_list(_EQM, CTX, {"materials": {"layout": {"rows": 2}}}, None)
 _bym = {ln["name"]: ln for ln in _resm["lines"] if ln["qty"]}
 check("meter VM-3P75CT x1 on the Victron section", (_bym["Medidor VM-3P75CT"]["qty"], _bym["Medidor VM-3P75CT"]["section"]), (1, "Victron Energy"))
 check("2 current transformers flagged to verify size", (_bym["Transformador de Corriente 100A:333mV"]["qty"], _bym["Transformador de Corriente 100A:333mV"]["comment"]), (2, "POR VERIFICAR TAMAÑO"))
-check("meter adds one UTP cable", _bym["Cable UTP normal"]["qty"], _utp0 + 1)
+check("meter adds no short UTP, it brings cat6e by metre", (_bym["Cable UTP normal"]["qty"], "Cable de red Ethernet cat6e" in _bym), (_utp0, True))
+_run = CTX["lengths"]["ac_in_m"]
+check("cat6e as long as the cabinet -> panel run (+waste, 5 m steps)", _bym["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to(_run * (1 + ME.WASTE), ME.CABLE_STEP_M))
+check("no meter: no cat6e", "Cable de red Ethernet cat6e" in _by, False)
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
