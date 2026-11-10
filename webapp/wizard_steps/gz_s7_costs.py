@@ -155,7 +155,8 @@ def _get_current_prices(panel: dict, inverter: dict, monitoring: dict | None, kw
             from database.supabase_client import get_client
 
             r = (get_client().table("monitoring_devices")
-                 .select("cost_usd, price_updated_at, price_source").eq("id", monitoring["id"]).single().execute())
+                 .select("cost_usd, ct_cost_usd, price_updated_at, price_source").eq("id", monitoring["id"]).single().execute())
+            prices["Transformadores de corriente"] = round(float((r.data or {}).get("ct_cost_usd") or 0), 2)
             prices["Sistema de monitoreo remoto"] = round(float((r.data or {}).get("cost_usd") or 0), 2)
             prices["Sistema de monitoreo remoto::note"] = price_note((r.data or {}).get("price_updated_at"), (r.data or {}).get("price_source"))
         except Exception:
@@ -205,6 +206,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
     chosen = equipment.get("chosen_scenario") or {}
     panel_count = chosen.get("total_panels", 0)
 
+    from calculations.meter_cts import ct_count
     from pricing.service_rates import kwp_from_blob
 
     live_prices = _get_current_prices(panel, inverter, monitoring, kwp_from_blob(blob))
@@ -256,6 +258,16 @@ def _seed_line_items(blob: dict) -> list[dict]:
             "specs": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
             "specs_en": f"{monitoring.get('brand','')} {monitoring.get('model','')}".strip(),
         })
+        n_ct = ct_count(monitoring, inverter)
+        if n_ct:       # the Fronius Smart Meter reads the grid through external current transformers: one per phase
+            items.append({
+                "item": "Transformadores de corriente", "item_en": "Current transformers",
+                "qty": n_ct,
+                "unit_cost": live_prices.get("Transformadores de corriente", 0.0),
+                "iva_pct": _catalog_iva(monitoring),
+                "specs": "Fronius Smart Meter CT V, 333 mV (una por fase)",
+                "specs_en": "Fronius Smart Meter CT V, 333 mV (one per phase)",
+            })
 
     for it in items:
         note = live_prices.get((it.get("item") or "") + "::note")

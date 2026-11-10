@@ -1,11 +1,12 @@
 """Wiring for a Grid Zero design (string inverter, no batteries, no charge controllers), NEC-based like the Off-Grid /
 Hybrid one (`og_wiring`) and returned in the same shape, so the Técnico tab, the materials list and the unifilar read it alike.
 
-Three runs, as Oscar draws them:
+Four runs, as Oscar draws them:
   1. PV strings -> DC breakers       (DC, one run per string; #10 solar-cable floor, 1 in conduit)
   2. DC breakers -> inverter          (DC, one run per string; protected by the string breaker, so no breaker of its own)
   3. Inverter -> generation meter base           (AC 240 V split-phase, L1 + L2 + ground; breaker = 125 % of the inverter's maximum output
                                        current, limited to the manufacturer's maximum; it sits in the meter base)
+  4. Generation meter base -> consumption meter base (same conductors as run 3, its own editable length, no breaker of its own)
 """
 from __future__ import annotations
 
@@ -20,11 +21,13 @@ LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",
     "dc_inv_m": "Breakers CC → Fronius",
     "ac_out_m": "Fronius → base de generación",
+    "gz_link_m": "Base de generación → base de consumo",
 }
 BRANCH_KEYS = {
     "Paneles → breakers CC (strings)": "pv_strings",
     "Breakers CC → inversor (strings)": "pv_dc_inv",
     "Inversor → base de medidor de generación": "gz_ac",
+    "Base de generación → base de consumo": "gz_link",
 }
 
 
@@ -89,10 +92,22 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
             ac["notes"].append(f"El breaker calculado ({ac['ocpd_a']} A) supera el máximo del fabricante: se limita a {int(max_ocpd)} A.")
             ac["ocpd_a"] = int(max_ocpd)
 
-    branches = [pv, dc_inv, ac]
+    # Interconnection with the existing consumption meter base: the same conductors that reach the generation base, its own length.
+    link = _size(
+        "Base de generación → base de consumo", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+        v_ref=C.PV_INVERTER_AC_V, length_m=L["gz_link_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+        note="Mismo conductor que llega a la base de medidor de generación (L1 + L2 + tierra); interconecta con la base de medición de consumo "
+             "existente. Lo protege el breaker de la base de generación, por eso no lleva uno propio.",
+    )
+    link["ocpd_a"] = None
+
+    branches = [pv, dc_inv, ac, link]
     for b in branches:
         b["key"] = BRANCH_KEYS.get(b["label"])
-        W.apply_manual(b, (manual_override or {}).get(b["key"]))
+        man = (manual_override or {}).get(b["key"])
+        if b["key"] == "gz_link" and not man and (manual_override or {}).get("gz_ac"):
+            man = {"ocpd_a": None, "ugc": (manual_override["gz_ac"] or {}).get("ugc")}     # "the same cable" as the run that reaches the generation base
+        W.apply_manual(b, man)
     ctx["has_manual"] = any(b.get("manual") for b in branches)
     ctx["gauge_options"] = [(g, W.gauge_label(g)) for g in W.T.GAUGE_ORDER[W.T.GAUGE_ORDER.index("14"):W.T.GAUGE_ORDER.index("500") + 1]]
     ctx.update(ready=True, branches=branches, meters=W.conductor_meters(branches))

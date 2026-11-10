@@ -244,7 +244,7 @@ GZ_BLOB = {"meta": {"system_type": "grid_zero"}, "site": BLOB["site"],
            "equipment": {"panel": PANEL, "inverter": FRONIUS, "chosen_scenario": {"total_panels": 16, "strings": 2, "panels_per_string": 8, "voc_total": 385.0}}}
 GZ = gz_wiring.build_context(GZ_BLOB)
 _gb = {b["key"]: b for b in GZ["branches"]}
-check("grid zero wiring: three runs (strings, DC breakers -> inverter, inverter -> meter base)", list(_gb), ["pv_strings", "pv_dc_inv", "gz_ac"])
+check("grid zero wiring: four runs (strings, DC breakers -> inverter, inverter -> generation base, generation base -> consumption base)", list(_gb), ["pv_strings", "pv_dc_inv", "gz_ac", "gz_link"])
 check("grid zero: DC breakers -> inverter has no breaker of its own", _gb["pv_dc_inv"]["ocpd_a"], None)
 check("grid zero: string run is #10 solar in 1 in conduit", (_gb["pv_strings"]["ugc"], _gb["pv_strings"]["conduit"]["trade"]), ("10", "1"))
 check("grid zero: meter-base breaker is 125 % of the inverter current, capped by the manufacturer", (_gb["gz_ac"]["ocpd_a"], _gb["gz_ac"].get("max_ocpd_a")), (60, 60))
@@ -285,6 +285,33 @@ cfg_h8 = {**cfg_h, "battery": {**cfg_h["battery"], "count": 8}}
 out_h8 = io.BytesIO()
 build(cfg_h8, out_h8)
 check("AC-coupled hybrid with 8 batteries renders abbreviated", out_h8.getvalue()[:4], b"%PDF")
+
+# ── Batch 9: Fronius Smart Meter + current transformers, interconnection cable, controllers with an ellipsis ───
+from calculations.meter_cts import ct_count  # noqa: E402
+SM = {"id": "sm", "brand": "Fronius", "model": "Smart Meter WR 100-600 V-3", "uses_cts": True}
+check("CTs: one per phase (split-phase 2, three-phase 3), none for a meter without CTs",
+      (ct_count(SM, _PRIMO), ct_count(SM, {**_PRIMO, "phase": "three"}), ct_count({"model": "Smart Meter 63A-3"}, _PRIMO)), (2, 3, 0))
+check("CTs: a design saved before the column existed is still recognised by its model", ct_count({"model": "Smart Meter WR 100-600 V-3"}, _PRIMO), 2)
+_gsm = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
+check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
+check("grid zero list: no CTs without the Smart Meter", "Transformador de Corriente 100A:333mV" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
+check("grid zero wiring: the link run has the same conductors as the generation-base run and no breaker of its own",
+      (_gb["gz_link"]["ugc"] == _gb["gz_ac"]["ugc"], _gb["gz_link"]["ocpd_a"]), (True, None))
+GZ_L = gz_wiring.build_context(GZ_BLOB, {"gz_link_m": 12})
+check("grid zero wiring: the link length is editable", {b["key"]: b["length_m"] for b in GZ_L["branches"]}["gz_link"], 12)
+check("grid zero list: the link carries 240 V cable (its own metres)", any("Base de generación → base de consumo" in w for ln in engine.build_list(GZ_EQ, GZ_L, {}, None, "grid_zero")["lines"] for w in ln.get("wheres") or []), True)
+check("grid zero drawing: link conductors reach the config", len(cfg_gz["base"]["link_conductors"] or []), 3)
+EQ_CC6 = {**EQ_DC, "n_strings": 12, "charge_controller_qty": 6}
+BLOB_CC6 = {**BLOB_DC, "equipment": EQ_CC6}
+d_cc6 = {"eq": EQ_CC6, "wiring": og_wiring.build_context(BLOB_CC6), "blob": BLOB_CC6}
+cfg_cc6, prob_cc6 = CB.build_config(project, d_cc6, {"lynx": "power_in"})
+check("6 controllers with 12 strings are drawable (abbreviated)", (prob_cc6["blockers"], cfg_cc6["controllers"]["count"], cfg_cc6["pv"]["strings"]), ([], 6, 12))
+check("abbreviated note mentions the controllers", any("controladores" in w["text"] and "abreviado" in w["text"] for w in prob_cc6["warnings"]), True)
+out_cc6 = io.BytesIO()
+_build_dc(cfg_cc6, out_cc6)
+check("the 6-controller drawing renders", out_cc6.getvalue()[:4], b"%PDF")
+_, prob_few = CB.build_config(project, {**d_cc6, "eq": {**EQ_CC6, "n_strings": 5}}, {"lynx": "power_in"})
+check("more controllers than strings is refused", any("al menos un string por controlador" in b for b in prob_few["blockers"]), True)
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

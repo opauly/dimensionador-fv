@@ -24,6 +24,7 @@ from collections import OrderedDict
 from calculations import bom as B
 from calculations import nec_tables as T
 from calculations import wiring as W
+from calculations.meter_cts import ct_count
 from materials.catalog import CATALOG, SECTIONS
 
 WASTE = 0.10             # cut-offs and slack on cable and conduit
@@ -76,6 +77,7 @@ WHERE = {
     "pv_strings": "Strings FV", "pv_cc": "Breakers CC → controlador", "pv_inv_ac": "Fronius → sub-panel",
     "cc_bat": "Controlador → baterías", "bat_inv": "Baterías → inversores", "ac_out": "AC Out", "ac_in": "AC In",
     "pv_dc_inv": "Breakers CC → Fronius", "gz_ac": "Fronius → base de generación",
+    "gz_link": "Base de generación → base de consumo",
 }
 
 # Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
@@ -226,6 +228,10 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
         if eq.get("monitoring"):
             c.add(None, 1, name=model(eq["monitoring"]), section="Generales", group="Monitoreo", source="diseño",
                   sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"))
+            n_ct = ct_count(eq["monitoring"], inv)
+            if n_ct:
+                c.add(_BY_KEY[METER_CT_KEY], n_ct, comment="POR VERIFICAR TAMAÑO",
+                      note=f"{n_ct} transformadores de corriente del medidor Fronius: uno por fase ({'trifásico' if n_ct == 3 else 'monofásico'})")
         return
     if inv:
         qty = int(eq.get("inverter_qty") or 1)
@@ -432,7 +438,7 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
                 elif key in ("cc_bat", "bat_inv"):
                     put("cable_thhn", g, "rojo", L, where, 2)
                     put("cable_thhn", g, "negro", L, where, 2)
-                elif key in ("pv_inv_ac", "gz_ac"):
+                elif key in ("pv_inv_ac", "gz_ac", "gz_link"):
                     put("cable_thhn", g, "negro", L, where, 2)
                     put("cable_thhn", g, "rojo", L, where, 2)
                 elif r["role"] == "Neutro":

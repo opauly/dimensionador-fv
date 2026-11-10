@@ -106,10 +106,12 @@ def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[st
         if not 1 <= qty <= 8:
             out.append(f"El dibujo admite de 1 a 8 inversores Victron; este diseño tiene {qty}.")
         n_str, n_cc = int(eq.get("n_strings") or 0), int(eq.get("charge_controller_qty") or 1)
-        if not 1 <= n_str <= 4:
-            out.append(f"El dibujo admite de 1 a 4 strings; el diseño tiene {n_str}.")
-        if not 1 <= n_cc <= 3:
-            out.append(f"El dibujo admite de 1 a 3 controladores de carga; el diseño tiene {n_cc}.")
+        if not 1 <= n_str <= (4 if n_cc <= 4 else 200):
+            out.append(f"El dibujo admite de 1 a 4 strings (más solo con más de 4 controladores); el diseño tiene {n_str}.")
+        if n_cc < 1:
+            out.append("El diseño no tiene controladores de carga.")
+        elif n_cc > 4 and n_str < n_cc:
+            out.append(f"Con más de 4 controladores el dibujo necesita al menos un string por controlador; el diseño tiene {n_str} strings y {n_cc} controladores.")
         n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
         if not 1 <= n_bat <= 24:
             out.append(f"El dibujo admite de 1 a 24 baterías; el diseño tiene {n_bat}.")
@@ -242,8 +244,13 @@ def _meter(eq: dict, grid_zero: bool = False) -> dict | None:
         mon = eq.get("monitoring") or {}
         if "meter" not in (mon.get("model") or "").lower():
             return None
-        return {"title": _model(mon).upper(), "lines": ["en paralelo en el tablero principal", "transformadores de corriente: por verificar"],
-                "ct_label": "TC", "comm": "Modbus RTU al Fronius"}
+        from calculations.meter_cts import ct_count
+
+        n_ct = ct_count(mon, eq.get("inverter")) or 2
+        model = (mon.get("model") or "").upper()
+        return {"title": f"{(mon.get('brand') or '').upper()} SMART METER".strip(),
+                "lines": [model.replace("SMART METER", "").strip() or "en paralelo", "en paralelo en el tablero principal", f"{n_ct} TC (POR VERIFICAR TAMAÑO)"],
+                "ct_label": f"{n_ct} TC", "comm": "Modbus RTU al Fronius"}
     m = eq.get("energy_meter")
     if not m:
         return None
@@ -263,6 +270,7 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
     branches = wiring["branches"]
     panel, inv = eq["panel"], eq["inverter"]
     pv, dc_inv, ac = _branch(branches, "pv_strings"), _branch(branches, "pv_dc_inv"), _branch(branches, "gz_ac")
+    link = _branch(branches, "gz_link")
     string_a = string_breaker_a or pv["ocpd_a"]
     cfg = {
         "kind": "grid_zero", "project": _project_block(project, d, answers), "meter": _meter(eq, grid_zero=True),
@@ -277,7 +285,8 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
             "ac_conductors": [f"L1 {_g(ac['ugc'])} negro", f"L2 {_g(ac['ugc'])} rojo", f"T {_g(_egc(ac) or ac['ugc'])} verde"],
             "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
         },
-        "base": {"breaker": f"2P {ac['ocpd_a']} A", "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde"},
+        "base": {"breaker": f"2P {ac['ocpd_a']} A", "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
+                 "link_conductors": ([f"L1 {_g(link['ugc'])} negro", f"L2 {_g(link['ugc'])} rojo", f"T {_g(_egc(link) or link['ugc'])} verde"] if link else None)},
         "subpanel": {"spd": _spd_label(answers)},
     }
     return _latinize(cfg), {"blockers": [], "warnings": warnings_grid_zero(eq, wiring, string_a)}
@@ -427,6 +436,9 @@ def warnings_grid_zero(eq: dict, wiring: dict, string_a: int) -> list[dict]:
 def _abbreviated_note(eq: dict, qty: int | None = None) -> dict | None:
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     parts = []
+    n_cc = int(eq.get("charge_controller_qty") or 1) if qty else 0     # only the DC-coupled drawing has controllers
+    if n_cc > 4:
+        parts.append(f"{n_cc} controladores y sus strings (MPPT 1, MPPT 2, «…» y MPPT {n_cc})")
     if n_bat > 4:
         parts.append(f"{n_bat} baterías (#1, #2, «…» y #{n_bat})")
     if qty and qty > 3:

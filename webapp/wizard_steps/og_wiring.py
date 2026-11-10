@@ -62,6 +62,7 @@ DEFAULT_LENGTHS = {
     "ac_out_m": 10.0,    # inverter -> AC panel
     "ac_in_m": 10.0,     # grid -> inverter AC input
     "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
+    "gz_link_m": 3.0,    # Grid Zero: generation meter base -> existing consumption meter base
 }
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",
@@ -98,6 +99,10 @@ BRANCH_KEYS = {
 }
 
 
+# Grid Zero runs (see gz_wiring): the manual-values form has to read them too.
+GZ_ONLY_KEYS = ("pv_dc_inv", "gz_ac", "gz_link")
+
+
 def clean_lengths(saved: dict | None) -> dict[str, float]:
     """Defaults overlaid with any positive saved values (also used for a project's own lengths)."""
     saved = saved or {}
@@ -119,7 +124,7 @@ def lengths(blob: dict) -> dict[str, float]:
 def manual_from_form(form) -> dict:
     """{branch key: {'ocpd_a': int|None, 'ugc': gauge|None}} from the manual-values form (blank = use the calculated)."""
     out = {}
-    for key in BRANCH_KEYS.values():
+    for key in (*BRANCH_KEYS.values(), *GZ_ONLY_KEYS):
         a, g = (form.get(f"man_ocpd_{key}") or "").strip(), (form.get(f"man_ugc_{key}") or "").strip()
         try:
             a = int(float(a.replace(",", "."))) if a else None
