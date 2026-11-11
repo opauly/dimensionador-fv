@@ -100,6 +100,7 @@ ALIASES = {
     "Medidor VM-3P75CT": ["vm 3p75ct"],
 }
 CT_PER_METER = 2   # split-phase: one current transformer per line
+BATTERY_STAND_SLOTS = 6  # US5000/UF5000 per metal stand (3 levels x 2), to be confirmed by Oscar
 METER_CT_KEY = "interconexion-transformador-de-corriente-100a-333mv"
 METER_BASE_KEY = "interconexion-base-para-medidor-monofasica-con-interruptor-principal-tipo-parche-clase-100-combo-base"
 METER_BREAKER_KEY = "interconexion-breaker-30a-compatible-con-base-para-medidor"
@@ -264,6 +265,11 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
         c.add(row, n_bat, name=model(bat), section="Victron Energy", source="diseño", note=f"{n_bat} batería(s) del diseño")
         if "pylontech" in _norm(bat.get("brand", "")):
             c.add(_named("Cables para Pylontech", "Victron Energy"), n_bat, source="regla", note="un juego de cables por batería Pylontech")
+        if _norm(bat.get("model", "")).startswith(("us5000", "uf5000")):
+            # US5000/UF5000 are rack batteries and sit on a separate metal stand (Fidus is wall-mounted and needs none).
+            stands = max(1, math.ceil(n_bat / BATTERY_STAND_SLOTS))
+            c.add(None, stands, name="Mueble metálico para baterías", unit="un", section="Generales", source="regla", comment="POR CONFIRMAR MEDIDA",
+                  note=f"{n_bat} baterías {bat.get('model')} van en mueble aparte, hasta {BATTERY_STAND_SLOTS} por mueble (por confirmar)")
     if mon:
         row = match_equipment(mon)
         c.add(row, 1, name=model(mon), section="Victron Energy", source="diseño")

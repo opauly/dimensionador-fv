@@ -371,5 +371,12 @@ check("grid zero: the link cable of the drawing is on the list", all(f"Cable {_g
 check("Chint DC boxes: 2 strings -> 1, 3 -> 2, 12 -> 6",
       [_list({**EQ, "n_strings": n}, {"ready": False, "branches": [], "coupling": {"strings": n}}).get("Centro de carga Chint DC 5 espacios", {}).get("qty") for n in (2, 3, 12)], [1, 2, 6])
 
+# Battery stand: only US5000/UF5000 (rack batteries) bring a metal stand, Fidus is wall-mounted
+_bank = lambda n: {"battery_bank": {"battery_count": n}}  # noqa: E731
+_us = {"brand": "Pylontech", "model": "US5000"}
+_stand = lambda b, n: _list({**EQ, "battery": b, **_bank(n)}, CTX).get("Mueble metálico para baterías", {}).get("qty")  # noqa: E731
+check("battery stand: Fidus none, US5000 4 -> 1, US5000 7 -> 2, UF5000 2 -> 1",
+      (_stand({"brand": "Pylontech", "model": "Fidus"}, 4), _stand(_us, 4), _stand(_us, 7), _stand({"brand": "Pylontech", "model": "UF5000"}, 2)), (None, 1, 2, 1))
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
