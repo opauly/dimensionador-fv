@@ -510,6 +510,7 @@
   <div class="s6og-chips">
     <span class="s6og-chip">🏗️ Instalada: <b>{{ '%.2f'|format(ac.demand.total_installed_kw) }} kW</b></span>
     <span class="s6og-chip">📊 Demandada: <b>{{ '%.2f'|format(ac.demand.total_demand_kw) }} kW</b> ({{ '%.0f'|format(ac.demand.blended_factor * 100) }}%)</span>
+    {% if ac.fleet_peak %}<span class="s6og-chip" title="Mediana de los picos diarios (percentil 95) de {{ ac.fleet_peak.n }} instalaciones reales con este mismo consumo diario; rango entre sitios {{ '%.0f'|format(ac.fleet_peak.range_kw[0]) }}–{{ '%.0f'|format(ac.fleet_peak.range_kw[1]) }} kW. Es referencia: la demanda calculada es el diseño.">🛰️ Pico medido en flota: <b>~{{ '%.1f'|format(ac.fleet_peak.design_kw) }} kW</b></span>{% endif %}
     <span class="s6og-chip">🔌 Disponible inversor: <b>{{ '%.2f'|format(ac.available_power_kw) }} kW</b>{{ ' (estimado)' if ac.ac_summary.ac_out.available_current_estimated else '' }}</span>
     <span class="s6og-chip">⚡ Corriente pico: <b>{{ '%.1f'|format(ac.ac_summary.peak_current_a) }} A</b></span>
   </div>

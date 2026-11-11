@@ -91,6 +91,17 @@
           </tr>
           {% endfor %}
         </tbody>
+        {% if loads_data %}
+        <tfoot>
+          <tr class="dtable-total">
+            <td>Total</td>
+            <td></td>
+            <td title="Suma de cantidad × potencia nominal de todas las cargas">{{ '{:,.1f}'.format(power_totals.installed_kw) }} kW <span class="card-note-sm">teórica</span></td>
+            <td title="Demanda ÷ teórica. Cada categoría trae su propio factor (el Paso 5 permite editarlo línea por línea).">Factor de demanda {{ power_totals.factor_pct }} %</td>
+            <td colspan="3" title="Potencia que realmente se espera al mismo tiempo: la base para dimensionar inversores y breakers."><b>{{ '{:,.1f}'.format(power_totals.demand_kw) }} kW</b> <span class="card-note-sm">demandada real</span></td>
+          </tr>
+        </tfoot>
+        {% endif %}
       </table>
     </div>
   </div>

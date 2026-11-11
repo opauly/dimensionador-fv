@@ -262,6 +262,29 @@ def save_step(form) -> dict:
     }
 
 
+def power_totals(loads_display: list[dict]) -> dict:
+    """Theoretical (nameplate) power, the demand factor and the real demanded power of a loads table, for the footer of
+    the Step 4 tables. Same per-category demand factors Step 5 starts from (it lets the engineer edit them line by line);
+    a row whose category is still "(Automático)" is classified from the keyword tables only (never an AI call while the
+    page renders) and falls back to the module's generic factor."""
+    from calculations import load_profile_off_grid as lp
+
+    installed = demand = 0.0
+    for r in loads_display:
+        kw = float(r.get("Potencia (kW)") or 0) * int(r.get("Cantidad") or 1)
+        if kw <= 0:
+            continue
+        cat = _CATEGORY_LABEL_TO_KEY.get(r.get("Categoría"))
+        if not cat:
+            key = lp._normalize(r.get("Descripción") or "")
+            cat = next((c for k, c in lp._PRECLASSIFIED_SPECIFIC_V1 + lp._PRECLASSIFIED_GENERIC_V1
+                        if lp._keyword_matches(k, key)), None)
+        installed += kw
+        demand += kw * lp.default_demand_factor_pct(cat)
+    return {"installed_kw": round(installed, 2), "demand_kw": round(demand, 2),
+            "factor_pct": round(demand / installed * 100) if installed else 0}
+
+
 # ── build_context ────────────────────────────────────────────────────────
 
 
@@ -278,6 +301,7 @@ def build_context(blob: dict, scratch_key: str = DEFAULT_SCRATCH_KEY) -> dict:
         "catalog_options": list(CATALOG_OPTIONS.keys()),
         "category_options": CATEGORY_SELECT_OPTIONS,
         "loads_data": loads_data,
+        "power_totals": power_totals(loads_data),
         "import_notes": _notes(blob, scratch_key),
         "can_continue": len(loads_data) > 0,
     }

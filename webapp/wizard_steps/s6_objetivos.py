@@ -291,7 +291,11 @@ def _inputs(blob: dict, system_type: str) -> dict:
     if main_panel.get("mode") == "loads" and (main_panel.get("profile") or {}).get("lines"):
         main_peak = compute_demand_load(main_panel["profile"]["lines"])["total_demand_kw"]
     else:
-        main_peak = (main_daily / 24.0) * 3.0
+        # no load list for the main panel: its peak is the average power times how far the real fleet's daily peaks sit above
+        # their average (measured; 3.0 only while the fleet cannot say)
+        from calculations.fleet_peaks import typical_peak_ratio
+
+        main_peak = (main_daily / 24.0) * typical_peak_ratio()
     return {"missing": missing, "critical_daily_kwh": critical_daily, "critical_peak_kw": peak,
             "whole_home_daily_kwh": critical_daily + main_daily, "whole_home_peak_kw": peak + main_peak,
             "monthly_kwh_kwp": monthly}

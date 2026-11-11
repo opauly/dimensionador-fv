@@ -862,6 +862,32 @@ def check_fleet_shares() -> int:
     return failures
 
 
+def check_fleet_peaks() -> int:
+    """The fleet's measured peak/average ratio feeds the main-panel peak estimate and the step-7 reference chip; 3.0 is the fallback."""
+    from unittest import mock
+
+    from calculations import fleet_peaks as fpk
+
+    failures = 0
+
+    def expect(label, ok):
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+        failures += 0 if ok else 1
+
+    fleet = {"n": 12, "typical": 3.5, "design": 5.5, "design_range": (2.4, 19.0)}
+    with mock.patch.object(fpk, "fleet_peak_ratios", lambda: fleet):
+        e = fpk.expected_peak_kw(48.0)         # 2 kW average
+        expect("typical peak ratio is the fleet's median", fpk.typical_peak_ratio() == 3.5)
+        expect("expected peak = average power x the fleet's design ratio, with the site range",
+               abs(e["design_kw"] - 11.0) < 1e-9 and abs(e["range_kw"][0] - 4.8) < 1e-9 and abs(e["range_kw"][1] - 38.0) < 1e-9 and e["n"] == 12)
+        expect("no energy -> no expected peak", fpk.expected_peak_kw(0) is None)
+    with mock.patch.object(fpk, "fleet_peak_ratios", lambda: None):
+        expect("without fleet data the peak ratio falls back to the historical 3.0", fpk.typical_peak_ratio() == 3.0)
+        expect("without fleet data there is no reference peak", fpk.expected_peak_kw(48.0) is None)
+    return failures
+
+
 def st_text(rows, key):
     r = next(r for r in rows if r["key"] == key)
     return r["achieved"]
@@ -883,6 +909,8 @@ def main() -> int:
     failures += check_goals()
     print("Fleet day / night shares")
     failures += check_fleet_shares()
+    print("Fleet peak / average ratio")
+    failures += check_fleet_peaks()
     print("\nALL PASSED" if failures == 0 else f"\n{failures} FAILED")
     return 1 if failures else 0
 

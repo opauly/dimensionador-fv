@@ -704,6 +704,16 @@ def save_step(blob: dict, vid: str | None = None) -> dict | None:
 # ── build_context ────────────────────────────────────────────────────────
 
 
+
+def _fleet_peak(daily_kwh) -> dict | None:
+    """The fleet's measured peak for a home using this much energy a day (informational, next to the calculated demand)."""
+    try:
+        from calculations.fleet_peaks import expected_peak_kw
+
+        return expected_peak_kw(float(daily_kwh or 0))
+    except Exception:                                   # noqa: BLE001 — optional
+        return None
+
 def build_context(blob: dict, vid: str | None = None) -> dict:
     blob = blob or {}
     c = _compute(blob, vid)
@@ -907,6 +917,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
         available_power_kw = float(inverter.get("kw") or 0) * final_inverter_qty
         ac_ctx = {
             "demand": demand, "ac_summary": ac_summary, "available_power_kw": available_power_kw,
+            "fleet_peak": _fleet_peak(daily_kwh),
             "cat_table": [{
                 "category_label": CATEGORY_LABELS_ES.get(cat["category"], cat["category"]),
                 "installed_kw": cat["installed_kw"], "factor_applied": cat["factor_applied"],
