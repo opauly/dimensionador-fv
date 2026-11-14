@@ -120,7 +120,10 @@ def generate_intro_text(blob: dict, vid: str) -> str:
         "inverter_model": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),
         "battery_count": battery_bank.get("battery_count", 0),
         "battery_kwh": tech.get("battery_kwh", 0),
-        "autonomy_days": consumption.get("autonomy_days", 0) if system_type == "off_grid" else 0,
+        # Same figure the PDF's technical table prints (achieved with the installed bank), so the text and the
+        # table never disagree; the Step-6 target (`consumption["autonomy_days"]`) is only the fallback.
+        "autonomy_days": (round(float(tech.get("autonomy_days") or consumption.get("autonomy_days") or 0), 1)
+                          if system_type == "off_grid" else 0),
         "backup_nights": battery_bank.get("backup_nights", 0) if system_type != "off_grid" else 0,
         "daily_generation_kwh": tech.get("daily_generation_kwh", 0),
         "daily_consumption_kwh": consumption.get("daily_kwh", 0),

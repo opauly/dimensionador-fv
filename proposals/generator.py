@@ -304,6 +304,56 @@ def _autonomy_figures(blob: dict, is_off_grid: bool, system_type: str, battery: 
     return out
 
 
+def _short_load_name(name: str, limit: int = 38) -> str:
+    """Load name for a one-line note: parenthetical dropped, cut at a word boundary."""
+    base = (name or "").split("(")[0].strip()
+    if len(base) <= limit:
+        return base
+    cut = base[:limit].rsplit(" ", 1)[0].split()
+    while len(cut) > 1 and cut[-1].lower() in {"con", "de", "del", "para", "y", "e", "with", "of", "for", "and"}:
+        cut.pop()
+    return " ".join(cut)
+
+
+def _scope_block(consumption: dict, system_type: str) -> tuple[dict | None, dict | None]:
+    """Off-Grid and Hybrid: the box beside the monthly chart — the loads the system was sized for / backs up (biggest ones
+    by daily energy, with hours when a load is 1 kW or more). Built only from the client's own load list, nothing fixed.
+    Returns (es, en); (None, None) for Grid Zero or when no per-load profile exists."""
+    if system_type not in ("off_grid", "hybrid"):
+        return None, None
+    lines = [r for r in ((consumption.get("profile") or {}).get("lines") or []) if float(r.get("estimated_kwh_day") or 0) > 0]
+    daily = float(consumption.get("daily_kwh") or 0)
+    if not lines or daily <= 0:
+        return None, None
+    lines.sort(key=lambda r: -float(r["estimated_kwh_day"]))
+    top, rest = lines[:8], lines[8:]
+
+    def rows(es: bool) -> list[dict]:
+        out = []
+        for r in top:
+            name = _short_load_name(r.get("load_name", ""), 34)
+            hrs = float(r.get("duty_hours_day") or 0)
+            if float(r.get("connected_power_kw") or 0) >= 1.0 and hrs > 0:
+                name += f" ({f'{hrs:.1f}'.rstrip('0').rstrip('.')} h/{'día' if es else 'day'})"
+            out.append({"name": name, "kwh": f"{float(r['estimated_kwh_day']):.1f}"})
+        return out
+
+    def more(es: bool):
+        if not rest:
+            return None
+        n, kwh = len(rest), sum(float(r["estimated_kwh_day"]) for r in rest)
+        return (f"+ {n} cargas pequeñas" if es else f"+ {n} small loads"), f"{kwh:.1f}"
+
+    hy = system_type == "hybrid"
+    es = {"title": "CARGAS RESPALDADAS" if hy else "CARGAS CONTEMPLADAS",
+          "sized": (f"Cargas con respaldo: {daily:.1f} kWh/día" if hy else f"Consumo diario: {daily:.2f} kWh/día"),
+          "inc_title": "Incluye", "rows": rows(True), "more": more(True), "unit": "kWh/día"}
+    en = {"title": "BACKED-UP LOADS" if hy else "LOADS COVERED",
+          "sized": (f"Backed-up loads: {daily:.1f} kWh/day" if hy else f"Daily consumption: {daily:.2f} kWh/day"),
+          "inc_title": "Included", "rows": rows(False), "more": more(False), "unit": "kWh/day"}
+    return es, en
+
+
 def _roof_fit_fmt(rf: dict | None):
     """Roof figures for the PDF's technical table: panels that fit / do not fit the stated roof (None when no roof was stated)."""
     if not rf:
@@ -464,6 +514,7 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
         "warranty_inverter_years": data.get("warranty_inverter_years" if es else "warranty_inverter_years_en", "5 años"),
         "warranty_battery_years":  data.get("warranty_battery_years" if es else "warranty_battery_years_en", "10 años"),
         "payment_notes":  data.get("payment_notes_es" if es else "payment_notes_en", []),
+        "scope":          data.get("scope_es" if es else "scope_en"),
         "bank_local_lines":  data.get("bank_local_lines"    if es else "bank_local_lines_en",  []),
         "bank_intl_lines":   data.get("bank_intl_lines"     if es else "bank_intl_lines_en",   []),
         "company": {
@@ -658,6 +709,7 @@ def build_from_wizard_blob(
     except Exception:
         pass
 
+    _scope_es, _scope_en = _scope_block(consumption, system_type)
     company = get_company_info()
     bank    = get_bank_info()
     inv_warranty = inverter.get("warranty_yr", 5)
@@ -761,6 +813,8 @@ def build_from_wizard_blob(
             "An electronic invoice is provided for the full amount",
             "Payments are made via bank transfer to the following account:",
         ],
+        "scope_es": _scope_es,
+        "scope_en": _scope_en,
         "bank_local_lines":    bank["bank_local_lines"],
         "bank_intl_lines":     bank["bank_intl_lines"],
         "bank_local_lines_en": bank["bank_local_lines_en"],

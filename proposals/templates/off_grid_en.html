@@ -87,7 +87,7 @@
     <tr>
       <th>Installed<br>capacity (kW)</th>
       {% if not technical.roof_fit %}<th>Panel area<br>(m2)</th>{% endif %}
-      <th>Estimated daily<br>energy (kWh)</th>
+      <th>Estimated daily<br>generation (kWh)</th>
       {% if technical.worst_month_cov %}<th>Solar coverage of<br>worst month</th>{% endif %}
       <th>Solar<br>utilization</th>
       {% if hybrid_savings %}<th>Bill<br>reduction</th>{% endif %}
@@ -151,11 +151,31 @@
 
 <!-- ── MONTHLY COVERAGE (inline SVG chart) ───────────────────────────────── -->
 {% if coverage_chart_svg %}
+{% if scope %}
+<table class="cov-table"><tr>
+<td class="cov-chart-td">
+  <div class="section-row"><span class="section-title">ESTIMATED MONTHLY COVERAGE</span></div>
+  <div class="coverage-chart" style="max-width:none;">{{ coverage_chart_svg | safe }}</div>
+  <div class="coverage-note" style="max-width:none;margin-bottom:0;">Design estimates based on the site's real solar irradiance; actual output varies with weather, shading and usage.</div>
+</td>
+<td class="cov-scope-td">
+  <div class="section-row"><span class="section-title">{{ scope.title }}</span></div>
+  <div class="scope-box">
+    <div class="scope-sized">{{ scope.sized }}</div>
+    <table class="scope-rows">
+      {% for r in scope.rows %}<tr><td>{{ r.name }}</td><td class="n">{{ r.kwh }}</td></tr>{% endfor %}
+      {% if scope.more %}<tr class="more"><td>{{ scope.more[0] }}</td><td class="n">{{ scope.more[1] }}</td></tr>{% endif %}
+    </table>
+  </div>
+</td>
+</tr></table>
+{% else %}
 <div class="coverage-block">
   <div class="section-row"><span class="section-title">ESTIMATED MONTHLY COVERAGE</span></div>
   <div class="coverage-chart">{{ coverage_chart_svg | safe }}</div>
   <div class="coverage-note">Design estimates based on the site's real solar irradiance; actual output varies with weather, shading and usage.</div>
 </div>
+{% endif %}
 {% endif %}
 
 <div class="flex-spacer"></div>

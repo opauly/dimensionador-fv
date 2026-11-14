@@ -424,3 +424,28 @@ body {
   color: #555;
   margin-top: 2pt;
 }
+
+/* ── LOADS COVERED box (Off-Grid): chart left, scope box right ───────────── */
+.cov-table { width: 100%; border-collapse: collapse; margin-top: var(--gap-section); }
+.cov-table > tbody > tr > td, .cov-table > tr > td { vertical-align: top; padding: 0; }
+.cov-chart-td { width: 57%; padding-right: 18pt !important; }
+.cov-scope-td { width: 43%; }
+.scope-box {
+  border: 0.6pt solid #d3dbe6; border-radius: 3pt; background: #f7f9fb;
+  padding: 3pt 5pt 3pt 5pt; margin-top: 2pt; font-size: var(--fs-table); line-height: 1.2;
+}
+.scope-sized { font-weight: bold; color: var(--navy); font-size: 7pt; margin-bottom: 2pt; }
+.scope-sub { font-weight: bold; font-size: var(--fs-fine); text-transform: uppercase; letter-spacing: 0.3pt; margin: 2pt 0 1pt 0; }
+.scope-inc { color: #2f8a4d; }
+.scope-exc { color: #b4423a; margin-top: 4pt; }
+.dot { display: inline-block; width: 4.5pt; height: 4.5pt; border-radius: 50%; margin-right: 3pt; }
+.dot-ok { background: var(--green); }
+.dot-no { background: #c85a52; }
+.scope-rows { width: 100%; border-collapse: collapse; }
+.scope-rows td { padding: 0.6pt 0; border-bottom: 0.3pt solid #e3e8ef; font-size: var(--fs-table); }
+.scope-rows td.n { text-align: right; width: 24pt; color: #444; }
+.scope-rows tr.more td { color: #777; font-style: italic; }
+.scope-rows tr.unit td { border-bottom: none; font-size: var(--fs-micro); color: #888; padding-top: 0; }
+.scope-excl { font-size: var(--fs-table); color: #444; }
+.scope-note { font-size: var(--fs-fine); color: #6B7280; margin-top: 2pt; }
+.scope-sub .u { text-transform: none; font-weight: normal; letter-spacing: 0; color: #6B7280; }
