@@ -26,6 +26,7 @@ from calculations import nec_tables as T
 from calculations import wiring as W
 from calculations.meter_cts import ct_count
 from materials.catalog import CATALOG, SECTIONS
+from webapp.wizard_steps import disconnect_center
 
 WASTE = 0.10             # cut-offs and slack on cable and conduit
 CABLE_STEP_M = 5         # cable is bought by the metre; round the request up to 5 m
@@ -83,7 +84,8 @@ WHERE = {
     "cc_bat": "Controlador → baterías", "bat_inv": "Baterías → inversores", "ac_out": "AC Out", "ac_in": "AC In",
     "pv_dc_inv": "Breakers CC → Fronius", "gz_ac": "Fronius → base de generación",
     "gz_link": "Base de generación → base de consumo",
-    "gz_disc": "Fronius → centro de carga de desconexión", "pv_disc": "Fronius → centro de carga de desconexión",
+    "gz_disc": "Fronius → centro de carga de desconexión", "pv_disc": "Fronius → centro de carga AC Out",
+    "out_feed": "Centro de carga AC Out → sub-panel", "in_feed": "Red → centro de carga AC In",
 }
 
 # Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
@@ -465,7 +467,7 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
                 elif key in ("cc_bat", "bat_inv"):
                     put("cable_thhn", g, "rojo", L, where, 2)
                     put("cable_thhn", g, "negro", L, where, 2)
-                elif key in ("pv_inv_ac", "gz_ac", "gz_link", "gz_disc", "pv_disc"):
+                elif key in ("pv_inv_ac", "gz_ac", "gz_link", "gz_disc", "pv_disc", "out_feed", "in_feed") and r["role"] != "Neutro":
                     put("cable_thhn", g, "negro", L, where, 2)
                     put("cable_thhn", g, "rojo", L, where, 2)
                 elif r["role"] == "Neutro":
@@ -512,10 +514,17 @@ def _cables(c: Collector, branches: list[dict]) -> None:
     c.add(_named("Kit barra de tierras", "Generales"), 1, note="uno por sistema")
 
 
-def _protections(c: Collector, branches: list[dict], opts: dict) -> None:
+def _protections(c: Collector, branches: list[dict], opts: dict, disc: dict | None = None) -> None:
+    # Grid Zero: the AC breaker sits in the meter base (see _interconnection). Breakers that live in a load center are listed by _centers,
+    # and "none" lists no breaker at all.
+    skip = {"gz_ac", "gz_disc", "pv_disc"}
+    if disc and disc.get("ac_out") != "din":
+        skip.add("ac_out")
+    if disc and disc.get("ac_in") != "din":
+        skip.add("ac_in")
     for b in branches:
         amps, key, where = b.get("ocpd_a"), b.get("key"), WHERE.get(b.get("key"), b["label"])
-        if not amps or key in ("gz_ac", "gz_disc", "pv_disc"):      # Grid Zero: the AC breaker sits in the meter base (see _interconnection); the disconnect center's in _disconnect
+        if not amps or key in skip:
             continue
         hot = next((r["count"] for r in b.get("conductors") or [] if r["role"] == "UGC"), 2)
         if b.get("protection") == "fuse":
@@ -572,39 +581,81 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
         c.add(_named("Pegamento para PVC", "Generales"), 1, note="una unidad si hay tubería PVC")
 
 
-DISC_BOX_KEY = "interconexion-tablero-nema-3r-4-espacios-marca-ch-sd-barras-de-125a-monofasico"
-METER_BREAKER_A = 20      # Smart Meter feed breaker in the disconnect center: 2 poles, 20 A (Oscar)
-METER_FEED_GAUGE = "12"    # Smart Meter voltage supply from the disconnect center: a few metres of #12
+BOX_NAMES = {2: "Tablero NEMA 3R 2 espacios, marca CH/ SD, barras de 125A, Monofasico",
+             4: "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico",
+             8: "Tablero NEMA 3R 8 espacios, marca CH/ SD, barras de 125A, Monofasico"}
+METER_BREAKER_A = 20      # Smart Meter feed breaker in the Grid Zero load center: 2 poles, 20 A (Oscar)
+METER_FEED_GAUGE = "12"    # Smart Meter voltage supply from the Grid Zero load center: a few metres of #12
 METER_FEED_M = 3
 
 
-def _disconnect(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
-    """Optional disconnect load center next to the Fronius (Oscar, 2026-11-13): a 4-space load center with a 2-pole breaker for the
-    Fronius output (the same size as the generation-base / sub-panel breaker) and, in Grid Zero with a Smart Meter, a second 2-pole breaker
-    of the same size that feeds the meter. It adds to the rest of the interconnection, it does not replace it."""
-    if not (wiring_ctx.get("disconnect") or {}).get("enabled"):
+def _breaker_counts(b: dict) -> tuple[int, int]:
+    """(breakers, poles) for a per-inverter AC branch: 120 V units go in pairs on one 2-pole breaker (an odd one alone on a single pole)."""
+    hot = next((r["count"] for r in b.get("conductors") or [] if r["role"] == "UGC"), 2)
+    qty = int(b["qty"])
+    if hot == 1 and qty % 2 == 0:
+        return qty // 2, 2
+    return qty, hot
+
+
+def _center(c: Collector, where: str, items: list[tuple[int, int, int, str]], why: str) -> None:
+    """A load center (the smallest catalog box that holds the breakers, several of the largest beyond that) and its breakers.
+    items = [(amps, qty, poles, note)]."""
+    spaces = sum(q * p for _, q, p, _ in items) or 2
+    size, boxes = next(((sz, 1) for sz in disconnect_center.BOX_SPACES if spaces <= sz), (disconnect_center.BOX_SPACES[-1], -(-spaces // disconnect_center.BOX_SPACES[-1])))
+    c.add(_named(BOX_NAMES[size], "Generales"), boxes, where=where, note=f"{why}: {spaces} espacios de breakers → {boxes} tablero(s) de {size} espacios")
+    for amps, qty, poles, note in items:
+        word = "2 polos" if poles == 2 else "1 polo"
+        if amps:
+            c.add(_find("breaker_panel", amps=amps, poles=poles), qty, name=f"Breaker de {amps}A {word}, marca CH /SD", section="Generales", group="Interconexión",
+                  sibling=_find("breaker_panel", amps=40, poles=2), where=where, note=note)
+        else:
+            c.add(None, qty, name=f"Breaker {word} para centro de carga (amperaje por definir)", section="Generales", group="Interconexión",
+                  sibling=_find("breaker_panel", amps=40, poles=2), where=where, comment="POR CONFIRMAR AMPERAJE", note=note)
+
+
+def _centers(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
+    """Load centers (Oscar, 2026-11-13).
+    Grid Zero (optional, extra to the meter base): a 2P breaker per Fronius + a 2P 20 A one that feeds the Smart Meter (+ 3 m of #12).
+    Hybrid / off-grid: the AC OUT center REPLACES the DIN breakers of the Victron units (pairs on a 2P breaker) and also holds the AC-coupled
+    Fronius breaker(s) when that is where it lands; the AC IN center replaces the input breakers the same way."""
+    disc = wiring_ctx.get("disconnect") or {}
+    branches = wiring_ctx.get("branches") or []
+    by_key = {b.get("key"): b for b in branches}
+    if grid_zero:
+        if not disc.get("enabled"):
+            return
+        b = by_key.get("gz_disc")
+        amps = int((b or {}).get("ocpd_a") or 0)
+        fr_qty = int(eq.get("inverter_qty") or 1)
+        meter_fed = bool(eq.get("monitoring"))
+        items = [(amps, fr_qty, 2, f"{fr_qty} para la salida del Fronius ({amps} A)" if amps else "salida del Fronius")]
+        if meter_fed:
+            items.append((METER_BREAKER_A, 1, 2, f"para alimentar el Smart Meter ({METER_BREAKER_A} A, 2 polos)"))
+        _center(c, "Centro de carga de desconexión", items, "centro de carga de desconexión junto al Fronius (opcional, además de la base de generación)")
+        if meter_fed:
+            for color in ("negro", "rojo"):
+                c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",
+                      section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=METER_FEED_GAUGE, color="negro"),
+                      where="Centro de carga → Smart Meter", note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
         return
-    key = "gz_disc" if grid_zero else "pv_disc"
-    branch = next((b for b in wiring_ctx.get("branches") or [] if b.get("key") == key), None)
-    c.add(_BY_KEY[DISC_BOX_KEY], 1, note="centro de carga de desconexión junto al Fronius (opcional): corta la salida del inversor cerca de él")
-    amps = int((branch or {}).get("ocpd_a") or 0)
-    meter_fed = grid_zero and bool(eq.get("monitoring"))
-    where = "Centro de carga de desconexión"
-    if amps:
-        c.add(_find("breaker_panel", amps=amps, poles=2), 1, name=f"Breaker de {amps}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
-              sibling=_find("breaker_panel", amps=40, poles=2), where=where, note=f"1 para la salida del Fronius ({amps} A)")
-    else:
-        c.add(None, 1, name="Breaker 2 polos para centro de carga (amperaje por definir)", section="Generales", group="Interconexión",
-              sibling=_find("breaker_panel", amps=40, poles=2), where=where, comment="POR CONFIRMAR AMPERAJE")
-    if meter_fed:      # Oscar (2026-11-13): the Smart Meter breaker is always 2 poles, 20 A
-        c.add(_find("breaker_panel", amps=METER_BREAKER_A, poles=2), 1, name=f"Breaker de {METER_BREAKER_A}A 2 polos, marca CH /SD", section="Generales",
-              group="Interconexión", sibling=_find("breaker_panel", amps=40, poles=2), where=where,
-              note=f"para alimentar el Smart Meter ({METER_BREAKER_A} A, 2 polos)")
-    if meter_fed:
-        for color in ("negro", "rojo"):
-            c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",
-                  section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=METER_FEED_GAUGE, color="negro"),
-                  where="Centro de carga → Smart Meter", note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
+    if disc.get("ac_out") == "center":
+        items = []
+        out = by_key.get("ac_out")
+        if out and out.get("ocpd_a"):
+            n, poles = _breaker_counts(out)
+            items.append((int(out["ocpd_a"]), n, poles, f"{out['qty']} inversor(es) Victron" + (" (en pares)" if poles == 2 and out["qty"] > 1 else "")))
+        fr = by_key.get("pv_disc")
+        if fr and disc.get("fronius_to") == "center":
+            items.append((int(fr.get("ocpd_a") or 0), int(fr["qty"]), 2, "Fronius acoplado en AC"))
+        if items:
+            _center(c, "Centro de carga AC Out", items, "reemplaza los breakers de riel DIN del AC Out")
+    if disc.get("ac_in") == "center":
+        inn = by_key.get("ac_in")
+        if inn and inn.get("ocpd_a"):
+            n, poles = _breaker_counts(inn)
+            _center(c, "Centro de carga AC In", [(int(inn["ocpd_a"]), n, poles, f"{inn['qty']} inversor(es) Victron" + (" (en pares)" if poles == 2 and inn["qty"] > 1 else ""))],
+                    "reemplaza los breakers de riel DIN del AC In")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -638,8 +689,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     _pv_connectors(c, eq, coupling)
     if wiring_ctx.get("ready"):
         _cables(c, branches)
-        _protections(c, branches, opts)
-        _disconnect(c, wiring_ctx, eq, grid_zero)
+        _protections(c, branches, opts, wiring_ctx.get("disconnect"))
+        _centers(c, wiring_ctx, eq, grid_zero)
         _conduit(c, branches, opts)
     else:
         pending.append("El cableado todavía no se puede dimensionar (" + (wiring_ctx.get("reason") or "faltan datos del diseño")

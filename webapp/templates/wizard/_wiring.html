@@ -26,18 +26,50 @@
 </style>
 
 <h5 style="font-size:13px;margin:14px 0 2px;">Cableado y canalizaciones</h5>
-{% if disconnect and disconnect.can %}
-  {# Optional disconnect load center (4 spaces) next to the Fronius. Own form: an unchecked box posts nothing, so it carries a marker field. #}
+{% if disconnect and (disconnect.can_gz or disconnect.can_ac) %}
+  {# AC protection layout. Grid Zero: optional extra load center next to the Fronius. Hybrid / off-grid: AC OUT and AC IN as a DIN breaker in the gabinete,
+     a load center that replaces it, or no breaker; an AC-coupled Fronius lands in the AC OUT center or in the critical-loads sub-panel.
+     Own form: an unchecked box posts nothing, so it carries a marker field. #}
   <form id="wr-disc" class="wr-cpl" hx-post="{{ post_url or url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change"
         hx-target="{{ form_target or '#wiring-panel' }}" hx-swap="{{ form_swap or 'outerHTML' }}">
     <input type="hidden" name="disc_form" value="1">
-    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:inherit;margin:6px 0;">
-      <input type="checkbox" name="disc_enabled" value="1" {{ 'checked' if disconnect.enabled else '' }}>
-      Centro de carga de desconexión junto al Fronius (4 espacios)
-    </label>
-    {% if disconnect.enabled %}
-      <p class="card-note-sm">Opcional. Corta la salida del Fronius cerca de él: un breaker de 2 polos del tamaño del breaker del Fronius{% if not coupling or not coupling.ac %} y otro de 2 polos 20 A para alimentar el Smart Meter{% endif %}.
-        No reemplaza la base de medidor de generación ni el breaker del sub-panel. Ajusta su distancia al Fronius en los largos de abajo.</p>
+    {% if disconnect.can_gz %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:inherit;margin:6px 0;">
+        <input type="checkbox" name="disc_enabled" value="1" {{ 'checked' if disconnect.enabled else '' }}>
+        Centro de carga de desconexión junto al Fronius (opcional)
+      </label>
+      {% if disconnect.enabled %}
+        <p class="card-note-sm">Corta la salida del Fronius cerca de él: un breaker de 2 polos por Fronius y otro de 2 polos 20 A para alimentar el Smart Meter; la caja crece con los breakers (2, 4 u 8 espacios).
+          No reemplaza la base de medidor de generación. Ajusta su distancia al Fronius en los largos de abajo.</p>
+      {% endif %}
+    {% else %}
+      <div class="wr-cpl-row">
+        <div><label for="wr-dout">Protección AC Out (Victron)</label>
+          <select id="wr-dout" name="disc_ac_out">
+            <option value="din" {{ 'selected' if disconnect.ac_out == 'din' else '' }}>Breaker riel DIN en gabinete</option>
+            <option value="center" {{ 'selected' if disconnect.ac_out == 'center' else '' }}>Centro de carga</option>
+            <option value="none" {{ 'selected' if disconnect.ac_out == 'none' else '' }}>Sin breaker</option>
+          </select></div>
+        {% if disconnect.can_ac_in %}
+          <div><label for="wr-din">Protección AC In (red → Victron)</label>
+            <select id="wr-din" name="disc_ac_in">
+              <option value="din" {{ 'selected' if disconnect.ac_in == 'din' else '' }}>Breaker riel DIN en gabinete</option>
+              <option value="center" {{ 'selected' if disconnect.ac_in == 'center' else '' }}>Centro de carga</option>
+              <option value="none" {{ 'selected' if disconnect.ac_in == 'none' else '' }}>Sin breaker</option>
+            </select></div>
+        {% endif %}
+        {% if disconnect.can_fronius %}
+          <div><label for="wr-dfr">Fronius acoplado en AC entra a</label>
+            <select id="wr-dfr" name="disc_fronius">
+              <option value="subpanel" {{ 'selected' if disconnect.fronius_to == 'subpanel' else '' }}>Sub-panel de cargas críticas</option>
+              <option value="center" {{ 'selected' if disconnect.fronius_to == 'center' else '' }}>Centro de carga del AC Out</option>
+            </select></div>
+        {% endif %}
+      </div>
+      {% if disconnect.out_center or disconnect.in_center %}
+        <p class="card-note-sm">El centro de carga reemplaza los breakers de riel DIN: cada inversor llega a su breaker (los Victron de 120 V van en pares sobre un breaker de 2 polos), las barras los juntan y sale un solo cable,
+          dimensionado para la suma. La caja crece con los breakers (2, 4 u 8 espacios). Ajusta los largos de abajo.</p>
+      {% endif %}
     {% endif %}
   </form>
 {% endif %}

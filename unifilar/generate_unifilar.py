@@ -186,6 +186,20 @@ def _disc_box(c, h, x, y, w, hgt, D):
         txt(cx, y + hgt - 41, f"Q-MED · {D['meter_breaker']} (medidor)", 6.2, 'Helvetica', black)
 
 
+def _ac_center_box(c, h, cx, cy, C, w=66):
+    """AC OUT / AC IN load center on the AC line of a hybrid / off-grid design: it replaces the Q1 / Q2 breaker symbol."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    rows = C["rows"]
+    hgt = 28 + 9 * len(rows)
+    y0 = cy - hgt / 2
+    box(cx - w / 2, y0, w, hgt, LGRAY)
+    small = w < 56
+    txt(cx, y0 + hgt - 9, 'CENTRO DE CARGA', 4.9 if small else 5.6, 'Helvetica-Bold')
+    txt(cx, y0 + hgt - 17, f"{C['title']} · {C['spaces']} esp." + (f" × {C['boxes']}" if C.get("boxes", 1) > 1 else ""), 4.8 if small else 5.2, 'Helvetica', GRAY)
+    for k, r in enumerate(rows):
+        txt(cx, y0 + hgt - 27 - 8 * k, r, 5.2 if small else 5.8)
+
+
 def _hybrid_ac(c, h, cfg):
     """Híbrido acoplado en AC: Fronius en el AC-OUT de 2 MultiPlus-II."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
@@ -240,16 +254,14 @@ def _hybrid_ac(c, h, cfg):
             lab(xc, yc - 9, '- ' + PV["dc_wire"], black)
     seg([(585, 590), (585, 572)], GRN, 1.1, (3, 2)); ground(585, 572); lab(595, 570, FR["ground_wire"], GRN, 'l')
 
-    # salida AC del Fronius al sub-panel (con centro de carga de desconexión opcional junto al Fronius)
-    D = cfg.get("disconnect")
-    seg([(690, 590), (690, 436)], black, 1.8)
-    if D:
-        _disc_box(c, h, 640, 515, 100, 52, D)
-        txt(748, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
-        stack(748, 563, FR["ac_conductors"], 'l')
+    # salida AC del Fronius: al sub-panel (Q3) o, si así se eligió, al centro de carga del AC Out
+    FR_C = bool(FR.get("to_center") and cfg.get("ac_out_center"))
+    if FR_C:
+        seg([(690, 590), (690, 520), (612, 520), (612, 461)], black, 1.8)
     else:
-        txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
-        stack(698, 563, FR["ac_conductors"], 'l')
+        seg([(690, 590), (690, 436)], black, 1.8)
+    txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
+    stack(698, 563, FR["ac_conductors"], 'l')
 
     # ---------- red y tablero principal ----------
     c.saveState(); c.setFillColor(white); c.setStrokeColor(black); c.setLineWidth(1.3); c.circle(62, 436, 16, fill=1, stroke=1); c.restoreState()
@@ -266,9 +278,13 @@ def _hybrid_ac(c, h, cfg):
     seg([(170, 436), (380, 436)], black, 1.8)
     breaker(200, 436); txt(200, 421, 'Int. principal', 6, 'Helvetica', GRAY)
     seg([(225, 386), (225, 368)], GRN, 1.1, (3, 2)); ground(225, 368); lab(235, 366, MU["ground_wire"], GRN, 'l')
-    breaker(325, 436)
-    txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, MU["ac_in_breaker"], 6.5)
-    stack(333, 413, MU["ac_in_conductors"])
+    if cfg.get("ac_in_center"):
+        _ac_center_box(c, h, 325, 436, cfg["ac_in_center"])
+        stack(333, 400, MU["ac_in_conductors"])
+    else:
+        breaker(325, 436)
+        txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, MU["ac_in_breaker"], 6.5)
+        stack(333, 413, MU["ac_in_conductors"])
     if cfg.get("meter"):
         _meter_block(c, h, cfg["meter"], 268, 436, above=True, gap=72)
 
@@ -286,15 +302,21 @@ def _hybrid_ac(c, h, cfg):
     txt(378, 427, 'AC-IN', 5.5, 'Helvetica-Bold', GRAY, 'r'); txt(562, 427, 'AC-OUT', 5.5, 'Helvetica-Bold', GRAY, 'l')
     seg([(390, 372), (390, 352)], GRN, 1.1, (3, 2)); ground(390, 352); lab(382, 350, MU["ground_wire"], GRN, 'r')
     seg([(560, 436), (640, 436)], black, 1.8)
-    stack(602, 466, MU["ac_out_conductors"])
+    if cfg.get("ac_out_center"):
+        _ac_center_box(c, h, 612, 436, cfg["ac_out_center"], w=50)
+        stack(612, 398, MU["ac_out_conductors"])
+    else:
+        stack(602, 466, MU["ac_out_conductors"])
 
     # ---------- sub-panel de cargas críticas ----------
     box(640, 366, 180, 140, LGRAY)
     txt(752, 494, 'SUB-PANEL CARGAS CRÍTICAS', 7, 'Helvetica-Bold'); txt(752, 485, '120/240 V', 6.5, 'Helvetica', GRAY)
     seg([(640, 436), (880, 436)], black, 1.8)
-    seg([(690, 506), (690, 436)], black, 1.8); dot(690, 436)
-    breaker(658, 436); txt(658, 446, 'Q2', 7, 'Helvetica-Bold'); txt(658, 424, SP["q2"], 6.5)
-    breaker(690, 466, vert=True); txt(698, 464, f"Q3 · {FR['ac_breaker']} (FV)", 6.5, 'Helvetica', black, 'l')
+    if not FR_C:
+        seg([(690, 506), (690, 436)], black, 1.8); dot(690, 436)
+        breaker(690, 466, vert=True); txt(698, 464, f"Q3 · {FR['ac_breaker']} (FV)", 6.5, 'Helvetica', black, 'l')
+    if not cfg.get("ac_out_center"):
+        breaker(658, 436); txt(658, 446, 'Q2', 7, 'Helvetica-Bold'); txt(658, 424, SP["q2"], 6.5)
     breaker(795, 436); txt(795, 446, 'Q4', 7, 'Helvetica-Bold'); txt(795, 455, SP["q4"], 6, 'Helvetica', GRAY)   # sobre la barra: abajo lo cruza el SPD
     if SP["spd"]:
         dot(775, 436)
@@ -679,10 +701,13 @@ def _off_grid(c, h, cfg):
     mid_y = 436
     seg([(560, mid_y), (sx0 + 40, mid_y)], black, 1.8)
     stack(602, mid_y + 30, MU["ac_out_conductors"])
+    if cfg.get("ac_out_center"):
+        _ac_center_box(c, h, 690, mid_y, cfg["ac_out_center"])
     box(sx0, 366, 180, 140, LGRAY)
     txt(sx0 + 90, 494, 'SUB-PANEL CARGAS CRÍTICAS', 7, 'Helvetica-Bold'); txt(sx0 + 90, 485, '120/240 V', 6.5, 'Helvetica', GRAY)
     seg([(sx0 + 20, mid_y), (sx0 + 190, mid_y)], black, 1.8)
-    breaker(sx0 + 30, mid_y); txt(sx0 + 30, mid_y + 10, 'Q2', 7, 'Helvetica-Bold'); txt(sx0 + 30, mid_y - 12, SP["q2"], 6.5)
+    if not cfg.get("ac_out_center"):
+        breaker(sx0 + 30, mid_y); txt(sx0 + 30, mid_y + 10, 'Q2', 7, 'Helvetica-Bold'); txt(sx0 + 30, mid_y - 12, SP["q2"], 6.5)
     breaker(sx0 + 150, mid_y); txt(sx0 + 150, mid_y + 10, 'Q4', 7, 'Helvetica-Bold'); txt(sx0 + 150, mid_y + 19, SP["q4"], 6, 'Helvetica', GRAY)
     if SP["spd"]:
         _spd(c, h, sx0 + 110, mid_y, SP["spd"], MU["ground_wire"])
@@ -704,8 +729,12 @@ def _off_grid(c, h, cfg):
         seg([(78, 436), (380, 436)], black, 1.8)
         breaker(200, 436); txt(200, 421, 'Int. principal', 6, 'Helvetica', GRAY)
         seg([(225, 386), (225, 368)], GRN, 1.1, (3, 2)); ground(225, 368); lab(235, 366, MU["ground_wire"], GRN, 'l')
-        breaker(325, 436); txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, grid["breaker"], 6.5)
-        stack(333, 413, grid["conductors"])
+        if cfg.get("ac_in_center"):
+            _ac_center_box(c, h, 325, 436, cfg["ac_in_center"])
+            stack(333, 400, grid["conductors"])
+        else:
+            breaker(325, 436); txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, grid["breaker"], 6.5)
+            stack(333, 413, grid["conductors"])
         if M:
             _meter_block(c, h, M, 268, 436, above=True, gap=72)
             meter_in_sub = None

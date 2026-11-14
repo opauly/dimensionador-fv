@@ -45,7 +45,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
         "show_ac_in": False, "coupling": {}, "can_couple": False,
     }
-    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), True)
+    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), "grid_zero")
     ctx["disconnect"] = disc
     if disc["enabled"]:
         ctx["length_labels"] = {**LENGTH_LABELS, "ac_out_m": "Centro de carga → base de generación", disconnect_center.LENGTH_KEY: disconnect_center.LENGTH_LABEL}

@@ -404,31 +404,69 @@ check("grid zero on: the base, its breaker and the padlock stay (it does not rep
        any("compatible con base para medidor" in n for n in _lg_on), "Candado pequeño para base medidor" in _lg_on), (True, True, True))
 check("grid zero off: no load center", "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico" in _lg_off, False)
 check("grid zero on: the center-run cable shows up on the list", any("Fronius → centro de carga de desconexión" in w for ln in _lg_on.values() for w in ln.get("wheres") or []), True)
-# AC-coupled hybrid
-_ha_on = og_wiring.build_context(BLOB, None, None, None, _DON)
-_ha_off = og_wiring.build_context(BLOB)
-check("AC hybrid: off by default; on inserts Fronius -> center before the run to the sub-panel",
-      ([b["key"] for b in _ha_off["branches"] if b["key"] in ("pv_disc", "pv_inv_ac")], [b["key"] for b in _ha_on["branches"] if b["key"] in ("pv_disc", "pv_inv_ac")],
-       _ha_on["disconnect"]["enabled"]), (["pv_inv_ac"], ["pv_disc", "pv_inv_ac"], True))
-_lh_on = _list(EQ, _ha_on)
-check("AC hybrid on: load center + ONE breaker (no Smart Meter) and the sub-panel breaker stays",
-      (_qty(_lh_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), sum(ln["qty"] for n, ln in _lh_on.items() if n.endswith("2 polos, marca CH /SD")),
-       any(n.startswith("Breaker AC para riel DIN") and any("sub-panel" in w for w in ln.get("wheres") or []) for n, ln in _lh_on.items())), (1, 1, True))
-_hd = og_wiring.build_context(BLOB_DC, None, None, None, _DON)
-check("DC-coupled: the option does nothing (no Fronius)", (_hd["disconnect"], any(b["key"] in ("pv_disc", "gz_disc") for b in _hd["branches"])),
-      ({"can": False, "enabled": False}, False))
-check("form field: unchecked box with the marker saves off, no marker keeps the choice",
-      (DCN.from_form({"disc_form": "1"}), DCN.from_form({"disc_form": "1", "disc_enabled": "1"}), DCN.from_form({})), ({"enabled": False}, {"enabled": True}, None))
-
+# AC protection layout (Oscar, 2026-11-13): hybrid / off-grid AC OUT and AC IN = DIN breakers (default) | load center that replaces them | none
+_B2 = lambda amps: f"Breaker de {amps}A 2 polos, marca CH /SD"  # noqa: E731
+_BOX = lambda n: f"Tablero NEMA 3R {n} espacios, marca CH/ SD, barras de 125A, Monofasico"  # noqa: E731
+_din = lambda lines: sorted(n for n in lines if n.startswith("Breaker AC para riel DIN") and any(("AC Out" in w or "AC In" in w) for w in lines[n].get("wheres") or []))  # noqa: E731
+_hw = lambda blob, dis: og_wiring.build_context(blob, None, None, None, dis)  # noqa: E731
+_ha_def = _hw(BLOB, None)
+_ha_cen = _hw(BLOB, {"ac_out": "center", "ac_in": "center", "fronius_to": "center"})
+_ha_cen_sub = _hw(BLOB, {"ac_out": "center", "ac_in": "din", "fronius_to": "center"})   # Fronius -> center needs ac_out center: here it is, but ac_in din
+_ha_none = _hw(BLOB, {"ac_out": "none", "ac_in": "none"})
+_ha_outc_sub = _hw(BLOB, {"ac_out": "center", "fronius_to": "subpanel"})
+_k = lambda ctx: [b["key"] for b in ctx["branches"]]  # noqa: E731
+check("AC hybrid default: runs as always, no centers", (_k(_ha_def), _ha_def["disconnect"]["out_center"], _ha_def["disconnect"]["in_center"]),
+      (["pv_strings", "pv_inv_ac", "bat_inv", "ac_out", "ac_in"], False, False))
+check("AC hybrid centers: Victron + Fronius runs are short, ONE feeder each way (out_feed, in_feed)", _k(_ha_cen),
+      ["pv_strings", "pv_disc", "bat_inv", "ac_out", "out_feed", "in_feed", "ac_in"])
+_fo = {b["key"]: b for b in _ha_cen["branches"]}
+_fo2 = {b["key"]: b for b in _ha_outc_sub["branches"]}
+check("out feeder carries the sum per leg: Fronius + Victron (1 Multi per leg) vs Victron only", (round(_fo["out_feed"]["current_a"], 1), round(_fo2["out_feed"]["current_a"], 1)),
+      (round(_fo["pv_disc"]["current_a"] + _fo["ac_out"]["current_a"], 1), round(_fo["ac_out"]["current_a"], 1)))
+check("feeders have no breaker of their own and carry neutral + ground", (_fo["out_feed"]["ocpd_a"], _fo["in_feed"]["ocpd_a"], {r["role"] for r in _fo["out_feed"]["conductors"]} >= {"UGC", "Neutro"}),
+      (None, None, True))
+check("Fronius to the sub-panel keeps its own run (pv_inv_ac) while AC OUT is a center", ("pv_inv_ac" in _k(_ha_outc_sub), "pv_disc" in _k(_ha_outc_sub)), (True, False))
+_l_def, _l_cen, _l_none, _l_cs = (_list(EQ, x) for x in (_ha_def, _ha_cen, _ha_none, _ha_outc_sub))
+_ac_out_a, _ac_in_a, _fr_a = (int(_fo[k]["ocpd_a"]) for k in ("ac_out", "ac_in", "pv_disc"))
+check("DIN default: breakers of AC OUT / AC IN are DIN rail ones in the gabinete, no load center", (len(_din(_l_def)) >= 2, any(n.startswith("Tablero NEMA 3R") for n in _l_def)), (True, False))
+check("centers: no DIN breakers for AC OUT / AC IN; a 2-space box for AC IN (1 pair) and a 4-space one for AC OUT (pair + Fronius)",
+      (_din(_l_cen), _qty(_l_cen, _BOX(4)), _qty(_l_cen, _BOX(2)), _qty(_l_cen, _B2(_ac_out_a)), _qty(_l_cen, _B2(_ac_in_a)), _qty(_l_cen, _B2(_fr_a))), ([], 1, 1, 1, 1, 1))
+check("AC OUT center without the Fronius: the Fronius keeps its DIN breaker and the box holds the pair only (2 spaces)",
+      (_qty(_l_cs, _BOX(2)), any(n.startswith("Breaker AC para riel DIN") and any("Fronius" in w for w in ln.get("wheres") or []) for n, ln in _l_cs.items())), (1, True))
+check("none: no AC OUT / AC IN breaker and no box", (_din(_l_none), any(n.startswith("Tablero NEMA 3R") for n in _l_none), any(n.endswith("2 polos, marca CH /SD") for n in _l_none)), ([], False, False))
+check("centers add the feeder cables to the list", any("Centro de carga AC Out → sub-panel" in w for ln in _l_cen.values() for w in ln.get("wheres") or []), True)
+# 4 Victron 120 V: two 2P breakers (pairs)
+_eq4 = {**EQ, "inverter_qty": 4}
+_ha4 = _hw({**BLOB, "equipment": _eq4}, {"ac_out": "center", "ac_in": "center"})
+_l4 = _list(_eq4, _ha4)
+_o4 = {b["key"]: b for b in _ha4["branches"]}
+check("4 Victron (120 V): 2 breakers 2P on AC OUT and 2 on AC IN -> 4-space boxes", (_o4["ac_out"]["qty"], _qty(_l4, _B2(int(_o4["ac_out"]["ocpd_a"]))), _qty(_l4, _B2(int(_o4["ac_in"]["ocpd_a"]))), _qty(_l4, _BOX(4))),
+      (4, 2, 2, 2))
+check("box sizes for 1..5 two-pole breakers: 2, 4, 8, 8 spaces, then several of 8", [DCN.box_spaces(n) for n in (1, 2, 3, 4, 5)],
+      [(2, 1), (4, 1), (8, 1), (8, 1), (8, 2)])
+# DC-coupled: the AC OUT / AC IN selectors work too, the Fronius one does not
+_hd_cen = _hw(BLOB_DC, {"ac_out": "center", "ac_in": "center", "fronius_to": "center"})
+check("DC-coupled: AC OUT / AC IN centers work, no Fronius destination", (_k(_hd_cen), _hd_cen["disconnect"]["can_fronius"] and False, _hd_cen["disconnect"]["fronius_to"]),
+      (["pv_strings", "pv_cc", "cc_bat", "bat_inv", "ac_out", "out_feed", "in_feed", "ac_in"], False, "subpanel"))
+check("form field: unchecked box with the marker saves off, selectors saved, no marker keeps the choice",
+      (DCN.from_form({"disc_form": "1"}), DCN.from_form({"disc_form": "1", "disc_enabled": "1", "disc_ac_out": "center", "disc_ac_in": "none", "disc_fronius": "center"}), DCN.from_form({})),
+      ({"enabled": False, "ac_out": "din", "ac_in": "din", "fronius_to": "subpanel"}, {"enabled": True, "ac_out": "center", "ac_in": "none", "fronius_to": "center"}, None))
+check("Grid Zero keeps its own switch; hybrid selectors do not apply to it", (_gz_on["disconnect"]["can_ac"], _gz_on["disconnect"]["enabled"]), (False, True))
 # drawing <-> list for the disconnect center
 _cgz_on, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_on, "blob": GZ_BLOB}, {})
 _cgz_off, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_off, "blob": GZ_BLOB}, {})
 check("grid zero drawing: center breakers (Fronius + meter) = list; off -> not drawn",
       (_amps(_cgz_on["disconnect"]["breaker"]), _amps(_cgz_on["disconnect"]["meter_breaker"]), _cgz_off["disconnect"]), (_gz_amps, 20, None))
-_cha_on, _ = CB.build_config(project, {"eq": EQ, "wiring": _ha_on, "blob": BLOB}, ans)
-check("hybrid AC drawing: center has the Fronius breaker only", (_amps(_cha_on["disconnect"]["breaker"]), _cha_on["disconnect"]["meter_breaker"]),
-      (int(_ha_on["branches"][[b["key"] for b in _ha_on["branches"]].index("pv_disc")]["ocpd_a"]), None))
-for _name, _cfg in (("grid_zero_on", _cgz_on), ("hybrid_on", _cha_on), ("grid_zero_off", _cgz_off)):
+_cha_on, _ = CB.build_config(project, {"eq": EQ, "wiring": _ha_cen, "blob": BLOB}, ans)
+_ocfg = _cha_on["ac_out_center"]
+check("hybrid drawing: AC OUT center rows = list (Victron pair + Fronius), AC IN center = list, Q3 replaced by the center",
+      (_ocfg["rows"], _ocfg["spaces"], _cha_on["ac_in_center"]["rows"], _cha_on["fronius"]["to_center"]),
+      ([f"2P {_ac_out_a} A", f"2P {_fr_a} A (FV)"], 4, [f"2P {_ac_in_a} A"], True))
+_cd, _ = CB.build_config(project, {**d_dc, "wiring": og_wiring.build_context(BLOB_DC, None, None, None, {"ac_out": "center", "ac_in": "center"})}, {"lynx": "power_in"})
+check("off-grid drawing: AC OUT / AC IN centers drawn, the sub-panel feeder conductors come from the feeder",
+      (_cd["ac_out_center"] is not None, _cd["ac_in_center"] is not None, _cd["multis"]["ac_out_conductors"][0].startswith("L1")), (True, True, True))
+check("off-grid drawing renders with centers", (lambda b: (build(_cd, b), b.getvalue()[:4])[1])(io.BytesIO()), b"%PDF")
+for _name, _cfg in (("grid_zero_on", _cgz_on), ("hybrid_centers", _cha_on), ("grid_zero_off", _cgz_off)):
     _buf = io.BytesIO()
     try:
         build(_cfg, _buf)

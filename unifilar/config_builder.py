@@ -166,8 +166,10 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
     cpl, branches = wiring["coupling"], wiring["branches"]
     panel, inv, bat, mon = eq["panel"], eq["inverter"], eq["battery"], eq["monitoring"]
     pv_inv = cpl["pv_inverter"]
-    pv, fr = _branch(branches, "pv_strings"), _branch(branches, "pv_inv_ac")
+    pv, fr = _branch(branches, "pv_strings"), _branch(branches, "pv_inv_ac") or _branch(branches, "pv_disc")
     ac_in, ac_out, bat_inv = _branch(branches, "ac_in"), _branch(branches, "ac_out"), _branch(branches, "bat_inv")
+    out_feed, in_feed = _branch(branches, "out_feed"), _branch(branches, "in_feed")
+    to_center = (wiring.get("disconnect") or {}).get("fronius_to") == "center"
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     site = blob.get("site") or {}
     place = ", ".join(x for x in (site.get("city"), site.get("province")) if x)
@@ -180,7 +182,8 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
 
     multi_label = "MULTIPLUS-II " + (re.search(r"48/\d+", inv.get("model", "")) or re.search(r"\d+", inv.get("model", "") + "0"))[0]
     cfg = {
-        "kind": "hybrid_ac", "meter": _meter(eq), "disconnect": _disconnect_cfg(wiring, "pv_disc"),
+        "kind": "hybrid_ac", "meter": _meter(eq),
+        "ac_out_center": _ac_center_cfg(wiring, "out"), "ac_in_center": _ac_center_cfg(wiring, "in"),
         "project": {
             "name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
             "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
@@ -194,14 +197,14 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
-            "label": f"{_model(pv_inv)} 240 V", "kw": pv_inv.get("kw"), "ac_breaker": f"2P {fr['ocpd_a']} A",
+            "label": f"{_model(pv_inv)} 240 V", "kw": pv_inv.get("kw"), "ac_breaker": f"2P {fr['ocpd_a']} A", "to_center": to_center,
             "ac_conductors": [x for x in hots(fr, neutral=False)], "ground_wire": f"T {_g(_egc(fr) or fr['ugc'])} verde",
         },
         "multis": {
             "label": multi_label, "model": f"{inv.get('model', '').split('/70')[0]} 120 V",
             "ac_in_breaker": f"2P {ac_in['ocpd_a']} A" if ac_in else "2P por definir",
-            "ac_in_conductors": hots(ac_in) if ac_in else ["por definir"],
-            "ac_out_conductors": hots(ac_out),
+            "ac_in_conductors": hots(in_feed or ac_in) if (in_feed or ac_in) else ["por definir"],
+            "ac_out_conductors": hots(out_feed or ac_out),
             "dc_pos": f"+ {_g(bat_inv['ugc'])} rojo", "dc_neg": f"- {_g(bat_inv['ugc'])} negro",
             "ground_wire": f"T {_g(_egc(ac_out) or ac_out['ugc'])} verde",
         },
@@ -236,6 +239,39 @@ def _project_block(project: dict, d: dict, answers: dict) -> dict:
     return {"name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
             "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
             "revision": answers["revision"], "draft": bool(answers["draft"])}
+
+
+def _ac_center_cfg(wiring: dict, which: str) -> dict | None:
+    """The AC OUT / AC IN load center of a hybrid / off-grid design, for the drawing: one row per breaker size ("2 × 2P 70 A") and the spaces."""
+    from materials.engine import _breaker_counts
+
+    disc = wiring.get("disconnect") or {}
+    branches = wiring.get("branches") or []
+    rows: list[tuple[int, int, int, str]] = []
+    if which == "out":
+        if disc.get("ac_out") != "center":
+            return None
+        b = _branch(branches, "ac_out")
+        if b and b.get("ocpd_a"):
+            n, poles = _breaker_counts(b)
+            rows.append((int(b["ocpd_a"]), n, poles, ""))
+        fr = _branch(branches, "pv_disc")
+        if fr and disc.get("fronius_to") == "center":
+            rows.append((int(fr.get("ocpd_a") or 0), int(fr["qty"]), 2, " (FV)"))
+    else:
+        if disc.get("ac_in") != "center":
+            return None
+        b = _branch(branches, "ac_in")
+        if b and b.get("ocpd_a"):
+            n, poles = _breaker_counts(b)
+            rows.append((int(b["ocpd_a"]), n, poles, ""))
+    if not rows:
+        return None
+    spaces = sum(n * p for _, n, p, _ in rows)
+    size = next((x for x in (2, 4, 8) if spaces <= x), 8)
+    boxes = 1 if spaces <= 8 else -(-spaces // 8)
+    return {"rows": [f"{n} × {p}P {a} A{tag}" if n > 1 else f"{p}P {a} A{tag}" for a, n, p, tag in rows],
+            "spaces": size, "boxes": boxes, "title": "AC OUT" if which == "out" else "AC IN"}
 
 
 def _disconnect_cfg(wiring: dict, key: str, meter_fed: bool = False) -> dict | None:
@@ -311,6 +347,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
     pv_cc, cc_bat, bat_inv = _branch(branches, "pv_strings"), _branch(branches, "cc_bat"), _branch(branches, "bat_inv")
     dc_cc = _branch(branches, "pv_cc") or pv_cc
     ac_in, ac_out = _branch(branches, "ac_in"), _branch(branches, "ac_out")
+    in_feed, out_feed = _branch(branches, "in_feed"), _branch(branches, "out_feed")
     qty = int(eq.get("inverter_qty") or 1)
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     leg_240 = float(inv.get("output_v") or 120) >= 200
@@ -324,6 +361,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
     mshort = (re.search(r"48/\d+", inv.get("model", "")) or re.search(r"\d+", inv.get("model", "") + "0"))[0]
     cfg = {
         "kind": "off_grid", "project": _project_block(project, d, answers), "meter": _meter(eq),
+        "ac_out_center": _ac_center_cfg(wiring, "out"), "ac_in_center": _ac_center_cfg(wiring, "in"),
         "pv": {
             "strings": int(eq["n_strings"]), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": (eq.get("array") or {}).get("area_m2"),
@@ -337,7 +375,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "multis": {
             "label": f"{fam} {mshort}", "model": f"{inv.get('model', '').split('/70')[0]} {int(float(inv.get('output_v') or 120))} V", "qty": qty,
             "single_note": "Split-phase 120/240 V · VE.Bus" if leg_240 else "120 V · VE.Bus",
-            "ac_out_conductors": hots(ac_out), "dc_pos": f"+ {_g(bat_inv['ugc'])} rojo", "dc_neg": f"- {_g(bat_inv['ugc'])} negro",
+            "ac_out_conductors": hots(out_feed or ac_out), "dc_pos": f"+ {_g(bat_inv['ugc'])} rojo", "dc_neg": f"- {_g(bat_inv['ugc'])} negro",
             "ground_wire": f"T {_g(_egc(ac_out) or ac_out['ugc'])} verde",
         },
         "battery": {
@@ -348,7 +386,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
                             else ["Cables batería a Power In (+ / -):", "por definir"]),
         },
         "gx": {"label": (mon.get("model") or "GX").upper()},
-        "grid_in": ({"label": "RED ELÉCTRICA", "breaker": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_in['ocpd_a']} A", "conductors": hots(ac_in)} if ac_in else None),
+        "grid_in": ({"label": "RED ELÉCTRICA", "breaker": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_in['ocpd_a']} A", "conductors": hots(in_feed or ac_in)} if ac_in else None),
         "subpanel": {"q2": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_out['ocpd_a']} A", "q4": answers["q4"], "spd": _spd_label(answers),
                      "loads": [x for x in (answers["loads1"], answers["loads2"]) if x]},
         "comms_notes": {
@@ -380,7 +418,7 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
         out.append({"level": level, "text": text})
 
     ac_in, ac_out, pv = _branch(branches, "ac_in"), _branch(branches, "ac_out"), _branch(branches, "pv_strings")
-    fr, bat_inv = _branch(branches, "pv_inv_ac"), _branch(branches, "bat_inv")
+    fr, bat_inv = _branch(branches, "pv_inv_ac") or _branch(branches, "pv_disc"), _branch(branches, "bat_inv")
     rated_in = float(inv.get("ac_input_current_max_a") or 0)
     if ac_in and rated_in:
         add("info", f"Q1 (AC-IN): 2P {ac_in['ocpd_a']} A sobre {_g(ac_in['ugc'])} ({ac_in.get('ugc_ampacity'):g} A a 75 °C); cada Multi admite {rated_in:g} A de entrada AC. "
@@ -398,7 +436,8 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
         add("info", f"Breaker de string {string_a} A ≥ 1.56 × Isc ({need:.1f} A); {series_txt}. "
                     f"Confirmar que su tensión nominal CC cubra el Voc del string ({cpl['check']['voc_string']:.0f} V).")
     if fr:
-        add("info", f"Q3 (Fronius): 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A.")
+        add("info", (f"Breaker del Fronius en el centro de carga del AC Out: 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A." if fr.get("key") == "pv_disc"
+                     else f"Q3 (Fronius): 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A."))
     if answers.get("lynx") == "power_in":
         add("warn", "Sin Lynx Distributor, los Multis quedan protegidos por los fusibles de las baterías y los del Power In: confirmar que baste y revisar la capacidad de interrupción frente a la corriente de falla del banco.")
     if bat_inv:

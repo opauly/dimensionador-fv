@@ -63,7 +63,8 @@ DEFAULT_LENGTHS = {
     "ac_in_m": 10.0,     # grid -> inverter AC input
     "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
     "gz_link_m": 2.0,    # Grid Zero: generation meter base -> existing consumption meter base
-    "disc_m": 1.5,       # optional disconnect load center: Fronius -> load center (Grid Zero and AC-coupled)
+    "disc_m": 1.5,       # AC OUT load center: inverter -> load center (Grid Zero: Fronius -> its load center)
+    "disc_in_m": 1.5,    # AC IN load center -> inverter
 }
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",
@@ -94,8 +95,11 @@ BRANCH_KEYS = {
     "Controlador de carga → baterías": "cc_bat",
     "Paneles → inversor FV (strings)": "pv_strings",
     "Inversor FV → sub-panel de cargas críticas": "pv_inv_ac",
-    "Centro de carga → sub-panel de cargas críticas": "pv_inv_ac",
-    "Inversor FV → centro de carga de desconexión": "pv_disc",
+    "Inversor FV → centro de carga AC Out": "pv_disc",
+    "Inversor → centro de carga AC Out": "ac_out",
+    "Centro de carga AC Out → sub-panel": "out_feed",
+    "Centro de carga AC In → entrada AC del inversor": "ac_in",
+    "Red → centro de carga AC In": "in_feed",
     "Baterías → inversor": "bat_inv",
     "Inversor → tablero AC (salida)": "ac_out",
     "Red → entrada AC del inversor": "ac_in",
@@ -238,17 +242,24 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     saved_cpl = coupling_override if coupling_override is not None else og_coupling.from_blob(blob)
     cpl = og_coupling.resolve(eq, saved_cpl if can_couple else {})
     ac_coupled = cpl["ac"]
-    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), ac_coupled)
+    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob),
+                                     (blob.get("meta") or {}).get("system_type"), ac_coupled)
     ctx = {
         "ready": False, "reason": None, "branches": [],
         "lengths": clean_lengths(lengths_override) if lengths_override is not None else lengths(blob),
-        "length_labels": LENGTH_LABELS_AC if ac_coupled else LENGTH_LABELS, "meters": {}, "insulation": W.DEFAULT_INSULATION,
+        "length_labels": dict(LENGTH_LABELS_AC if ac_coupled else LENGTH_LABELS), "meters": {}, "insulation": W.DEFAULT_INSULATION,
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
         "show_ac_in": False, "coupling": cpl, "can_couple": can_couple, "disconnect": disc,
     }
-    if disc["enabled"]:
-        ctx["length_labels"] = {**ctx["length_labels"], "pv_inv_ac_m": "Centro de carga → sub-panel de cargas críticas",
-                                disconnect_center.LENGTH_KEY: disconnect_center.LENGTH_LABEL_AC}
+    labels = ctx["length_labels"]
+    if disc["out_center"]:
+        labels["ac_out_m"] = "Centro de carga AC Out → sub-panel"
+        labels[disconnect_center.LENGTH_KEY] = "Inversores → centro de carga AC Out"
+        if disc["fronius_to"] == "center":
+            labels.pop("pv_inv_ac_m", None)
+    if disc["in_center"]:
+        labels["ac_in_m"] = "Red → centro de carga AC In"
+        labels[disconnect_center.LENGTH_IN_KEY] = "Centro de carga AC In → inversores"
     if ac_coupled:
         n_series, n_strings = int(cpl.get("series") or 0), int(cpl.get("strings") or 0)
         if not (panel and battery and inverter and cpl.get("pv_inverter") and n_series and n_strings):
@@ -287,33 +298,22 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
             branches[0]["max_ocpd_a"] = int(max_series)
             branches[0]["notes"].append(f"Datasheet del módulo: protección máxima en serie {int(max_series)} A (aplica también al breaker).")
         pv_ac_a = C.pv_inverter_ac_current_a(pv_inv)
+        to_center = disc["fronius_to"] == "center"
         pv_ac = _size(
-            "Inversor FV → sub-panel de cargas críticas", kind="ac", qty=pv_qty,
+            "Inversor FV → centro de carga AC Out" if to_center else "Inversor FV → sub-panel de cargas críticas", kind="ac", qty=pv_qty,
             current_a=pv_ac_a, factor=W.CONTINUOUS_FACTOR,
-            v_ref=C.PV_INVERTER_AC_V, length_m=L["pv_inv_ac_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+            v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY] if to_center else L["pv_inv_ac_m"], hot=2, neutral=0,
+            insulation=ins, conduit_type=conduit,
             note=f"Salida del inversor FV: {_f(pv_inv, 'kw'):g} kW ÷ {C.PV_INVERTER_AC_V:.0f} V = {pv_ac_a:.1f} A, × 1.25. "
-                 "L1 + L2 + tierra, sin neutro; entra al sub-panel de cargas críticas del lado de carga de los Multis.",
+                 + ("L1 + L2 + tierra, sin neutro; entra a un breaker de 2 polos del centro de carga del AC Out, junto con los Multis."
+                    if to_center else
+                    "L1 + L2 + tierra, sin neutro; entra al sub-panel de cargas críticas del lado de carga de los Multis."),
         )
         fr_ds = fronius_limits(pv_inv.get("model")) or {}
         fr_max = _f(pv_inv, "max_ocpd_a") or fr_ds.get("ocpd_a")      # catalog column first, the built-in datasheet table as fallback
         if fr_max:
             pv_ac["max_ocpd_a"] = int(fr_max)
             pv_ac["notes"].append(f"Datasheet del fabricante a 240 V: breaker AC máx. {int(fr_max)} A (corriente de salida continua {pv_ac_a:g} A).")
-        if disc["enabled"]:
-            # Optional disconnect load center at the Fronius output: same conductors twice, each with its own length. The 2P breaker of the
-            # center (the same size as the one at the sub-panel) goes with the first run.
-            pv_ac["label"] = "Centro de carga → sub-panel de cargas críticas"
-            pv_ac["notes"].append("Sale del centro de carga de desconexión (4 espacios) junto al inversor FV; mismo conductor que el tramo anterior.")
-            pv_disc = _size(
-                "Inversor FV → centro de carga de desconexión", kind="ac", qty=pv_qty,
-                current_a=pv_ac_a, factor=W.CONTINUOUS_FACTOR,
-                v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
-                note=f"Del inversor FV al centro de carga de desconexión (4 espacios): {pv_ac_a:.1f} A × 1.25. L1 + L2 + tierra, sin neutro. "
-                     "El breaker de 2 polos de este centro de carga corta la salida del inversor cerca de él.",
-            )
-            if fr_max:
-                pv_disc["max_ocpd_a"] = int(fr_max)
-            branches.append(pv_disc)
         branches.append(pv_ac)
     else:
         branches = [
@@ -392,9 +392,10 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
         basis_label = "carga conectada (todos los circuitos a la vez)" if AC_OUT_BASIS == "connected" else "demanda (factores de demanda)"
 
         out_branch = _size(
-            "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
+            "Inversor → centro de carga AC Out" if disc["out_center"] else "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
             current_a=i_out, factor=W.CONTINUOUS_FACTOR,
-            v_ref=leg_v, length_m=L["ac_out_m"], hot=hot, neutral=1, insulation=ins, conduit_type=conduit, shared_conduit=True,
+            v_ref=leg_v, length_m=L[disconnect_center.LENGTH_KEY] if disc["out_center"] else L["ac_out_m"], hot=hot, neutral=1,
+            insulation=ins, conduit_type=conduit, shared_conduit=True,
             note=f"Por inversor ({leg_v:.0f} V): {basis_label} ÷ {inv_qty} inversor(es), × 1.25. "
                  f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
         )
@@ -407,6 +408,19 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                     f"El breaker de {out_branch['ocpd_a']} A supera lo que admite la salida del inversor "
                     f"({rated_out:.0f} A nominal → máx. {out_branch['max_ocpd_a']} A).")
         branches.append(out_branch)
+        if disc["out_center"]:
+            # The load center joins every inverter on one bus and ONE feeder leaves for the sub-panel, sized for the sum on one leg
+            # (120 V units alternate between L1 and L2, so half of them per leg; a 240 V unit is on both) plus the AC-coupled Fronius.
+            per_leg = (math.ceil(inv_qty / 2) if hot == 1 else inv_qty) * i_out
+            fronius_a = (cpl["qty"] * C.pv_inverter_ac_current_a(cpl["pv_inverter"])) if (disc["fronius_to"] == "center" and ac_coupled) else 0.0
+            branches.append(_size(
+                "Centro de carga AC Out → sub-panel", kind="ac", qty=1, current_a=per_leg + fronius_a, factor=W.CONTINUOUS_FACTOR,
+                v_ref=leg_v * 2 if hot == 1 else leg_v, length_m=L["ac_out_m"], hot=2, neutral=1, insulation=ins, conduit_type=conduit,
+                note=f"Un solo alimentador del centro de carga del AC Out al sub-panel: suma por fase de los inversores ({per_leg:.1f} A"
+                     + (f" + Fronius {fronius_a:.1f} A" if fronius_a else "") + "), × 1.25. L1 + L2 + neutro + tierra. "
+                     "Lo protegen los breakers de cada inversor en el centro de carga.",
+            ))
+            branches[-1]["ocpd_a"] = None
 
         # AC IN: designed from the most the inverter can take in (its pass-through rating); the breaker
         # is the largest standard size AT OR BELOW that rating (manufacturer: "rated … or less").
@@ -416,9 +430,9 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
             ctx["show_ac_in"] = True
             max_in = W.ocpd_size_max(rated_in)
             in_branch = _size(
-                "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
+                "Centro de carga AC In → entrada AC del inversor" if disc["in_center"] else "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
                 current_a=rated_in, factor=1.0,
-                v_ref=leg_v, length_m=L["ac_in_m"], hot=hot, neutral=1,
+                v_ref=leg_v, length_m=L[disconnect_center.LENGTH_IN_KEY] if disc["in_center"] else L["ac_in_m"], hot=hot, neutral=1,
                 ocpd_override=max_in, insulation=ins, conduit_type=conduit, shared_conduit=True,
                 note=f"Por inversor: máxima corriente de entrada (passthrough) del datasheet, {rated_in:.0f} A. "
                      f"Breaker = el mayor estándar ≤ {rated_in:.0f} A ({max_in} A); el fabricante pide protección de {rated_in:.0f} A o menos. "
@@ -442,16 +456,26 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 in_branch["notes"].append(
                     f"El resumen de arriba suma los {inv_qty} inversores en un solo breaker de 2 polos ({ac_in['breaker_a']} A); "
                     f"aquí cada inversor tiene su propio breaker de {max_in} A.")
+            if disc["in_center"]:
+                # Grid -> load center: one feeder for the pass-through of every inverter on one leg; the breakers of the center protect each inverter.
+                per_leg_in = (math.ceil(inv_qty / 2) if hot == 1 else inv_qty) * rated_in
+                feeder_in = _size(
+                    "Red → centro de carga AC In", kind="ac", qty=1, current_a=per_leg_in, factor=1.0,
+                    v_ref=leg_v * 2 if hot == 1 else leg_v, length_m=L["ac_in_m"], hot=2, neutral=1, insulation=ins, conduit_type=conduit,
+                    note=f"Un solo alimentador de la red al centro de carga del AC In: paso de corriente de los inversores por fase ({per_leg_in:.0f} A). "
+                         "L1 + L2 + neutro + tierra. El breaker de cabecera es el del tablero existente, fuera de esta lista.",
+                )
+                feeder_in["ocpd_a"] = None
+                branches.append(feeder_in)
             branches.append(in_branch)
     else:
         ctx["ac_missing"] = True
 
+    if not ctx["show_ac_in"]:       # no AC IN in this design: nothing to protect with a load center
+        disc["can_ac_in"], disc["ac_in"], disc["in_center"] = False, "din", False
     for b in branches:
         b["key"] = BRANCH_KEYS.get(b["label"])
-        man = (manual_override or {}).get(b["key"])
-        if b["key"] == "pv_disc" and not man and (manual_override or {}).get("pv_inv_ac"):
-            man = {"ocpd_a": None, "ugc": (manual_override["pv_inv_ac"] or {}).get("ugc")}     # "the same cable" as the run after the center
-        W.apply_manual(b, man)
+        W.apply_manual(b, (manual_override or {}).get(b["key"]))
     ctx["has_manual"] = any(b.get("manual") for b in branches)
     ctx["gauge_options"] = [(g, W.gauge_label(g)) for g in W.T.GAUGE_ORDER[W.T.GAUGE_ORDER.index("14"):W.T.GAUGE_ORDER.index("500") + 1]]
     ctx.update(ready=True, branches=branches, meters=W.conductor_meters(branches))
