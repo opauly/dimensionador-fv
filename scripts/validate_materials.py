@@ -232,7 +232,7 @@ _bg = {ln["name"]: ln for ln in _gz["lines"] if ln["qty"]}
 check("grid zero: panels and inverter come from the chosen scenario", (_bg["Paneles solares"]["qty"], _bg["Inversor Fronius Primo 8.2-1"]["qty"]), (12, 1))
 check("grid zero: 45 A breaker (125 % of 34.2 A) for the meter base, base x1, padlock x1",
       (_bg["Breaker 45A compatible con base para medidor"]["qty"], _bg["Base para medidor monofásica con interruptor principal tipo parche, clase 100 (Combo base)"]["qty"], _bg["Candado pequeño para base medidor"]["qty"]), (1, 1, 1))
-check("grid zero: no Victron, Lynx, fuses, duct, cabinet or monitoring kit", any(("Lynx" in n or "Fusible" in n or "Ducto" in n or "Gabinete" in n or "toma de monitoreo" in n or "Victron" in ln["section"]) for n, ln in _bg.items()), False)
+check("grid zero: no Victron, Lynx, fuses, duct or monitoring kit", any(("Lynx" in n or "Fusible" in n or "Ducto" in n or "toma de monitoreo" in n or "Victron" in ln["section"]) for n, ln in _bg.items()), False)
 check("grid zero: still carries rails, Chint DC box and SPD", all(n in _bg for n in ("Rieles (largueros)", "Centro de carga Chint DC 5 espacios", "Supresor de Picos SDSA 1175")), True)
 _gz30 = ME.build_list({**_GZ, "inverter": {**_PRIMO, "ac_output_current_a": 20.8, "max_ocpd_a": 30}}, {"ready": False, "branches": []}, {}, None, "grid_zero")
 check("grid zero: a 20.8 A inverter takes the master 30 A breaker line", any(ln["name"] == "Breaker 30A compatible con base para medidor" and ln["in_master"] for ln in _gz30["lines"] if ln["qty"]), True)
@@ -294,8 +294,8 @@ check("CTs: one per phase (split-phase 2, three-phase 3), none for a meter witho
 check("CTs: a design saved before the column existed is still recognised by its model", ct_count({"model": "Smart Meter WR 100-600 V-3"}, _PRIMO), 2)
 _gsm = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
 check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
-check("grid zero list: the Smart Meter goes in the usual 50x40x20 cabinet, flagged to confirm", (_gsm["Gabinete metálico 50x40x20"]["qty"], _gsm["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
-check("grid zero list: no cabinet without the Smart Meter", "Gabinete metálico 50x40x20" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
+check("grid zero list: the cabinet is the norm; the Smart Meter goes in the usual 50x40x20, flagged to confirm", (_gsm["Gabinete metálico 50x40x20"]["qty"], _gsm["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
+check("grid zero list: the cabinet comes even without the Smart Meter", "Gabinete metálico 50x40x20" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, True)
 check("grid zero list: no CTs without the Smart Meter", "Transformador de Corriente 100A:333mV" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
 check("grid zero wiring: the link run has the same conductors as the generation-base run and no breaker of its own",
       (_gb["gz_link"]["ugc"] == _gb["gz_ac"]["ugc"], _gb["gz_link"]["ocpd_a"]), (True, None))
