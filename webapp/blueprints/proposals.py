@@ -89,7 +89,16 @@ def _row(proposal: dict) -> dict:
     quote_str = format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), cur_vnum)
     badge_label, badge_bg, badge_fg = STATUS_BADGE.get(status, ("—", "#f1f5f9", "#64748b"))
 
+    # With more than one version the status alone says nothing about WHICH one the client has: name the last version sent and
+    # whether the newest one is still unsent ("v1 enviada · v2 sin enviar").
+    sent_nums = sorted(v["version_number"] for v in versions_emb if v.get("sent_to_client"))
+    sent_hint = ""
+    if len(versions_emb) > 1 and sent_nums:
+        sent_hint = (f"v{cur_vnum} enviada" if cur_vnum in sent_nums
+                     else f"v{sent_nums[-1]} enviada · v{cur_vnum} sin enviar")
+
     return {
+        "sent_hint": sent_hint,
         "id": proposal["id"],
         "client_name": client_name,
         "sys_label": sys_label,

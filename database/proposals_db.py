@@ -91,7 +91,7 @@ def get_proposal(proposal_id: str) -> dict | None:
 
 def list_proposals(status: str | None = None) -> list[dict]:
     db = get_client()
-    q = db.table("proposals").select("*, proposal_versions(version_number, total_usd, locked, created_at)")
+    q = db.table("proposals").select("*, proposal_versions(version_number, total_usd, locked, sent_to_client, created_at)")
     if status:
         q = q.eq("status", status)
     result = q.order("updated_at", desc=True).limit(200).execute()
