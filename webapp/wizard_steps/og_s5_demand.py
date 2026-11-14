@@ -37,6 +37,7 @@ _CONFIDENCE_BADGES = {
     "benchmark": ("📊 Tabla de referencia", "#6b7280"),
     "user_confirmed": ("✅ Confirmado por cliente", "#166534"),
     "default_assumed": ("⚠️ Estimado genérico", "#b45309"),
+    "bill_calibrated": ("🧾 Ajustado al recibo", "#047857"),
 }
 
 DEFAULT_SCRATCH_KEY = "s5og"
@@ -74,11 +75,25 @@ def _table_rows(profile: dict, diversified_used_downstream: bool) -> list[dict]:
             "kwh_day": line["estimated_kwh_day"],
             "factor_pct": round(factor * 100, 1),
             "energy_kwh_day": round(line["estimated_kwh_day"] * factor, 2),
+            "installed_kw": float(line.get("connected_power_kw") or 0) * int(line.get("quantity") or 1),
             "badge": badge,
             "badge_color": color,
             "detail": line["source_detail"],
         })
     return rows
+
+
+def _row_totals(rows: list[dict]) -> dict:
+    """Footer of the demand table: energy (kWh/día), its blended demand factor, and the installed vs demanded POWER the same
+    per-line factors give (the ones the engineer can edit here)."""
+    kwh = sum(r["kwh_day"] for r in rows)
+    energy = sum(r["energy_kwh_day"] for r in rows)
+    installed = sum(r["installed_kw"] for r in rows)
+    demand = sum(r["installed_kw"] * r["factor_pct"] / 100.0 for r in rows)
+    return {"qty": sum(int(r["quantity"] or 0) for r in rows), "kwh_day": round(kwh, 2), "energy_kwh_day": round(energy, 2),
+            "energy_factor_pct": round(energy / kwh * 100) if kwh else 0,
+            "installed_kw": round(installed, 2), "demand_kw": round(demand, 2),
+            "power_factor_pct": round(demand / installed * 100) if installed else 0}
 
 
 def _cat_totals(rows: list[dict]) -> dict:
@@ -112,7 +127,7 @@ def calculate(blob: dict, scratch_key: str) -> dict:
     lat, lon = _site_latlon(blob)
     profile = build_load_profile(loads, lat=lat, lon=lon)
     scratch = _scratch(blob, scratch_key)
-    return {**scratch, "profile": profile}
+    return {**scratch, "profile": profile, "adjust_note": None}
 
 
 def recalculate(blob: dict, scratch_key: str, form) -> dict:
@@ -159,11 +174,13 @@ def recalculate(blob: dict, scratch_key: str, form) -> dict:
 
     rows = parse_rows(form, "line", ["hd", "fd"])
     updated_loads = []
+    calibrated = set()            # lines a previous "Ajustar al recibo" scaled and the engineer has not retyped since
     for i, (orig, line) in enumerate(zip(loads, profile["lines"])):
         row = rows[i] if i < len(rows) else {}
 
         new_hours = to_float(row.get("hd"))
-        already_confirmed = line.get("confidence") == "user_confirmed"
+        was_calibrated = line.get("confidence") == "bill_calibrated"
+        already_confirmed = line.get("confidence") == "user_confirmed" or was_calibrated
         current_default = line.get("duty_hours_day") or 0
         duty_hours_override = (
             float(new_hours)
@@ -173,6 +190,8 @@ def recalculate(blob: dict, scratch_key: str, form) -> dict:
             )
             else None
         )
+        if was_calibrated and duty_hours_override is not None and abs(duty_hours_override - current_default) < 1e-9:
+            calibrated.add(i)
 
         factor_pct = to_float(row.get("fd"))
         factor = float(factor_pct) / 100.0 if factor_pct is not None else line.get("demand_factor_pct")
@@ -185,7 +204,89 @@ def recalculate(blob: dict, scratch_key: str, form) -> dict:
         })
 
     new_profile = build_load_profile(updated_loads, lat=lat, lon=lon)
-    return {**scratch, "profile": new_profile}
+    out = {**scratch, "adjust_note": None}
+    bill_month = to_float(form.get("adjust_kwh_month"))
+    if bill_month is not None:
+        out["bill_kwh_month"] = bill_month
+
+    if form.get("_adjust") == "1":
+        if not bill_month or bill_month <= 0:
+            out.update(adjust_note="Escribe el consumo mensual real del recibo (kWh/mes).", adjust_ok=False)
+        else:
+            new_profile, calibrated, note, ok = _adjust_to_bill(updated_loads, new_profile, calibrated, bill_month / MONTH_DAYS, lat, lon)
+            out.update(adjust_note=note, adjust_ok=ok)
+    _mark_calibrated(new_profile, calibrated, profile)
+    out["profile"] = new_profile
+    return out
+
+
+MONTH_DAYS = 30.4          # same days-per-month the hybrid main-panel figures use
+MAX_HOURS = 24.0
+
+
+def _adjust_to_bill(updated_loads: list[dict], profile: dict, calibrated: set, target_day: float, lat, lon):
+    """"Ajustar al recibo": scale the daily hours of the lines the engineer has NOT confirmed so the total kWh/día equals the
+    real consumption on the bill. Lines with hours the engineer typed stay as they are; a line that would need more than 24 h
+    stops at 24 and the others absorb the rest. Returns (profile, calibrated line indexes, note, ok)."""
+    from calculations.load_profile_off_grid import build_load_profile
+
+    lines = profile["lines"]
+    flexible = [i for i, l in enumerate(lines)
+                if (l["confidence"] != "user_confirmed" or i in calibrated)
+                and l["connected_power_kw"] * l["quantity"] > 0 and (l.get("duty_hours_day") or 0) > 0]
+    fixed_kwh = sum(l["estimated_kwh_day"] for i, l in enumerate(lines) if i not in flexible)
+    flex_kwh = sum(lines[i]["estimated_kwh_day"] for i in flexible)
+    if not flexible or flex_kwh <= 0:
+        return profile, calibrated, "No hay líneas que ajustar: todas tienen horas confirmadas o no consumen.", False
+    remaining = target_day - fixed_kwh
+    if remaining <= 0:
+        return profile, calibrated, (f"Las líneas con horas confirmadas ya suman {fixed_kwh:,.1f} kWh/día, "
+                                     f"más que el recibo ({target_day:,.1f} kWh/día)."), False
+
+    kw = {i: lines[i]["connected_power_kw"] * lines[i]["quantity"] for i in flexible}
+    hours = {i: float(lines[i]["duty_hours_day"]) for i in flexible}
+    free, factor, capped_n = set(flexible), 1.0, 0
+    while free:
+        free_kwh = sum(kw[i] * hours[i] for i in free)
+        factor = remaining / free_kwh
+        over = [i for i in free if hours[i] * factor > MAX_HOURS]
+        if not over:
+            for i in free:
+                hours[i] = round(hours[i] * factor, 3)
+            break
+        for i in over:
+            hours[i] = MAX_HOURS
+            remaining -= kw[i] * MAX_HOURS
+            free.discard(i)
+            capped_n += 1
+        if remaining <= 0:
+            break
+
+    adjusted = [dict(l) for l in updated_loads]
+    for i in flexible:
+        adjusted[i]["duty_hours_day"] = hours[i]
+    new_profile = build_load_profile(adjusted, lat=lat, lon=lon)
+    total = new_profile["total_kwh_day"]
+    fixed_n = len(lines) - len(flexible)
+    ok = abs(total - target_day) <= max(0.05, target_day * 0.005)
+    note = (f"Ajustado a {target_day * MONTH_DAYS:,.0f} kWh/mes ({target_day:,.1f} kWh/día): "
+            f"{len(flexible)} línea(s) escaladas ×{factor:,.1f}" + (f", {fixed_n} con horas confirmadas se respetaron" if fixed_n else "") + ".")
+    if ok and factor >= 2:
+        note += " Un factor tan alto sugiere que faltan equipos en la lista o que se usan más horas de las típicas."
+    if not ok:
+        note = (f"No se alcanza el recibo: {capped_n} línea(s) ya están al máximo de 24 h/día. "
+                f"Total posible {total:,.1f} kWh/día de {target_day:,.1f}. Faltan cargas en la lista.")
+    return new_profile, set(flexible), note, ok
+
+
+def _mark_calibrated(profile: dict, calibrated: set, prior_profile: dict) -> None:
+    """Lines scaled by "Ajustar al recibo" keep their own badge (and stay overrides on later recalculations)."""
+    for i in calibrated:
+        if i < len(profile["lines"]):
+            line = profile["lines"][i]
+            line["confidence"] = "bill_calibrated"
+            line["source_detail"] = (f"{line['connected_power_kw']} kW × {line['duty_hours_day']} h/día × {line['quantity']} "
+                                     f"(horas ajustadas para que el total coincida con el recibo)")
 
 
 def generate_hourly_shape(blob: dict, scratch_key: str) -> dict:
@@ -284,6 +385,9 @@ def build_context(
             "show_hourly_chart": show_hourly_chart,
             "hourly_chart_html": None,
             "can_continue": False,
+            "bill_kwh_month": scratch.get("bill_kwh_month"),
+            "calibrated_count": 0,
+            "adjust_note": None, "adjust_ok": True,
         }
 
     rows = _table_rows(profile, diversified_used_downstream)
@@ -309,6 +413,7 @@ def build_context(
         "scratch_key": scratch_key,
         "profile": profile,
         "rows": rows,
+        "totals": _row_totals(rows),
         "total_kwh_day": total_kwh_day,
         "total_kwh_day_diversified": total_diversified,
         "diversified_used_downstream": diversified_used_downstream,
@@ -318,4 +423,8 @@ def build_context(
         "show_hourly_chart": show_hourly_chart,
         "hourly_chart_html": hourly_chart_html,
         "can_continue": total_kwh_day > 0,
+        "bill_kwh_month": scratch.get("bill_kwh_month"),
+        "calibrated_count": sum(1 for r in rows if r["badge"] == _CONFIDENCE_BADGES["bill_calibrated"][0]),
+        "adjust_note": scratch.get("adjust_note"),
+        "adjust_ok": scratch.get("adjust_ok", True),
     }

@@ -8,10 +8,10 @@
 <div id="s4hmp-cargas">
   {% if mp.error %}<p class="wiz-error">{{ mp.error }}</p>{% endif %}
   {% if mp.import_notes %}
-    <div class="card" style="margin:8px 0;padding:10px 12px;">
-      <p style="margin:0 0 4px;font-size:13px;"><b>Notas de la IA al leer el texto</b> <span class="card-note-sm">(revisar antes de continuar)</span></p>
-      <ul style="margin:0;padding-left:18px;font-size:12.5px;">{% for n in mp.import_notes %}<li>{{ n }}</li>{% endfor %}</ul>
-    </div>
+    <details style="margin:8px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--muted-2);">Notas de la IA al leer el texto ({{ mp.import_notes|length }})</summary>
+      <ul style="margin:6px 0 0;padding-left:18px;font-size:12.5px;">{% for n in mp.import_notes %}<li>{{ n }}</li>{% endfor %}</ul>
+    </details>
   {% endif %}
 
   <h5 style="font-size:13px;margin:10px 0 4px;">Cargas comunes</h5>

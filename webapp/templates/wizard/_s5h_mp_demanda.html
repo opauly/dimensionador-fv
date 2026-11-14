@@ -55,6 +55,19 @@
             </tr>
             {% endfor %}
           </tbody>
+          {% if mp.rows %}
+          <tfoot>
+            <tr>
+              <td>Total</td><td></td><td>{{ mp.totals.qty }}</td><td></td>
+              <td>{{ '{:,.2f}'.format(mp.totals.kwh_day) }}</td>
+              <td title="Energía diversificada ÷ kWh/día: factor de demanda promedio ponderado por consumo.">{{ mp.totals.energy_factor_pct }} %</td>
+              <td><b>{{ '{:,.2f}'.format(mp.totals.energy_kwh_day) }}</b></td>
+              <td colspan="2" title="Potencia instalada × el factor de demanda de cada línea (los de la columna, editables). Es la base para dimensionar inversores y breakers.">
+                Potencia: {{ '{:,.1f}'.format(mp.totals.installed_kw) }} kW instalada · <b>{{ '{:,.1f}'.format(mp.totals.demand_kw) }} kW demandada</b> ({{ mp.totals.power_factor_pct }} %)
+              </td>
+            </tr>
+          </tfoot>
+          {% endif %}
         </table>
       </div>
     </div>
@@ -66,6 +79,20 @@
     </button>
     <span id="s5hmp-recalc-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Recalculando…</span>
 
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;">
+      <label for="s5hmp-bill" class="card-note-sm" style="margin:0;" title="Consumo total del sitio por mes. Si ya hay paneles: retirada + producida − depositada.">Consumo real del recibo (kWh/mes)</label>
+      <input id="s5hmp-bill" class="finput" type="number" min="1" step="any" name="adjust_kwh_month" placeholder="p. ej. 1660" style="max-width:130px;" value="{{ mp.bill_kwh_month if mp.bill_kwh_month else '' }}">
+      <button class="btn btn-outline" type="button"
+              hx-post="{{ url_for('wizard.paso5h_mp_recalcular', vid=vid) }}"
+              hx-include="#s5hmp-tabla-rows input, #s5hmp-bill" hx-vals='{"_adjust": "1"}'
+              hx-target="#s5hmp-demanda" hx-swap="outerHTML"
+              hx-indicator="#s5hmp-recalc-spin" hx-disabled-elt="this"
+              title="Escala las horas de las líneas que no confirmaste hasta que el total coincida con el recibo. Las líneas con horas escritas por ti no se tocan.">
+        Ajustar al recibo
+      </button>
+    </div>
+    {% if mp.adjust_note %}<p class="card-note-sm" style="margin-top:6px;{{ '' if mp.adjust_ok else 'color:#b45309;' }}">{{ mp.adjust_note }}</p>{% endif %}
+
     {% if mp.default_count %}
       <p class="wiz-error" style="margin-top:10px;">⚠️ {{ mp.default_count }} línea(s) usan un estimado genérico — revísalas antes de continuar.</p>
     {% endif %}
@@ -73,6 +100,7 @@
     <div class="cards" style="grid-template-columns:1fr;margin-top:14px;max-width:460px;">
       <div class="card-green">
         <b>Consumo diario total estimado (tablero principal)</b><br>
+        {% if mp.calibrated_count %}<span class="card-note-sm" style="display:inline-block;margin:2px 0 6px;padding:2px 8px;border-radius:10px;background:#d1fae5;color:#047857;font-weight:600;">🧾 Ajustado al recibo{% if mp.bill_kwh_month %} · {{ '{:,.0f}'.format(mp.bill_kwh_month) }} kWh/mes{% endif %} · {{ mp.calibrated_count }} línea(s) escaladas</span><br>{% endif %}
         <span class="card-value">{{ '{:,.2f}'.format(mp.total_kwh_day) }} kWh/día</span><br>
         <span class="card-note-sm">Diversificado (× factor demanda): {{ '{:,.2f}'.format(mp.total_kwh_day_diversified) }} kWh/día.</span>
       </div>
