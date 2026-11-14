@@ -281,8 +281,11 @@ def _disconnect_cfg(wiring: dict, key: str, meter_fed: bool = False) -> dict | N
     b = next((x for x in wiring.get("branches") or [] if x.get("key") == key), None)
     if not b or not b.get("ocpd_a"):
         return None
-    amps = f"2P {int(b['ocpd_a'])} A"
-    return {"breaker": amps, "meter_breaker": "2P 20 A" if meter_fed else None}
+    n = max(1, int(b.get("qty") or 1))
+    amps = (f"{n} × " if n > 1 else "") + f"2P {int(b['ocpd_a'])} A"
+    need = 2 * (n + (1 if meter_fed else 0))
+    return {"breaker": amps, "meter_breaker": "2P 20 A" if meter_fed else None, "qty": n,
+            "spaces": next((x for x in (2, 4, 8) if need <= x), 8), "boxes": 1 if need <= 8 else -(-need // 8)}
 
 
 def _meter(eq: dict, grid_zero: bool = False) -> dict | None:
@@ -318,20 +321,26 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
     panel, inv = eq["panel"], eq["inverter"]
     pv, dc_inv, ac = _branch(branches, "pv_strings"), _branch(branches, "pv_dc_inv"), _branch(branches, "gz_ac")
     link = _branch(branches, "gz_link")
+    to_center = _branch(branches, "gz_disc")
+    n_inv = max(1, int(eq.get("inverter_qty") or 1))
+    strings_total = int(eq["n_strings"])
+    strings_each = max(1, -(-strings_total // n_inv))      # what is drawn: the strings of ONE inverter, "igual en cada inversor"
     string_a = string_breaker_a or pv["ocpd_a"]
+    fr_out = to_center or ac                               # the run that leaves each Fronius
     cfg = {
         "kind": "grid_zero", "project": _project_block(project, d, answers), "meter": _meter(eq, grid_zero=True),
         "disconnect": _disconnect_cfg(wiring, "gz_disc", meter_fed=bool(eq.get("monitoring"))),
         "pv": {
-            "strings": int(eq["n_strings"]), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
+            "strings": strings_each, "inverters": n_inv, "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": None,
             "string_breaker": f"{string_a} A 2P DC", "dc_wire": f"{_g(pv['ugc'])} SOLAR", "dc_inv_wire": f"{_g(dc_inv['ugc'])} SOLAR",
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
-            "label": f"{_model(inv)} 240 V", "kw": inv.get("kw"), "mppt": int(inv.get("mppt_channels") or int(eq["n_strings"])),
-            "ac_conductors": [f"L1 {_g(ac['ugc'])} negro", f"L2 {_g(ac['ugc'])} rojo", f"T {_g(_egc(ac) or ac['ugc'])} verde"],
-            "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
+            "label": f"{_model(inv)} 240 V", "kw": inv.get("kw"), "mppt": int(inv.get("mppt_channels") or strings_each), "qty": n_inv,
+            "ac_conductors": [f"L1 {_g(fr_out['ugc'])} negro", f"L2 {_g(fr_out['ugc'])} rojo", f"T {_g(_egc(fr_out) or fr_out['ugc'])} verde"],
+            "feeder_conductors": [f"L1 {_g(ac['ugc'])} negro", f"L2 {_g(ac['ugc'])} rojo", f"T {_g(_egc(ac) or ac['ugc'])} verde"],
+            "ground_wire": f"T {_g(_egc(fr_out) or fr_out['ugc'])} verde",
         },
         "base": {"breaker": f"2P {ac['ocpd_a']} A", "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
                  "link_conductors": ([f"L1 {_g(link['ugc'])} negro", f"L2 {_g(link['ugc'])} rojo", f"T {_g(_egc(link) or link['ugc'])} verde"] if link else None)},

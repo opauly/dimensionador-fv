@@ -56,9 +56,9 @@ def from_blob(blob: dict) -> dict:
     return clean(((blob or {}).get("scratch") or {}).get(SCRATCH_KEY))
 
 
-def resolve(saved: dict | None, system_type: str | None, ac_coupled: bool = False, show_ac_in: bool = True) -> dict:
+def resolve(saved: dict | None, system_type: str | None, ac_coupled: bool = False, show_ac_in: bool = True, forced: bool = False) -> dict:
     """What applies to this design. `can_gz`: Grid Zero extra center; `can_ac`: Victron AC OUT / AC IN selectors; `can_fronius`: AC-coupled
-    Fronius destination. `enabled` is the Grid Zero center; `ac_out` / `ac_in` / `fronius_to` are the effective modes."""
+    Fronius destination. `enabled` is the Grid Zero center (`forced`: several Fronius in parallel need it to join their outputs); `ac_out` / `ac_in` / `fronius_to` are the effective modes."""
     cfg = clean(saved)
     grid_zero = system_type == "grid_zero"
     can_ac = system_type in ("off_grid", "hybrid")
@@ -68,7 +68,7 @@ def resolve(saved: dict | None, system_type: str | None, ac_coupled: bool = Fals
     return {
         "can": grid_zero, "can_gz": grid_zero, "can_ac": can_ac, "can_fronius": bool(can_ac and ac_coupled and ac_out == "center"),
         "can_ac_in": bool(can_ac and show_ac_in),
-        "enabled": bool(grid_zero and cfg["enabled"]),
+        "enabled": bool(grid_zero and (cfg["enabled"] or forced)), "forced": bool(grid_zero and forced),
         "ac_out": ac_out, "ac_in": ac_in, "fronius_to": fronius_to,
         "out_center": ac_out == "center", "in_center": ac_in == "center",
     }

@@ -180,7 +180,7 @@ def _disc_box(c, h, x, y, w, hgt, D):
     box(x, y, w, hgt, LGRAY)
     cx = x + w / 2
     txt(cx, y + hgt - 11, 'CENTRO DE CARGA', 6.8, 'Helvetica-Bold')
-    txt(cx, y + hgt - 20, '4 espacios · desconexión del FV', 5.6, 'Helvetica', GRAY)
+    txt(cx, y + hgt - 20, f"{D.get('spaces', 4)} espacios" + (f" × {D['boxes']}" if D.get("boxes", 1) > 1 else "") + " · desconexión del FV", 5.6, 'Helvetica', GRAY)
     txt(cx, y + hgt - 31, f"Q-FV · {D['breaker']}", 6.2, 'Helvetica', black)
     if D.get("meter_breaker"):
         txt(cx, y + hgt - 41, f"Q-MED · {D['meter_breaker']} (medidor)", 6.2, 'Helvetica', black)
@@ -224,7 +224,8 @@ def _hybrid_ac(c, h, cfg):
     box(40, 590, 240, 120, LGRAY)
     txt(160, 697, 'ARREGLO FOTOVOLTAICO', 8, 'Helvetica-Bold')
     kwp = n_str * n_mod * PV["module_w"] / 1000
-    txt(160, 686, f"{n_str * n_mod} × {PV['module_label']} · {kwp:.2f} kWp", 7)
+    n_inv = int(PV.get("inverters") or 1)
+    txt(160, 686, f"{n_str * n_mod} × {PV['module_label']} · {kwp:.2f} kWp" + (f" · por inversor (× {n_inv})" if n_inv > 1 else ""), 7)
     pitch = min(24, 188 / n_mod); mw = pitch - 4
     for i, yc in enumerate(ys):
         txt(48, yc - 2.5, f"S{i + 1}", 7, 'Helvetica-Bold', NAVY, 'l')
@@ -546,10 +547,12 @@ def _grid_zero(c, h, cfg):
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     PV, FR, BS, SP, M = cfg["pv"], cfg["fronius"], cfg["base"], cfg["subpanel"], cfg.get("meter")
     n_str, n_mod = PV["strings"], PV["modules_per_string"]
-    assert 1 <= n_str <= 4, "pv.strings debe ser de 1 a 4"
-    kwp = n_str * n_mod * PV["module_w"] / 1000
+    n_inv = int(FR.get("qty") or 1)          # inversores en paralelo: se dibuja uno, «igual en cada inversor»
+    assert 1 <= n_str <= 4, "pv.strings debe ser de 1 a 4 por inversor"
+    kwp = n_inv * n_str * n_mod * PV["module_w"] / 1000
+    fr_name = f"{n_inv} × {FR['label']}" if n_inv > 1 else FR['label']
     txt(30, 748, 'DIAGRAMA UNIFILAR', 17, 'Helvetica-Bold', NAVY, 'l')
-    txt(30, 734, f"Sistema fotovoltaico conectado a la red · Cero inyección (Grid Zero) · {FR['label']} · {n_str * n_mod} × {PV['module_label']} ({kwp:.2f} kWp)",
+    txt(30, 734, f"Sistema fotovoltaico conectado a la red · Cero inyección (Grid Zero) · {fr_name} · {n_inv * n_str * n_mod} × {PV['module_label']} ({kwp:.2f} kWp)",
         7.5, 'Helvetica', GRAY, 'l')
     if cfg["project"]["draft"]:
         txt(1196, 748, 'BORRADOR · REV ' + cfg["project"]["revision"].split()[0], 10, 'Helvetica-Bold', RED, 'r')
@@ -558,8 +561,8 @@ def _grid_zero(c, h, cfg):
     _dc_box(c, h, PV, ys, wire_out=PV.get("dc_inv_wire"))
 
     box(560, 590, 200, 120, LGRAY)
-    txt(660, 696, 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold'); txt(660, 685, FR["label"], 7)
-    txt(660, 675, f"{FR['kw']} kW · {FR['mppt']} MPPT", 6.5, 'Helvetica', GRAY)
+    txt(660, 696, f"{n_inv} × INVERSOR ON-GRID (FV)" if n_inv > 1 else 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold'); txt(660, 685, FR["label"], 7)
+    txt(660, 675, f"{FR['kw']} kW · {FR['mppt']} MPPT" + (" · igual en cada inversor" if n_inv > 1 else ""), 6.5, 'Helvetica', GRAY)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {min(i, FR['mppt'] - 1) + 1}", 6.5, 'Helvetica', GRAY, 'l')
     seg([(585, 590), (585, 572)], GRN, 1.1, (3, 2)); ground(585, 572); lab(595, 570, FR["ground_wire"], GRN, 'l')
@@ -570,6 +573,8 @@ def _grid_zero(c, h, cfg):
         seg([(690, 590), (690, 560)], black, 1.8)
         _disc_box(c, h, 640, 505, 120, 55, D)
         seg([(640, 532), (375, 532), (375, 496)], black, 1.8)
+        if FR.get("feeder_conductors"):
+            stack(520, 524, FR["feeder_conductors"], 'l')
         txt(768, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
         stack(766, 563, FR["ac_conductors"], 'l')
     else:

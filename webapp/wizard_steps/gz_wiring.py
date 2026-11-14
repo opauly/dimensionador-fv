@@ -45,7 +45,9 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
         "show_ac_in": False, "coupling": {}, "can_couple": False,
     }
-    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), "grid_zero")
+    n_inv = max(1, int(eq.get("inverter_qty") or 1))
+    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), "grid_zero",
+                                     forced=n_inv > 1)
     ctx["disconnect"] = disc
     if disc["enabled"]:
         ctx["length_labels"] = {**LENGTH_LABELS, "ac_out_m": "Centro de carga → base de generación", disconnect_center.LENGTH_KEY: disconnect_center.LENGTH_LABEL}
@@ -84,15 +86,17 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
     dc_inv["ocpd_a"] = None
 
     out_a = C.pv_inverter_ac_current_a(inverter)
+    out_total = out_a * n_inv          # several Fronius in parallel: what reaches the base is the sum
     ac = _size(
-        "Inversor → base de medidor de generación", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+        "Inversor → base de medidor de generación", kind="ac", qty=1, current_a=out_total, factor=W.CONTINUOUS_FACTOR,
         v_ref=C.PV_INVERTER_AC_V, length_m=L["ac_out_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
-        note=f"Salida del inversor: corriente máxima {out_a:.1f} A × 1.25 (NEC 705 / 690.8). L1 + L2 + tierra, sin neutro. "
-             "El breaker va en la base de medidor de generación (interruptor principal).",
+        note=(f"Salida del inversor: corriente máxima {out_a:.1f} A × 1.25 (NEC 705 / 690.8). " if n_inv == 1
+              else f"Suma de {n_inv} inversores en paralelo: {n_inv} × {out_a:.1f} A = {out_total:.1f} A × 1.25 (NEC 705 / 690.8). ")
+             + "L1 + L2 + tierra, sin neutro. El breaker va en la base de medidor de generación (interruptor principal).",
     )
     ds = fronius_limits(inverter.get("model")) or {}
     max_ocpd = _f(inverter, "max_ocpd_a") or ds.get("ocpd_a")
-    if max_ocpd:
+    if max_ocpd and n_inv == 1:        # the manufacturer limit is per inverter: with several, each one has its own breaker in the load center
         ac["max_ocpd_a"] = int(max_ocpd)
         ac["notes"].append(f"Datasheet del fabricante a 240 V: breaker AC máx. {int(max_ocpd)} A.")
         if ac.get("ocpd_a") and ac["ocpd_a"] > max_ocpd:
@@ -101,7 +105,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
 
     # Interconnection with the existing consumption meter base: the same conductors that reach the generation base, its own length.
     link = _size(
-        "Base de generación → base de consumo", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+        "Base de generación → base de consumo", kind="ac", qty=1, current_a=out_total, factor=W.CONTINUOUS_FACTOR,
         v_ref=C.PV_INVERTER_AC_V, length_m=L["gz_link_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
         note="Mismo conductor que llega a la base de medidor de generación (L1 + L2 + tierra); interconecta con la base de medición de consumo "
              "existente. Lo protege el breaker de la base de generación, por eso no lleva uno propio.",
@@ -115,15 +119,16 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
         ac["label"] = "Centro de carga → base de medidor de generación"
         ac["notes"].append("Sale del centro de carga de desconexión (4 espacios) junto al Fronius; el breaker de la base de generación sigue siendo el interruptor principal.")
         to_center = _size(
-            "Inversor → centro de carga de desconexión", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+            "Inversor → centro de carga de desconexión", kind="ac", qty=n_inv, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
             v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
-            note=f"Salida del inversor al centro de carga de desconexión (4 espacios): {out_a:.1f} A × 1.25. L1 + L2 + tierra, sin neutro. "
-                 "El breaker de 2 polos del centro de carga corta el Fronius cerca de él.",
+            note=f"Salida de cada inversor ({out_a:.1f} A × 1.25) al centro de carga de desconexión: un tendido por Fronius ({n_inv}), cada uno a su breaker de "
+                 "2 polos. L1 + L2 + tierra, sin neutro." + (" Las barras del centro de carga juntan los inversores." if n_inv > 1 else ""),
         )
-        if max_ocpd:
-            to_center["max_ocpd_a"] = int(max_ocpd)
-            if to_center.get("ocpd_a") and to_center["ocpd_a"] > max_ocpd:
-                to_center["ocpd_a"] = int(max_ocpd)
+        if max_ocpd or ds.get("ocpd_a"):
+            cap = int(max_ocpd or ds.get("ocpd_a"))
+            to_center["max_ocpd_a"] = cap
+            if to_center.get("ocpd_a") and to_center["ocpd_a"] > cap:
+                to_center["ocpd_a"] = cap
         branches.insert(2, to_center)
     for b in branches:
         b["key"] = BRANCH_KEYS.get(b["label"])

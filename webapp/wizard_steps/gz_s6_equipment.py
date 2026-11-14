@@ -33,6 +33,8 @@ because it changes behaviour and PLAN §1.10 item 15 requires it: see
 """
 from __future__ import annotations
 
+import math
+
 from calculations.mppt import check_design, validate_string_design
 
 
@@ -53,6 +55,34 @@ def _find(items: list[dict], id_: str | None) -> dict | None:
     if not id_:
         return None
     return next((x for x in items if x.get("id") == id_), None)
+
+
+MAX_INVERTERS = 6      # string inverters in parallel for one Grid Zero design
+DC_AC_MAX_RATIO = 1.2  # largest array per inverter we suggest, as a multiple of the inverter's kW
+
+
+def _qty(raw) -> int:
+    """Number of identical inverters in parallel (1..MAX_INVERTERS)."""
+    try:
+        n = int(float(str(raw).replace(",", ".")))
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(MAX_INVERTERS, n))
+
+
+def _scale(sc: dict, qty: int) -> dict:
+    """A per-inverter design (series x strings on ONE inverter) as the whole system with `qty` identical inverters in parallel: strings,
+    panels, kW and area are the totals; the per-MPPT / voltage checks stay per inverter (that is what each inverter sees)."""
+    out = {**sc, "inverter_qty": qty, "strings_per_inverter": sc["strings"]}
+    if qty > 1:
+        out["strings"] = sc["strings"] * qty
+        out["total_panels"] = sc["total_panels"] * qty
+        out["system_kw"] = round(sc["system_kw"] * qty, 2)
+        if sc.get("area_m2") is not None:
+            out["area_m2"] = round(sc["area_m2"] * qty, 1)
+        if sc.get("description"):
+            out["description"] = f"{qty} inversores en paralelo, igual en cada uno · {sc['description']}"
+    return out
 
 
 def _tariff_info(utility: dict) -> dict | None:
@@ -88,6 +118,7 @@ def _resolve_selection(blob: dict) -> dict:
     panel_id = s6.get("panel_id") or current.get("panel_id") or (panels[0]["id"] if panels else None)
     inverter_id = s6.get("inverter_id") or current.get("inverter_id") or (inverters[0]["id"] if inverters else None)
     monitoring_id = s6.get("monitoring_id", current.get("monitoring_id"))
+    inverter_qty = _qty(s6.get("inverter_qty") if s6.get("inverter_qty") is not None else current.get("inverter_qty"))
 
     selected_panel = _find(panels, panel_id) or (panels[0] if panels else None)
     selected_inverter = _find(inverters, inverter_id) or (inverters[0] if inverters else None)
@@ -111,6 +142,7 @@ def _resolve_selection(blob: dict) -> dict:
         "selected_monitoring": selected_monitoring,
         "m_series": m_series,
         "m_parallel": m_parallel,
+        "inverter_qty": inverter_qty,
     }
 
 
@@ -240,8 +272,9 @@ def select_equipment(blob: dict, form) -> dict:
     )
     monitoring_id = (form.get("monitoring_id") or "").strip() or None
 
-    equip_key = f"{panel_id}_{inverter_id}" if panel_id and inverter_id else None
-    new_s6 = {**s6, "panel_id": panel_id, "inverter_id": inverter_id, "monitoring_id": monitoring_id}
+    qty = _qty(form.get("inverter_qty") if form.get("inverter_qty") not in (None, "") else (s6.get("inverter_qty") or 1))
+    equip_key = (f"{panel_id}_{inverter_id}" + (f"_x{qty}" if qty > 1 else "")) if panel_id and inverter_id else None
+    new_s6 = {**s6, "panel_id": panel_id, "inverter_id": inverter_id, "monitoring_id": monitoring_id, "inverter_qty": qty}
 
     if s6.get("equip_key") != equip_key:
         new_s6["equip_key"] = equip_key
@@ -282,7 +315,10 @@ def calc_mppt(blob: dict) -> dict:
     daytime_kwh = avg_kwh * fraction
     target_kw = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
 
-    scenarios = validate_string_design(selected_panel, selected_inverter, target_kw)
+    qty = sel["inverter_qty"]
+    # Each of the `qty` identical inverters takes an equal share of the target; the scenarios come back as whole-system totals.
+    per_inverter = validate_string_design(selected_panel, selected_inverter, (target_kw / qty) if target_kw else None)
+    scenarios = [_scale(sc, qty) for sc in per_inverter]
 
     return {
         **s6,
@@ -361,7 +397,7 @@ def save_step(blob: dict) -> dict | None:
 
     scenarios = s6.get("scenarios") or []
     using_manual = bool(s6.get("use_manual"))
-    manual_design = check_design(selected_panel, selected_inverter, sel["m_series"], sel["m_parallel"])
+    manual_design = _scale(check_design(selected_panel, selected_inverter, sel["m_series"], sel["m_parallel"]), sel["inverter_qty"])
 
     effective_label = _effective_label(scenarios, s6, using_manual)
     chosen, active_label = _resolve_chosen(scenarios, effective_label, using_manual, manual_design)
@@ -389,6 +425,7 @@ def save_step(blob: dict) -> dict | None:
         "panel": selected_panel,
         "inverter_id": selected_inverter["id"],
         "inverter": selected_inverter,
+        "inverter_qty": sel["inverter_qty"],
         "mppt_scenario": active_label,
         "chosen_scenario": chosen_scenario,
         # Do-not-drop item 7 — the FULL scenario set, not just the chosen one.
@@ -486,7 +523,8 @@ def build_context(blob: dict) -> dict:
     )
 
     # ── Manual design (do-not-drop items 8, 14) ───────────────────────────
-    manual_design = check_design(selected_panel, selected_inverter, sel["m_series"], sel["m_parallel"])
+    inverter_qty = sel["inverter_qty"]
+    manual_design = _scale(check_design(selected_panel, selected_inverter, sel["m_series"], sel["m_parallel"]), inverter_qty)
     vmax = float(selected_inverter.get("vmax") or 0)
     vmin_mppt = float(selected_inverter.get("vmin_mppt") or 0)
     vmax_mppt = float(selected_inverter.get("vmax_mppt") or 0)
@@ -537,6 +575,7 @@ def build_context(blob: dict) -> dict:
             "margin_chart_html": margin_chart_html,
             "total_panels": chosen["total_panels"], "panels_per_string": chosen["panels_per_string"],
             "strings": chosen["strings"], "system_kw": chosen["system_kw"],
+            "inverter_qty": chosen.get("inverter_qty", 1), "strings_per_inverter": chosen.get("strings_per_inverter", chosen["strings"]),
             "area_m2": chosen.get("area_m2") or round(chosen["total_panels"] * area_panel, 1),
             "proj": chosen_proj,
             "gen_chart_html": gen_chart_html,
@@ -586,11 +625,26 @@ def build_context(blob: dict) -> dict:
 
         goals_check_ctx = goals_check.build(blob, {
             "system_kw": float(chosen_ctx["system_kw"]),
-            "inverter_kw": float(selected_inverter.get("kw") or 0),
+            "inverter_kw": float(selected_inverter.get("kw") or 0) * inverter_qty,
             "reduction_pct": float(chosen_ctx["proj"]["coverage"]),
         })
 
+    # How many inverters the daytime target needs: the target array kW over the largest array ONE inverter accepts.
+    qty_hint = None
+    target_kw_all = (daytime_kwh / avg_irradiance) if (avg_irradiance > 0 and daytime_kwh > 0) else None
+    if target_kw_all and selected_panel and selected_inverter:
+        biggest = validate_string_design(selected_panel, selected_inverter, 1e9)
+        cap_one = max((x["system_kw"] for x in biggest if x.get("within_limits")), default=0)
+        inv_kw = float(selected_inverter.get("kw") or 0)
+        if inv_kw > 0:      # Fronius recommends up to ~1.2 x the inverter's kW of panels (Primo 10.0: 8.0-12.0 kW)
+            cap_one = min(cap_one, inv_kw * DC_AC_MAX_RATIO)
+        if cap_one > 0:
+            need = max(1, math.ceil(round(target_kw_all / cap_one, 3)))
+            qty_hint = {"needed": min(need, MAX_INVERTERS), "target_kw": round(target_kw_all, 2), "cap_one_kw": round(cap_one, 2),
+                        "short": need > inverter_qty}
+
     return {
+        "inverter_qty": inverter_qty, "max_inverters": MAX_INVERTERS, "qty_hint": qty_hint,
         "goals_check": goals_check_ctx,
         "panels": panels, "inverters": inverters, "monitoring_devices": monitoring_devices,
         "selected_panel": selected_panel, "selected_inverter": selected_inverter,

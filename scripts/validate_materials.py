@@ -474,5 +474,34 @@ for _name, _cfg in (("grid_zero_on", _cgz_on), ("hybrid_centers", _cha_on), ("gr
     except Exception as _e:  # noqa: BLE001
         check(f"drawing renders with the center: {_name}", repr(_e), "no error")
 
+# ── Grid Zero with Fronius in parallel (Oscar, 2026-11-13) ──
+import copy as _copy  # noqa: E402
+from webapp.wizard_steps import gz_s6_equipment as _GS6  # noqa: E402
+check("gz sizing: _qty clamps 1..6 and survives junk", [_GS6._qty(x) for x in (None, "", "2", 0, 9, "x")], [1, 1, 2, 1, 6, 1])
+_sc = {"scenario": "B", "strings": 3, "panels_per_string": 8, "total_panels": 24, "system_kw": 14.88, "area_m2": 50.0, "voc_total": 385.0, "description": "d"}
+_s2 = _GS6._scale(_sc, 2)
+check("gz sizing: 2 inverters in parallel -> totals double, per-inverter checks stay, strings per inverter kept",
+      (_s2["strings"], _s2["total_panels"], _s2["system_kw"], _s2["strings_per_inverter"], _s2["voc_total"], _s2["inverter_qty"]), (6, 48, 29.76, 3, 385.0, 2))
+check("gz sizing: one inverter leaves the design untouched", {k: v for k, v in _GS6._scale(_sc, 1).items() if k in _sc} == _sc, True)
+_b2 = _copy.deepcopy(GZ_BLOB); _b2["equipment"]["inverter_qty"] = 2
+_g2 = gz_wiring.build_context(_b2, {"gz_link_m": 12})
+_g2k = {b["key"]: b for b in _g2["branches"]}
+check("gz parallel: the load center is forced and joins the Fronius (one run each), one feeder carries the sum",
+      (_g2["disconnect"]["enabled"], _g2["disconnect"]["forced"], _g2k["gz_disc"]["qty"], round(_g2k["gz_ac"]["current_a"], 1), round(_g2k["gz_disc"]["current_a"] * 2, 1)),
+      (True, True, 2, round(_g2k["gz_disc"]["current_a"] * 2, 1), round(_g2k["gz_disc"]["current_a"] * 2, 1)))
+check("gz parallel: the base breaker covers the sum (> single Fronius breaker)", _g2k["gz_ac"]["ocpd_a"] > _gb["gz_ac"]["ocpd_a"], True)
+_lg2 = _list({**_b2["equipment"], "monitoring": SM}, _g2, "grid_zero")
+_f_a = int(_g2k["gz_disc"]["ocpd_a"])
+check("gz parallel list: 2 Fronius, 8-space load center (2 x 2P + meter 2P 20 A), 2 breakers of the Fronius size, base breaker of the sum, 2 EMT stub sets",
+      (_lg2[next(n for n in _lg2 if n.startswith("Inversor Fronius"))]["qty"], _qty(_lg2, _BOX(8)), _qty(_lg2, _B2(_f_a)), _qty(_lg2, "Breaker de 20A 2 polos"),
+       _qty(_lg2, f"Breaker {int(_g2k['gz_ac']['ocpd_a'])}A compatible con base"), _qty(_lg2, 'Conector de presión 1" EMT')),
+      (2, 1, 2, 1, 1, 8))
+_cg2, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**_b2["equipment"], "monitoring": SM}, "wiring": _g2, "blob": _b2}, {})
+check("gz parallel drawing: one Fronius drawn 'igual en cada inversor', center breakers = list, box = list",
+      (_cg2["fronius"]["qty"], _cg2["pv"]["inverters"], _cg2["disconnect"]["breaker"], _cg2["disconnect"]["spaces"]), (2, 2, f"2 × 2P {_f_a} A", 8))
+_buf = io.BytesIO()
+build(_cg2, _buf)
+check("gz parallel drawing renders", _buf.getvalue()[:4], b"%PDF")
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

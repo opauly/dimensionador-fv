@@ -35,8 +35,8 @@
     <input type="hidden" name="disc_form" value="1">
     {% if disconnect.can_gz %}
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:inherit;margin:6px 0;">
-        <input type="checkbox" name="disc_enabled" value="1" {{ 'checked' if disconnect.enabled else '' }}>
-        Centro de carga de desconexión junto al Fronius (opcional)
+        <input type="checkbox" name="disc_enabled" value="1" {{ 'checked' if disconnect.enabled else '' }} {{ 'disabled' if disconnect.forced else '' }}>
+        Centro de carga de desconexión junto al Fronius {{ '(obligatorio con varios inversores en paralelo: junta sus salidas)' if disconnect.forced else '(opcional)' }}
       </label>
       {% if disconnect.enabled %}
         <p class="card-note-sm">Corta la salida del Fronius cerca de él: un breaker de 2 polos por Fronius y otro de 2 polos 20 A para alimentar el Smart Meter; la caja crece con los breakers (2, 4 u 8 espacios).

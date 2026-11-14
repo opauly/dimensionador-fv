@@ -231,7 +231,7 @@ def _seed_line_items(blob: dict) -> list[dict]:
     if inverter:
         items.append({
             "item": "Inversores", "item_en": "Inverters",
-            "qty": 1,
+            "qty": max(1, int(equipment.get("inverter_qty") or chosen.get("inverter_qty") or 1)),
             "unit_cost": live_prices.get("Inversores", 0.0),
             "iva_pct": _catalog_iva(inverter),
             "specs": f"{inverter.get('brand','')} {inverter.get('model','')}".strip(),

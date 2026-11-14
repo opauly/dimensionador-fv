@@ -194,23 +194,25 @@ def grid_zero_equipment(eq: dict) -> dict:
     ch = eq.get("chosen_scenario") or {}
     return {**eq, "panel_count": int(eq.get("panel_count") or ch.get("total_panels") or 0),
             "n_strings": int(eq.get("n_strings") or ch.get("strings") or 0),
-            "panels_per_string": int(eq.get("panels_per_string") or ch.get("panels_per_string") or 0), "inverter_qty": 1}
+            "panels_per_string": int(eq.get("panels_per_string") or ch.get("panels_per_string") or 0),
+            "inverter_qty": max(1, int(eq.get("inverter_qty") or ch.get("inverter_qty") or 1))}
 
 
 def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None) -> None:
     """Grid Zero only: meter base with main switch, the breaker that feeds the grid from the inverter
     (125 % of the inverter's maximum output current, next standard size) and the padlock."""
     inv = eq.get("inverter") or {}
+    n_inv = max(1, int(eq.get("inverter_qty") or 1))
     c.add(_BY_KEY[METER_BASE_KEY], 1, note="base de medidor de generación con interruptor principal: solo Grid Zero")
-    out_a = float(inv.get("ac_output_current_a") or 0)
+    out_a = float(inv.get("ac_output_current_a") or 0) * n_inv      # several Fronius in parallel: the base breaker covers the sum
     sizes = list(T.OCPD_SIZES_A)
     if out_a > 0:
         amps = next((a for a in sizes if a >= out_a * 1.25), sizes[-1])
-        why = f"125 % de la corriente máxima del inversor ({out_a:g} A), tamaño comercial siguiente"
+        why = f"125 % de la corriente máxima del inversor ({out_a:g} A" + (f", {n_inv} en paralelo" if n_inv > 1 else "") + "), tamaño comercial siguiente"
         comment = None
     else:
         amps, why, comment = 30, "sin corriente máxima del inversor en el catálogo: se asume 30 A", "POR CONFIRMAR AMPERAJE"
-    max_a = float(inv.get("max_ocpd_a") or 0)
+    max_a = float(inv.get("max_ocpd_a") or 0) if n_inv == 1 else 0.0      # the manufacturer limit is per inverter
     if max_a and amps > max_a:
         amps, why = int(max_a), why + f"; limitado al breaker máximo del fabricante ({max_a:g} A)"
     sized = next((b for b in branches or [] if b.get("key") == "gz_ac" and b.get("ocpd_a")), None)
@@ -232,8 +234,10 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
               note=f"{n_panels} módulos del diseño")
     if grid_zero:
         if inv:
-            c.add(None, 1, name=f"Inversor {model(inv)}", section="Paneles solares", source="diseño",
-                  comment=f"{inv.get('kw')} kW · Grid Zero", note="inversor de strings del diseño")
+            n_inv = max(1, int(eq.get("inverter_qty") or 1))
+            c.add(None, n_inv, name=f"Inversor {model(inv)}", section="Paneles solares", source="diseño",
+                  comment=f"{inv.get('kw')} kW · Grid Zero" + (" · en paralelo" if n_inv > 1 else ""),
+                  note="inversor de strings del diseño" if n_inv == 1 else f"{n_inv} inversores de strings iguales, en paralelo")
         if eq.get("monitoring"):
             c.add(None, 1, name=model(eq["monitoring"]), section="Generales", group="Monitoreo", source="diseño",
                   sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"))
