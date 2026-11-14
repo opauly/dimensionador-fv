@@ -209,7 +209,7 @@ def _default_assumptions(system_type: str) -> dict:
     from calculations.fleet_shares import hybrid_defaults
 
     d = hybrid_defaults()                               # the fleet's measured night share (historical 40 % until it is ready)
-    return {"night_load_fraction": d["night_load_fraction"], "site_exports_to_grid": d["site_exports_to_grid"]}
+    return {"night_load_fraction": d["night_load_fraction"], "site_exports_to_grid": d["site_exports_to_grid"], "peak_basis": "fleet"}
 
 
 def _match_preset(system_type: str, goals: dict) -> str:
@@ -251,7 +251,7 @@ def _daytime(blob: dict, vid: str | None) -> dict:
 # ── sizing inputs read from the earlier steps ────────────────────────────
 
 
-def _inputs(blob: dict, system_type: str) -> dict:
+def _inputs(blob: dict, system_type: str, peak_basis: str | None = None) -> dict:
     """Everything the sweet-spot formulas need from Steps 3-5, or `missing` messages when something isn't there."""
     consumption = blob.get("consumption") or {}
     site = blob.get("site") or {}
@@ -296,7 +296,19 @@ def _inputs(blob: dict, system_type: str) -> dict:
         from calculations.fleet_peaks import typical_peak_ratio
 
         main_peak = (main_daily / 24.0) * typical_peak_ratio()
-    return {"missing": missing, "critical_daily_kwh": critical_daily, "critical_peak_kw": peak,
+    # the inverter is sized for the critical peak: the calculated one ("everything on at once") or, if chosen, the fleet's measured
+    # peak for this consumption (never below the biggest single load, never above the calculated one)
+    if peak_basis is None:
+        peak_basis = (effective_goals(blob)["assumptions"] or {}).get("peak_basis")
+    design = None
+    if peak_basis == "fleet" and lines:
+        from calculations.fleet_peaks import design_peak_kw
+
+        largest = max((float(l.get("connected_power_kw") or 0) for l in lines), default=0.0)
+        # the fleet's sites are real consumption, so compare with the undiversified daily energy, not the factor-reduced one
+        design = design_peak_kw(peak, float(consumption.get("daily_kwh") or critical_daily), largest)
+    return {"missing": missing, "critical_daily_kwh": critical_daily,
+            "critical_peak_kw": design["used_kw"] if design else peak, "critical_peak_calc_kw": peak, "peak_design": design,
             "whole_home_daily_kwh": critical_daily + main_daily, "whole_home_peak_kw": peak + main_peak,
             "monthly_kwh_kwp": monthly}
 
@@ -323,6 +335,8 @@ def parse_form(system_type: str, form, base_goals: dict, base_assumptions: dict)
             pct = _num(form.get("a_night_load_pct"))
             assumptions["night_load_fraction"] = None if pct is None else pct / 100.0
         assumptions["site_exports_to_grid"] = form.get("a_site_exports") == "on"
+        if form.get("a_peak_basis") in ("fleet", "calculated"):
+            assumptions["peak_basis"] = form.get("a_peak_basis")
     return goals, assumptions
 
 
@@ -494,8 +508,9 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
         rows[1:1] = roof_row
     a = band["optimo"]["assumptions"]
     notes = [*roof_notes,
-             f"Carga crítica {_fmt(inputs['critical_daily_kwh'])} kWh/día (pico {_fmt(inputs['critical_peak_kw'])} kW); "
-             f"casa completa {_fmt(inputs['whole_home_daily_kwh'])} kWh/día.",
+             f"Carga crítica {_fmt(inputs['critical_daily_kwh'])} kWh/día (pico {_fmt(inputs['critical_peak_kw'])} kW"
+             + (f", medido en flota; calculado {_fmt(inputs['critical_peak_calc_kw'])} kW" if (inputs.get("peak_design") or {}).get("basis") == "fleet" else "")
+             + f"); casa completa {_fmt(inputs['whole_home_daily_kwh'])} kWh/día.",
              f"Carga nocturna {_fmt(a['night_load_fraction'] * 100, 0)}% ({'medida' if a['night_load_fraction_source'] == 'measured' else 'por defecto'}) · "
              f"fracción diurna {_fmt(a['daytime_fraction'] * 100, 0)}% · DoD de referencia {_fmt(band['optimo']['assumptions']['reference_battery_dod_pct'], 0)}%.",
              f"Batería definida por: {'respaldo' if band['optimo']['battery_driven_by'] == 'backup' else 'ciclado diario'}. "
@@ -574,7 +589,15 @@ def _fleet_block(system_type: str, inputs: dict, block: dict | None, goals: dict
         return None
     sites = sorted(ref["comparable"], key=lambda x: x["avg_load_kwh"])
     sim = _simulation_block(system_type, inputs, block, ref, goals or {})
+    try:
+        from calculations.fleet_peaks import peak_for_consumption
+
+        peak = peak_for_consumption(float(daily))
+    except Exception:                                   # noqa: BLE001 — informational
+        peak = None
+    calc_peak = inputs.get("critical_peak_calc_kw") if system_type == "hybrid" else inputs.get("peak_kw")
     return {"ref": ref, "sim": sim, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
+            "peak": peak, "calc_peak_kw": calc_peak,
             "roof_kwp": dt.roof_capacity_kwp((goals or {}).get("roof_area_m2"), (goals or {}).get("roof_panel_w"), *dt.roof_geometry(goals)),
             "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"], "inverter": x["inverter_kw"],
                        "peak_kw": (x["peak_max_w"] / 1000.0) if x["peak_max_w"] else None,
@@ -593,6 +616,8 @@ def _current(blob: dict, system_type: str, daytime_fraction: float) -> dict:
         defaults = _default_goals(system_type, daytime_fraction)
         goals = {**defaults, **stored["goals"]}
         assumptions = {**_default_assumptions(system_type), **(stored.get("assumptions") or {})}
+        if system_type == "hybrid" and "peak_basis" not in (stored.get("assumptions") or {}):
+            assumptions["peak_basis"] = "calculated"        # a draft saved before the option existed keeps the peak it was sized with
         return {"goals": goals, "assumptions": assumptions, "preset": stored.get("preset") or _match_preset(system_type, goals),
                 "confirmed": bool(stored.get("confirmed")), "ack_ceiling_pct": stored.get("ack_ceiling_pct"),
                 "source": stored.get("source", "user"), "stored": True}
@@ -615,7 +640,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
     cur = _current(blob, system_type, fraction)
     goals, assumptions = cur["goals"], cur["assumptions"]
     status = _status(system_type, goals, assumptions, fraction)
-    inputs = _inputs(blob, system_type)
+    inputs = _inputs(blob, system_type, assumptions.get("peak_basis") or "calculated")
     block = _block(system_type, goals, assumptions, inputs, fraction) if not status["errors"] else None
 
     ack_ok = (not status["needs_ack"]) or cur["ack_ceiling_pct"] == status["ceiling_pct"]
@@ -732,7 +757,7 @@ def sweet_spot(blob: dict) -> dict | None:
     fraction = eff["daytime_fraction"]
     if _status(system_type, eff["goals"], eff["assumptions"], fraction)["errors"]:
         return None
-    inputs = _inputs(blob, system_type)
+    inputs = _inputs(blob, system_type, eff["assumptions"].get("peak_basis") or "calculated")
     if inputs["missing"]:
         return None
     band, goal_obj = _raw_band(system_type, eff["goals"], eff["assumptions"], inputs, fraction)

@@ -753,6 +753,8 @@ def estimate_hybrid_savings_pct(
     whole_home_avg_kwh_month: float,
     daytime_fraction: float,
     tariff_info: dict,
+    all_critical: bool = False,
+    utilization_pct: float | None = None,
 ) -> dict:
     """
     Hybrid bill-reduction estimate: how much of the whole home's monthly
@@ -804,11 +806,28 @@ def estimate_hybrid_savings_pct(
     """
     from calculations.tariff_calculator import estimate_bill_crc
 
-    gen_available_kwh_day = max(0.0, daily_generation_kwh - critical_daily_kwh)
-    gen_available_kwh_month = gen_available_kwh_day * 30.4
+    if all_critical:
+        # Every load is on the backed-up panel (single "tablero principal"): there is no separate main panel for a "surplus" to
+        # offset, and the solar that feeds the house directly or through the battery IS the bill reduction. Netting the critical
+        # load out of the generation (below) would count that energy as "already spoken for" and report almost no savings.
+        # Energy the house uses from its own solar = what the array produced and the system did not have to curtail
+        # (utilization from the daily battery simulation) — or, without a simulation, the daytime share served directly plus the
+        # remainder that reaches the night load through the battery (90 % round trip) — never more than the house consumes.
+        gen_month = daily_generation_kwh * 30.4
+        if utilization_pct is not None:
+            used_month = gen_month * max(0.0, min(100.0, utilization_pct)) / 100.0
+        else:
+            direct = min(gen_month, whole_home_avg_kwh_month * daytime_fraction)
+            night_load = max(0.0, whole_home_avg_kwh_month - whole_home_avg_kwh_month * daytime_fraction)
+            used_month = direct + min((gen_month - direct) * 0.9, night_load)
+        self_consumed_kwh_month = min(used_month, whole_home_avg_kwh_month)
+        gen_available_kwh_day = max(0.0, daily_generation_kwh - self_consumed_kwh_month / 30.4)
+    else:
+        gen_available_kwh_day = max(0.0, daily_generation_kwh - critical_daily_kwh)
+        gen_available_kwh_month = gen_available_kwh_day * 30.4
 
-    daytime_kwh_month = whole_home_avg_kwh_month * daytime_fraction
-    self_consumed_kwh_month = min(gen_available_kwh_month, daytime_kwh_month)
+        daytime_kwh_month = whole_home_avg_kwh_month * daytime_fraction
+        self_consumed_kwh_month = min(gen_available_kwh_month, daytime_kwh_month)
     grid_kwh_month = max(0.0, whole_home_avg_kwh_month - self_consumed_kwh_month)
 
     old_bill = estimate_bill_crc(whole_home_avg_kwh_month, tariff_info)

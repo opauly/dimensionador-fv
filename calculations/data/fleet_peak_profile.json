@@ -1,0 +1,27 @@
+{
+  "as_of": "2026-11-11",
+  "source": "vrm.site_samples, 15-minute load averages",
+  "n_sites": 23,
+  "days_median": 95.0,
+  "fit": {
+    "a": 4.2505,
+    "b": 0.8123,
+    "resid_sd_log": 0.4383,
+    "avg_kw_min": 0.113,
+    "avg_kw_max": 6.018
+  },
+  "duration": {
+    "3x": {
+      "time_pct": 2.4,
+      "run_p95_h": 1.0
+    },
+    "4x": {
+      "time_pct": 0.8,
+      "run_p95_h": 0.75
+    }
+  },
+  "inverter_over_max": {
+    "n": 12,
+    "median": 2.04
+  }
+}

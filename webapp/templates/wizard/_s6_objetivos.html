@@ -99,6 +99,16 @@
     <div class="obj-help">El dato que más pesa en la batería. 40% es la mediana de 9 sitios monitoreados (rango real 17–54%).</div>
   </div>
   <div class="obj-field">
+    <label class="flabel">Pico para dimensionar el inversor</label>
+    <div class="obj-input">
+      <select class="finput" name="a_peak_basis">
+        <option value="fleet" {{ 'selected' if assumptions.peak_basis == 'fleet' else '' }}>Medido en flota</option>
+        <option value="calculated" {{ 'selected' if assumptions.peak_basis != 'fleet' else '' }}>Calculado (todo encendido)</option>
+      </select>
+    </div>
+    <div class="obj-help">«Medido en flota»: el pico que muestran sitios reales con tu consumo (con margen: 1 de cada 10 sitios por encima), sin bajar del equipo más grande y sin pasar del calculado. «Calculado» suma todas las cargas con su factor de demanda. El cableado y las protecciones siguen usando el calculado.</div>
+  </div>
+  <div class="obj-field">
     <label class="flabel">Exportación de excedentes</label>
     <label style="font-size:13px;"><input type="checkbox" name="a_site_exports" {{ 'checked' if assumptions.site_exports_to_grid else '' }}> El sitio puede exportar</label>
     <div class="obj-help">Si no exporta, el FV sobre ~1.75× la carga no se aprovecha.</div>
@@ -190,8 +200,22 @@
               <td class="mid">{{ '%.1f'|format(ref.inverter.inverter_kw.median) }}<span class="u">kW</span></td>
               <td>{{ '%.1f'|format(ref.inverter.inverter_kw.p25) }}–{{ '%.1f'|format(ref.inverter.inverter_kw.p75) }}<span class="u">kW</span></td></tr>
           {% endif %}
+          {% if fleet.peak %}{% set pk = fleet.peak %}
+          <tr><td>Pico de carga <span class="obj-tag measured">MEDIDO</span></td>
+              <td>{% if fleet.calc_peak_kw %}{{ '%.1f'|format(fleet.calc_peak_kw) }}<span class="u">kW</span>{% else %}—{% endif %}</td>
+              <td class="mid">{{ '%.1f'|format(pk.typical_kw) }}<span class="u">kW</span></td>
+              <td>{{ '%.1f'|format(pk.typical_kw) }}–{{ '%.1f'|format(pk.high_kw) }}<span class="u">kW</span></td></tr>
+          {% endif %}
         </tbody>
       </table>
+      {% if fleet.peak %}{% set pk = fleet.peak %}
+      <p class="obj-note" style="margin-top:6px;">
+        Pico de carga: la fórmula usa la demanda de tus cargas (todo lo que puede encenderse junto, con factores de demanda); la flota muestra lo que de verdad se vio, escalado a tu consumo ({{ pk.n }} sitios, promedios de 15 min; «rango» = típico a 1 de cada 10 por encima).
+        Una carga de más de 3 veces el promedio ocurre ~{{ '%.0f'|format(pk.time_above_3x_pct or 0) }} % del tiempo y un tramo largo dura ~{{ '%.1f'|format(pk.run_above_3x_h or 0) }} h: son picos cortos que el inversor puede cubrir con su potencia pico.
+        {% if pk.inverter_over_max %}Los inversores de la flota son ~{{ '%.1f'|format(pk.inverter_over_max) }}× el máximo que han visto.{% endif %}
+        {% if pk.extrapolated %}<b>Tu consumo queda fuera del rango de la flota: es una extrapolación.</b>{% endif %}
+      </p>
+      {% endif %}
     {% elif ref.note %}
       <p class="obj-note">{{ ref.note }}</p>
     {% endif %}

@@ -888,6 +888,127 @@ def check_fleet_peaks() -> int:
     return failures
 
 
+def check_fleet_peak_profile() -> int:
+    """The fleet's size-scaled sustained peak (snapshot of 15-minute data) — hand-computed against a made-up profile."""
+    from unittest import mock
+
+    from calculations import fleet_peaks as fpk
+
+    failures = 0
+
+    def expect(label, ok):
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+        failures += 0 if ok else 1
+
+    prof = {"as_of": "2026-01-01", "n_sites": 10, "fit": {"a": 4.0, "b": 0.8, "resid_sd_log": 0.4, "avg_kw_min": 0.1, "avg_kw_max": 6.0},
+            "duration": {"3x": {"time_pct": 2.5, "run_p95_h": 1.0}, "4x": {"time_pct": 0.8, "run_p95_h": 0.75}}, "inverter_over_max": {"n": 5, "median": 2.0}}
+    with mock.patch.object(fpk, "peak_profile", lambda: prof):
+        e = fpk.peak_for_consumption(48.0)                      # 2 kW average
+        want = 4.0 * 2.0 ** 0.8
+        expect("typical sustained peak follows the fitted power law", abs(e["typical_kw"] - want) < 1e-9)
+        expect("'high' is the typical peak lifted by the 90th-percentile spread", abs(e["high_kw"] - want * 1.6694) < 0.01)
+        expect("duration and inverter-ratio figures are passed through", e["time_above_3x_pct"] == 2.5 and e["run_above_3x_h"] == 1.0 and e["inverter_over_max"] == 2.0)
+        expect("inside the fleet's range it is not flagged as an extrapolation", e["extrapolated"] is False)
+        expect("beyond the fleet's biggest site it is flagged as an extrapolation", fpk.peak_for_consumption(400.0)["extrapolated"] is True)
+        expect("no energy -> no profile peak", fpk.peak_for_consumption(0) is None)
+        d = fpk.design_peak_kw(67.2, 48.0, 5.0)                 # fleet high for a 2 kW average is ~11.6 kW
+        expect("design peak: the fleet lowers a big calculated peak", d["basis"] == "fleet" and abs(d["used_kw"] - e["high_kw"]) < 1e-9 and d["calc_kw"] == 67.2)
+        expect("design peak never drops below the biggest single load", fpk.design_peak_kw(67.2, 48.0, 20.0)["used_kw"] == 20.0)
+        expect("design peak never exceeds the calculated peak", fpk.design_peak_kw(5.0, 48.0, 1.0)["used_kw"] == 5.0 and fpk.design_peak_kw(5.0, 48.0, 1.0)["basis"] == "calculated")
+    with mock.patch.object(fpk, "peak_profile", lambda: None):
+        expect("without the snapshot there is no profile peak", fpk.peak_for_consumption(48.0) is None)
+        expect("without the snapshot the design peak stays the calculated one", fpk.design_peak_kw(67.2, 48.0, 13.8)["used_kw"] == 67.2)
+    from webapp.wizard_steps import s6_objetivos as s6
+
+    base_goals = {"x": 1}
+    _, a1 = s6.parse_form("hybrid", {"a_peak_basis": "calculated"}, base_goals, {"peak_basis": "fleet"})
+    _, a2 = s6.parse_form("hybrid", {"a_peak_basis": "nonsense"}, base_goals, {"peak_basis": "fleet"})
+    expect("Objetivos form: the peak basis is parsed and junk is ignored", a1["peak_basis"] == "calculated" and a2["peak_basis"] == "fleet")
+    stored = {"system_type": "hybrid", "goals": {"reserve_soc_pct": 35.0}, "assumptions": {"night_load_fraction": 0.4, "site_exports_to_grid": False}}
+    expect("a draft saved before the option existed keeps the calculated peak",
+           s6._current({"objectives": stored, "meta": {}}, "hybrid", 0.45)["assumptions"]["peak_basis"] == "calculated")
+    expect("a new draft defaults to the fleet's peak", s6._default_assumptions("hybrid")["peak_basis"] == "fleet")
+    fpk.clear_cache()
+    real = fpk.peak_profile()
+    expect("the shipped snapshot loads and has a fit", bool(real) and real["fit"]["a"] > 0 and real["n_sites"] >= 8)
+    return failures
+
+
+def check_hybrid_savings_all_critical() -> int:
+    """Bill-reduction read-out when the whole site is the backed-up panel: the solar the house uses counts, it is not netted out."""
+    from calculations.sizing_off_grid import estimate_hybrid_savings_pct
+
+    failures = 0
+
+    def expect(label, ok):
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+        failures += 0 if ok else 1
+
+    tariff = {"access_charge_crc": 0, "tiers": [{"from_kwh": 0, "to_kwh": None, "rate_crc": 100.0, "is_fixed": False, "sort_order": 1}]}
+    month = 1500.0                                              # 49.3 kWh/day, all of it critical
+    gen_day = 60.0
+    old = estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff)
+    new = estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff, all_critical=True, utilization_pct=80.0)
+    expect("legacy read-out (surplus after the critical load) is unchanged", abs(old["self_consumed_kwh_month"] - min(max(0, gen_day - month / 30.4) * 30.4, month * 0.45)) < 0.2)
+    expect("all-critical with a simulated utilization: used = generation x utilization", abs(new["self_consumed_kwh_month"] - gen_day * 30.4 * 0.8) < 0.2)
+    expect("flat tariff: the bill reduction equals the share of kWh the house covers", abs(new["savings_pct"] - new["self_consumed_kwh_month"] / month * 100) < 0.2)
+    expect("all-critical reports far more than the netted-out figure", new["savings_pct"] > old["savings_pct"] + 30)
+    cap = estimate_hybrid_savings_pct(500.0, month / 30.4, month, 0.45, tariff, all_critical=True, utilization_pct=100.0)
+    expect("never more than the house consumes", cap["self_consumed_kwh_month"] <= month + 1e-6 and cap["savings_pct"] <= 100.0)
+    fb = estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff, all_critical=True)
+    expect("without a simulation: daytime direct use + night via the battery (90 %), capped at consumption", 0 < fb["self_consumed_kwh_month"] <= month)
+    return failures
+
+
+def check_bill_adjust() -> int:
+    """Step 5's "Ajustar al recibo": the unconfirmed lines are scaled until the total matches the bill; typed hours are respected."""
+    from werkzeug.datastructures import MultiDict
+
+    from webapp.wizard_steps import og_s5_demand as dm
+
+    failures = 0
+
+    def expect(label, ok):
+        nonlocal failures
+        print(f"  {'ok  ' if ok else 'FAIL'} {label}")
+        failures += 0 if ok else 1
+
+    names = [("Refrigerador", 1.8), ("Lavadora", 1.44), ("Secadora", 6.24), ("Iluminación", 0.5)]
+    loads = [{"name": n, "quantity": 1, "nameplate_kw": k, "category": None} for n, k in names]
+    blob = {"consumption": {"loads": loads}, "site": {}}
+    sub = dm.calculate(blob, "s5og")
+    blob["scratch"] = {"s5og": sub}
+
+    def form(profile, **extra):
+        f = {}
+        for i, l in enumerate(profile["lines"]):
+            f[f"line-{i}-hd"] = str(l["duty_hours_day"])
+            f[f"line-{i}-fd"] = str(round(l["demand_factor_pct"] * 100, 1))
+        f.update(extra)
+        return MultiDict(f)
+
+    out = dm.recalculate(blob, "s5og", form(sub["profile"], adjust_kwh_month="900", _adjust="1"))
+    total = out["profile"]["total_kwh_day"]
+    expect("the adjusted total matches the bill (900 kWh/mes = 29.6 kWh/día)", abs(total - 900 / 30.4) < 0.1 and out["adjust_ok"])
+    expect("scaled lines carry the 'ajustado al recibo' badge", all(l["confidence"] == "bill_calibrated" for l in out["profile"]["lines"]))
+    blob["scratch"] = {"s5og": out}
+    again = dm.recalculate(blob, "s5og", form(out["profile"]))
+    expect("a plain recalculation keeps the calibration", abs(again["profile"]["total_kwh_day"] - total) < 0.05
+           and all(l["confidence"] == "bill_calibrated" for l in again["profile"]["lines"]))
+    f = form(out["profile"], adjust_kwh_month="900", _adjust="1")
+    f["line-2-hd"] = "1"                      # the engineer types the Secadora's hours
+    fixed = dm.recalculate(blob, "s5og", f)
+    sec = fixed["profile"]["lines"][2]
+    expect("hours typed by the engineer are respected while the rest absorb the difference",
+           sec["duty_hours_day"] == 1.0 and sec["confidence"] == "user_confirmed" and abs(fixed["profile"]["total_kwh_day"] - 900 / 30.4) < 0.1)
+    blob["scratch"] = {"s5og": sub}
+    impossible = dm.recalculate(blob, "s5og", form(sub["profile"], adjust_kwh_month="50000", _adjust="1"))
+    expect("a bill the list cannot reach is reported, not faked", impossible["adjust_ok"] is False and "24 h" in impossible["adjust_note"])
+    return failures
+
+
 def st_text(rows, key):
     r = next(r for r in rows if r["key"] == key)
     return r["achieved"]
@@ -911,6 +1032,10 @@ def main() -> int:
     failures += check_fleet_shares()
     print("Fleet peak / average ratio")
     failures += check_fleet_peaks()
+    failures += check_fleet_peak_profile()
+    failures += check_hybrid_savings_all_critical()
+    print("Step 5 — Ajustar al recibo")
+    failures += check_bill_adjust()
     print("\nALL PASSED" if failures == 0 else f"\n{failures} FAILED")
     return 1 if failures else 0
 
