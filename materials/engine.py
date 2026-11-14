@@ -403,8 +403,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
           max(1, math.ceil(feet / FEET_PER_SILICONE)),
           note=f"un tubo por cada {FEET_PER_SILICONE} patas (mínimo 1)")
 
-    if grid_zero:      # no Victron units: no wire duct to them, no EMT stubs, no monitoring outlet
-        return
+    # Oscar (2026-11-13): Grid Zero carries the 4x4 duct, the short EMT stubs to the inverter and the monitoring outlet kit too.
     c.add(_named("Ducto metálico cuadrado 4x4", "Generales"), 1, note="mínimo 1: lleva el cableado general de los inversores (el cable de batería va por fuera del tubo)")
     c.add(_named("Tapas para ducto metálico 4x4", "Generales"), 2, note="2 tapas finales por ducto (mínimo)")
     inv_qty = int(eq.get("inverter_qty") or 1) if eq.get("inverter") else 0
