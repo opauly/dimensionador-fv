@@ -396,8 +396,8 @@ check("grid zero on: labels follow the center", (_gz_on["branches"][3]["label"],
 _lg_on = _list({**GZ_EQ, "monitoring": SM}, _gz_on, "grid_zero")
 _lg_off = _list({**GZ_EQ, "monitoring": SM}, _gz_off, "grid_zero")
 _gz_amps = int(_gz_on["branches"][2]["ocpd_a"])
-check("grid zero on: 4-space load center + 2 breakers (Fronius + Smart Meter) of the base-breaker size + #12 feed",
-      (_qty(_lg_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), _qty(_lg_on, f"Breaker de {_gz_amps}A 2 polos, marca CH /SD"),
+check("grid zero on: 4-space load center + Fronius breaker + Smart Meter breaker (2P 20 A) + #12 feed",
+      (_qty(_lg_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), _qty(_lg_on, f"Breaker de {_gz_amps}A 2 polos, marca CH /SD") + _qty(_lg_on, "Breaker de 20A 2 polos, marca CH /SD") * (_gz_amps != 20),
        any("Centro de carga → Smart Meter" in w for ln in _lg_on.values() for w in ln.get("wheres") or [])), (1, 2, True))
 check("grid zero on: the base, its breaker and the padlock stay (it does not replace them)",
       ("Base para medidor monofásica con interruptor principal tipo parche, clase 100 (combo base)" in _lg_on or any("Base para medidor" in n for n in _lg_on),
@@ -424,7 +424,7 @@ check("form field: unchecked box with the marker saves off, no marker keeps the 
 _cgz_on, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_on, "blob": GZ_BLOB}, {})
 _cgz_off, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_off, "blob": GZ_BLOB}, {})
 check("grid zero drawing: center breakers (Fronius + meter) = list; off -> not drawn",
-      (_amps(_cgz_on["disconnect"]["breaker"]), _amps(_cgz_on["disconnect"]["meter_breaker"]), _cgz_off["disconnect"]), (_gz_amps, _gz_amps, None))
+      (_amps(_cgz_on["disconnect"]["breaker"]), _amps(_cgz_on["disconnect"]["meter_breaker"]), _cgz_off["disconnect"]), (_gz_amps, 20, None))
 _cha_on, _ = CB.build_config(project, {"eq": EQ, "wiring": _ha_on, "blob": BLOB}, ans)
 check("hybrid AC drawing: center has the Fronius breaker only", (_amps(_cha_on["disconnect"]["breaker"]), _cha_on["disconnect"]["meter_breaker"]),
       (int(_ha_on["branches"][[b["key"] for b in _ha_on["branches"]].index("pv_disc")]["ocpd_a"]), None))

@@ -36,7 +36,7 @@
       Centro de carga de desconexión junto al Fronius (4 espacios)
     </label>
     {% if disconnect.enabled %}
-      <p class="card-note-sm">Opcional. Corta la salida del Fronius cerca de él: un breaker de 2 polos del tamaño del breaker del Fronius{% if not coupling or not coupling.ac %} y otro para alimentar el Smart Meter{% endif %}.
+      <p class="card-note-sm">Opcional. Corta la salida del Fronius cerca de él: un breaker de 2 polos del tamaño del breaker del Fronius{% if not coupling or not coupling.ac %} y otro de 2 polos 20 A para alimentar el Smart Meter{% endif %}.
         No reemplaza la base de medidor de generación ni el breaker del sub-panel. Ajusta su distancia al Fronius en los largos de abajo.</p>
     {% endif %}
   </form>

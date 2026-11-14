@@ -573,6 +573,7 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
 
 
 DISC_BOX_KEY = "interconexion-tablero-nema-3r-4-espacios-marca-ch-sd-barras-de-125a-monofasico"
+METER_BREAKER_A = 20      # Smart Meter feed breaker in the disconnect center: 2 poles, 20 A (Oscar)
 METER_FEED_GAUGE = "12"    # Smart Meter voltage supply from the disconnect center: a few metres of #12
 METER_FEED_M = 3
 
@@ -588,16 +589,17 @@ def _disconnect(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> No
     c.add(_BY_KEY[DISC_BOX_KEY], 1, note="centro de carga de desconexión junto al Fronius (opcional): corta la salida del inversor cerca de él")
     amps = int((branch or {}).get("ocpd_a") or 0)
     meter_fed = grid_zero and bool(eq.get("monitoring"))
-    n_breakers = 2 if meter_fed else 1
     where = "Centro de carga de desconexión"
     if amps:
-        row = _find("breaker_panel", amps=amps, poles=2)
-        c.add(row, n_breakers, name=f"Breaker de {amps}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
-              sibling=_find("breaker_panel", amps=40, poles=2), where=where,
-              note=("1 para la salida del Fronius" + (" + 1 para alimentar el Smart Meter" if meter_fed else "")) + f", del mismo amperaje ({amps} A)")
+        c.add(_find("breaker_panel", amps=amps, poles=2), 1, name=f"Breaker de {amps}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
+              sibling=_find("breaker_panel", amps=40, poles=2), where=where, note=f"1 para la salida del Fronius ({amps} A)")
     else:
-        c.add(None, n_breakers, name="Breaker 2 polos para centro de carga (amperaje por definir)", section="Generales", group="Interconexión",
+        c.add(None, 1, name="Breaker 2 polos para centro de carga (amperaje por definir)", section="Generales", group="Interconexión",
               sibling=_find("breaker_panel", amps=40, poles=2), where=where, comment="POR CONFIRMAR AMPERAJE")
+    if meter_fed:      # Oscar (2026-11-13): the Smart Meter breaker is always 2 poles, 20 A
+        c.add(_find("breaker_panel", amps=METER_BREAKER_A, poles=2), 1, name=f"Breaker de {METER_BREAKER_A}A 2 polos, marca CH /SD", section="Generales",
+              group="Interconexión", sibling=_find("breaker_panel", amps=40, poles=2), where=where,
+              note=f"para alimentar el Smart Meter ({METER_BREAKER_A} A, 2 polos)")
     if meter_fed:
         for color in ("negro", "rojo"):
             c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",

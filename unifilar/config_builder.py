@@ -246,7 +246,7 @@ def _disconnect_cfg(wiring: dict, key: str, meter_fed: bool = False) -> dict | N
     if not b or not b.get("ocpd_a"):
         return None
     amps = f"2P {int(b['ocpd_a'])} A"
-    return {"breaker": amps, "meter_breaker": amps if meter_fed else None}
+    return {"breaker": amps, "meter_breaker": "2P 20 A" if meter_fed else None}
 
 
 def _meter(eq: dict, grid_zero: bool = False) -> dict | None:
