@@ -1,0 +1,59 @@
+{# Plano de taller tab — see projects_plano.py. Root id "plano-panel"; the wall form swaps it (outerHTML). #}
+<div id="plano-panel">
+<style>
+.pl-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 6px; }
+.pl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 16px; margin: 8px 0; max-width: 720px; }
+.pl-grid label { display: block; font-size: 11.5px; color: var(--muted-2); margin-bottom: 2px; }
+.pl-grid input { width: 100%; box-sizing: border-box; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; font-family: var(--font); }
+.pl-ok, .pl-no, .pl-none { display: inline-block; padding: 6px 16px; border-radius: 8px; color: #fff; font-weight: 700; font-size: 15px; margin: 6px 0; }
+.pl-ok { background: #1E8449; } .pl-no { background: #B8322A; } .pl-none { background: #6b7280; }
+.pl-pdf { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: 8px; background: #f9fafb; }
+.pl-dl { display: inline-block; padding: 7px 14px; background: var(--navy); color: #fff; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; margin-right: 8px; }
+.pl-est { color: #92400e; } .pl-miss { color: #B84345; font-weight: 600; }
+.pl-notes li { margin: 4px 0; font-size: 12.5px; color: #374151; }
+</style>
+
+{% if empty %}
+  <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
+{% else %}
+  <p class="pl-h" style="margin-top:6px;">Plano de taller</p>
+  <p class="card-note-sm">Ubicación sugerida de los equipos sobre una pared, con las medidas de las fichas. Escribe el tamaño de la pared propuesta y la herramienta dice si cumple. Los equipos salen del mismo diseño y lista de materiales de las otras pestañas.</p>
+
+  <form hx-post="{{ url_for('projects.plano_guardar', pid=pid) }}" hx-trigger="change delay:400ms" hx-target="#plano-panel" hx-swap="outerHTML">
+    <div class="pl-grid">
+      <div><label for="pl-w">Ancho de la pared (m)</label><input id="pl-w" type="number" step="0.01" min="0.3" max="30" name="wall_w_m" value="{{ answers.wall_w_m if answers.wall_w_m is not none else '' }}" placeholder="ej. 3.00"></div>
+      <div><label for="pl-h">Alto de la pared (m)</label><input id="pl-h" type="number" step="0.01" min="0.3" max="10" name="wall_h_m" value="{{ answers.wall_h_m if answers.wall_h_m is not none else '' }}" placeholder="ej. 2.40"></div>
+      <div><label for="pl-m">Margen a las orillas (mm)</label><input id="pl-m" type="number" step="10" min="0" max="500" name="margin_mm" value="{{ '%g'|format(comp.margin) }}"></div>
+    </div>
+  </form>
+
+  {% set chk = comp.check %}
+  {% if chk.fits is none %}
+    <span class="pl-none">SIN PARED INGRESADA</span>
+    <p class="card-note-sm">Pared mínima necesaria: <b>{{ chk.need_w }} × {{ chk.need_h }} mm</b> (equipos + {{ '%g'|format(comp.margin) }} mm de margen).</p>
+  {% else %}
+    <span class="{{ 'pl-ok' if chk.fits else 'pl-no' }}">{{ 'CUMPLE' if chk.fits else 'NO CUMPLE' }}</span>
+    <p class="card-note-sm">Mínimo necesario <b>{{ chk.need_w }} × {{ chk.need_h }} mm</b> · pared propuesta <b>{{ '%g'|format(chk.wall_w) }} × {{ '%g'|format(chk.wall_h) }} mm</b> ·
+      ancho: {{ 'sobran' if chk.slack_w >= 0 else 'faltan' }} <b>{{ chk.slack_w|abs }} mm</b> · alto: {{ 'sobran' if chk.slack_h >= 0 else 'faltan' }} <b>{{ chk.slack_h|abs }} mm</b>.</p>
+  {% endif %}
+
+  <p><a class="pl-dl" href="{{ url_for('projects.plano_pdf', pid=pid) }}" target="_blank">Abrir PDF</a>
+    <a class="pl-dl" style="background:#4b5563;" href="{{ url_for('projects.plano_pdf', pid=pid) }}" download="{{ pdf_name }}">Descargar</a>
+    <span class="card-note-sm">{{ pdf_name }}</span></p>
+
+  <p class="pl-h">Equipos en la pared</p>
+  <div class="dtable-wrap"><table class="dtable">
+    <thead><tr><td>Equipo</td><td class="tc-num">Cant.</td><td>Ancho × alto × fondo (mm)</td><td>Medida</td></tr></thead>
+    <tbody>
+      {% for p in comp.parts %}
+        <tr><td>{{ p.label }}</td><td class="tc-num">{{ p.qty }}</td>
+          <td>{% if p.missing %}—{% else %}{{ '%g'|format(p.w) }} × {{ '%g'|format(p.h) }} × {{ '%g'|format(p.d) }}{% endif %}</td>
+          <td>{% if p.missing %}<span class="pl-miss">falta la ficha</span>{% elif p.real %}ficha{% else %}<span class="pl-est">estimada / nominal</span>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <ul class="pl-notes">{% for n in comp.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+
+  <iframe class="pl-pdf" title="Plano de taller" src="{{ url_for('projects.plano_pdf', pid=pid) }}#toolbar=0&navpanes=0"></iframe>
+{% endif %}
+</div>

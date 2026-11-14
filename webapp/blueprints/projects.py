@@ -86,7 +86,7 @@ from flask import Blueprint, abort, redirect, render_template, request, url_for
 
 from webapp.blueprints import (
     projects_adjust, projects_budget, projects_invoicing, projects_ledger, projects_labor,
-    projects_lista, projects_payments, projects_promote, projects_tech, projects_unifilar,
+    projects_lista, projects_payments, projects_plano, projects_promote, projects_tech, projects_unifilar,
 )
 from webapp.blueprints.projects_common import (
     FILTER_MAP, FILTER_OPTIONS, LEDGER_TAB_CATEGORIES, STATUS_BADGE, detail_ctx, fmt_usd, tab_url,
@@ -102,6 +102,7 @@ projects_promote.register(bp)
 projects_adjust.register(bp)
 projects_lista.register(bp)
 projects_unifilar.register(bp)
+projects_plano.register(bp)
 projects_tech.register(bp)
 
 
@@ -302,6 +303,8 @@ def _panel_for(ctx: dict, tab: str) -> str:
         return projects_lista.render_panel(ctx)
     if tab == "unifilar":
         return projects_unifilar.render_panel(ctx)
+    if tab == "plano":
+        return projects_plano.render_panel(ctx)
     return _placeholder_panel(ctx, tab)
 
 
@@ -371,6 +374,11 @@ def lista(pid):
 @bp.route("/<pid>/unifilar")
 def unifilar(pid):
     return _project_page(pid, "unifilar")
+
+
+@bp.route("/<pid>/plano")
+def plano(pid):
+    return _project_page(pid, "plano")
 
 
 @bp.route("/<pid>/estado", methods=["POST"])
