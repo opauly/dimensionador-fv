@@ -105,6 +105,7 @@ ALIASES = {
 CT_PER_METER = 2   # split-phase: one current transformer per line
 BATTERY_STAND_SLOTS = 6  # US5000/UF5000 per metal stand (3 levels x 2), to be confirmed by Oscar
 METER_CT_KEY = "interconexion-transformador-de-corriente-100a-333mv"
+METER_BASE_CLASS_A = 100   # the catalog base is class 100: a bigger breaker needs a class 200 base
 METER_BASE_KEY = "interconexion-base-para-medidor-monofasica-con-interruptor-principal-tipo-parche-clase-100-combo-base"
 METER_BREAKER_KEY = "interconexion-breaker-30a-compatible-con-base-para-medidor"
 PADLOCK_KEY = "interconexion-candado-pequeno-para-base-medidor"
@@ -203,7 +204,6 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
     (125 % of the inverter's maximum output current, next standard size) and the padlock."""
     inv = eq.get("inverter") or {}
     n_inv = max(1, int(eq.get("inverter_qty") or 1))
-    c.add(_BY_KEY[METER_BASE_KEY], 1, note="base de medidor de generación con interruptor principal: solo Grid Zero")
     out_a = float(inv.get("ac_output_current_a") or 0) * n_inv      # several Fronius in parallel: the base breaker covers the sum
     sizes = list(T.OCPD_SIZES_A)
     if out_a > 0:
@@ -218,6 +218,12 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
     sized = next((b for b in branches or [] if b.get("key") == "gz_ac" and b.get("ocpd_a")), None)
     if sized:       # the wiring sizing already holds it (manual override included)
         amps, why, comment = int(sized["ocpd_a"]), f"el del tramo «{sized['label']}» (125 % de la corriente máxima del inversor, tamaño comercial siguiente)", None
+    base = _BY_KEY[METER_BASE_KEY]
+    if amps > METER_BASE_CLASS_A:      # Oscar (2026-11-13): over 100 A the base changes to class 200
+        c.add(None, 1, name=base["name"].replace("clase 100", "clase 200"), section=base["section"], group=base["group"], sibling=base,
+              note=f"breaker de {amps} A: pasa de 100 A, así que la base es clase 200 en vez de clase 100", comment="base clase 200")
+    else:
+        c.add(base, 1, note="base de medidor de generación con interruptor principal: solo Grid Zero")
     row = _BY_KEY[METER_BREAKER_KEY] if amps == 30 else None
     c.add(row, 1, name=f"Breaker {amps}A compatible con base para medidor", section="Generales", group="Interconexión",
           sibling=_BY_KEY[METER_BREAKER_KEY], comment=comment, note=why)

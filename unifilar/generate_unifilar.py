@@ -589,6 +589,7 @@ def _grid_zero(c, h, cfg):
     txt(150, 464, 'BASE MEDICIÓN', 7, 'Helvetica-Bold'); txt(150, 455, 'CONSUMO (existente)', 6, 'Helvetica', GRAY)
     box(270, 386, 130, 110, LGRAY)
     txt(335, 484, 'BASE MEDIDOR', 7, 'Helvetica-Bold'); txt(335, 475, 'DE GENERACIÓN', 7, 'Helvetica-Bold')
+    txt(335, 392, f"clase {BS.get('class', 100)}", 5.8, 'Helvetica', GRAY)
     seg([(78, 436), (450, 436)], black, 1.8)
     c.saveState(); c.setFillColor(white); c.setStrokeColor(black); c.setLineWidth(1.1); c.circle(150, 436, 12, fill=1, stroke=1); c.restoreState()
     txt(150, 433.5, 'kWh', 6, 'Helvetica-Bold')

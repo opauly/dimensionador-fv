@@ -29,10 +29,7 @@
         </select></div>
       {% endif %}
       {% if kind in ('hybrid_ac', 'off_grid') %}
-      <div class="{{ 'un-ask' if not answers.lynx else '' }}"><label for="un-lynx">Bus DC de baterías</label>
-        <select id="un-lynx" name="lynx"><option value="">— elegir —</option>
-          {% for val, lab in lynx_choices %}<option value="{{ val }}" {{ 'selected' if answers.lynx == val else '' }}>{{ lab }}</option>{% endfor %}
-        </select></div>
+      <input type="hidden" name="lynx" value="power_in">
       <div><label for="un-q4">Uso del sub-panel (Q4)</label><input id="un-q4" type="text" name="q4" value="{{ answers.q4 }}"></div>
       <div><label for="un-l1">Cargas críticas (línea 1)</label><input id="un-l1" type="text" name="loads1" value="{{ answers.loads1 }}"></div>
       <div><label for="un-l2">Cargas críticas (línea 2)</label><input id="un-l2" type="text" name="loads2" value="{{ answers.loads2 }}"></div>

@@ -43,12 +43,12 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
 - Dibujo: `unifilar/generate_unifilar.py` (copia del skill `unifilar-hibrido-ac`; documentación en `docs/unifilar/`).
   Único cambio al dibujo: el texto del uso de Q4 pasa sobre la barra para no cruzarse con el SPD.
 - Configuración: `unifilar/config_builder.py` arma el JSON del dibujo con los calibres, breakers y colores del
-  dimensionamiento; las dos preguntas que el diseño no responde (inyección y bus DC con o sin Lynx Distributor)
-  se preguntan siempre y se guardan en `tech_spec["unifilar"]`.
+  dimensionamiento; la pregunta que el diseño no responde (inyección; el bus DC siempre es Lynx Power In, el Distributor no se usa)
+  se pregunta siempre y se guarda en `tech_spec["unifilar"]`.
 - Alcance (avisa y no dibuja fuera de él): híbrido con acople AC, 2 MultiPlus-II 120 V, 1 inversor FV con 1–2 strings,
-  1–6 baterías (1–4 con Distributor), Ekrano GX.
-- Las revisiones de ingeniería (Q1 vs. 95 A por Multi, breaker de string vs. 1.56 × Isc, Q3, protección DC sin
-  Distributor, fusibles pendientes) se muestran en pantalla, nunca dentro del PDF.
+  1–24 baterías, Ekrano GX.
+- Las revisiones de ingeniería (Q1 vs. 95 A por Multi, breaker de string vs. 1.56 × Isc, Q3, protección DC de los Multis,
+  fusibles pendientes) se muestran en pantalla, nunca dentro del PDF.
 
 ## Reglas de Oscar (de las compras reales de María José)
 

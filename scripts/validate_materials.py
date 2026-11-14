@@ -129,7 +129,7 @@ check("xlsx holds only lines with a quantity", all(row[1] for row in rows[1:] if
 project = {"system_type": "hybrid", "client_name": "María José Castro"}
 d = {"eq": EQ, "wiring": CTX, "blob": BLOB}
 cfg, prob = CB.build_config(project, d, {})
-check("both questions block the drawing until answered", (cfg, len(prob["blockers"])), (None, 2))
+check("only the injection question blocks the drawing until answered (the Lynx is always Power In)", (cfg, len(prob["blockers"])), (None, 1))
 ans = {"export": "grid_zero", "lynx": "power_in"}
 cfg, prob = CB.build_config(project, d, ans)
 check("drawn from the sized design: string breaker / wire", (cfg["pv"]["string_breaker"], cfg["pv"]["dc_wire"]), ("32 A 2P DC", "#10 AWG SOLAR"))
@@ -149,14 +149,14 @@ dc_ctx = og_wiring.build_context(BLOB_DC)
 check("DC coupling picks the off-grid drawing", CB.drawing_kind(project, dc_ctx), "off_grid")
 d_dc = {"eq": EQ_DC, "wiring": dc_ctx, "blob": BLOB_DC}
 _, nolynx = CB.build_config(project, d_dc, {})
-check("off-grid drawing asks the Lynx question but not the injection one", [("Bus DC" in b) for b in nolynx["blockers"]], [True])
+check("off-grid drawing no longer asks about the Lynx (always Power In)", [("Bus DC" in b) for b in nolynx["blockers"]], [])
 cfg_dc, prob_dc = CB.build_config(project, d_dc, {"lynx": "power_in"})
 check("off-grid config: 2 inverters, 1 controller, 4 batteries, no grid-in without an AC-in run",
       (cfg_dc["kind"], cfg_dc["multis"]["qty"], cfg_dc["controllers"]["count"], cfg_dc["battery"]["count"], bool(cfg_dc["grid_in"]) == bool(CB._branch(dc_ctx["branches"], "ac_in"))),
       ("off_grid", 2, 1, 4, True))
 check("off-grid controller output cable is the sized one", cfg_dc["controllers"]["out_pos"].startswith("+ #"), True)
 _, dist = CB.build_config(project, d_dc, {"lynx": "power_in_distributor"})
-check("off-grid drawing refuses the Distributor variant", any("Distributor" in b for b in dist["blockers"]), True)
+check("an old Distributor answer is read as plain Power In (no blocker)", any("Distributor" in b for b in dist["blockers"]), False)
 out_dc = io.BytesIO()
 from unifilar.generate_unifilar import build as _build_dc  # noqa: E402
 _build_dc(cfg_dc, out_dc)
@@ -502,6 +502,13 @@ check("gz parallel drawing: one Fronius drawn 'igual en cada inversor', center b
 _buf = io.BytesIO()
 build(_cg2, _buf)
 check("gz parallel drawing renders", _buf.getvalue()[:4], b"%PDF")
+
+# base class: 100 up to a 100 A breaker, class 200 above it (Oscar, 2026-11-13)
+_base = lambda lines: [n for n in lines if n.startswith("Base para medidor")]  # noqa: E731
+check("gz base: a single Fronius keeps the class 100 base, two Primo 10.0 (110 A breaker) need class 200",
+      ([("clase 100" in n) for n in _base(_lg_off)], [("clase 200" in n) for n in _base(_lg2)], _gz_amps <= 100, int(_g2k["gz_ac"]["ocpd_a"]) > 100),
+      ([True], [True], True, True))
+check("gz drawing shows the base class", (_cgz_off["base"]["class"], _cg2["base"]["class"]), (100, 200))
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

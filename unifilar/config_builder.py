@@ -19,10 +19,11 @@ from calculations import wiring as W
 
 # Questions the drawing cannot infer and the wizard must never assume (docs/unifilar/CONTEXTO.md §3.4, §7).
 EXPORT_CHOICES = (("grid_zero", "Cero inyección (Grid Zero)"), ("inyeccion", "Con inyección a la red"))
-LYNX_CHOICES = (("power_in", "Solo Lynx Power In"), ("power_in_distributor", "Lynx Power In + Lynx Distributor"))
+# Oscar (2026-11-13): the Lynx Distributor is not used; the DC bus is always Lynx Power In (in parallel when there are several bars).
+LYNX_CHOICES = (("power_in", "Lynx Power In (en paralelo)"),)
 
 DEFAULT_ANSWERS = {
-    "export": None, "lynx": None, "spd": True, "spd_label": "SPD SDSA 1175",
+    "export": None, "lynx": "power_in", "spd": True, "spd_label": "SPD SDSA 1175",
     "q4": "circuitos críticos", "loads1": "iluminación, internet, tomacorrientes,", "loads2": "refrigerador, etc.",
     "revision": "A (borrador)", "draft": True,
 }
@@ -38,7 +39,7 @@ def latin(s: str) -> str:
 def clean_answers(saved: dict | None) -> dict:
     a = {**DEFAULT_ANSWERS, **(saved or {})}
     a["export"] = a["export"] if a["export"] in dict(EXPORT_CHOICES) else None
-    a["lynx"] = a["lynx"] if a["lynx"] in dict(LYNX_CHOICES) else None
+    a["lynx"] = "power_in"      # an old saved answer with the Distributor is read as plain Power In
     return a
 
 
@@ -145,8 +146,6 @@ def missing_answers(answers: dict, kind: str = "hybrid_ac") -> list[str]:
         return out
     if not answers.get("export") and kind == "hybrid_ac":
         out.append("Inyección a la red: elige cero inyección o con inyección.")
-    if not answers.get("lynx"):
-        out.append("Bus DC de baterías: elige solo Lynx Power In o con Lynx Distributor (siempre se pregunta, no se supone).")
     return out
 
 
@@ -342,7 +341,7 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
             "feeder_conductors": [f"L1 {_g(ac['ugc'])} negro", f"L2 {_g(ac['ugc'])} rojo", f"T {_g(_egc(ac) or ac['ugc'])} verde"],
             "ground_wire": f"T {_g(_egc(fr_out) or fr_out['ugc'])} verde",
         },
-        "base": {"breaker": f"2P {ac['ocpd_a']} A", "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
+        "base": {"breaker": f"2P {ac['ocpd_a']} A", "class": 200 if int(ac["ocpd_a"] or 0) > 100 else 100, "ground_wire": f"T {_g(_egc(ac) or ac['ugc'])} verde",
                  "link_conductors": ([f"L1 {_g(link['ugc'])} negro", f"L2 {_g(link['ugc'])} rojo", f"T {_g(_egc(link) or link['ugc'])} verde"] if link else None)},
         "subpanel": {"spd": _spd_label(answers)},
     }
