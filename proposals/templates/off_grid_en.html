@@ -163,6 +163,7 @@
   <div class="scope-box">
     <div class="scope-sized">{{ scope.sized }}</div>
     <table class="scope-rows">
+      <tr class="hd"><td>{{ scope.col_load }}</td><td class="n">{{ scope.unit }}</td></tr>
       {% for r in scope.rows %}<tr><td>{{ r.name }}</td><td class="n">{{ r.kwh }}</td></tr>{% endfor %}
       {% if scope.more %}<tr class="more"><td>{{ scope.more[0] }}</td><td class="n">{{ scope.more[1] }}</td></tr>{% endif %}
     </table>

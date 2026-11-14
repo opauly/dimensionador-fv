@@ -347,10 +347,10 @@ def _scope_block(consumption: dict, system_type: str) -> tuple[dict | None, dict
     hy = system_type == "hybrid"
     es = {"title": "CARGAS RESPALDADAS" if hy else "CARGAS CONTEMPLADAS",
           "sized": (f"Cargas con respaldo: {daily:.1f} kWh/día" if hy else f"Consumo diario: {daily:.2f} kWh/día"),
-          "inc_title": "Incluye", "rows": rows(True), "more": more(True), "unit": "kWh/día"}
+          "col_load": "Carga", "rows": rows(True), "more": more(True), "unit": "kWh/día"}
     en = {"title": "BACKED-UP LOADS" if hy else "LOADS COVERED",
           "sized": (f"Backed-up loads: {daily:.1f} kWh/day" if hy else f"Daily consumption: {daily:.2f} kWh/day"),
-          "inc_title": "Included", "rows": rows(False), "more": more(False), "unit": "kWh/day"}
+          "col_load": "Load", "rows": rows(False), "more": more(False), "unit": "kWh/day"}
     return es, en
 
 
