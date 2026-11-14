@@ -315,7 +315,7 @@ def _short_load_name(name: str, limit: int = 38) -> str:
     return " ".join(cut)
 
 
-def _scope_block(consumption: dict, system_type: str) -> tuple[dict | None, dict | None]:
+def _scope_block(consumption: dict, system_type: str, language: str = "es") -> tuple[dict | None, dict | None]:
     """Off-Grid and Hybrid: the box beside the monthly chart — the loads the system was sized for / backs up (biggest ones
     by daily energy, with hours when a load is 1 kW or more). Built only from the client's own load list, nothing fixed.
     Returns (es, en); (None, None) for Grid Zero or when no per-load profile exists."""
@@ -328,10 +328,16 @@ def _scope_block(consumption: dict, system_type: str) -> tuple[dict | None, dict
     lines.sort(key=lambda r: -float(r["estimated_kwh_day"]))
     top, rest = lines[:8], lines[8:]
 
+    # Load names are free text (usually Spanish): put the ones shown into the PDF's language (one cached AI call; unchanged on failure).
+    from ai.load_names import translate_names
+
+    short = [_short_load_name(r.get("load_name", ""), 34) for r in top]
+    names_by_lang = {language: translate_names(short, language)} if language in ("es", "en") else {}
+
     def rows(es: bool) -> list[dict]:
         out = []
-        for r in top:
-            name = _short_load_name(r.get("load_name", ""), 34)
+        for i, r in enumerate(top):
+            name = names_by_lang.get("es" if es else "en", short)[i]
             hrs = float(r.get("duty_hours_day") or 0)
             if float(r.get("connected_power_kw") or 0) >= 1.0 and hrs > 0:
                 name += f" ({f'{hrs:.1f}'.rstrip('0').rstrip('.')} h/{'día' if es else 'day'})"
@@ -709,7 +715,7 @@ def build_from_wizard_blob(
     except Exception:
         pass
 
-    _scope_es, _scope_en = _scope_block(consumption, system_type)
+    _scope_es, _scope_en = _scope_block(consumption, system_type, language)
     company = get_company_info()
     bank    = get_bank_info()
     inv_warranty = inverter.get("warranty_yr", 5)
