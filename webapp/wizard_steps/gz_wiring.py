@@ -14,7 +14,7 @@ from calculations import coupling as C
 from calculations import wiring as W
 from calculations.datasheet_limits import fronius_limits
 from materials.engine import grid_zero_equipment
-from webapp.wizard_steps import og_wiring
+from webapp.wizard_steps import disconnect_center, og_wiring
 from webapp.wizard_steps.og_wiring import _f, _size
 
 LENGTH_LABELS = {
@@ -28,10 +28,13 @@ BRANCH_KEYS = {
     "Breakers CC → inversor (strings)": "pv_dc_inv",
     "Inversor → base de medidor de generación": "gz_ac",
     "Base de generación → base de consumo": "gz_link",
+    "Centro de carga → base de medidor de generación": "gz_ac",
+    "Inversor → centro de carga de desconexión": "gz_disc",
 }
 
 
-def build_context(blob: dict, lengths_override: dict | None = None, manual_override: dict | None = None) -> dict:
+def build_context(blob: dict, lengths_override: dict | None = None, manual_override: dict | None = None,
+                  disconnect_override: dict | None = None) -> dict:
     blob = blob or {}
     eq = grid_zero_equipment(og_wiring.fresh_equipment(blob.get("equipment") or {}))
     panel, inverter = eq.get("panel") or {}, eq.get("inverter") or {}
@@ -42,6 +45,10 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
         "show_ac_in": False, "coupling": {}, "can_couple": False,
     }
+    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), True)
+    ctx["disconnect"] = disc
+    if disc["enabled"]:
+        ctx["length_labels"] = {**LENGTH_LABELS, "ac_out_m": "Centro de carga → base de generación", disconnect_center.LENGTH_KEY: disconnect_center.LENGTH_LABEL}
     n_series, n_strings = int(eq.get("panels_per_string") or 0), int(eq.get("n_strings") or 0)
     if not (panel and inverter and n_series and n_strings):
         ctx["reason"] = "Falta un diseño completo (paneles, strings e inversor) para dimensionar el cableado."
@@ -102,9 +109,27 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
     link["ocpd_a"] = None
 
     branches = [pv, dc_inv, ac, link]
+    if disc["enabled"]:
+        # Optional disconnect load center next to the Fronius (does not replace the generation meter base): the run to the base starts
+        # at the center, and a short run joins the Fronius to it. The center's 2P breaker is the same size as the one in the base.
+        ac["label"] = "Centro de carga → base de medidor de generación"
+        ac["notes"].append("Sale del centro de carga de desconexión (4 espacios) junto al Fronius; el breaker de la base de generación sigue siendo el interruptor principal.")
+        to_center = _size(
+            "Inversor → centro de carga de desconexión", kind="ac", qty=1, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
+            v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+            note=f"Salida del inversor al centro de carga de desconexión (4 espacios): {out_a:.1f} A × 1.25. L1 + L2 + tierra, sin neutro. "
+                 "El breaker de 2 polos del centro de carga corta el Fronius cerca de él.",
+        )
+        if max_ocpd:
+            to_center["max_ocpd_a"] = int(max_ocpd)
+            if to_center.get("ocpd_a") and to_center["ocpd_a"] > max_ocpd:
+                to_center["ocpd_a"] = int(max_ocpd)
+        branches.insert(2, to_center)
     for b in branches:
         b["key"] = BRANCH_KEYS.get(b["label"])
         man = (manual_override or {}).get(b["key"])
+        if b["key"] == "gz_disc" and not man and (manual_override or {}).get("gz_ac"):
+            man = {"ocpd_a": (manual_override["gz_ac"] or {}).get("ocpd_a"), "ugc": (manual_override["gz_ac"] or {}).get("ugc")}
         if b["key"] == "gz_link" and not man and (manual_override or {}).get("gz_ac"):
             man = {"ocpd_a": None, "ugc": (manual_override["gz_ac"] or {}).get("ugc")}     # "the same cable" as the run that reaches the generation base
         W.apply_manual(b, man)

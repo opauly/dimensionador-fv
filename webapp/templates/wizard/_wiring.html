@@ -26,6 +26,21 @@
 </style>
 
 <h5 style="font-size:13px;margin:14px 0 2px;">Cableado y canalizaciones</h5>
+{% if disconnect and disconnect.can %}
+  {# Optional disconnect load center (4 spaces) next to the Fronius. Own form: an unchecked box posts nothing, so it carries a marker field. #}
+  <form id="wr-disc" class="wr-cpl" hx-post="{{ post_url or url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="change"
+        hx-target="{{ form_target or '#wiring-panel' }}" hx-swap="{{ form_swap or 'outerHTML' }}">
+    <input type="hidden" name="disc_form" value="1">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:inherit;margin:6px 0;">
+      <input type="checkbox" name="disc_enabled" value="1" {{ 'checked' if disconnect.enabled else '' }}>
+      Centro de carga de desconexión junto al Fronius (4 espacios)
+    </label>
+    {% if disconnect.enabled %}
+      <p class="card-note-sm">Opcional. Corta la salida del Fronius cerca de él: un breaker de 2 polos del tamaño del breaker del Fronius{% if not coupling or not coupling.ac %} y otro para alimentar el Smart Meter{% endif %}.
+        No reemplaza la base de medidor de generación ni el breaker del sub-panel. Ajusta su distancia al Fronius en los largos de abajo.</p>
+    {% endif %}
+  </form>
+{% endif %}
 {% if can_couple and roof %}
   {# In the wizard the coupling is chosen at the top of Equipos; here it is only reported. #}
   {% if coupling.ac and coupling.check %}

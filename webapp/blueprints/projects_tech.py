@@ -13,6 +13,7 @@ stored in `projects.tech_spec` (migration 052):
     wiring_manual    the engineer's own breaker / gauge per branch, judged against the calculated one
     coupling         PV coupling of a hybrid design (DC controllers or AC-coupled PV inverter),
                      see webapp/wizard_steps/og_coupling.py
+    disconnect       optional disconnect load center next to the Fronius, see webapp/wizard_steps/disconnect_center.py
 
 The wiring maths is `calculations/wiring.py` (NEC tables from the CCC+FV workbook); the BOM
 assembly is `calculations/bom.py`. Wiring is available for Off-Grid / Hybrid designs; Grid Zero
@@ -103,7 +104,7 @@ def register(bp):
         whole panel so the wiring table and the BOM can never disagree."""
         from database.projects_db import get_project, update_tech_spec
         from webapp.blueprints.projects_common import detail_ctx
-        from webapp.wizard_steps import og_coupling, og_wiring
+        from webapp.wizard_steps import disconnect_center, og_coupling, og_wiring
 
         project = get_project(pid)
         if not project:
@@ -119,5 +120,8 @@ def register(bp):
         cpl = og_coupling.from_form(form)
         if cpl is not None:
             spec["coupling"] = cpl
+        disc = disconnect_center.from_form(form)
+        if disc is not None:
+            spec["disconnect"] = disc
         update_tech_spec(pid, spec)
         return render_panel(detail_ctx(pid, active_tab="tecnico"))

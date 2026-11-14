@@ -25,7 +25,7 @@ import math
 from calculations import coupling as C
 from calculations import wiring as W
 from calculations.datasheet_limits import fronius_limits, multi_limits
-from webapp.wizard_steps import og_coupling
+from webapp.wizard_steps import disconnect_center, og_coupling
 
 SCRATCH_KEY = "wiring"
 
@@ -63,6 +63,7 @@ DEFAULT_LENGTHS = {
     "ac_in_m": 10.0,     # grid -> inverter AC input
     "dc_inv_m": 5.0,     # Grid Zero: DC breakers -> string inverter
     "gz_link_m": 2.0,    # Grid Zero: generation meter base -> existing consumption meter base
+    "disc_m": 1.5,       # optional disconnect load center: Fronius -> load center (Grid Zero and AC-coupled)
 }
 LENGTH_LABELS = {
     "pv_cc_m": "Paneles → breakers CC",
@@ -93,6 +94,8 @@ BRANCH_KEYS = {
     "Controlador de carga → baterías": "cc_bat",
     "Paneles → inversor FV (strings)": "pv_strings",
     "Inversor FV → sub-panel de cargas críticas": "pv_inv_ac",
+    "Centro de carga → sub-panel de cargas críticas": "pv_inv_ac",
+    "Inversor FV → centro de carga de desconexión": "pv_disc",
     "Baterías → inversor": "bat_inv",
     "Inversor → tablero AC (salida)": "ac_out",
     "Red → entrada AC del inversor": "ac_in",
@@ -100,7 +103,7 @@ BRANCH_KEYS = {
 
 
 # Grid Zero runs (see gz_wiring): the manual-values form has to read them too.
-GZ_ONLY_KEYS = ("pv_dc_inv", "gz_ac", "gz_link")
+GZ_ONLY_KEYS = ("pv_dc_inv", "gz_ac", "gz_link", "gz_disc")
 
 
 def clean_lengths(saved: dict | None) -> dict[str, float]:
@@ -219,7 +222,7 @@ def _fresh_inverter(eq: dict) -> dict:
 
 
 def build_context(blob: dict, lengths_override: dict | None = None, coupling_override: dict | None = None,
-                  manual_override: dict | None = None) -> dict:
+                  manual_override: dict | None = None, disconnect_override: dict | None = None) -> dict:
     """{'ready': bool, 'reason': str|None, 'branches': [...], 'lengths': {...}, ...}
 
     `lengths_override` / `coupling_override` let a caller that owns those elsewhere (a project's
@@ -235,13 +238,17 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     saved_cpl = coupling_override if coupling_override is not None else og_coupling.from_blob(blob)
     cpl = og_coupling.resolve(eq, saved_cpl if can_couple else {})
     ac_coupled = cpl["ac"]
+    disc = disconnect_center.resolve(disconnect_override if disconnect_override is not None else disconnect_center.from_blob(blob), ac_coupled)
     ctx = {
         "ready": False, "reason": None, "branches": [],
         "lengths": clean_lengths(lengths_override) if lengths_override is not None else lengths(blob),
         "length_labels": LENGTH_LABELS_AC if ac_coupled else LENGTH_LABELS, "meters": {}, "insulation": W.DEFAULT_INSULATION,
         "conduit_type": W.DEFAULT_CONDUIT, "vd_limit": W.VD_LIMIT_PCT, "terminal_temp": W.TERMINAL_TEMP_C,
-        "show_ac_in": False, "coupling": cpl, "can_couple": can_couple,
+        "show_ac_in": False, "coupling": cpl, "can_couple": can_couple, "disconnect": disc,
     }
+    if disc["enabled"]:
+        ctx["length_labels"] = {**ctx["length_labels"], "pv_inv_ac_m": "Centro de carga → sub-panel de cargas críticas",
+                                disconnect_center.LENGTH_KEY: disconnect_center.LENGTH_LABEL_AC}
     if ac_coupled:
         n_series, n_strings = int(cpl.get("series") or 0), int(cpl.get("strings") or 0)
         if not (panel and battery and inverter and cpl.get("pv_inverter") and n_series and n_strings):
@@ -292,6 +299,21 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
         if fr_max:
             pv_ac["max_ocpd_a"] = int(fr_max)
             pv_ac["notes"].append(f"Datasheet del fabricante a 240 V: breaker AC máx. {int(fr_max)} A (corriente de salida continua {pv_ac_a:g} A).")
+        if disc["enabled"]:
+            # Optional disconnect load center at the Fronius output: same conductors twice, each with its own length. The 2P breaker of the
+            # center (the same size as the one at the sub-panel) goes with the first run.
+            pv_ac["label"] = "Centro de carga → sub-panel de cargas críticas"
+            pv_ac["notes"].append("Sale del centro de carga de desconexión (4 espacios) junto al inversor FV; mismo conductor que el tramo anterior.")
+            pv_disc = _size(
+                "Inversor FV → centro de carga de desconexión", kind="ac", qty=pv_qty,
+                current_a=pv_ac_a, factor=W.CONTINUOUS_FACTOR,
+                v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+                note=f"Del inversor FV al centro de carga de desconexión (4 espacios): {pv_ac_a:.1f} A × 1.25. L1 + L2 + tierra, sin neutro. "
+                     "El breaker de 2 polos de este centro de carga corta la salida del inversor cerca de él.",
+            )
+            if fr_max:
+                pv_disc["max_ocpd_a"] = int(fr_max)
+            branches.append(pv_disc)
         branches.append(pv_ac)
     else:
         branches = [
@@ -426,7 +448,10 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
 
     for b in branches:
         b["key"] = BRANCH_KEYS.get(b["label"])
-        W.apply_manual(b, (manual_override or {}).get(b["key"]))
+        man = (manual_override or {}).get(b["key"])
+        if b["key"] == "pv_disc" and not man and (manual_override or {}).get("pv_inv_ac"):
+            man = {"ocpd_a": None, "ugc": (manual_override["pv_inv_ac"] or {}).get("ugc")}     # "the same cable" as the run after the center
+        W.apply_manual(b, man)
     ctx["has_manual"] = any(b.get("manual") for b in branches)
     ctx["gauge_options"] = [(g, W.gauge_label(g)) for g in W.T.GAUGE_ORDER[W.T.GAUGE_ORDER.index("14"):W.T.GAUGE_ORDER.index("500") + 1]]
     ctx.update(ready=True, branches=branches, meters=W.conductor_meters(branches))

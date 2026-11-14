@@ -174,6 +174,18 @@ def _legend(c, h):
 
 
 
+def _disc_box(c, h, x, y, w, hgt, D):
+    """Optional disconnect load center (4 spaces) next to the Fronius: the AC line enters at the top and leaves by the bottom or the left."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    box(x, y, w, hgt, LGRAY)
+    cx = x + w / 2
+    txt(cx, y + hgt - 11, 'CENTRO DE CARGA', 6.8, 'Helvetica-Bold')
+    txt(cx, y + hgt - 20, '4 espacios · desconexión del FV', 5.6, 'Helvetica', GRAY)
+    txt(cx, y + hgt - 31, f"Q-FV · {D['breaker']}", 6.2, 'Helvetica', black)
+    if D.get("meter_breaker"):
+        txt(cx, y + hgt - 41, f"Q-MED · {D['meter_breaker']} (medidor)", 6.2, 'Helvetica', black)
+
+
 def _hybrid_ac(c, h, cfg):
     """Híbrido acoplado en AC: Fronius en el AC-OUT de 2 MultiPlus-II."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
@@ -228,10 +240,16 @@ def _hybrid_ac(c, h, cfg):
             lab(xc, yc - 9, '- ' + PV["dc_wire"], black)
     seg([(585, 590), (585, 572)], GRN, 1.1, (3, 2)); ground(585, 572); lab(595, 570, FR["ground_wire"], GRN, 'l')
 
-    # salida AC del Fronius al sub-panel
+    # salida AC del Fronius al sub-panel (con centro de carga de desconexión opcional junto al Fronius)
+    D = cfg.get("disconnect")
     seg([(690, 590), (690, 436)], black, 1.8)
-    txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
-    stack(698, 563, FR["ac_conductors"], 'l')
+    if D:
+        _disc_box(c, h, 640, 515, 100, 52, D)
+        txt(748, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
+        stack(748, 563, FR["ac_conductors"], 'l')
+    else:
+        txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
+        stack(698, 563, FR["ac_conductors"], 'l')
 
     # ---------- red y tablero principal ----------
     c.saveState(); c.setFillColor(white); c.setStrokeColor(black); c.setLineWidth(1.3); c.circle(62, 436, 16, fill=1, stroke=1); c.restoreState()
@@ -524,10 +542,18 @@ def _grid_zero(c, h, cfg):
         txt(566, yc - 2.5, f"MPPT {min(i, FR['mppt'] - 1) + 1}", 6.5, 'Helvetica', GRAY, 'l')
     seg([(585, 590), (585, 572)], GRN, 1.1, (3, 2)); ground(585, 572); lab(595, 570, FR["ground_wire"], GRN, 'l')
 
-    # salida AC del Fronius a la base de medidor de generación
-    seg([(690, 590), (690, 545), (375, 545), (375, 496)], black, 1.8)
-    txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
-    stack(698, 563, FR["ac_conductors"], 'l')
+    # salida AC del Fronius a la base de medidor de generación (con centro de carga de desconexión opcional junto al Fronius)
+    D = cfg.get("disconnect")
+    if D:
+        seg([(690, 590), (690, 560)], black, 1.8)
+        _disc_box(c, h, 640, 505, 120, 55, D)
+        seg([(640, 532), (375, 532), (375, 496)], black, 1.8)
+        txt(768, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
+        stack(766, 563, FR["ac_conductors"], 'l')
+    else:
+        seg([(690, 590), (690, 545), (375, 545), (375, 496)], black, 1.8)
+        txt(700, 575, 'AC 240 V', 6.5, 'Helvetica', black, 'l')
+        stack(698, 563, FR["ac_conductors"], 'l')
 
     # red → base de medición de consumo (existente) → base de medidor de generación → tablero principal
     c.saveState(); c.setFillColor(white); c.setStrokeColor(black); c.setLineWidth(1.3); c.circle(62, 436, 16, fill=1, stroke=1); c.restoreState()

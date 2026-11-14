@@ -44,11 +44,12 @@ def load(project: dict) -> dict:
         out["empty"] = "La versión elegida todavía no tiene equipos seleccionados."
         return out
     if project.get("system_type") in ("off_grid", "hybrid"):
-        out["wiring"] = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"), spec.get("wiring_manual") or {})
+        out["wiring"] = og_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("coupling"), spec.get("wiring_manual") or {},
+                                               spec.get("disconnect"))
     elif project.get("system_type") == "grid_zero":
         from webapp.wizard_steps import gz_wiring
 
-        out["wiring"] = gz_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("wiring_manual") or {})
+        out["wiring"] = gz_wiring.build_context(blob, spec.get("wiring_lengths") or {}, spec.get("wiring_manual") or {}, spec.get("disconnect"))
     else:
         out["wiring"] = {"ready": False, "reason": "El cableado automático está disponible para sistemas Off-Grid, Híbridos y Grid Zero.",
                          "branches": []}

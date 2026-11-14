@@ -180,7 +180,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
 
     multi_label = "MULTIPLUS-II " + (re.search(r"48/\d+", inv.get("model", "")) or re.search(r"\d+", inv.get("model", "") + "0"))[0]
     cfg = {
-        "kind": "hybrid_ac", "meter": _meter(eq),
+        "kind": "hybrid_ac", "meter": _meter(eq), "disconnect": _disconnect_cfg(wiring, "pv_disc"),
         "project": {
             "name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
             "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
@@ -238,6 +238,17 @@ def _project_block(project: dict, d: dict, answers: dict) -> dict:
             "revision": answers["revision"], "draft": bool(answers["draft"])}
 
 
+def _disconnect_cfg(wiring: dict, key: str, meter_fed: bool = False) -> dict | None:
+    """The optional disconnect load center next to the Fronius, for the drawing: the 2P breaker size (and the Smart Meter breaker, same size)."""
+    if not (wiring.get("disconnect") or {}).get("enabled"):
+        return None
+    b = next((x for x in wiring.get("branches") or [] if x.get("key") == key), None)
+    if not b or not b.get("ocpd_a"):
+        return None
+    amps = f"2P {int(b['ocpd_a'])} A"
+    return {"breaker": amps, "meter_breaker": amps if meter_fed else None}
+
+
 def _meter(eq: dict, grid_zero: bool = False) -> dict | None:
     """Energy meter drawn in parallel at the main panel (the VM-3P75CT picked in Equipos; the Fronius Smart Meter in Grid Zero)."""
     if grid_zero:
@@ -274,6 +285,7 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
     string_a = string_breaker_a or pv["ocpd_a"]
     cfg = {
         "kind": "grid_zero", "project": _project_block(project, d, answers), "meter": _meter(eq, grid_zero=True),
+        "disconnect": _disconnect_cfg(wiring, "gz_disc", meter_fed=bool(eq.get("monitoring"))),
         "pv": {
             "strings": int(eq["n_strings"]), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": None,

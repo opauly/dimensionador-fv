@@ -378,5 +378,60 @@ _stand = lambda b, n: _list({**EQ, "battery": b, **_bank(n)}, CTX).get("Mueble m
 check("battery stand: Fidus none, US5000 4 -> 1, US5000 7 -> 2, UF5000 2 -> 1",
       (_stand({"brand": "Pylontech", "model": "Fidus"}, 4), _stand(_us, 4), _stand(_us, 7), _stand({"brand": "Pylontech", "model": "UF5000"}, 2)), (None, 1, 2, 1))
 
+# ── Optional disconnect load center next to the Fronius (Oscar, 2026-11-13) ──
+from webapp.wizard_steps import disconnect_center as DCN  # noqa: E402
+_DON = {"enabled": True}
+_gz_off = gz_wiring.build_context(GZ_BLOB, {"gz_link_m": 12}, None, None)
+_gz_on = gz_wiring.build_context(GZ_BLOB, {"gz_link_m": 12, "disc_m": 2}, None, _DON)
+check("grid zero: option off by default, no extra run", ([b["key"] for b in _gz_off["branches"]], _gz_off["disconnect"]["enabled"]),
+      (["pv_strings", "pv_dc_inv", "gz_ac", "gz_link"], False))
+check("grid zero on: Fronius -> center run inserted, same conductors as the run to the base",
+      ([b["key"] for b in _gz_on["branches"]], _gz_on["branches"][2]["ugc"] == _gz_on["branches"][3]["ugc"], _gz_on["branches"][2]["length_m"]),
+      (["pv_strings", "pv_dc_inv", "gz_disc", "gz_ac", "gz_link"], True, 2.0))
+check("grid zero on: labels follow the center", (_gz_on["branches"][3]["label"], "disc_m" in _gz_on["length_labels"]),
+      ("Centro de carga → base de medidor de generación", True))
+_lg_on = _list({**GZ_EQ, "monitoring": SM}, _gz_on, "grid_zero")
+_lg_off = _list({**GZ_EQ, "monitoring": SM}, _gz_off, "grid_zero")
+_gz_amps = int(_gz_on["branches"][2]["ocpd_a"])
+check("grid zero on: 4-space load center + 2 breakers (Fronius + Smart Meter) of the base-breaker size + #12 feed",
+      (_qty(_lg_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), _qty(_lg_on, f"Breaker de {_gz_amps}A 2 polos, marca CH /SD"),
+       any("Centro de carga → Smart Meter" in w for ln in _lg_on.values() for w in ln.get("wheres") or [])), (1, 2, True))
+check("grid zero on: the base, its breaker and the padlock stay (it does not replace them)",
+      ("Base para medidor monofásica con interruptor principal tipo parche, clase 100 (combo base)" in _lg_on or any("Base para medidor" in n for n in _lg_on),
+       any("compatible con base para medidor" in n for n in _lg_on), "Candado pequeño para base medidor" in _lg_on), (True, True, True))
+check("grid zero off: no load center", "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico" in _lg_off, False)
+check("grid zero on: the center-run cable shows up on the list", any("Fronius → centro de carga de desconexión" in w for ln in _lg_on.values() for w in ln.get("wheres") or []), True)
+# AC-coupled hybrid
+_ha_on = og_wiring.build_context(BLOB, None, None, None, _DON)
+_ha_off = og_wiring.build_context(BLOB)
+check("AC hybrid: off by default; on inserts Fronius -> center before the run to the sub-panel",
+      ([b["key"] for b in _ha_off["branches"] if b["key"] in ("pv_disc", "pv_inv_ac")], [b["key"] for b in _ha_on["branches"] if b["key"] in ("pv_disc", "pv_inv_ac")],
+       _ha_on["disconnect"]["enabled"]), (["pv_inv_ac"], ["pv_disc", "pv_inv_ac"], True))
+_lh_on = _list(EQ, _ha_on)
+check("AC hybrid on: load center + ONE breaker (no Smart Meter) and the sub-panel breaker stays",
+      (_qty(_lh_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), sum(ln["qty"] for n, ln in _lh_on.items() if n.endswith("2 polos, marca CH /SD")),
+       any(n.startswith("Breaker AC para riel DIN") and any("sub-panel" in w for w in ln.get("wheres") or []) for n, ln in _lh_on.items())), (1, 1, True))
+_hd = og_wiring.build_context(BLOB_DC, None, None, None, _DON)
+check("DC-coupled: the option does nothing (no Fronius)", (_hd["disconnect"], any(b["key"] in ("pv_disc", "gz_disc") for b in _hd["branches"])),
+      ({"can": False, "enabled": False}, False))
+check("form field: unchecked box with the marker saves off, no marker keeps the choice",
+      (DCN.from_form({"disc_form": "1"}), DCN.from_form({"disc_form": "1", "disc_enabled": "1"}), DCN.from_form({})), ({"enabled": False}, {"enabled": True}, None))
+
+# drawing <-> list for the disconnect center
+_cgz_on, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_on, "blob": GZ_BLOB}, {})
+_cgz_off, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": _gz_off, "blob": GZ_BLOB}, {})
+check("grid zero drawing: center breakers (Fronius + meter) = list; off -> not drawn",
+      (_amps(_cgz_on["disconnect"]["breaker"]), _amps(_cgz_on["disconnect"]["meter_breaker"]), _cgz_off["disconnect"]), (_gz_amps, _gz_amps, None))
+_cha_on, _ = CB.build_config(project, {"eq": EQ, "wiring": _ha_on, "blob": BLOB}, ans)
+check("hybrid AC drawing: center has the Fronius breaker only", (_amps(_cha_on["disconnect"]["breaker"]), _cha_on["disconnect"]["meter_breaker"]),
+      (int(_ha_on["branches"][[b["key"] for b in _ha_on["branches"]].index("pv_disc")]["ocpd_a"]), None))
+for _name, _cfg in (("grid_zero_on", _cgz_on), ("hybrid_on", _cha_on), ("grid_zero_off", _cgz_off)):
+    _buf = io.BytesIO()
+    try:
+        build(_cfg, _buf)
+        check(f"drawing renders with the center: {_name}", _buf.getvalue()[:4], b"%PDF")
+    except Exception as _e:  # noqa: BLE001
+        check(f"drawing renders with the center: {_name}", repr(_e), "no error")
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
