@@ -96,7 +96,7 @@ def check_strings(panel: dict, pv_inv: dict, strings: int, series: int, *, qty: 
             f"{i_mppt:.1f} A de {imax:.0f} A" + (f" ({spm} strings en paralelo por MPPT)" if spm > 1 else ""))
     if strings > total_channels:
         add("Strings ≤ entradas MPPT", None,
-            f"{strings} strings sobre {total_channels} entradas MPPT: hay strings en paralelo, revisar la caja combinadora")
+            f"{strings} strings sobre {total_channels} entradas MPPT: se juntan de a {spm} con conectores MC4 en Y (un tendido y un breaker por entrada)")
     if inv_kw:
         add("Relación CC/CA del arreglo", ratio <= DC_AC_RATIO_WARN, f"{array_kw:.1f} kWp / {inv_kw:.1f} kW = {ratio:.2f}")
     if hybrid_kw_total:

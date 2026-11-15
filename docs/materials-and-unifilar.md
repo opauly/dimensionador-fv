@@ -94,8 +94,16 @@ patas 47 (compró 45), calibre de tierras (ahora por la T250.122 según el break
   El dibujo DC cubre 1-8 inversores, 1-24 controladores (con más de 4 se abrevia: MPPT 1, MPPT 2, «· · ·» y el último, cada uno con su string; hace falta al menos un string por controlador), 1-4 strings (más solo con más de 4 controladores), 1-24 baterías y solo Lynx Power In (sin Distributor).
 - **Dibujo abreviado:** con más de 4 baterías o más de 3 inversores se dibujan #1, #2, «· · ·» y el último; el cableado del
   resto se repite igual. El título del Lynx dice cuántas barras en paralelo (⌈entradas ÷ 4⌉).
-- **DC acoplado, un breaker por string:** «Paneles → breakers CC» (uno por string, con su breaker) y «Breakers CC → controlador» (strings combinados en una barra,
-  sin breaker propio). Largo del segundo tramo editable en Técnico.
+- **Strings en paralelo (conectores MC4 en Y):** cuando hay más strings que entradas MPPT (o que controladores), los que comparten entrada se juntan en el techo
+  con conectores MC4 en Y: queda **un tendido y un breaker DC por entrada MPPT**, dimensionados con la suma (Isc × strings × 1.25 × 1.25, serie CC 16–63 A).
+  Los strings se reparten parejo (3 sobre 2 entradas → 2 y 1; el cable y el breaker se calculan para el grupo más grande). Un empalme lleva una pieza Y por
+  polaridad (línea «MC4 en Y» = 2 × (strings − tendidos)); las parejas MC4 se cuentan por tendido; las cajas Chint se cuentan por breaker. La regla vive en
+  `calculations/pv_groups.py` y la leen el cableado (`pv_groups` en el contexto), la lista y el unifilar. El breaker del grupo no se limita a la protección
+  máxima en serie del módulo: se revisa la corriente inversa (n − 1) × Isc contra ese valor; si lo supera hace falta fusible por string (NEC 690.9) y los Y
+  no lo reemplazan (aviso en Técnico, en la lista y en la revisión del unifilar). Si el grupo no tiene breaker comercial (> 63 A) el dibujo dice «por definir».
+  El unifilar dibuja los strings de cada entrada juntos y unidos por la Y (hasta 6 strings en el arreglo; más, una fila por tendido con «Y × N»).
+- **DC acoplado, un breaker por controlador:** «Paneles → breakers CC» (un tendido por controlador, ya con los strings juntos por la Y, con su breaker) y
+  «Breakers CC → controlador» (mismo par de conductores, sin breaker propio). Largo del segundo tramo editable en Técnico.
 - **No se incluyen:** cajas plexo (por ahora), tornillos de techo (las patas en L ya los traen), el sub-panel de cargas críticas (lo pone el propietario o
   constructor) y el conector de varilla de tierra.
 - **Mínimos:** un paquete de amarras; las gazas salen de la distancia de la tubería, sin repuesto.

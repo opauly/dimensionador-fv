@@ -55,7 +55,7 @@
 
     <b style="font-size:12.5px;">Opciones del proyecto</b>
     <div class="ls-grid">
-      <div><label for="ls-sb">Breaker CC por string (A)</label><input id="ls-sb" type="number" min="10" name="opt_string_breaker" value="{{ options.string_breaker_a or '' }}" placeholder="el calculado"></div>
+      <div><label for="ls-sb">Breaker CC por tendido (A)</label><input id="ls-sb" type="number" min="10" name="opt_string_breaker" value="{{ options.string_breaker_a or '' }}" placeholder="el calculado"></div>
       <div><label for="ls-bends">Curvas por canalización</label><input id="ls-bends" type="number" min="0" name="opt_bends" value="{{ options.bends_per_raceway }}"></div>
       <div><label for="ls-lb">Conduletas LB por canalización</label><input id="ls-lb" type="number" min="0" name="opt_lb" value="{{ options.lb_per_raceway }}"></div>
       {% for b in branches %}

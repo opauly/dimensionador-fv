@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 
 from calculations import coupling as C
+from calculations import pv_groups
 from calculations import wiring as W
 from calculations.datasheet_limits import fronius_limits, multi_limits
 from webapp.wizard_steps import disconnect_center, og_coupling
@@ -225,6 +226,26 @@ def _fresh_inverter(eq: dict) -> dict:
     return snap
 
 
+def module_protection(branch: dict, panel: dict, pvg: dict) -> None:
+    """The module's maximum series fuse against the PV run breaker. One string per run: the breaker is capped at that value. Strings joined
+    by Y connectors: the combined breaker cannot be capped (it would be below the run current), so the check is the reverse current the
+    other strings push into a module, (n - 1) x Isc; above the fuse rating each string needs its own fuse (NEC 690.9)."""
+    max_series, isc, per_run = _f(panel, "max_series_fuse_a"), _f(panel, "isc"), int(pvg.get("per_run") or 1)
+    if not max_series:
+        return
+    if per_run <= 1:
+        branch["max_ocpd_a"] = int(max_series)
+        branch["notes"].append(f"Datasheet del módulo: protección máxima en serie {int(max_series)} A (aplica también al breaker).")
+        return
+    back = pv_groups.backfeed_a(isc, per_run)
+    if back <= max_series:
+        branch["notes"].append(f"Corriente inversa entre strings en paralelo: {per_run - 1} × {isc:g} A = {back:.1f} A ≤ {int(max_series)} A "
+                               f"(protección máxima en serie del módulo): los conectores Y no necesitan fusible por string.")
+    else:
+        branch["notes"].append(f"ATENCIÓN: con {per_run} strings en paralelo la corriente inversa es {back:.1f} A y supera los {int(max_series)} A "
+                               f"que soporta el módulo (protección máxima en serie): cada string necesita su fusible (NEC 690.9); los conectores Y no protegen.")
+
+
 def build_context(blob: dict, lengths_override: dict | None = None, coupling_override: dict | None = None,
                   manual_override: dict | None = None, disconnect_override: dict | None = None) -> dict:
     """{'ready': bool, 'reason': str|None, 'branches': [...], 'lengths': {...}, ...}
@@ -275,6 +296,12 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     cc_qty = max(1, int(eq.get("charge_controller_qty") or 1))
     inv_qty = max(1, int(eq.get("inverter_qty") or 1))
     strings_per_cc = math.ceil(n_strings / cc_qty)
+    # Strings that share an MPPT input are joined with MC4 Y connectors in the roof: one run and one DC breaker per MPPT input / controller.
+    pvg = pv_groups.summary(n_strings, int((cpl.get("check") or {}).get("channels") or 1) if ac_coupled else cc_qty)
+    ctx["pv_groups"] = pvg
+    runs, per_run = pvg["runs"], pvg["per_run"]
+    y_text = (f" Los {n_strings} strings se juntan de a {per_run} con conectores MC4 en Y (en el techo): queda un tendido y un breaker por entrada MPPT."
+              if per_run > 1 else "")
     isc, imp, vmp = _f(panel, "isc"), _f(panel, "imp"), _f(panel, "vmp")
     v_bat = _f(battery, "voltage_v", 48.0) or 48.0
     array_v = vmp * n_series
@@ -284,19 +311,16 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
         pv_inv, pv_qty = cpl["pv_inverter"], cpl["qty"]
         branches = [
             _size(
-                "Paneles → inversor FV (strings)", kind="dc", qty=n_strings,
-                current_a=isc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                "Paneles → inversor FV (strings)", kind="dc", qty=runs,
+                current_a=isc * per_run, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
                 protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
                 min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
-                note=f"Un tendido por string ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el gabinete DC. "
-                     f"Corriente = Isc × 1.25 × 1.25 (NEC 690.8); breaker de la serie estándar CC (NB1-63DC).",
+                note=f"Un tendido por entrada MPPT ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el gabinete DC." + y_text
+                     + f" Corriente = Isc × {per_run} × 1.25 × 1.25 (NEC 690.8); breaker de la serie estándar CC (NB1-63DC).",
             ),
         ]
-        max_series = _f(panel, "max_series_fuse_a")
-        if max_series:
-            branches[0]["max_ocpd_a"] = int(max_series)
-            branches[0]["notes"].append(f"Datasheet del módulo: protección máxima en serie {int(max_series)} A (aplica también al breaker).")
+        module_protection(branches[0], panel, pvg)
         pv_ac_a = C.pv_inverter_ac_current_a(pv_inv)
         to_center = disc["fronius_to"] == "center"
         pv_ac = _size(
@@ -318,28 +342,25 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
     else:
         branches = [
             _size(
-                "Paneles → breakers CC (strings)", kind="dc", qty=n_strings,
-                current_a=isc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
+                "Paneles → breakers CC (strings)", kind="dc", qty=runs,
+                current_a=isc * per_run, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
                 protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
                 min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
-                note=f"Un tendido por string ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el centro de carga DC. "
-                     f"Corriente = Isc × 1.25 × 1.25 (NEC 690.8); breaker de la serie comercial CC.",
+                note=f"Un tendido por controlador ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el centro de carga DC." + y_text
+                     + f" Corriente = Isc × {per_run} × 1.25 × 1.25 (NEC 690.8); breaker de la serie comercial CC.",
             ),
             _size(
                 "Breakers CC → controlador de carga", kind="dc", qty=cc_qty,
                 current_a=isc * strings_per_cc, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["dc_inv_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
                 protection="breaker", shared_conduit=True, min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
-                note=f"{strings_per_cc} string(s) por controlador, ya protegidos cada uno por su breaker; se combinan en una barra y entran "
-                     f"al MPPT con un par de conductores. Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8). No lleva breaker propio.",
+                note=f"Del breaker CC al MPPT del controlador, con el mismo par de conductores ({strings_per_cc} string(s) por controlador). "
+                     f"Corriente = Isc × strings × 1.25 × 1.25 (NEC 690.8). Lo protege el breaker CC, por eso no lleva uno propio.",
             ),
         ]
         branches[1]["ocpd_a"] = None
-        max_series = _f(panel, "max_series_fuse_a")
-        if max_series:
-            branches[0]["max_ocpd_a"] = int(max_series)
-            branches[0]["notes"].append(f"Datasheet del módulo: protección máxima en serie {int(max_series)} A (aplica también al breaker).")
+        module_protection(branches[0], panel, pvg)
 
         # Controller output: the lower of its rating and what the array can push at battery voltage.
         pv_power_cc = array_v * imp * strings_per_cc

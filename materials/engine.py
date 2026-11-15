@@ -378,7 +378,8 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
         c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
 
 
-def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str], grid_zero: bool = False) -> None:
+def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str], grid_zero: bool = False,
+                 branches: list[dict] | None = None) -> None:
     """Items every project carries whatever its size (Oscar's rules): one enclosure, one surge
     protector, roof sealant, the DC breaker box, the wire duct and its EMT stubs to the inverters,
     and the monitoring outlet. Roof screws are not listed: the L brackets already come with theirs.
@@ -396,13 +397,14 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     c.add(_named("Riel strut perfil bajo", "Generales"), 1, note="uno por proyecto")
 
     strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
-    chint = max(1, math.ceil(strings / CHINT_STRINGS))       # a 5-space box holds two 2-pole breakers
+    runs = pv_runs(branches, strings)                          # one DC breaker per MPPT input: strings joined by Y share one
+    chint = max(1, math.ceil(runs / CHINT_STRINGS))          # a 5-space box holds two 2-pole breakers
     c.add(_named("Centro de carga Chint DC 5 espacios", "Generales"), chint,
-          note="siempre va: aloja los breakers DC de los strings" + (f" ({CHINT_STRINGS} strings por caja, {strings} strings)" if chint > 1 else ""))
+          note="siempre va: aloja los breakers DC de los strings" + (f" ({CHINT_STRINGS} breakers por caja, {runs} breakers)" if chint > 1 else ""))
     c.add(None, 2, name="Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)", section="Generales",
           sibling=_named("Centro de carga Chint DC 5 espacios", "Generales"), note="2 por proyecto, como en la cotización de MAZ")
     if chint > 1:
-        pending.append(f"Cada centro de carga Chint de 5 espacios aloja 2 breakers 2P de strings; el diseño tiene {strings} strings, así que van {chint} cajas.")
+        pending.append(f"Cada centro de carga Chint de 5 espacios aloja 2 breakers 2P de strings; el diseño tiene {runs} breakers DC, así que van {chint} cajas.")
     if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power straight from the Lynx bus (internal fuse, no breaker)
         for color in ("rojo", "negro"):
             c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=f"Cable #{GX_CABLE_GAUGE} AWG THHN, CU, color {color}", unit="m",
@@ -437,11 +439,31 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
               note=f"{MONITOR_CIRCUIT_M} m para el circuito de la toma de monitoreo (fase, neutro y tierra)")
 
 
-def _pv_connectors(c: Collector, eq: dict, coupling: dict) -> None:
+def pv_runs(branches: list[dict] | None, strings: int) -> int:
+    """PV runs (= DC breakers): the quantity of the strings branch the wiring sized; without wiring, one run per string."""
+    b = next((x for x in branches or [] if x.get("key") == "pv_strings"), None)
+    return int(b["qty"]) if b else int(strings or 0)
+
+
+def _pv_connectors(c: Collector, eq: dict, coupling: dict, branches: list[dict] | None = None, pending: list[str] | None = None) -> None:
+    """MC4 pairs at the ends of each run, plus the Y connectors that join strings sharing an MPPT input (Oscar, 2026-11-14): a join needs one
+    Y piece per polarity (male-male-female and female-female-male)."""
     strings = int(coupling.get("strings") or 0) if coupling.get("ac") else int(eq.get("n_strings") or 0)
-    if strings:
-        c.add(_named("MC4", "Paneles solares"), strings * 2 * 2, comment="Parejas macho/hembra",
-              note=f"{strings} strings × 2 polaridades × 2 extremos del tendido")
+    if not strings:
+        return
+    runs = pv_runs(branches, strings)
+    c.add(_named("MC4", "Paneles solares"), runs * 2 * 2, comment="Parejas macho/hembra",
+          note=f"{runs} tendidos × 2 polaridades × 2 extremos del tendido")
+    y = 2 * max(0, strings - runs)
+    if y:
+        per = -(-strings // max(1, runs))
+        c.add(_named("MC4 en Y", "Paneles solares"), y,
+              note=f"juntan los {strings} strings en {runs} entradas MPPT ({per} strings por entrada): {strings - runs} uniones × 2 polaridades")
+        panel = eq.get("panel") or {}
+        isc, max_series = float(panel.get("isc") or 0), float(panel.get("max_series_fuse_a") or 0)
+        if pending is not None and max_series and (per - 1) * isc > max_series:
+            pending.append(f"Con {per} strings en paralelo la corriente inversa ({(per - 1) * isc:.1f} A) supera la protección máxima en serie del módulo "
+                           f"({max_series:g} A): cada string necesita su fusible (NEC 690.9); los conectores Y no lo reemplazan.")
 
 
 def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
@@ -542,7 +564,7 @@ def _protections(c: Collector, branches: list[dict], opts: dict, disc: dict | No
                   where=where, note=f"un fusible por tendido ({b['qty']}) en la barra Lynx Power In")
         elif key in ("pv_strings", "pv_cc"):
             a = int(opts.get("string_breaker_a") or amps) if key == "pv_strings" else amps
-            note = "uno por string" + (f" (calculado {amps} A, elegido {a} A)" if a != amps else "")
+            note = "uno por tendido (por entrada MPPT; los strings en paralelo se juntan con MC4 en Y antes del breaker)" + (f" (calculado {amps} A, elegido {a} A)" if a != amps else "")
             c.add(_find("breaker_dc_din", amps=a, poles=2), b["qty"], name=f"Breaker DC para riel DIN {a}A 2P", section="Paneles solares",
                   sibling=_find("breaker_dc_din", amps=32, poles=2), where=where, note=note)
         else:
@@ -695,8 +717,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     else:
         _system(c, eq, coupling, wiring_ctx)
     _mounting(c, eq, layout, pending)
-    _project_kit(c, eq, coupling, layout, pending, grid_zero)
-    _pv_connectors(c, eq, coupling)
+    _project_kit(c, eq, coupling, layout, pending, grid_zero, branches)
+    _pv_connectors(c, eq, coupling, branches, pending)
     if wiring_ctx.get("ready"):
         _cables(c, branches)
         _protections(c, branches, opts, wiring_ctx.get("disconnect"))

@@ -263,14 +263,16 @@ out_gz = io.BytesIO()
 _build_dc(cfg_gz, out_gz)
 check("grid zero PDF renders", out_gz.getvalue()[:4], b"%PDF")
 
-# ── Batch 8: one breaker per string in DC-coupled systems, abbreviated drawings for many units ─────────────────
+# ── Batch 8: one breaker per MPPT input in DC-coupled systems (strings joined by MC4 Y), abbreviated drawings for many units ─────────────────
 _dcb = {b["key"]: b for b in dc_ctx["branches"]}
-check("DC-coupled wiring: one breaker per string (2 runs), the run to the controller has none", (_dcb["pv_strings"]["qty"], _dcb["pv_strings"]["ocpd_a"] is not None, _dcb["pv_cc"]["ocpd_a"]), (2, True, None))
+check("DC-coupled wiring: 2 strings on 1 controller are joined by a Y -> 1 run with 1 breaker (2 x Isc), the run to the controller has none",
+      (_dcb["pv_strings"]["qty"], _dcb["pv_strings"]["ocpd_a"] is not None, _dcb["pv_cc"]["ocpd_a"], dc_ctx["pv_groups"]["sizes"]), (1, True, None, [2]))
 EQ_DC4 = {**EQ_DC, "n_strings": 4, "charge_controller_qty": 2}
 BLOB_DC4 = {**BLOB_DC, "equipment": EQ_DC4}
 dc4 = og_wiring.build_context(BLOB_DC4)
 _dc4l = {ln["name"]: ln for ln in engine.build_list(EQ_DC4, dc4, {}, None)["lines"] if ln["qty"]}
-check("DC-coupled list: 4 strings on 2 controllers -> 4 string breakers (not 2)", _dc4l["Breaker DC para riel DIN 32A 2P"]["qty"], 4)
+check("DC-coupled list: 4 strings on 2 controllers -> 2 breakers (one per controller, each for 2 strings: 63 A) and 4 MC4 Y pieces",
+      (_dc4l["Breaker DC para riel DIN 63A 2P"]["qty"], _dc4l["MC4 en Y"]["qty"], _dc4l["MC4"]["qty"]), (2, 4, 8))
 check("DC-coupled list: the strings -> breakers and breakers -> controller runs both carry solar cable", sum(ln["qty"] for n, ln in _dc4l.items() if "SOLAR" in n) > 0, True)
 from unifilar.generate_unifilar import _slots  # noqa: E402
 check("up to 4 units are all drawn", _slots(4), [(0, 1), (1, 2), (2, 3), (3, 4)])
@@ -356,9 +358,9 @@ check("hybrid AC: no breaker for the Ekrano (internal fuse), but its #12 supply 
 check("hybrid AC: the meter in the drawing is on the list with its CTs", ("Medidor VM-3P75CT" in _lh, _lh["Transformador de Corriente 100A:333mV"]["qty"]), (True, 2))
 # DC-coupled
 _ld = _list({**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, dc_ctx)
-check("DC-coupled: string breakers, controllers, Multis, batteries of the drawing = list",
-      (_qty(_ld, "Breaker DC para riel DIN 32A"), _ld["Controlador de carga 250/100"]["qty"], _ld["Inversor Multiplus 5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
-      (cfg_dc["pv"]["strings"], cfg_dc["controllers"]["count"], cfg_dc["multis"]["qty"], cfg_dc["battery"]["count"]))
+check("DC-coupled: DC breakers (one per MPPT input), controllers, Multis, batteries of the drawing = list",
+      (_qty(_ld, "Breaker DC para riel DIN"), _ld["Controlador de carga 250/100"]["qty"], _ld["Inversor Multiplus 5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
+      (len(cfg_dc["pv"]["sizes"]), cfg_dc["controllers"]["count"], cfg_dc["multis"]["qty"], cfg_dc["battery"]["count"]))
 check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Lynx Power In"]["qty"]), (ceil((4 + 2 + 1) / 4),) * 2)
 check("DC-coupled: AC breakers of the drawing are on the list",
       [f"Breaker AC para riel DIN {_amps(x)}A 2P" in _ld for x in ((cfg_dc["grid_in"] or {}).get("breaker"), cfg_dc["subpanel"]["q2"]) if x], [True, True])
@@ -509,6 +511,48 @@ check("gz base: a single Fronius keeps the class 100 base, two Primo 10.0 (110 A
       ([("clase 100" in n) for n in _base(_lg_off)], [("clase 200" in n) for n in _base(_lg2)], _gz_amps <= 100, int(_g2k["gz_ac"]["ocpd_a"]) > 100),
       ([True], [True], True, True))
 check("gz drawing shows the base class", (_cgz_off["base"]["class"], _cg2["base"]["class"]), (100, 200))
+
+# ── Batch 19: strings in parallel joined by MC4 Y connectors (Oscar, 2026-11-14): one run + one DC breaker per MPPT input ──
+from calculations import pv_groups  # noqa: E402
+check("pv groups: 3 strings on 2 inputs -> runs of 2 and 1, 2 Y pieces", (pv_groups.sizes(3, 2), pv_groups.summary(3, 2)["y_pieces"]), ([2, 1], 2))
+check("pv groups: fewer strings than inputs -> one run each, no Y", (pv_groups.sizes(2, 4), pv_groups.summary(2, 4)["y_pieces"]), ([1, 1], 0))
+check("pv groups: 12 strings on 6 controllers -> 6 runs of 2, 12 Y pieces", (pv_groups.sizes(12, 6), pv_groups.summary(12, 6)["y_pieces"]), ([2] * 6, 12))
+check("pv groups: reverse current is (n - 1) x Isc", pv_groups.backfeed_a(13.9, 3), 27.8)
+# AC-coupled hybrid with 4 strings on the Fronius' 2 MPPT inputs
+_EQ19 = {**EQ, "n_strings": 4, "panels_per_string": 4}
+_BL19 = {**BLOB, "equipment": _EQ19, "scratch": {"coupling": {"mode": "ac", "strings": 4, "modules_per_string": 4}}}
+_W19 = og_wiring.build_context(_BL19)
+_b19 = {b["key"]: b for b in _W19["branches"]}
+check("hybrid AC 4 strings on 2 MPPT: 2 runs sized for 2 strings (Isc x 2 x 1.5625 = 49.6 A -> 63 A breaker)",
+      (_W19["pv_groups"]["sizes"], _b19["pv_strings"]["qty"], round(_b19["pv_strings"]["current_a"], 1), _b19["pv_strings"]["ocpd_a"]), ([2, 2], 2, 31.7, 63))
+_L19 = {ln["name"]: ln for ln in engine.build_list(_EQ19, _W19, {}, None)["lines"] if ln["qty"]}
+check("hybrid AC 4 strings: 2 breakers 63 A, 4 MC4 Y pieces, 8 MC4 (2 runs x 2 x 2), one Chint box",
+      (_L19["Breaker DC para riel DIN 63A 2P"]["qty"], _L19["MC4 en Y"]["qty"], _L19["MC4"]["qty"], _L19["Centro de carga Chint DC 5 espacios"]["qty"]), (2, 4, 8, 1))
+check("hybrid AC 2 strings on 2 MPPT: no Y connectors", "MC4 en Y" in {ln["name"] for ln in engine.build_list(EQ, CTX, {}, None)["lines"] if ln["qty"]}, False)
+_c19, _p19 = CB.build_config(project, {"eq": _EQ19, "wiring": _W19, "blob": _BL19}, {"export": "grid_zero"})
+check("hybrid AC drawing takes 4 strings (2 per MPPT): sizes reach the config", (_p19["blockers"], _c19["pv"]["sizes"], _c19["pv"]["strings"]), ([], [2, 2], 4))
+_o19 = io.BytesIO(); build(_c19, _o19)
+check("hybrid AC drawing with Y connectors renders", _o19.getvalue()[:4], b"%PDF")
+# 3 strings per MPPT: no commercial DC breaker -> drawn as 'por definir' and warned, not a crash
+_EQ19b = {**EQ, "n_strings": 6, "panels_per_string": 3}
+_BL19b = {**BLOB, "equipment": _EQ19b, "scratch": {"coupling": {"mode": "ac", "strings": 6, "modules_per_string": 3}}}
+_c19b, _p19b = CB.build_config(project, {"eq": _EQ19b, "wiring": og_wiring.build_context(_BL19b), "blob": _BL19b}, {"export": "grid_zero"})
+check("3 strings per MPPT: no commercial breaker -> 'por definir' and a warning", (_c19b["pv"]["string_breaker"], any("comercial" in w["text"] for w in _p19b["warnings"])), ("por definir", True))
+_o19b = io.BytesIO(); build(_c19b, _o19b)
+check("3 strings per MPPT drawing renders", _o19b.getvalue()[:4], b"%PDF")
+# Grid Zero: 3 strings on the Fronius' 2 MPPT inputs, and two Fronius with 3 strings each
+_GE19 = {**GZ_EQ, "n_strings": 3}
+_GB19 = {**GZ_BLOB, "equipment": _GE19}
+_GW19 = gz_wiring.build_context(_GB19)
+check("grid zero 3 strings on 2 MPPT: runs of 2 and 1, 2 breakers", (_GW19["pv_groups"]["sizes"], {b["key"]: b for b in _GW19["branches"]}["pv_strings"]["qty"]), ([2, 1], 2))
+_GC19, _GP19 = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": _GE19, "wiring": _GW19, "blob": _GB19}, {})
+check("grid zero drawing takes the paralleled strings", (_GP19["blockers"], _GC19["pv"]["sizes"]), ([], [2, 1]))
+_go19 = io.BytesIO(); build(_GC19, _go19)
+check("grid zero drawing with a Y renders", _go19.getvalue()[:4], b"%PDF")
+_GL19 = {ln["name"]: ln for ln in engine.build_list(_GE19, _GW19, {}, None, "grid_zero")["lines"] if ln["qty"]}
+check("grid zero list: 2 DC breakers, 2 MC4 Y pieces", (_GL19["Breaker DC para riel DIN 63A 2P"]["qty"] if "Breaker DC para riel DIN 63A 2P" in _GL19 else _GL19.get("Breaker DC para riel DIN 32A 2P", {}).get("qty"), _GL19["MC4 en Y"]["qty"]), (2, 2))
+# DC-coupled: 12 strings on 6 controllers draw as 6 runs of 2, abbreviated
+check("DC-coupled 6 controllers x 2 strings: 6 runs in the drawing config", (cfg_cc6["pv"]["sizes"], cfg_cc6["pv"]["strings"]), ([2] * 6, 12))
 
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
