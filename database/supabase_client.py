@@ -1,20 +1,23 @@
 from __future__ import annotations
 import os
+import threading
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client: Client | None = None
+_local = threading.local()
 
 
 def get_client() -> Client:
-    global _client
-    if _client is None:
+    """One client per thread: the dev server is threaded, and a single HTTP/2 connection shared by several threads fails with
+    "httpx.ReadError: [Errno 35] Resource temporarily unavailable"."""
+    client = getattr(_local, "client", None)
+    if client is None:
         url = os.environ["SUPABASE_URL"]
         key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-        _client = create_client(url, key)
-    return _client
+        client = _local.client = create_client(url, key)
+    return client
 
 
 def ping() -> bool:
