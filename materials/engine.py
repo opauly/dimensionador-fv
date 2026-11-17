@@ -19,6 +19,7 @@ so regenerating after a design change never wipes a manual quantity:
 from __future__ import annotations
 
 import math
+import re
 from collections import OrderedDict
 
 from calculations import bom as B
@@ -121,8 +122,67 @@ def _tidy(name: str) -> str:
     return re.sub(r"\s+,", ",", re.sub(r"\s{2,}", " ", name)).strip()
 
 
+def breaker_name(poles: int, amps: int, kind: str = "ch", detail: str | None = None) -> str:
+    """The one name every breaker line carries: `Breaker 2P20A CH/SD`. Poles and amps are a single token (2P20A = 2 poles, 20 A);
+    `kind` is what it mounts on: "ch" plug-in breaker of a load center, "din_ac" / "din_dc" DIN-rail breaker, "base" meter-base breaker."""
+    where = {"ch": "CH/SD", "din_ac": "AC riel DIN", "din_dc": "DC riel DIN", "base": "para base de medidor"}[kind]
+    return f"Breaker {int(poles)}P{int(amps)}A {where}" + (f" ({detail})" if detail else "")
+
+
+_MAT = {"PVC": "PVC", "EMT": "EMT", "BIEX": "Biex"}
+
+
+def cable_name(kind: str, gauge: str, color: str) -> str:
+    """`Cable THHN #4 AWG negro`, `Cable SOLAR #8 AWG rojo`: type, then gauge, then colour, for every cable line."""
+    typ = {"cable_thhn": "THHN", "cable_solar": "SOLAR", "cable_xhhw": "XHHW-2 Serie 8000"}[kind]
+    return f"Cable {typ} #{gauge} AWG {color}"
+
+
+def lug_name(gauge: str) -> str:
+    return f"Conector de ojo #{gauge} AWG"
+
+
+def shrink_name(gauge: str, color: str) -> str:
+    return f"Termoencogible #{gauge} AWG {color}"
+
+
+def conduit_name(kind: str, material: str, trade: str) -> str:
+    """`Tubo PVC 1"`, `Unión EMT 1"`, `Conector de presión EMT 1"`: the part, the material, then the trade size."""
+    m = _MAT.get(material, material)
+    part = {"conduit_tube": "Tubo", "conduit_union": "Unión", "conduit_connector": "Conector", "conduit_bend": "Curva",
+            "conduit_press_connector": "Conector de presión", "conduit_lb": "Conduleta LB", "conduit_strap": "Gasa channel"}[kind]
+    return f'{part} {trade}"' if kind in ("conduit_lb", "conduit_strap") else f'{part} {m} {trade}"'
+
+
+def box_name(spaces: int) -> str:
+    return f"Tablero NEMA 3R {spaces} espacios CH/SD"
+
+
+def _standard_name(r: dict) -> str | None:
+    k, a = r.get("kind"), r.get("attrs") or {}
+    if k in ("cable_thhn", "cable_solar", "cable_xhhw") and a.get("gauge") and a.get("color"):
+        return cable_name(k, a["gauge"], a["color"])
+    if k == "lug" and a.get("gauge"):
+        return lug_name(a["gauge"])
+    if k == "shrink" and a.get("gauge") and a.get("color"):
+        return shrink_name(a["gauge"], a["color"])
+    if k and k.startswith("conduit_") and a.get("trade") and a.get("material"):
+        return conduit_name(k, a["material"], a["trade"])
+    if m := re.match(r"Tablero NEMA 3R (\d+) espacios", r["name"]):
+        return box_name(int(m.group(1)))
+    return None
+
+
+_BREAKER_KIND = {"breaker_panel": "ch", "breaker_ac_din": "din_ac", "breaker_dc_din": "din_dc"}
 for _r in CATALOG:
     _r["name"] = _tidy(_r["name"])
+    _a = _r.get("attrs") or {}
+    if _BREAKER_KIND.get(_r.get("kind")) and _a.get("amps") and _a.get("poles"):
+        _r["name"] = breaker_name(_a["poles"], _a["amps"], _BREAKER_KIND[_r["kind"]])
+    elif _r["key"] == METER_BREAKER_KEY:
+        _r["name"] = breaker_name(2, 30, "base")
+    else:
+        _r["name"] = _standard_name(_r) or _r["name"]
 
 _GAUGE_ORDER = ("18", "16", "14", "12", "10", "8", "6", "4", "3", "2", "1", "1/0", "2/0", "3/0", "4/0")
 _COLOR_ORDER = ("negro", "rojo", "blanco", "verde", "azul", "amarillo")
@@ -254,7 +314,7 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
     else:
         c.add(base, 1, note="base de medidor de generación con interruptor principal: solo Grid Zero")
     row = _BY_KEY[METER_BREAKER_KEY] if amps == 30 else None
-    c.add(row, 1, name=f"Breaker {amps}A compatible con base para medidor", section="Generales", group="Interconexión",
+    c.add(row, 1, name=breaker_name(2, amps, "base"), section="Generales", group="Interconexión",
           sibling=_BY_KEY[METER_BREAKER_KEY], comment=comment, note=why)
     c.add(_BY_KEY[PADLOCK_KEY], 1, note="candado para la base de medidor de generación")
 
@@ -323,8 +383,8 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
         c.add(_BY_KEY[METER_CT_KEY], CT_PER_METER, comment="POR VERIFICAR TAMAÑO",
               note=f"{CT_PER_METER} transformadores de corriente para el medidor (uno por línea)")
         # The meter reads voltage straight from the panel (85-265 V): it needs its own small breaker (María José's install: 2 poles, 15 A, CH).
-        c.add(None, 1, name=f"Breaker de {VM_BREAKER_A}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
-              sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), where="Alimentación del medidor VM",
+        c.add(None, 1, name=breaker_name(2, VM_BREAKER_A), section="Generales", group="Interconexión",
+              sibling=_named(breaker_name(2, 20)), where="Alimentación del medidor VM",
               note=f"protege la toma de voltaje del medidor ({VM_BREAKER_A} A, 2 polos)")
         # Ethernet from the meter (at the electrical panel) to the Cerbo/Ekrano in the cabinet: same run as grid -> inverters.
         run = float((lengths or {}).get("ac_in_m") or 0)
@@ -440,7 +500,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
         pending.append(f"Cada centro de carga Chint de 5 espacios aloja 2 breakers 2P de strings; el diseño tiene {runs} breakers DC, así que van {chint} cajas.")
     if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power straight from the Lynx bus (internal fuse, no breaker)
         for color in ("rojo", "negro"):
-            c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=f"Cable #{GX_CABLE_GAUGE} AWG THHN, CU, color {color}", unit="m",
+            c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=cable_name("cable_thhn", GX_CABLE_GAUGE, color), unit="m",
                   section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=GX_CABLE_GAUGE, color="negro"), where="Alimentación Ekrano/Cerbo (positivo)" if color == "rojo" else "Alimentación Ekrano/Cerbo (negativo)",
                   rank=_cable_rank("cable_thhn", GX_CABLE_GAUGE, color),
                   note=f"{GX_CABLE_M} m de #{GX_CABLE_GAUGE} para alimentar el Ekrano/Cerbo desde la barra Lynx (+ rojo, - negro); lleva fusible interno, sin breaker")
@@ -463,12 +523,12 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
               note=f"{EMT_STUBS_PER_INVERTER} tramos por inversor, un conector de presión por tramo")
 
     kit = "toma de monitoreo (Ekrano/router): siempre va"
-    c.add(None, 1, name="Breaker 20A 1 polo CH (toma de monitoreo)", section="Generales", sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), note=kit)
+    c.add(None, 1, name=breaker_name(1, 20, "ch", "toma de monitoreo"), section="Generales", sibling=_named(breaker_name(2, 20)), note=kit)
     c.add(None, 1, name="Toma doble 15A 125V", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     c.add(None, 1, name="Placa de acero inoxidable para toma doble", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     c.add(None, 1, name="Caja rectangular de intemperie 3 huecos 1/2\"", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     for color in ("rojo", "verde", "blanco"):
-        c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=f"Cable #12 AWG THHN, CU, color {color}", unit="m",
+        c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=cable_name("cable_thhn", "12", color), unit="m",
               section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo (" + {"rojo": "fase", "blanco": "neutro", "verde": "tierra"}[color] + ")",
               rank=_cable_rank("cable_thhn", "12", color),
               note=f"{MONITOR_CIRCUIT_M} m para el circuito de la toma de monitoreo (fase, neutro y tierra)")
@@ -557,11 +617,11 @@ def _cables(c: Collector, branches: list[dict]) -> None:
         label = W.gauge_label(g)
         if kind == "cable_solar":
             qty = _ceil_to(m, CABLE_STEP_M)
-            row, name, section, group = _find(kind, gauge=g, color=color), f"Cable #{g} AWG - SOLAR {color}", "Paneles solares", None
+            row, name, section, group = _find(kind, gauge=g, color=color), cable_name("cable_solar", g, color), "Paneles solares", None
             note = f"{t['m']:g} m calculados (distancia del techo al centro de carga DC) + {int(WASTE * 100)} % de desperdicio, pedido por metro en pasos de {CABLE_STEP_M} m"
         else:
             qty = _ceil_to(m, CABLE_STEP_M)
-            row, name = _find(kind, gauge=g, color=color), f"Cable #{g} AWG THHN, CU, color {color}"
+            row, name = _find(kind, gauge=g, color=color), cable_name("cable_thhn", g, color)
             section, group = "Generales", "Cable"
             note = f"{t['m']:g} m calculados ({label}) + {int(WASTE * 100)} % de desperdicio, redondeado a {CABLE_STEP_M} m"
             total_m += t["m"]
@@ -571,12 +631,12 @@ def _cables(c: Collector, branches: list[dict]) -> None:
 
     for g, lg in lugs.items():
         n = math.ceil(lg["n"] * (1 + WASTE))
-        c.add(_find("lug", gauge=g), _ceil_to(n, LUG_STEP), name=f"Conector de ojo para cable #{g} AWG", section="Generales",
+        c.add(_find("lug", gauge=g), _ceil_to(n, LUG_STEP), name=lug_name(g), section="Generales",
               group="Accesorios eléctricos", sibling=_find("lug", gauge="4"), where=" · ".join(lg["where"]),
               note=f"{lg['n']} extremos de conductor × 1.1, de a {LUG_STEP}")
         for color, ends in lg["dc"].items():
             m = max(1, math.ceil(ends * SHRINK_M_PER_LUG))
-            c.add(_find("shrink", gauge=g, color=color), m, name=f"Termoencogible para cable #{g} {color}", unit="m", section="Generales",
+            c.add(_find("shrink", gauge=g, color=color), m, name=shrink_name(g, color), unit="m", section="Generales",
                   group="Accesorios eléctricos", sibling=_find("shrink", gauge="4", color=color), note=f"{ends} terminales × {SHRINK_M_PER_LUG * 100:g} cm, mínimo 1 m")
     for color in sorted(colors):
         row = _find("tape", color=color)
@@ -605,14 +665,14 @@ def _protections(c: Collector, branches: list[dict], opts: dict, disc: dict | No
         elif key in ("pv_strings", "pv_cc"):
             a = int(opts.get("string_breaker_a") or amps) if key == "pv_strings" else amps
             note = "uno por tendido (por entrada MPPT; los strings en paralelo se juntan con MC4 en Y antes del breaker)" + (f" (calculado {amps} A, elegido {a} A)" if a != amps else "")
-            c.add(_find("breaker_dc_din", amps=a, poles=2), b["qty"], name=f"Breaker DC para riel DIN {a}A 2P", section="Paneles solares",
+            c.add(_find("breaker_dc_din", amps=a, poles=2), b["qty"], name=breaker_name(2, a, "din_dc"), section="Paneles solares",
                   sibling=_find("breaker_dc_din", amps=32, poles=2), where=where, note=note)
         else:
             qty, poles = b["qty"], hot
             note = f"{amps} A calculado"
             if key in ("ac_in", "ac_out") and hot == 1 and qty % 2 == 0:
                 qty, poles, note = qty // 2, 2, f"{b['qty']} inversores de 120 V en L1 y L2 comparten un breaker de 2 polos de {amps} A"
-            c.add(_find("breaker_ac_din", amps=amps, poles=poles), qty, name=f"Breaker AC para riel DIN {amps}A {poles}P", section="Generales",
+            c.add(_find("breaker_ac_din", amps=amps, poles=poles), qty, name=breaker_name(poles, amps, "din_ac"), section="Generales",
                   sibling=_find("breaker_ac_din", amps=90, poles=2), where=where, note=note)
 
 
@@ -637,15 +697,15 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
         used_pvc = used_pvc or mat == "PVC"
         spacing = STRAP_SPACING_M[mat]
         conn_kind = "conduit_press_connector" if mat == "EMT" else "conduit_connector"
-        conn_name = f'Conector de presión {trade}" EMT' if mat == "EMT" else f'Conector {trade}"/ {mat} SCH-40'
+        conn_name = conduit_name(conn_kind, mat, trade)
         for kind, text, qty, note in (
-            ("conduit_tube", f'Tuberia {trade}" / {mat}', tubes,
+            ("conduit_tube", conduit_name("conduit_tube", mat, trade), tubes,
              f"{g['m']:g} m de recorrido × 1.1 en tubos de {TUBE_M:g} m ({g['raceways']} canalización(es))"),
             (conn_kind, conn_name, 2 * g["raceways"], "2 por canalización (uno en cada extremo)"),
-            ("conduit_union", f'Uniones de {trade}" / {mat}', g["raceways"] * (per - 1), f"{per - 1} por canalización (tubos de {TUBE_M:g} m)"),
-            ("conduit_bend", f'Curva de {trade}" / {mat}', bends * g["raceways"], f"{bends} curvas por canalización"),
-            ("conduit_lb", f'Conduleta LB {trade}"', lbs * g["raceways"], f"{lbs} por canalización"),
-            ("conduit_strap", f'Gasa channel {trade}"', math.ceil(g["m"] / spacing), f"una cada {spacing:g} m de recorrido"),
+            ("conduit_union", conduit_name("conduit_union", mat, trade), g["raceways"] * (per - 1), f"{per - 1} por canalización (tubos de {TUBE_M:g} m)"),
+            ("conduit_bend", conduit_name("conduit_bend", mat, trade), bends * g["raceways"], f"{bends} curvas por canalización"),
+            ("conduit_lb", conduit_name("conduit_lb", mat, trade), lbs * g["raceways"], f"{lbs} por canalización"),
+            ("conduit_strap", conduit_name("conduit_strap", mat, trade), math.ceil(g["m"] / spacing), f"una cada {spacing:g} m de recorrido"),
         ):
             sibling = _find(kind, material=mat, trade="1") or _find(kind, material="PVC", trade="1")
             c.add(_find(kind, material=mat, trade=trade), qty, name=text, section="Generales", sibling=sibling, where=where, note=note)
@@ -653,9 +713,7 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
         c.add(_named("Pegamento para PVC", "Generales"), 1, note="una unidad si hay tubería PVC")
 
 
-BOX_NAMES = {2: "Tablero NEMA 3R 2 espacios, marca CH/ SD, barras de 125A, Monofasico",
-             4: "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico",
-             8: "Tablero NEMA 3R 8 espacios, marca CH/ SD, barras de 125A, Monofasico"}
+BOX_NAMES = {n: box_name(n) for n in (2, 4, 8)}
 METER_BREAKER_A = 15      # Fronius Smart Meter feed breaker: 2 poles, 15 A, CH (Oscar, 2026-11-17; it was 20 A)
 METER_FEED_GAUGE = "12"    # Smart Meter voltage supply from the Grid Zero load center: a few metres of #12
 METER_FEED_M = 3
@@ -679,10 +737,10 @@ def _center(c: Collector, where: str, items: list[tuple[int, int, int, str]], wh
     for amps, qty, poles, note in items:
         word = "2 polos" if poles == 2 else "1 polo"
         if amps:
-            c.add(_find("breaker_panel", amps=amps, poles=poles), qty, name=f"Breaker de {amps}A {word}, marca CH /SD", section="Generales", group="Interconexión",
+            c.add(_find("breaker_panel", amps=amps, poles=poles), qty, name=breaker_name(poles, amps), section="Generales", group="Interconexión",
                   sibling=_find("breaker_panel", amps=40, poles=2), where=where, note=note)
         else:
-            c.add(None, qty, name=f"Breaker {word} para centro de carga (amperaje por definir)", section="Generales", group="Interconexión",
+            c.add(None, qty, name=f"Breaker {poles}P CH/SD (amperaje por definir)", section="Generales", group="Interconexión",
                   sibling=_find("breaker_panel", amps=40, poles=2), where=where, comment="POR CONFIRMAR AMPERAJE", note=note)
 
 
@@ -707,7 +765,7 @@ def _centers(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
         _center(c, "Centro de carga de desconexión", items, "centro de carga de desconexión junto al Fronius (opcional, además de la base de generación)")
         if meter_fed:
             for color in ("negro", "rojo"):
-                c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",
+                c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=cable_name("cable_thhn", METER_FEED_GAUGE, color), unit="m",
                       section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=METER_FEED_GAUGE, color="negro"),
                       where="Centro de carga → Smart Meter (" + ("fase L1" if color == "negro" else "fase L2") + ")", rank=_cable_rank("cable_thhn", METER_FEED_GAUGE, color),
                       note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
@@ -755,8 +813,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
     _equipment(c, eq, coupling, wiring_ctx.get("lengths"), grid_zero)
     if uses_cts(eq.get("monitoring")) and not (grid_zero and (wiring_ctx.get("disconnect") or {}).get("enabled")):
         # The Fronius Smart Meter always carries its own 2P 15 A breaker (Oscar, 2026-11-17); with the optional Grid Zero load center it is listed there.
-        c.add(None, 1, name=f"Breaker de {METER_BREAKER_A}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
-              sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), where="Alimentación del Smart Meter",
+        c.add(None, 1, name=breaker_name(2, METER_BREAKER_A), section="Generales", group="Interconexión",
+              sibling=_named(breaker_name(2, 20)), where="Alimentación del Smart Meter",
               note=f"protege la alimentación del Fronius Smart Meter ({METER_BREAKER_A} A, 2 polos)")
     if grid_zero:
         _interconnection(c, eq, branches)

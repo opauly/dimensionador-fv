@@ -109,7 +109,7 @@ d = {"eq": {"inverter": {"id": "mp", "brand": "Victron Energy", "model": "MultiP
             "battery": {"id": "fid", "brand": "Pylontech", "model": "Fidus"}, "battery_bank": {"battery_count": 4}},
      "wiring": {"coupling": {"ac": True, "qty": 1, "pv_inverter": {"id": "fr", "brand": "Fronius", "model": "Primo 10.0-1"}}}}
 lines = [{"name": "Centro de carga Chint DC 5 espacios", "qty": 1}, {"name": "Lynx Power In", "qty": 2},
-         {"name": "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico", "qty": 1}]
+         {"name": "Tablero NEMA 3R 4 espacios CH/SD", "qty": 1}]
 sp = design.build_spec(proj, d, lines, dims=dims, fixed=FIX)
 check("spec from the design: 2 Victron, AC-coupled Fronius, 4 Fidus on the wall, Chint, Lynx, one 4-space center, gabinete",
       (sp.victron.qty, sp.fronius.qty, sp.fidus.qty, sp.rack, sp.chint.qty, sp.lynx.qty, [(c.qty, c.w) for c in sp.centers], sp.gabinete.w),
