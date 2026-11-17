@@ -59,6 +59,11 @@ def _g(gauge: str) -> str:
     return f"#{gauge} AWG" if W.T.T8_CMILS[gauge] <= W.T.T8_CMILS["4/0"] else f"{gauge} kcmil"
 
 
+def _pv_wire(gauge: str) -> str:
+    """Label of a PV-side conductor: solar cable is sold in #12 / #10 / #8 (same rule as the materials list)."""
+    return f"{_g(gauge)} " + ("SOLAR" if gauge in ("12", "10", "8") else "THHN")
+
+
 def _branch(branches: list[dict], key: str) -> dict | None:
     return next((b for b in branches if b.get("key") == key), None)
 
@@ -205,7 +210,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
             "strings": int(cpl["strings"]), "sizes": _pv_sizes(wiring, int(cpl["strings"])), "modules_per_string": int(cpl["series"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(),
             "roof_m2": (eq.get("array") or {}).get("area_m2"),
-            "string_breaker": _dc_breaker(string_a), "dc_wire": f"{_g(pv['ugc'])} SOLAR",
+            "string_breaker": _dc_breaker(string_a), "dc_wire": _pv_wire(pv['ugc']),
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
@@ -345,7 +350,7 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
         "pv": {
             "strings": strings_each, "sizes": _pv_sizes(wiring, strings_each), "inverters": n_inv, "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": None,
-            "string_breaker": _dc_breaker(string_a), "dc_wire": f"{_g(pv['ugc'])} SOLAR", "dc_inv_wire": f"{_g(dc_inv['ugc'])} SOLAR",
+            "string_breaker": _dc_breaker(string_a), "dc_wire": _pv_wire(pv['ugc']), "dc_inv_wire": _pv_wire(dc_inv['ugc']),
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
@@ -386,8 +391,8 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "pv": {
             "strings": int(eq["n_strings"]), "sizes": _pv_sizes(wiring, int(eq["n_strings"])), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": (eq.get("array") or {}).get("area_m2"),
-            "string_breaker": _dc_breaker(string_breaker_a or pv_cc["ocpd_a"]), "dc_wire": f"{_g(pv_cc['ugc'])} SOLAR",
-            "dc_out_wire": f"{_g(dc_cc['ugc'])} SOLAR", "ground_wire": f"T {_g(_egc(pv_cc) or pv_cc['ugc'])} verde",
+            "string_breaker": _dc_breaker(string_breaker_a or pv_cc["ocpd_a"]), "dc_wire": _pv_wire(pv_cc['ugc']),
+            "dc_out_wire": _pv_wire(dc_cc['ugc']), "ground_wire": f"T {_g(_egc(pv_cc) or pv_cc['ugc'])} verde",
         },
         "controllers": {
             "count": int(eq.get("charge_controller_qty") or 1), "label": _model(cc),

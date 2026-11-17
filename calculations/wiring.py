@@ -196,7 +196,7 @@ def size_branch(
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
     egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
-    min_gauge: str | None = None, shared_conduit: bool = False,
+    min_gauge: str | None = None, max_gauge: str | None = None, shared_conduit: bool = False,
     stocked_only: bool = False, min_conduit_trade: str | None = None,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
@@ -218,7 +218,9 @@ def size_branch(
     `min_conduit_trade` is a practice floor for the raceway (solar wiring is always at least 1").
     `min_gauge` is a practice floor (e.g. Pauly always pulls #10 solar cable): the conductor starts
     there when the ampacity would allow something smaller. The EGC still derives from the
-    gauge the floor starts from, as the workbook derives it from the initial gauge."""
+    gauge the floor starts from, as the workbook derives it from the initial gauge.
+    `max_gauge` is the opposite ceiling (solar cable is not sold thicker than #8): voltage drop never pushes past it; when the cap leaves the
+    drop above the limit, or the conductor cannot carry the breaker, the branch is flagged instead."""
     notes: list[str] = [note] if note else []
     design_a = round(current_a * factor, 2)
     ugc_raw = initial_gauge(design_a)
@@ -241,9 +243,13 @@ def size_branch(
         start_g = min_gauge
         notes.append(f"Calibre mínimo de práctica: {min_gauge} AWG (la ampacidad permitiría {ugc_i} AWG).")
     start = T.GAUGE_ORDER.index(start_g)
+    if max_gauge and start > T.GAUGE_ORDER.index(max_gauge):
+        out["ok"] = False
+        notes.append(f"La corriente pide {start_g} AWG, más grueso que el cable solar que se vende ({max_gauge} AWG): reparte en más tendidos.")
     ugc = start_g
     vd_v = vd(ugc, current_a, length_m)
-    for g in [g for g in T.GAUGE_ORDER[start:] if g in _order(stocked_only)]:
+    cap = T.GAUGE_ORDER.index(max_gauge) if max_gauge else len(T.GAUGE_ORDER)
+    for g in [g for g in T.GAUGE_ORDER[start:cap + 1] if g in _order(stocked_only)] or [start_g]:
         ugc = g
         vd_v = vd(g, current_a, length_m)
         if v_ref and vd_v / v_ref * 100.0 <= VD_LIMIT_PCT:
@@ -252,7 +258,11 @@ def size_branch(
     vd_pct_initial = vd(ugc_i, current_a, length_m) / v_ref * 100.0 if v_ref else 0.0
     if vd_pct > VD_LIMIT_PCT:
         out["ok"] = False
-        notes.append(f"La caída de tensión ({vd_pct:.2f} %) supera {VD_LIMIT_PCT:.0f} % incluso con el calibre máximo de la tabla.")
+        if max_gauge and ugc == max_gauge:
+            notes.append(f"La caída de tensión ({vd_pct:.2f} %) supera {VD_LIMIT_PCT:.0f} %: el cable solar no se vende más grueso que {max_gauge} AWG. "
+                         "Acorta el tendido, sube el voltaje del arreglo (más módulos en serie) o reparte en más tendidos.")
+        else:
+            notes.append(f"La caída de tensión ({vd_pct:.2f} %) supera {VD_LIMIT_PCT:.0f} % incluso con el calibre máximo de la tabla.")
     vd_g = ugc                      # gauge after the voltage-drop step, before any OCPD-driven enlargement
 
     if ocpd_override is not None:
@@ -268,7 +278,7 @@ def size_branch(
     # A conductor may only carry an OCPD up to the next standard size above its ampacity (NEC 240.4(B)).
     # A restricted set (fuses) can force a larger rating than the design current needs -> enlarge the cable.
     if ocpd is not None:
-        for g in [g for g in T.GAUGE_ORDER[T.GAUGE_ORDER.index(ugc):] if g in _order(stocked_only)]:
+        for g in [g for g in T.GAUGE_ORDER[T.GAUGE_ORDER.index(ugc):cap + 1] if g in _order(stocked_only)]:
             a = ampacity(g)
             if a is not None and ocpd <= ocpd_size(a):
                 if g != ugc:

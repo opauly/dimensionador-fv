@@ -19,6 +19,7 @@ DC_BREAKER_SIZES_A = (16, 20, 32, 40, 63)
 # Practice floor for PV string cable: Pauly buys #10 AWG solar cable for every array, even when the
 # ampacity would allow #12.
 PV_MIN_GAUGE = "10"
+PV_MAX_GAUGE = "8"          # solar cable is sold in #12 / #10 / #8 only; a PV run never goes thicker (Oscar, 2026-11-17)
 
 # Solar wiring always goes in at least 1" conduit (bigger than the 3/4" the fill would allow).
 PV_MIN_CONDUIT_TRADE = "1"

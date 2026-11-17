@@ -44,6 +44,7 @@ def build_workbook(lines: list[dict], title: str = "Solicitud de materiales") ->
             group = ln["group"]
             ws.append([ln["name"], ln["qty"], ln["unit"], ln.get("comment") or ""])
             ws[ws.max_row][1].alignment = Alignment(horizontal="right")
+            ws[ws.max_row][3].alignment = Alignment(wrap_text=True, vertical="top")   # one bullet per line
     for i, width in enumerate([62, 10, 8, 44] + [11] * 8, start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
     out = BytesIO()

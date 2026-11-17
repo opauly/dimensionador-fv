@@ -73,7 +73,7 @@ def build_pdf(lines: list[dict], title: str = "Solicitud de materiales", subtitl
                 style += [("BACKGROUND", (0, r), (-1, r), GREEN), ("SPAN", (0, r), (-1, r))]
             group = ln["group"]
             data.append([Paragraph(_t(ln["name"]), name), Paragraph(_qty(ln["qty"]), right),
-                         Paragraph(_t(ln["unit"]), base), Paragraph(_t(ln.get("comment")), note)])
+                         Paragraph(_t(ln["unit"]), base), Paragraph(_t(ln.get("comment")).replace("\n", "<br/>"), note)])
         table = Table(data, colWidths=widths, repeatRows=1)
         table.setStyle(TableStyle(style))
         story += [table, Spacer(1, 5 * mm)]

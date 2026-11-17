@@ -10,6 +10,7 @@ change that closes (or widens) the gap is noticed.
 from __future__ import annotations
 
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -273,7 +274,9 @@ dc4 = og_wiring.build_context(BLOB_DC4)
 _dc4l = {ln["name"]: ln for ln in engine.build_list(EQ_DC4, dc4, {}, None)["lines"] if ln["qty"]}
 check("DC-coupled list: 4 strings on 2 controllers -> 2 breakers (one per controller, each for 2 strings: 63 A) and 4 MC4 Y pieces",
       (_dc4l["Breaker DC para riel DIN 63A 2P"]["qty"], _dc4l["MC4 en Y"]["qty"], _dc4l["MC4"]["qty"]), (2, 4, 8))
-check("DC-coupled list: the strings -> breakers and breakers -> controller runs both carry solar cable", sum(ln["qty"] for n, ln in _dc4l.items() if "SOLAR" in n) > 0, True)
+_solar_ok = all(re.search(r"#(8|10|12) AWG", n) for n in _dc4l if "SOLAR" in n)
+check("solar cable is only #12 / #10 / #8 (never #6), with + / - in the detail",
+      (_solar_ok, any("(positivo)" in (ln.get("comment") or "") for ln in _dc4l.values()), any("(negativo)" in (ln.get("comment") or "") for ln in _dc4l.values())), (True, True, True))
 from unifilar.generate_unifilar import _slots  # noqa: E402
 check("up to 4 units are all drawn", _slots(4), [(0, 1), (1, 2), (2, 3), (3, 4)])
 check("8 units: #1, #2, ellipsis, #8", _slots(8), [(0, 1), (1, 2), (2, None), (3, 8)])

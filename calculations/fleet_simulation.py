@@ -516,7 +516,7 @@ _CHEAPEST_CACHE: dict = {}
 def cheapest_design(ds: dict, zone: str, daily_kwh: float, targets: dict[str, dict], *, kwp_max: float,
                     usd_per_kwp: float, usd_per_kwh: float) -> dict | None:
     """For each named target, the cheapest array + battery that keeps the days a year without full service (average over the zone's
-    real years x the fleet's load patterns) at or under it. A target is {"days", "kwp_min", "kwh_min"}: the minimum array / battery the
+    real years x the fleet's load patterns) at or under it. A target is {"days", "kwp_min", "kwh_min"} (+ optional "worst": the worst-year days it must not exceed): the minimum array / battery the
     other goals already ask for (they are floors, never lowered). Every pair on a grid of kWp x battery is replayed once, then each
     target takes the lowest-cost pair above its floors. Returns {name: {kwp, battery_kwh, days_year, days_year_worst, soc_typ_pct,
     cost_usd, met, ...}} (`met` False: nothing on the grid reaches the target, the best one is returned), or None when the zone has no
@@ -543,7 +543,7 @@ def cheapest_design(ds: dict, zone: str, daily_kwh: float, targets: dict[str, di
     out = {}
     for name, t in targets.items():
         allowed = np.where((pk >= t["kwp_min"] - 1e-9) & (pb >= t["kwh_min"] - 1e-9))[0]
-        ok = allowed[days[allowed] <= t["days"]]
+        ok = allowed[(days[allowed] <= t["days"]) & (worst[allowed] <= t.get("worst", np.inf) + 1e-9)]
         i = int(ok[np.argmin(cost[ok])]) if len(ok) else int(allowed[np.argmin(days[allowed])])
         out[name] = {"kwp": float(pk[i]), "battery_kwh": float(pb[i]), "days_year": float(days[i]), "days_year_worst": float(worst[i]),
                      "soc_typ_pct": float(soc[i]), "cost_usd": float(cost[i]), "met": bool(len(ok)), "target": float(t["days"]),

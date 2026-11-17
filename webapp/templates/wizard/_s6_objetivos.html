@@ -119,7 +119,7 @@
 </div>
 
 {% if fields|selectattr('advanced')|list %}
-<details style="margin:6px 0 10px;"><summary style="cursor:pointer;font-size:12.5px;">Ajustes finos (margen y cobertura FV)</summary>
+<details style="margin:6px 0 10px;"><summary style="cursor:pointer;font-size:12.5px;">Opciones avanzadas (se calculan solas; ajústalas solo si hace falta)</summary>
   <div class="obj-grid">{% for f in fields if f.advanced %}{{ obj_field(f) }}{% endfor %}</div>
 </details>
 {% endif %}

@@ -314,7 +314,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Paneles → inversor FV (strings)", kind="dc", qty=runs,
                 current_a=isc * per_run, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
-                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
+                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, max_gauge=C.PV_MAX_GAUGE, shared_conduit=True,
                 min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
                 note=f"Un tendido por entrada MPPT ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el gabinete DC." + y_text
                      + f" Corriente = Isc × {per_run} × 1.25 × 1.25 (NEC 690.8); breaker de la serie estándar CC (NB1-63DC).",
@@ -345,7 +345,7 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Paneles → breakers CC (strings)", kind="dc", qty=runs,
                 current_a=isc * per_run, factor=W.CONTINUOUS_FACTOR * W.PV_CONDITIONS_FACTOR,
                 v_ref=array_v, length_m=L["pv_cc_m"], hot=2, insulation=ins, conduit_type=conduit, egc_included=PV_BRANCH_HAS_EGC,
-                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, shared_conduit=True,
+                protection="breaker", ocpd_choices=C.DC_BREAKER_SIZES_A, min_gauge=C.PV_MIN_GAUGE, max_gauge=C.PV_MAX_GAUGE, shared_conduit=True,
                 min_conduit_trade=C.PV_MIN_CONDUIT_TRADE,
                 note=f"Un tendido por controlador ({n_strings} strings de {n_series} módulos), cada uno con su breaker CC en el centro de carga DC." + y_text
                      + f" Corriente = Isc × {per_run} × 1.25 × 1.25 (NEC 690.8); breaker de la serie comercial CC.",

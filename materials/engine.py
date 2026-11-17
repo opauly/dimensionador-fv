@@ -38,6 +38,7 @@ EMT_TUBES_PER_INVERTER = 1   # linear rule from his purchase: one 3 m tube per i
 GZ_RUN_FALLBACK_M = 10.0     # Grid Zero: when the wiring lengths are not available (same as the wiring default)
 GZ_LINK_FALLBACK_M = 2.0
 CHINT_STRINGS = 2            # 2-pole string breakers that fit in one Chint DC 5-space box
+SOLAR_CABLE_GAUGES = ("12", "10", "8")   # the solar (PV) cable the dealers sell; the wiring never asks for thicker
 GX_CABLE_GAUGE = "12"        # Ekrano/Cerbo supply cable (Oscar: #12 or #14, a few metres); #12 is the gauge already stocked for monitoring
 GX_CABLE_M = 3
 MONITOR_CIRCUIT_M = 15       # monitoring outlet circuit: metres of each #12 conductor
@@ -200,9 +201,10 @@ class Collector:
                     "source": source, "wheres": [], "notes": [], "comments": [], "order": order}
             self.lines[key] = line
         line["qty"] += qty
-        for lst, val in ((line["wheres"], where), (line["notes"], note), (line["comments"], comment)):
-            if val and val not in lst:
-                lst.append(val)
+        for lst, vals in ((line["wheres"], (where or "").split(" · ")), (line["notes"], [note]), (line["comments"], [comment])):
+            for val in vals:
+                if val and val not in lst:
+                    lst.append(val)
 
 
 def _slug(s: str) -> str:
@@ -434,7 +436,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     if not grid_zero and eq.get("monitoring"):     # the Ekrano/Cerbo takes its power straight from the Lynx bus (internal fuse, no breaker)
         for color in ("rojo", "negro"):
             c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=f"Cable #{GX_CABLE_GAUGE} AWG THHN, CU, color {color}", unit="m",
-                  section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=GX_CABLE_GAUGE, color="negro"), where="Alimentación Ekrano/Cerbo",
+                  section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=GX_CABLE_GAUGE, color="negro"), where="Alimentación Ekrano/Cerbo (positivo)" if color == "rojo" else "Alimentación Ekrano/Cerbo (negativo)",
                   rank=_cable_rank("cable_thhn", GX_CABLE_GAUGE, color),
                   note=f"{GX_CABLE_M} m de #{GX_CABLE_GAUGE} para alimentar el Ekrano/Cerbo desde la barra Lynx (+ rojo, - negro); lleva fusible interno, sin breaker")
 
@@ -462,7 +464,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     c.add(None, 1, name="Caja rectangular de intemperie 3 huecos 1/2\"", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     for color in ("rojo", "verde", "blanco"):
         c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=f"Cable #12 AWG THHN, CU, color {color}", unit="m",
-              section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo",
+              section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo (" + {"rojo": "fase", "blanco": "neutro", "verde": "tierra"}[color] + ")",
               rank=_cable_rank("cable_thhn", "12", color),
               note=f"{MONITOR_CIRCUIT_M} m para el circuito de la toma de monitoreo (fase, neutro y tierra)")
 
@@ -499,7 +501,10 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
     tally: dict[tuple, dict] = {}
     lugs: dict[str, dict] = {}
 
-    def put(kind, gauge, color, m, where, ends=0):
+    def put(kind, gauge, color, m, where, ends=0, role=None):
+        base = where
+        if role:
+            where = f"{where} ({role})"
         t = tally.setdefault((kind, gauge, color), {"m": 0.0, "where": []})
         t["m"] += m
         if where not in t["where"]:
@@ -507,9 +512,9 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
         if ends:
             lg = lugs.setdefault(gauge, {"n": 0, "where": [], "dc": {}})
             lg["n"] += ends
-            if where not in lg["where"]:
-                lg["where"].append(where)
-            if kind == "cable_thhn" and color in ("rojo", "negro") and where in ("Baterías → inversores", "Controlador → baterías"):
+            if base not in lg["where"]:
+                lg["where"].append(base)
+            if kind == "cable_thhn" and color in ("rojo", "negro") and base in ("Baterías → inversores", "Controlador → baterías"):
                 lg["dc"][color] = lg["dc"].get(color, 0) + ends
 
     for b in branches:
@@ -520,20 +525,22 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
                 if r["role"] == "EGC":
                     if i >= b.get("raceways", b["qty"]):
                         continue            # a shared pipe carries one ground for all its runs
-                    put("cable_thhn", g, "verde", n * L, where, 2 * n)
+                    put("cable_thhn", g, "verde", n * L, where, 2 * n, "tierra")
                 elif key in ("pv_strings", "pv_cc", "pv_dc_inv"):
-                    put("cable_solar", g, "rojo", L, where)
-                    put("cable_solar", g, "negro", L, where)
+                    # Solar cable is sold in #12 / #10 / #8; the wiring caps PV runs at #8 (anything else would be THHN).
+                    kind = "cable_solar" if g in SOLAR_CABLE_GAUGES else "cable_thhn"
+                    put(kind, g, "rojo", L, where, role="positivo")
+                    put(kind, g, "negro", L, where, role="negativo")
                 elif key in ("cc_bat", "bat_inv"):
-                    put("cable_thhn", g, "rojo", L, where, 2)
-                    put("cable_thhn", g, "negro", L, where, 2)
+                    put("cable_thhn", g, "rojo", L, where, 2, "positivo")
+                    put("cable_thhn", g, "negro", L, where, 2, "negativo")
                 elif key in ("pv_inv_ac", "gz_ac", "gz_link", "gz_disc", "pv_disc", "out_feed", "in_feed") and r["role"] != "Neutro":
-                    put("cable_thhn", g, "negro", L, where, 2)
-                    put("cable_thhn", g, "rojo", L, where, 2)
+                    put("cable_thhn", g, "negro", L, where, 2, "fase L1")
+                    put("cable_thhn", g, "rojo", L, where, 2, "fase L2")
                 elif r["role"] == "Neutro":
-                    put("cable_thhn", g, "blanco", n * L, where, 2 * n)
+                    put("cable_thhn", g, "blanco", n * L, where, 2 * n, "neutro")
                 else:   # AC phases: inverter 1 on L1 (black), inverter 2 on L2 (red)
-                    put("cable_thhn", g, "negro" if i % 2 == 0 else "rojo", n * L, where, 2 * n)
+                    put("cable_thhn", g, "negro" if i % 2 == 0 else "rojo", n * L, where, 2 * n, "fase L1" if i % 2 == 0 else "fase L2")
     return tally, lugs
 
 
@@ -697,7 +704,7 @@ def _centers(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
             for color in ("negro", "rojo"):
                 c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",
                       section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=METER_FEED_GAUGE, color="negro"),
-                      where="Centro de carga → Smart Meter", rank=_cable_rank("cable_thhn", METER_FEED_GAUGE, color),
+                      where="Centro de carga → Smart Meter (" + ("fase L1" if color == "negro" else "fase L2") + ")", rank=_cable_rank("cable_thhn", METER_FEED_GAUGE, color),
                       note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
         return
     if disc.get("ac_out") == "center":
@@ -767,7 +774,8 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
 def _finish(line: dict) -> dict:
     qty = line["qty"]
     line["qty"] = int(qty) if float(qty).is_integer() else round(qty, 1)
-    line["comment"] = " · ".join(dict.fromkeys(line["wheres"] + line["comments"]))
+    items = list(dict.fromkeys(line["wheres"] + line["comments"]))
+    line["comment"] = items[0] if len(items) == 1 else "\n".join(f"• {i}" for i in items)   # several uses -> one bullet each
     line["note"] = "; ".join(line["notes"])
     return line
 

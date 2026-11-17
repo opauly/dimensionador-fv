@@ -52,7 +52,7 @@
         {% if g.name %}<tr class="g"><td colspan="4">{{ g.name }}</td></tr>{% endif %}
         {% for ln in g.lines %}
           <tr><td>{{ ln.name }}{% if ln.note %}<div class="dp-sub">{{ ln.note }}</div>{% endif %}</td>
-              <td class="n">{{ ln.qty }}</td><td>{{ ln.unit }}</td><td>{{ ln.comment }}</td></tr>
+              <td class="n">{{ ln.qty }}</td><td>{{ ln.unit }}</td><td style="white-space:pre-line;">{{ ln.comment }}</td></tr>
         {% endfor %}
       {% endfor %}
       </tbody>

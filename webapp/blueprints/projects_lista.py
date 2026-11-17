@@ -110,6 +110,8 @@ def register(bp):
                 computed = {ln["id"]: ln for ln in (result["lines"] if result else []) if ln.get("computed_qty") is not None}
                 for lid, ln in computed.items():
                     q, comment = form.get("q:" + lid), form.get("c:" + lid)
+                    if comment is not None:
+                        comment = comment.replace("\r\n", "\n")    # a textarea posts CRLF
                     ov = {}
                     if q not in (None, ""):
                         try:

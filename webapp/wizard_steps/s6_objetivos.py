@@ -37,9 +37,9 @@ _PRESET_INDEX = {"minimo": 0, "recomendado": 1, "maximo": 2}
 # "Según datos reales" (Off-Grid only): the values the real-data simulation supports — autonomy 2 days and ~2x PV coverage already meet
 # "98% of days with energy, no stretch over 2 days" (more PV barely helps beyond that); margin and inverter ceiling are policy, so
 # they take the "Mínimo aceptable" neighbourhood. Everything else (hidden goals) follows the "Recomendado" tier.
-DEFAULT_MAX_FAIL_DAYS = 2.0           # off-grid: days a year the system may fall short of the load (5-year average), pre-filled
+DEFAULT_MAX_FAIL_DAYS = 0.5           # off-grid fixed rule (not asked): at most half a day a year on average over the real years and the fleet's load patterns, and no failing day in the worst year; the Mínimo column allows 2
 DEFAULT_OUTAGE_COVER_PCT = 90.0       # hybrid: share of real grid outages the battery must outlast (the fleet simulation's own bar), pre-filled
-DEFAULT_NIGHT_COVER_PCT = 90.0        # hybrid: share of nights the battery must carry to sunrise, pre-filled
+DEFAULT_NIGHT_COVER_PCT = None        # hybrid: nights are an energy-savings matter, not reliability: not asked by default
 DEFAULT_ROOF_PANEL_W = 620.0      # pre-filled value of the editable "Potencia del panel de referencia" field (the user owns the number)
 DATA_PRESET = "datos_reales"
 _DATA_PRESET_LABEL = "Según datos reales"
@@ -139,14 +139,19 @@ FIELD_SPECS: dict[str, list[dict]] = {
 }
 
 # Off-Grid margin and PV coverage are hard to pick up front; the preset buttons fill them, so they live under "Ajustes finos".
-for _sp in FIELD_SPECS["off_grid"]:
-    if _sp["name"] in ("reserve_soc_pct", "pv_design_factor"):
-        _sp["advanced"] = True
+_ADVANCED = {"off_grid": ("autonomy_days", "typical_min_soc_pct", "reserve_soc_pct", "pv_design_factor", "inverter_loading_target_pct"),
+             "hybrid": ("reserve_soc_pct", "backup_nights", "cycling_nights", "pv_coverage", "inverter_islanded_loading_target_pct"),
+             "grid_zero": ("max_dc_ac_ratio",)}
+for _st, _names in _ADVANCED.items():
+    for _sp in FIELD_SPECS[_st]:
+        if _sp["name"] in _names:
+            _sp["advanced"] = True
 
 # Growth, expansion, the solar-resource basis and the hybrid battery basis only feed reports or are ignored by the model (they never
 # change the recommended equipment), so they are not
 # asked for: the tier keeps the preset's values (see `_preset_goals`) and the form never sends them.
-_HIDDEN_GOALS = {"growth_energy_pct", "growth_peak_pct", "expansion_provision", "solar_resource_basis", "battery_basis"}
+_HIDDEN_GOALS = {"growth_energy_pct", "growth_peak_pct", "expansion_provision", "solar_resource_basis", "battery_basis",
+                 "max_fail_days_year", "outage_cover_pct", "night_cover_pct"}
 for _st in list(FIELD_SPECS):
     FIELD_SPECS[_st] = [_sp for _sp in FIELD_SPECS[_st] if _sp["name"] not in _HIDDEN_GOALS]
 
@@ -452,8 +457,11 @@ def _apply_reliability(band: dict, goals: dict, inputs: dict) -> dict:
         len_m, wid_m, packing = dt.roof_geometry(goals)
         cap = dt.roof_capacity_kwp(goals.get("roof_area_m2"), goals.get("roof_panel_w"), len_m, wid_m, packing)
         top = max(c["system_kw"] for c in band.values())
-        names = {"piso": 2.0, "optimo": 1.0, "techo": 0.5}
-        targets = {n: {"days": float(goal) * m, "kwp_min": float(band[n]["system_kw"]), "kwh_min": float(band[n]["battery_nominal_kwh"])} for n, m in names.items()}
+        # Mínimo tolerates 2 days a year; Punto óptimo and Máximo ask for "no day without energy" in the real years (average at or under the
+        # goal and no failing day in the worst year).
+        days = {"piso": 2.0, "optimo": float(goal), "techo": float(goal)}
+        targets = {n: {"days": d, "kwp_min": float(band[n]["system_kw"]), "kwh_min": float(band[n]["battery_nominal_kwh"]),
+                       **({"worst": 0.0} if n != "piso" else {})} for n, d in days.items()}
         res = fs.cheapest_design(ds, zone, float(inputs["daily_kwh"]), targets,
                                  kwp_max=max(float(cap), top) if cap else top * 1.8,
                                  usd_per_kwp=costs[0], usd_per_kwh=costs[1])
@@ -687,7 +695,7 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             {"label": "Inversor (potencia AC continua)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
         ]
         if all(c.get("rel_goal") for c in cols):
-            rows += [{"label": f"Días al año sin cubrir el consumo (promedio de {_yrs()})", "unit": "días", "values": [_fmt(c["rel_goal"]["days_year"]) for c in cols]},
+            rows += [{"label": f"Días sin energía al año (promedio de {_yrs()})", "unit": "días", "values": [_fmt(c["rel_goal"]["days_year"]) for c in cols]},
                      {"label": f"Peor de los {_yrs()}", "unit": "días", "values": [_fmt(c["rel_goal"]["days_year_worst"], 0) for c in cols], "sub": "extra"}]
         roof_row, roof_notes, roof_warn = _roof_rows_notes(cols, goals, inputs, inputs["daily_kwh"])
         if roof_row:
@@ -702,11 +710,11 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
         soc_warn, soc_text = [], ""
         rg = band["optimo"].get("rel_goal")
         if rg:
-            soc_text = (f"Meta de {_fmt(rg['target'], 1)} días/año sin cubrir: la combinación más barata que la cumple con el clima real de {rg['zone_label']} "
+            soc_text = (f"Regla de diseño: ningún día sin energía en los años de clima real. La combinación más barata que la cumple en {rg['zone_label']} "
                         f"({rg['years']} años) es {_fmt(band['optimo']['system_kw'])} kWp y {_fmt(band['optimo']['battery_nominal_kwh'])} kWh "
                         f"({_fmt(rg['days_year'])} días/año; peor año {_fmt(rg['days_year_worst'], 0)}). ")
             if not rg["met"]:
-                soc_warn.append("Ninguna combinación de la búsqueda llega a la meta de días sin cubrir: sube la meta, o revisa el techo disponible.")
+                soc_warn.append("Ninguna combinación de la búsqueda logra cero días sin energía: revisa el techo disponible o la carga.")
         g_opt = band["optimo"].get("soc_goal")
         if g_opt:
             if g_opt["status"] == "raised":
