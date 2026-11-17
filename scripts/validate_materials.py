@@ -41,7 +41,7 @@ FRONIUS = {"id": "fr10", "type": "string_inverter", "brand": "Fronius", "model":
 MP = {"id": "mp5", "brand": "Victron Energy", "model": "MultiPlus-II 48/5000/70-95", "kw": 5.0, "output_v": 120.0,
       "ac_out_rated_a": 115.0, "ac_input_current_max_a": 95.0, "efficiency_pct": 96.0, "type": "hybrid"}
 EQ = {"panel": PANEL, "panel_count": 16, "battery": {"brand": "Pylontech", "model": "Fidus", "voltage_v": 51.2, "capacity_kwh": 4.97},
-      "battery_bank": {"battery_count": 4}, "inverter": MP, "inverter_qty": 2, "monitoring": {"brand": "Victron Energy", "model": "Ekrano GX"},
+      "battery_bank": {"battery_count": 4}, "inverter": MP, "inverter_qty": 2, "monitoring": {"brand": "Victron Energy", "model": "Monitoreo Victron Ekrano GX"},
       "n_strings": 2, "panels_per_string": 8, "array": {"area_m2": 43.2}}
 og_coupling.pv_inverter_options = lambda: [FRONIUS]
 og_wiring._fresh_inverter = lambda eq: eq.get("inverter") or {}
@@ -80,10 +80,10 @@ check("splices 4 (she bought 8: known gap)", q("Uniones de riel"), 4)
 check("mid clamps 30 (she bought 32)", q("Midclamp"), 30)
 check("end clamps 9 (she bought 10)", q("Endclamp"), 9)
 check("MC4 8 (she bought 8)", q("MC4"), 8)
-check("SOLAR black / red by the metre: 2 strings x 15 m + 10 % = 35 m each", (q("Cable SOLAR #10 AWG negro"), q("Cable SOLAR #10 AWG rojo")), (35, 35))
-check("panels 16, Multis 2, Fidus 4, Ekrano 1", (q("Paneles solares"), q("Inversor Multiplus 5000 120V"), q("Batería Pylontech Fidus"), q("Ekrano GX")), (16, 2, 4, 1))
+check("SOLAR black / red by the metre: 2 strings x 15 m + 10 % = 35 m each", (q("Cable SOLAR CU #10 AWG negro"), q("Cable SOLAR CU #10 AWG rojo")), (35, 35))
+check("panels 16, Multis 2, Fidus 4, Ekrano 1", (q("Paneles solares"), q("Inversor Victron MultiPlus-II 48/5000 120V"), q("Batería Pylontech Fidus"), q("Monitoreo Victron Ekrano GX")), (16, 2, 4, 1))
 check("Pylontech cable sets 4 (she bought 4)", q("Cables para Pylontech"), 4)
-check("Lynx bars 2 / bolts 12 (she bought 3 bars / 12 bolts: open question)", (q("Lynx Power In"), q("Roscas para Lynx Power In")), (2, 12))
+check("Lynx bars 2 / bolts 12 (she bought 3 bars / 12 bolts: open question)", (q("Barra Victron Lynx Power In"), q("Pernos Victron Lynx Power In")), (2, 12))
 check("UTP 4 / VE.CAN 1 (she bought 4 / 1)", (q("Cable UTP normal"), q("Cable UTP tipo A")), (4, 1))
 check("tape: one roll per colour used (4)", sum(1 for n in by if n.startswith("Tape color")), 4)
 check("Fronius is a new line, not in the master list", (q("Inversor Fronius Primo 10.0-1"), by["Inversor Fronius Primo 10.0-1"]["in_master"]), (1, False))
@@ -92,10 +92,10 @@ check("AC in: two 120 V Multis share one 2-pole 90 A breaker", q("Breaker 2P90A 
 check("AC out 70 A 2P x1, Fronius 60 A 2P x1", (q("Breaker 2P70A AC riel DIN"), q("Breaker 2P60A AC riel DIN")), (1, 1))
 check("battery-to-Multi fuses: Mega 125 A x2 (4000 W continuous / 0.96 / 51.2 V x 1.25 = 102 A) + battery fuses by definir x4",
       (q("Fusible Mega 125A"), q("Fusible Mega de batería (calibre por definir)")), (2, 4))
-check("ground by breaker (T250.122), one per raceway: #8 green = AC out 10 m + AC in 10 m, +10 % -> 25", q("Cable THHN #8 AWG verde"), 25)
-check("ground by breaker: #10 green = PV 15 m + Fronius 10 m (32 A and 60 A breakers), +10 % -> 30", q("Cable THHN #10 AWG verde"), 30)
-check("no #3 AWG cable is asked for (dealers do not stock it): AC in uses #2", ("Cable THHN #3 AWG negro" in by, "Cable THHN #2 AWG negro" in by), (False, True))
-check("#4 black THHN is a master line, 15 m", (by["Cable THHN #4 AWG negro"]["in_master"], q("Cable THHN #4 AWG negro")), (True, 15))
+check("ground by breaker (T250.122), one per raceway: #8 green = AC out 10 m + AC in 10 m, +10 % -> 25", q("Cable THHN CU #8 AWG verde"), 25)
+check("ground by breaker: #10 green = PV 15 m + Fronius 10 m (32 A and 60 A breakers), +10 % -> 30", q("Cable THHN CU #10 AWG verde"), 30)
+check("no #3 AWG cable is asked for (dealers do not stock it): AC in uses #2", ("Cable THHN CU #3 AWG negro" in by, "Cable THHN CU #2 AWG negro" in by), (False, True))
+check("#4 black THHN is a master line, 15 m", (by["Cable THHN CU #4 AWG negro"]["in_master"], q("Cable THHN CU #4 AWG negro")), (True, 15))
 check("heat-shrink for the DC lugs (#2 AWG), 1 m minimum", q("Termoencogible #2 AWG rojo"), 1)
 check("battery-side DC runs are not piped (no 1 1/4 in conduit from them)", any(n.startswith("Tubo ") and ' 1 1/4"' in n and by[n]["comment"].startswith("Baterías") for n in by), False)
 check("PVC glue 1 when PVC is used", q("Pegamento para PVC"), 1)
@@ -115,7 +115,7 @@ specEd = {"materials": {**LAYOUT["materials"], "overrides": {key: {"qty": 32}}, 
     {"id": "a2", "key": None, "name": "Caja de paso 4x4", "qty": 2, "unit": "un"}]}}
 _, byEd = lines(specEd)
 check("override keeps her 32 mid clamps and remembers the computed 30", (byEd["Midclamp"]["qty"], byEd["Midclamp"]["computed_qty"], byEd["Midclamp"]["edited"]), (32, 30, True))
-check("extra from the master list keeps its section", byEd["Gabinete metálico 50x40x20"]["section"], "Generales")
+check("extra from the master list keeps its section", byEd["Gabinete metálico 50x40x20 cm"]["section"], "Generales")
 check("free-text extra is a new line", (byEd["Caja de paso 4x4"]["qty"], byEd["Caja de paso 4x4"]["in_master"]), (2, False))
 
 # ── xlsx export ────────────────────────────────────────────────────────────────
@@ -189,7 +189,7 @@ check("string of 8 modules is 9.21 m: 2 rails of 4.7 m + 1 splice per rail line,
 # Batch-1 rules: one enclosure (size to confirm), one SPD, roof sealant by feet; no roof screws, no sub-panel.
 _res = ME.build_list(EQ, CTX, {"materials": {"layout": {"rows": 2}}}, None)
 _by = {ln["name"]: ln for ln in _res["lines"] if ln["qty"]}
-check("enclosure 50x40x20 x1 flagged to confirm", (_by["Gabinete metálico 50x40x20"]["qty"], _by["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
+check("enclosure 50x40x20 x1 flagged to confirm", (_by["Gabinete metálico 50x40x20 cm"]["qty"], _by["Gabinete metálico 50x40x20 cm"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
 check("one surge protector", _by["Supresor de Picos SDSA 1175"]["qty"], 1)
 check("sealant: 1 tube per 20 feet", _by["Silicon 3M (especificar color según color de las láminas del techo)"]["qty"], 3)
 check("no roof screws on the list", any("Tornillo de techo" in n for n in _by), False)
@@ -200,8 +200,8 @@ check("Chint DC 5-space box x1", _by["Centro de carga Chint DC 5 espacios"]["qty
 check("duct 4x4 x1 + 2 end caps", (_by["Ducto metálico cuadrado 4x4"]["qty"], _by["Tapas para ducto metálico 4x4"]["qty"]), (1, 2))
 check("PG-21 cable glands x2", _by["Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)"]["qty"], 2)
 check("EMT stubs to the 2 inverters: 2 tubes, 8 pressure connectors", (_by['Tubo EMT 1"']["qty"], _by['Conector de presión EMT 1"']["qty"]), (2, 8))
-check("monitoring outlet kit", [_by[n]["qty"] for n in ("Breaker 1P20A CH/SD (toma de monitoreo)", "Toma doble 15A 125V", "Placa de acero inoxidable para toma doble", 'Caja rectangular de intemperie 3 huecos 1/2"')], [1, 1, 1, 1])
-check("monitoring circuit: #12 red / green / white, 15 m each (+3 m red for the Ekrano supply)", [_by[f"Cable THHN #12 AWG {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [18, 15, 15])
+check("monitoring outlet kit", [_by[n]["qty"] for n in ("Breaker 1P20A CH/SD (toma de monitoreo)", "Toma doble 15A 125V", "Placa de acero inoxidable para toma doble", 'Caja de intemperie rectangular 3 huecos 1/2"')], [1, 1, 1, 1])
+check("monitoring circuit: #12 red / green / white, 15 m each (+3 m red for the Ekrano supply)", [_by[f"Cable THHN CU #12 AWG {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [18, 15, 15])
 check("ties: one pack", _by["Gasas plásticas #8 (Negras)"]["qty"], 1)
 check("solar strings go in at least 1 in conduit", [b["conduit"]["trade"] for b in CTX["branches"] if b.get("key") == "pv_strings"], ["1"])
 check("no 3 AWG anywhere in the sized branches", any(b.get("ugc") in ("3", "1") for b in CTX["branches"]), False)
@@ -214,13 +214,13 @@ _utp0 = _by["Cable UTP normal"]["qty"]
 _EQM = {**EQ, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}
 _resm = ME.build_list(_EQM, CTX, {"materials": {"layout": {"rows": 2}}}, None)
 _bym = {ln["name"]: ln for ln in _resm["lines"] if ln["qty"]}
-check("meter VM-3P75CT x1 on the Victron section", (_bym["Medidor VM-3P75CT"]["qty"], _bym["Medidor VM-3P75CT"]["section"]), (1, "Victron Energy"))
+check("meter VM-3P75CT x1 on the Victron section", (_bym["Medidor Victron VM-3P75CT"]["qty"], _bym["Medidor Victron VM-3P75CT"]["section"]), (1, "Victron Energy"))
 check("2 current transformers flagged to verify size", (_bym["Transformador de Corriente 100A:333mV"]["qty"], _bym["Transformador de Corriente 100A:333mV"]["comment"]), (2, "POR VERIFICAR TAMAÑO"))
 check("meter brings its own 15 A 2-pole CH breaker, and no meter means no breaker", (_bym["Breaker 2P15A CH/SD"]["qty"], "Breaker 2P15A CH/SD" in {ln["name"] for ln in engine.build_list(EQ, CTX, {}, None)["lines"] if ln["qty"]}), (1, False))
-check("meter adds no short UTP, it brings cat6e by metre", (_bym["Cable UTP normal"]["qty"], "Cable de red Ethernet cat6e" in _bym), (_utp0, True))
+check("meter adds no short UTP, it brings cat6e by metre", (_bym["Cable UTP normal"]["qty"], "Cable UTP cat6e" in _bym), (_utp0, True))
 _run = CTX["lengths"]["ac_in_m"]
-check("cat6e as long as the cabinet -> panel run (+waste, 5 m steps)", _bym["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to(_run * (1 + ME.WASTE), ME.CABLE_STEP_M))
-check("no meter: no cat6e", "Cable de red Ethernet cat6e" in _by, False)
+check("cat6e as long as the cabinet -> panel run (+waste, 5 m steps)", _bym["Cable UTP cat6e"]["qty"], ME._ceil_to(_run * (1 + ME.WASTE), ME.CABLE_STEP_M))
+check("no meter: no cat6e", "Cable UTP cat6e" in _by, False)
 
 # Batch-6 rules: Fidus fuse 125 A (max charge 100 A); Grid Zero list has no Victron / batteries / Lynx and carries the interconnection items.
 _EQF = {**EQ, "battery": {**EQ["battery"], "fuse_a": 125, "max_charge_a": 100}}
@@ -257,7 +257,7 @@ GZ_EQ = GZ_BLOB["equipment"]
 _gzl = {ln["name"]: ln for ln in engine.build_list(GZ_EQ, GZ, {}, None, "grid_zero")["lines"] if ln["qty"]}
 check("grid zero list: DC string breakers counted once (2)", _gzl["Breaker 2P32A DC riel DIN"]["qty"], 2)
 check("grid zero list: the AC breaker is the meter-base one, not a DIN breaker", (any((n.startswith("Breaker ") and n.endswith("AC riel DIN")) for n in _gzl), _gzl["Breaker 2P60A para base de medidor"]["qty"]), (False, 1))
-check("grid zero list: solar cable for both DC runs and 240 V cable to the meter base", ("Cable SOLAR #10 AWG rojo" in _gzl, any("THHN" in n and "negro" in n for n in _gzl)), (True, True))
+check("grid zero list: solar cable for both DC runs and 240 V cable to the meter base", ("Cable SOLAR CU #10 AWG rojo" in _gzl, any("THHN" in n and "negro" in n for n in _gzl)), (True, True))
 cfg_gz, prob_gz = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": GZ_EQ, "wiring": GZ, "blob": GZ_BLOB}, {})
 check("grid zero drawing needs no questions", (cfg_gz["kind"], prob_gz["blockers"]), ("grid_zero", []))
 check("grid zero drawing: base breaker and strings from the sized design", (cfg_gz["base"]["breaker"], cfg_gz["pv"]["strings"], cfg_gz["pv"]["string_breaker"]), ("2P 60 A", 2, "32 A 2P DC"))
@@ -302,9 +302,9 @@ check("CTs: one per phase (split-phase 2, three-phase 3), none for a meter witho
       (ct_count(SM, _PRIMO), ct_count(SM, {**_PRIMO, "phase": "three"}), ct_count({"model": "Smart Meter 63A-3"}, _PRIMO)), (2, 3, 0))
 check("CTs: a design saved before the column existed is still recognised by its model", ct_count({"model": "Smart Meter WR 100-600 V-3"}, _PRIMO), 2)
 _gsm = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
-check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
-check("grid zero list: the cabinet is the norm; the Smart Meter goes in the usual 50x40x20, flagged to confirm", (_gsm["Gabinete metálico 50x40x20"]["qty"], _gsm["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
-check("grid zero list: the cabinet comes even without the Smart Meter", "Gabinete metálico 50x40x20" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, True)
+check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Medidor Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
+check("grid zero list: the cabinet is the norm; the Smart Meter goes in the usual 50x40x20, flagged to confirm", (_gsm["Gabinete metálico 50x40x20 cm"]["qty"], _gsm["Gabinete metálico 50x40x20 cm"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
+check("grid zero list: the cabinet comes even without the Smart Meter", "Gabinete metálico 50x40x20 cm" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, True)
 check("grid zero list: the Fronius Smart Meter carries its own 2P 15 A breaker (no load center), and no Smart Meter means none",
       (_gsm.get("Breaker 2P15A CH/SD", {}).get("qty"), "Breaker 2P15A CH/SD" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}), (1, False))
 check("grid zero list: no CTs without the Smart Meter", "Transformador de Corriente 100A:333mV" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
@@ -327,10 +327,10 @@ _, prob_few = CB.build_config(project, {**d_cc6, "eq": {**EQ_CC6, "n_strings": 5
 check("more controllers than strings is refused", any("al menos un string por controlador" in b for b in prob_few["blockers"]), True)
 
 check("grid zero list: cat6e for the Smart Meter = (Fronius -> base 10 m + base -> base 12 m) x 1.1, in 5 m steps",
-      {ln["name"]: ln for ln in ME.build_list({**GZ_EQ, "monitoring": SM}, GZ_L, {}, None, "grid_zero")["lines"] if ln["qty"]}["Cable de red Ethernet cat6e"]["qty"],
+      {ln["name"]: ln for ln in ME.build_list({**GZ_EQ, "monitoring": SM}, GZ_L, {}, None, "grid_zero")["lines"] if ln["qty"]}["Cable UTP cat6e"]["qty"],
       ME._ceil_to((10 + 12) * (1 + ME.WASTE), ME.CABLE_STEP_M))
 _gdef = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"ready": False, "branches": []}, {}, None, "grid_zero")["lines"] if ln["qty"]}
-check("grid zero list: without wiring lengths the cat6e still comes (10 + 2 m default)", _gdef["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to((10 + 2) * (1 + ME.WASTE), ME.CABLE_STEP_M))
+check("grid zero list: without wiring lengths the cat6e still comes (10 + 2 m default)", _gdef["Cable UTP cat6e"]["qty"], ME._ceil_to((10 + 2) * (1 + ME.WASTE), ME.CABLE_STEP_M))
 
 # ── Batch 10: the list and the drawing must agree (every breaker, device and count the drawing shows is on the list) ──
 import re  # noqa: E402
@@ -356,18 +356,18 @@ _ch, _ = CB.build_config(project, {"eq": {**EQ, "energy_meter": {"brand": "Victr
 check("hybrid AC: Q1, Q2 and Q3 breakers of the drawing are on the list",
       [f"Breaker 2P{_amps(x)}A AC riel DIN" in _lh for x in (_ch["multis"]["ac_in_breaker"], _ch["subpanel"]["q2"], _ch["fronius"]["ac_breaker"])], [True, True, True])
 check("hybrid AC: string breakers of the drawing = list", (_qty(_lh, f"Breaker 2P{_amps(_ch['pv']['string_breaker'])}A DC riel DIN"), _ch["pv"]["strings"]), (_ch["pv"]["strings"], _ch["pv"]["strings"]))
-check("hybrid AC: batteries, Multis and SPD of the drawing are on the list", (_lh["Batería Pylontech Fidus"]["qty"], _lh["Inversor Multiplus 5000 120V"]["qty"], "Supresor de Picos SDSA 1175" in _lh), (_ch["battery"]["count"], 2, True))
+check("hybrid AC: batteries, Multis and SPD of the drawing are on the list", (_lh["Batería Pylontech Fidus"]["qty"], _lh["Inversor Victron MultiPlus-II 48/5000 120V"]["qty"], "Supresor de Picos SDSA 1175" in _lh), (_ch["battery"]["count"], 2, True))
 check("hybrid AC: one Mega fuse per battery plus one per Multi", _qty(_lh, "Fusible Mega"), _ch["battery"]["count"] + 2)
 check("hybrid AC: no breaker for the Ekrano (internal fuse), but its #12 supply cable (3 m red + 3 m black) is on the list",
       (_qty(_lh, "Breaker 2P16A DC riel DIN"), any("Alimentación Ekrano/Cerbo" in w for ln in _lh.values() for w in ln.get("wheres") or []),
-       _lh["Cable THHN #12 AWG negro"]["qty"]), (0, True, 3))
-check("hybrid AC: the meter in the drawing is on the list with its CTs", ("Medidor VM-3P75CT" in _lh, _lh["Transformador de Corriente 100A:333mV"]["qty"]), (True, 2))
+       _lh["Cable THHN CU #12 AWG negro"]["qty"]), (0, True, 3))
+check("hybrid AC: the meter in the drawing is on the list with its CTs", ("Medidor Victron VM-3P75CT" in _lh, _lh["Transformador de Corriente 100A:333mV"]["qty"]), (True, 2))
 # DC-coupled
 _ld = _list({**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3P75CT"}}, dc_ctx)
 check("DC-coupled: DC breakers (one per MPPT input), controllers, Multis, batteries of the drawing = list",
-      (sum(ln["qty"] for n, ln in _ld.items() if n.startswith("Breaker ") and n.endswith("DC riel DIN")), _ld["Controlador de carga 250/100"]["qty"], _ld["Inversor Multiplus 5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
+      (sum(ln["qty"] for n, ln in _ld.items() if n.startswith("Breaker ") and n.endswith("DC riel DIN")), _ld["Controlador Victron SmartSolar MPPT 250/100"]["qty"], _ld["Inversor Victron MultiPlus-II 48/5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
       (len(cfg_dc["pv"]["sizes"]), cfg_dc["controllers"]["count"], cfg_dc["multis"]["qty"], cfg_dc["battery"]["count"]))
-check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Lynx Power In"]["qty"]), (ceil((4 + 2 + 1) / 4),) * 2)
+check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Barra Victron Lynx Power In"]["qty"]), (ceil((4 + 2 + 1) / 4),) * 2)
 check("DC-coupled: AC breakers of the drawing are on the list",
       [f"Breaker 2P{_amps(x)}A AC riel DIN" in _ld for x in ((cfg_dc["grid_in"] or {}).get("breaker"), cfg_dc["subpanel"]["q2"]) if x], [True, True])
 # Grid Zero
@@ -375,7 +375,7 @@ _lg = _list({**GZ_EQ, "monitoring": SM}, GZ_L, "grid_zero")
 _cgz, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**GZ_EQ, "monitoring": SM}, "wiring": GZ_L, "blob": GZ_BLOB}, {})
 check("grid zero: generation-base breaker, string breakers and SPD of the drawing are on the list",
       (f"Breaker 2P{_amps(_cgz['base']['breaker'])}A para base de medidor" in _lg, _qty(_lg, "Breaker 2P32A DC riel DIN"), "Supresor de Picos SDSA 1175" in _lg), (True, _cgz["pv"]["strings"], True))
-check("grid zero: the meter and its CTs in the drawing are on the list (2 TC)", ("Fronius Smart Meter WR 100-600 V-3" in _lg, _lg["Transformador de Corriente 100A:333mV"]["qty"], _cgz["meter"]["ct_label"]), (True, 2, "2 TC"))
+check("grid zero: the meter and its CTs in the drawing are on the list (2 TC)", ("Medidor Fronius Smart Meter WR 100-600 V-3" in _lg, _lg["Transformador de Corriente 100A:333mV"]["qty"], _cgz["meter"]["ct_label"]), (True, 2, "2 TC"))
 check("grid zero: no Ekrano supply cable (no GX)", any("Alimentación Ekrano/Cerbo" in w for ln in _lg.values() for w in ln.get("wheres") or []), False)
 check("grid zero: the link cable of the drawing is on the list", all(f"Cable {_g}" for _g in _cgz["base"]["link_conductors"]) and any("Base de generación → base de consumo" in w for ln in _lg.values() for w in ln.get("wheres") or []), True)
 # Chint boxes follow the strings (a 5-space box holds two 2-pole breakers)
@@ -561,7 +561,7 @@ check("grid zero list: 2 DC breakers, 2 MC4 Y pieces", (_GL19["Breaker 2P63A DC 
 check("DC-coupled 6 controllers x 2 strings: 6 runs in the drawing config", (cfg_cc6["pv"]["sizes"], cfg_cc6["pv"]["strings"]), ([2] * 6, 12))
 
 # Batch 20: BOM format -- gauge sign glued to the number, and one cable kept together (gauge thin -> thick, colours side by side)
-check("1/0 cable name has no space after the #", [r["name"] for r in engine.CATALOG if "1/0" in r["name"] and r.get("kind") == "cable_thhn"], ["Cable THHN #1/0 AWG negro"])
+check("1/0 cable name has no space after the #", [r["name"] for r in engine.CATALOG if "1/0" in r["name"] and r.get("kind") == "cable_thhn"], ["Cable THHN CU #1/0 AWG negro"])
 check("no catalog name keeps '# 1' or 'Cable#'", [r["name"] for r in engine.CATALOG if "# " in r["name"] or "Cable#" in r["name"]], [])
 _cab = [ln for ln in engine.build_list(_GE19, _GW19, {}, None, "grid_zero")["lines"] if ln["qty"] and ln["name"].startswith("Cable #") and "THHN" in ln["name"]]
 _gk = [(engine._GAUGE_ORDER.index(ln["name"].split("#")[1].split(" ")[0]), engine._COLOR_ORDER.index(ln["name"].rsplit("color ", 1)[1])) for ln in _cab]

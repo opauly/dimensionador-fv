@@ -92,17 +92,17 @@ WHERE = {
 
 # Equipment names in the master list -> substrings of "brand model" (lowercase) that mean the same item.
 ALIASES = {
-    "Inversor Quattro 48/10000/140 120V": ["quattro 48/10000"],
-    "Inversor Multiplus 5000 120V": ["48/5000"],
-    "Inversor Multiplus 3000 120V": ["48/3000"],
-    "Controlador de carga 450/200": ["450/200"],
-    "Controlador de carga 250/100": ["250/100"],
-    "Controlador de carga 150/70": ["150/70"],
+    "Inversor Victron Quattro 48/10000/140 120V": ["quattro 48/10000"],
+    "Inversor Victron MultiPlus-II 48/5000 120V": ["48/5000"],
+    "Inversor Victron MultiPlus-II 48/3000 120V": ["48/3000"],
+    "Controlador Victron SmartSolar MPPT 450/200": ["450/200"],
+    "Controlador Victron SmartSolar MPPT 250/100": ["250/100"],
+    "Controlador Victron SmartSolar MPPT 150/70": ["150/70"],
     "Batería Pylontech US5000": ["us5000"],
     "Batería Pylontech Fidus": ["fidus"],
-    "Ekrano GX": ["ekrano"],
-    "Cerbo GX": ["cerbo"],
-    "Medidor VM-3P75CT": ["vm 3p75ct"],
+    "Monitoreo Victron Ekrano GX": ["ekrano"],
+    "Monitoreo Victron Cerbo GX": ["cerbo"],
+    "Medidor Victron VM-3P75CT": ["vm 3p75ct"],
 }
 VM_BREAKER_A = 15      # breaker that feeds the Victron VM meter (the Fronius Smart Meter uses the same one: METER_BREAKER_A)
 CT_PER_METER = 2   # split-phase: one current transformer per line
@@ -133,9 +133,10 @@ _MAT = {"PVC": "PVC", "EMT": "EMT", "BIEX": "Biex"}
 
 
 def cable_name(kind: str, gauge: str, color: str) -> str:
-    """`Cable THHN #4 AWG negro`, `Cable SOLAR #8 AWG rojo`: type, then gauge, then colour, for every cable line."""
+    """`Cable THHN CU #4 AWG negro`, `Cable XHHW-2 Serie 8000 AL #8 AWG negro`: type, metal (CU / AL), gauge, colour, for every cable line."""
     typ = {"cable_thhn": "THHN", "cable_solar": "SOLAR", "cable_xhhw": "XHHW-2 Serie 8000"}[kind]
-    return f"Cable {typ} #{gauge} AWG {color}"
+    metal = "AL" if kind == "cable_xhhw" else "CU"          # Serie 8000 is aluminium alloy; THHN and solar cable are copper
+    return f"Cable {typ} {metal} #{gauge} AWG {color}"
 
 
 def lug_name(gauge: str) -> str:
@@ -152,6 +153,33 @@ def conduit_name(kind: str, material: str, trade: str) -> str:
     part = {"conduit_tube": "Tubo", "conduit_union": "Unión", "conduit_connector": "Conector", "conduit_bend": "Curva",
             "conduit_press_connector": "Conector de presión", "conduit_lb": "Conduleta LB", "conduit_strap": "Gasa channel"}[kind]
     return f'{part} {trade}"' if kind in ("conduit_lb", "conduit_strap") else f'{part} {m} {trade}"'
+
+
+# Equipment, network cable and enclosures: `{Tipo} {Marca} {Modelo}` for equipment, `{Tipo} {medidas} cm` for boxes (Oscar, 2026-11-17).
+_RENAMES = {
+    "Inversor Multiplus 5000 120V": "Inversor Victron MultiPlus-II 48/5000 120V",
+    "Inversor Multiplus 3000 120V": "Inversor Victron MultiPlus-II 48/3000 120V",
+    "Inversor Quattro 48/10000/140 120V": "Inversor Victron Quattro 48/10000/140 120V",
+    "Controlador de carga 450/200": "Controlador Victron SmartSolar MPPT 450/200",
+    "Controlador de carga 250/100": "Controlador Victron SmartSolar MPPT 250/100",
+    "Controlador de carga 150/70": "Controlador Victron SmartSolar MPPT 150/70",
+    "Lynx Power In": "Barra Victron Lynx Power In",
+    "Roscas para Lynx Power In": "Pernos Victron Lynx Power In",
+    "Cerbo GX": "Monitoreo Victron Cerbo GX",
+    "Ekrano GX": "Monitoreo Victron Ekrano GX",
+    "Pantalla GX Touch": "Pantalla Victron GX Touch",
+    "Medidor VM-3P75CT": "Medidor Victron VM-3P75CT",
+    "Cable UTP, cat 5 (interiores o exteriores)": "Cable UTP cat5 (interior/exterior)",
+    "Conectores RJ-45": "Conector RJ45",
+    "Caja plexo 20x30x3cm": "Caja plexo 20x30x3 cm",
+    "Caja plexo 20x30x10cm (lisas)": "Caja plexo lisa 20x30x10 cm",
+    "Caja plexo 22x17x8.5cm (lisas)": "Caja plexo lisa 22x17x8.5 cm",
+    "Gabinete metálico 70x50x25": "Gabinete metálico 70x50x25 cm",
+    "Gabinete metálico 30x25x15": "Gabinete metálico 30x25x15 cm",
+    "Gabinete metálico 50x40x20": "Gabinete metálico 50x40x20 cm",
+}
+CABINET = _RENAMES["Gabinete metálico 50x40x20"]
+UTP_NET = "Cable UTP cat6e"
 
 
 def box_name(spaces: int) -> str:
@@ -182,7 +210,7 @@ for _r in CATALOG:
     elif _r["key"] == METER_BREAKER_KEY:
         _r["name"] = breaker_name(2, 30, "base")
     else:
-        _r["name"] = _standard_name(_r) or _r["name"]
+        _r["name"] = _standard_name(_r) or _RENAMES.get(_r["name"], _r["name"])
 
 _GAUGE_ORDER = ("18", "16", "14", "12", "10", "8", "6", "4", "3", "2", "1", "1/0", "2/0", "3/0", "4/0")
 _COLOR_ORDER = ("negro", "rojo", "blanco", "verde", "azul", "amarillo")
@@ -322,7 +350,7 @@ def _interconnection(c: Collector, eq: dict, branches: list[dict] | None = None)
 def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = None, grid_zero: bool = False) -> None:
     panel, inv = eq.get("panel") or {}, eq.get("inverter") or {}
     bat, cc, mon = eq.get("battery") or {}, eq.get("charge_controller") or {}, eq.get("monitoring") or {}
-    model = lambda it: f"{it.get('brand', '')} {it.get('model', '')}".strip()  # noqa: E731
+    model = lambda it: f"{it.get('brand', '')} {it.get('model', '')}".strip().replace("Victron Energy", "Victron")  # noqa: E731
     n_panels = int(eq.get("panel_count") or 0)
     if panel and n_panels:
         c.add(_named("Paneles solares", "Paneles solares"), n_panels, source="diseño", comment=model(panel),
@@ -334,8 +362,8 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
                   comment=f"{inv.get('kw')} kW · Grid Zero" + (" · en paralelo" if n_inv > 1 else ""),
                   note="inversor de strings del diseño" if n_inv == 1 else f"{n_inv} inversores de strings iguales, en paralelo")
         if eq.get("monitoring"):
-            c.add(None, 1, name=model(eq["monitoring"]), section="Generales", group="Monitoreo", source="diseño",
-                  sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"))
+            c.add(None, 1, name=("Medidor " if uses_cts(eq["monitoring"]) else "Monitoreo ") + model(eq["monitoring"]), section="Generales", group="Monitoreo", source="diseño",
+                  sibling=_named("Cable UTP cat5 (interior/exterior)"))
             n_ct = ct_count(eq["monitoring"], inv)
             if n_ct:
                 c.add(_BY_KEY[METER_CT_KEY], n_ct, comment="POR VERIFICAR TAMAÑO",
@@ -344,14 +372,14 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
                 # Modbus (RS485) from the meter, where the CTs sit after the consumption meter, to the inverter: Ethernet cat6e as long as the
                 # inverter -> generation base run plus the hop between the two meter bases.
                 run = float((lengths or {}).get("ac_out_m") or GZ_RUN_FALLBACK_M) + float((lengths or {}).get("gz_link_m") or GZ_LINK_FALLBACK_M)
-                c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name="Cable de red Ethernet cat6e", unit="m", section="Generales",
+                c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name=UTP_NET, unit="m", section="Generales",
                       group="Monitoreo", sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"), where="Medidor Fronius → inversor",
                       note=f"{run:g} m (Fronius → base de generación + base de generación → base de consumo) + {int(WASTE * 100)} % de desperdicio, de a {CABLE_STEP_M:g} m")
         return
     if inv:
         qty = int(eq.get("inverter_qty") or 1)
         row = match_equipment(inv)
-        c.add(row, qty, name=model(inv), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
+        c.add(row, qty, name="Inversor " + model(inv), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
               note=f"{qty} inversor(es) del diseño")
     if coupling.get("ac") and coupling.get("pv_inverter"):
         pv = coupling["pv_inverter"]
@@ -360,11 +388,11 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
     elif cc:
         qty = int(eq.get("charge_controller_qty") or 1)
         row = match_equipment(cc)
-        c.add(row, qty, name=model(cc), section="Victron Energy", source="diseño", note=f"{qty} controlador(es) del diseño")
+        c.add(row, qty, name="Controlador " + model(cc), section="Victron Energy", source="diseño", note=f"{qty} controlador(es) del diseño")
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     if bat and n_bat:
         row = match_equipment(bat)
-        c.add(row, n_bat, name=model(bat), section="Victron Energy", source="diseño", note=f"{n_bat} batería(s) del diseño")
+        c.add(row, n_bat, name="Batería " + model(bat), section="Victron Energy", source="diseño", note=f"{n_bat} batería(s) del diseño")
         if "pylontech" in _norm(bat.get("brand", "")):
             c.add(_named("Cables para Pylontech", "Victron Energy"), n_bat, source="regla", note="un juego de cables por batería Pylontech")
         if _norm(bat.get("model", "")).startswith(("us5000", "uf5000")):
@@ -374,11 +402,11 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
                   note=f"{n_bat} baterías {bat.get('model')} van en mueble aparte, hasta {BATTERY_STAND_SLOTS} por mueble (por confirmar)")
     if mon:
         row = match_equipment(mon)
-        c.add(row, 1, name=model(mon), section="Victron Energy", source="diseño")
+        c.add(row, 1, name="Monitoreo " + model(mon), section="Victron Energy", source="diseño")
     meter = eq.get("energy_meter") or {}
     if meter:
         row = match_equipment(meter)
-        c.add(row, 1, name=model(meter), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
+        c.add(row, 1, name="Medidor " + model(meter), section="Victron Energy", source="diseño", comment=None if row else "no está en la lista maestra",
               note="medidor de energía elegido en Equipos")
         c.add(_BY_KEY[METER_CT_KEY], CT_PER_METER, comment="POR VERIFICAR TAMAÑO",
               note=f"{CT_PER_METER} transformadores de corriente para el medidor (uno por línea)")
@@ -389,7 +417,7 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
         # Ethernet from the meter (at the electrical panel) to the Cerbo/Ekrano in the cabinet: same run as grid -> inverters.
         run = float((lengths or {}).get("ac_in_m") or 0)
         if run > 0:
-            c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name="Cable de red Ethernet cat6e", unit="m", section="Generales",
+            c.add(None, _ceil_to(run * (1 + WASTE), CABLE_STEP_M), name=UTP_NET, unit="m", section="Generales",
                   group="Monitoreo", sibling=_named("Cable UTP, cat 5 (interiores o exteriores)"), where="Medidor → Cerbo/Ekrano GX",
                   note=f"{run:g} m del tramo gabinete → tablero eléctrico (largo de «Red → entrada AC») + {int(WASTE * 100)} % de desperdicio, de a {CABLE_STEP_M:g} m")
 
@@ -398,9 +426,9 @@ def _system(c: Collector, eq: dict, coupling: dict, wiring_ctx: dict) -> None:
     for r in B.system_rows(eq, coupling, wiring_ctx):
         item = r["item"]
         if item.startswith("Victron Lynx Power In"):
-            c.add(_named("Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
+            c.add(_named("Barra Victron Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
         elif item.startswith("Pernos"):
-            c.add(_named("Roscas para Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
+            c.add(_named("Pernos Victron Lynx Power In", "Victron Energy"), r["qty"], note=r["note"])
         elif item.startswith("Fusible MEGA de batería") and r.get("amps"):
             c.add(_find("fuse_mega", amps=r["amps"]), r["qty"], name=f"Fusible Mega {r['amps']}A", section="Victron Energy",
                   sibling=_find("fuse_mega", amps=225), note=r["note"])
@@ -481,7 +509,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
         return
     # Oscar (2026-11-13): the gabinete is the norm in every system, Grid Zero included (the Fronius Smart Meter goes in it); the plexo box is
     # only for the odd case with no gabinete, which is a manual edit of this line in the Lista.
-    c.add(_named("Gabinete metálico 50x40x20", "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
+    c.add(_named(CABINET, "Generales"), 1, comment="POR CONFIRMAR MEDIDA",
           note=("un gabinete para el Fronius Smart Meter y sus bornes (Grid Zero); medida base 50x40x20" if grid_zero
                 else "un gabinete para los breakers AC (riel DIN), el Ekrano/Cerbo GX y la barra de tierras; medida base 50x40x20"))
     c.add(_named("Supresor de Picos SDSA 1175", "Generales"), 1, note="uno por proyecto")
@@ -526,7 +554,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     c.add(None, 1, name=breaker_name(1, 20, "ch", "toma de monitoreo"), section="Generales", sibling=_named(breaker_name(2, 20)), note=kit)
     c.add(None, 1, name="Toma doble 15A 125V", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     c.add(None, 1, name="Placa de acero inoxidable para toma doble", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
-    c.add(None, 1, name="Caja rectangular de intemperie 3 huecos 1/2\"", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
+    c.add(None, 1, name="Caja de intemperie rectangular 3 huecos 1/2\"", section="Generales", sibling=_named("Tomacorriente tipo parche 15A, 120V."), note=kit)
     for color in ("rojo", "verde", "blanco"):
         c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=cable_name("cable_thhn", "12", color), unit="m",
               section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo (" + {"rojo": "fase", "blanco": "neutro", "verde": "tierra"}[color] + ")",
