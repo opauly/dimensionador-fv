@@ -9,7 +9,7 @@ Oscar's rules (2026-11-13):
     120 V Victron units go in PAIRS: two of them share one 2-pole breaker.
   * AC-coupled Fronius: its output goes to the AC OUT load center ("center") or straight to the critical-loads sub-panel ("subpanel").
   * Grid Zero keeps the breaker in the generation meter base; an extra small load center next to the Fronius is optional (`enabled`): one 2P
-    breaker per Fronius + a 2P 20 A one that feeds the Smart Meter. It does not replace the base.
+    breaker per Fronius + a 2P 15 A one that feeds the Smart Meter. It does not replace the base.
 
 The choice is a small dict kept in the same two homes as the PV coupling: `blob["scratch"]["disconnect"]` for a quote being built,
 `projects.tech_spec["disconnect"]` for a won project.
@@ -28,7 +28,7 @@ LENGTH_LABEL_AC = "Inversor FV → centro de carga de desconexión"
 MODES = ("din", "center", "none")
 FRONIUS_TO = ("subpanel", "center")
 BOX_SPACES = (2, 4, 8)            # NEMA 3R load centers in the catalog
-METER_BREAKER_A = 20             # Smart Meter feed breaker: 2 poles, 20 A
+METER_BREAKER_A = 15             # Smart Meter feed breaker: 2 poles, 15 A
 
 
 def clean(saved: dict | None) -> dict:

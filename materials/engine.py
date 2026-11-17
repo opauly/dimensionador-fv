@@ -24,7 +24,7 @@ from collections import OrderedDict
 from calculations import bom as B
 from calculations import nec_tables as T
 from calculations import wiring as W
-from calculations.meter_cts import ct_count
+from calculations.meter_cts import ct_count, uses_cts
 from materials.catalog import CATALOG, SECTIONS
 from webapp.wizard_steps import disconnect_center
 
@@ -103,6 +103,7 @@ ALIASES = {
     "Cerbo GX": ["cerbo"],
     "Medidor VM-3P75CT": ["vm 3p75ct"],
 }
+VM_BREAKER_A = 15      # breaker that feeds the Victron VM meter (the Fronius Smart Meter uses the same one: METER_BREAKER_A)
 CT_PER_METER = 2   # split-phase: one current transformer per line
 BATTERY_STAND_SLOTS = 6  # US5000/UF5000 per metal stand (3 levels x 2), to be confirmed by Oscar
 METER_CT_KEY = "interconexion-transformador-de-corriente-100a-333mv"
@@ -321,6 +322,10 @@ def _equipment(c: Collector, eq: dict, coupling: dict, lengths: dict | None = No
               note="medidor de energía elegido en Equipos")
         c.add(_BY_KEY[METER_CT_KEY], CT_PER_METER, comment="POR VERIFICAR TAMAÑO",
               note=f"{CT_PER_METER} transformadores de corriente para el medidor (uno por línea)")
+        # The meter reads voltage straight from the panel (85-265 V): it needs its own small breaker (María José's install: 2 poles, 15 A, CH).
+        c.add(None, 1, name=f"Breaker de {VM_BREAKER_A}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
+              sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), where="Alimentación del medidor VM",
+              note=f"protege la toma de voltaje del medidor ({VM_BREAKER_A} A, 2 polos)")
         # Ethernet from the meter (at the electrical panel) to the Cerbo/Ekrano in the cabinet: same run as grid -> inverters.
         run = float((lengths or {}).get("ac_in_m") or 0)
         if run > 0:
@@ -651,7 +656,7 @@ def _conduit(c: Collector, branches: list[dict], opts: dict) -> None:
 BOX_NAMES = {2: "Tablero NEMA 3R 2 espacios, marca CH/ SD, barras de 125A, Monofasico",
              4: "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico",
              8: "Tablero NEMA 3R 8 espacios, marca CH/ SD, barras de 125A, Monofasico"}
-METER_BREAKER_A = 20      # Smart Meter feed breaker in the Grid Zero load center: 2 poles, 20 A (Oscar)
+METER_BREAKER_A = 15      # Fronius Smart Meter feed breaker: 2 poles, 15 A, CH (Oscar, 2026-11-17; it was 20 A)
 METER_FEED_GAUGE = "12"    # Smart Meter voltage supply from the Grid Zero load center: a few metres of #12
 METER_FEED_M = 3
 
@@ -683,7 +688,7 @@ def _center(c: Collector, where: str, items: list[tuple[int, int, int, str]], wh
 
 def _centers(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
     """Load centers (Oscar, 2026-11-13).
-    Grid Zero (optional, extra to the meter base): a 2P breaker per Fronius + a 2P 20 A one that feeds the Smart Meter (+ 3 m of #12).
+    Grid Zero (optional, extra to the meter base): a 2P breaker per Fronius + a 2P 15 A one that feeds the Smart Meter (+ 3 m of #12). Without that optional center the Smart Meter still carries its own 2P 15 A breaker.
     Hybrid / off-grid: the AC OUT center REPLACES the DIN breakers of the Victron units (pairs on a 2P breaker) and also holds the AC-coupled
     Fronius breaker(s) when that is where it lands; the AC IN center replaces the input breakers the same way."""
     disc = wiring_ctx.get("disconnect") or {}
@@ -748,6 +753,11 @@ def build_list(eq: dict, wiring_ctx: dict, spec: dict | None = None, base_layout
 
     c = Collector()
     _equipment(c, eq, coupling, wiring_ctx.get("lengths"), grid_zero)
+    if uses_cts(eq.get("monitoring")) and not (grid_zero and (wiring_ctx.get("disconnect") or {}).get("enabled")):
+        # The Fronius Smart Meter always carries its own 2P 15 A breaker (Oscar, 2026-11-17); with the optional Grid Zero load center it is listed there.
+        c.add(None, 1, name=f"Breaker de {METER_BREAKER_A}A 2 polos, marca CH /SD", section="Generales", group="Interconexión",
+              sibling=_named("Breaker de 20A 2 polos, marca CH /SD"), where="Alimentación del Smart Meter",
+              note=f"protege la alimentación del Fronius Smart Meter ({METER_BREAKER_A} A, 2 polos)")
     if grid_zero:
         _interconnection(c, eq, branches)
     else:

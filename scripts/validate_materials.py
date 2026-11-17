@@ -216,6 +216,7 @@ _resm = ME.build_list(_EQM, CTX, {"materials": {"layout": {"rows": 2}}}, None)
 _bym = {ln["name"]: ln for ln in _resm["lines"] if ln["qty"]}
 check("meter VM-3P75CT x1 on the Victron section", (_bym["Medidor VM-3P75CT"]["qty"], _bym["Medidor VM-3P75CT"]["section"]), (1, "Victron Energy"))
 check("2 current transformers flagged to verify size", (_bym["Transformador de Corriente 100A:333mV"]["qty"], _bym["Transformador de Corriente 100A:333mV"]["comment"]), (2, "POR VERIFICAR TAMAÑO"))
+check("meter brings its own 15 A 2-pole CH breaker, and no meter means no breaker", (_bym["Breaker de 15A 2 polos, marca CH /SD"]["qty"], "Breaker de 15A 2 polos, marca CH /SD" in {ln["name"] for ln in engine.build_list(EQ, CTX, {}, None)["lines"] if ln["qty"]}), (1, False))
 check("meter adds no short UTP, it brings cat6e by metre", (_bym["Cable UTP normal"]["qty"], "Cable de red Ethernet cat6e" in _bym), (_utp0, True))
 _run = CTX["lengths"]["ac_in_m"]
 check("cat6e as long as the cabinet -> panel run (+waste, 5 m steps)", _bym["Cable de red Ethernet cat6e"]["qty"], ME._ceil_to(_run * (1 + ME.WASTE), ME.CABLE_STEP_M))
@@ -304,6 +305,8 @@ _gsm = {ln["name"]: ln for ln in ME.build_list({**_GZ, "monitoring": SM}, {"read
 check("grid zero list: Fronius Smart Meter x1 + 2 current transformers to verify", (_gsm["Fronius Smart Meter WR 100-600 V-3"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["qty"], _gsm["Transformador de Corriente 100A:333mV"]["comment"]), (1, 2, "POR VERIFICAR TAMAÑO"))
 check("grid zero list: the cabinet is the norm; the Smart Meter goes in the usual 50x40x20, flagged to confirm", (_gsm["Gabinete metálico 50x40x20"]["qty"], _gsm["Gabinete metálico 50x40x20"]["comment"]), (1, "POR CONFIRMAR MEDIDA"))
 check("grid zero list: the cabinet comes even without the Smart Meter", "Gabinete metálico 50x40x20" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, True)
+check("grid zero list: the Fronius Smart Meter carries its own 2P 15 A breaker (no load center), and no Smart Meter means none",
+      (_gsm.get("Breaker de 15A 2 polos, marca CH /SD", {}).get("qty"), "Breaker de 15A 2 polos, marca CH /SD" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}), (1, False))
 check("grid zero list: no CTs without the Smart Meter", "Transformador de Corriente 100A:333mV" in {ln["name"] for ln in _gz["lines"] if ln["qty"]}, False)
 check("grid zero wiring: the link run has the same conductors as the generation-base run and no breaker of its own",
       (_gb["gz_link"]["ugc"] == _gb["gz_ac"]["ugc"], _gb["gz_link"]["ocpd_a"]), (True, None))
@@ -401,8 +404,8 @@ check("grid zero on: labels follow the center", (_gz_on["branches"][3]["label"],
 _lg_on = _list({**GZ_EQ, "monitoring": SM}, _gz_on, "grid_zero")
 _lg_off = _list({**GZ_EQ, "monitoring": SM}, _gz_off, "grid_zero")
 _gz_amps = int(_gz_on["branches"][2]["ocpd_a"])
-check("grid zero on: 4-space load center + Fronius breaker + Smart Meter breaker (2P 20 A) + #12 feed",
-      (_qty(_lg_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), _qty(_lg_on, f"Breaker de {_gz_amps}A 2 polos, marca CH /SD") + _qty(_lg_on, "Breaker de 20A 2 polos, marca CH /SD") * (_gz_amps != 20),
+check("grid zero on: 4-space load center + Fronius breaker + Smart Meter breaker (2P 15 A) + #12 feed",
+      (_qty(_lg_on, "Tablero NEMA 3R 4 espacios, marca CH/ SD, barras de 125A, Monofasico"), _qty(_lg_on, f"Breaker de {_gz_amps}A 2 polos, marca CH /SD") + _qty(_lg_on, "Breaker de 15A 2 polos, marca CH /SD") * (_gz_amps != 15),
        any("Centro de carga → Smart Meter" in w for ln in _lg_on.values() for w in ln.get("wheres") or [])), (1, 2, True))
 check("grid zero on: the base, its breaker and the padlock stay (it does not replace them)",
       ("Base para medidor monofásica con interruptor principal tipo parche, clase 100 (combo base)" in _lg_on or any("Base para medidor" in n for n in _lg_on),
@@ -497,8 +500,8 @@ check("gz parallel: the load center is forced and joins the Fronius (one run eac
 check("gz parallel: the base breaker covers the sum (> single Fronius breaker)", _g2k["gz_ac"]["ocpd_a"] > _gb["gz_ac"]["ocpd_a"], True)
 _lg2 = _list({**_b2["equipment"], "monitoring": SM}, _g2, "grid_zero")
 _f_a = int(_g2k["gz_disc"]["ocpd_a"])
-check("gz parallel list: 2 Fronius, 8-space load center (2 x 2P + meter 2P 20 A), 2 breakers of the Fronius size, base breaker of the sum, 2 EMT stub sets",
-      (_lg2[next(n for n in _lg2 if n.startswith("Inversor Fronius"))]["qty"], _qty(_lg2, _BOX(8)), _qty(_lg2, _B2(_f_a)), _qty(_lg2, "Breaker de 20A 2 polos"),
+check("gz parallel list: 2 Fronius, 8-space load center (2 x 2P + meter 2P 15 A), 2 breakers of the Fronius size, base breaker of the sum, 2 EMT stub sets",
+      (_lg2[next(n for n in _lg2 if n.startswith("Inversor Fronius"))]["qty"], _qty(_lg2, _BOX(8)), _qty(_lg2, _B2(_f_a)), _qty(_lg2, "Breaker de 15A 2 polos"),
        _qty(_lg2, f"Breaker {int(_g2k['gz_ac']['ocpd_a'])}A compatible con base"), _qty(_lg2, 'Conector de presión 1" EMT')),
       (2, 1, 2, 1, 1, 8))
 _cg2, _ = CB.build_config({"system_type": "grid_zero", "client_name": "Prueba"}, {"eq": {**_b2["equipment"], "monitoring": SM}, "wiring": _g2, "blob": _b2}, {})
