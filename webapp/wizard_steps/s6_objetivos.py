@@ -37,6 +37,9 @@ _PRESET_INDEX = {"minimo": 0, "recomendado": 1, "maximo": 2}
 # "Según datos reales" (Off-Grid only): the values the real-data simulation supports — autonomy 2 days and ~2x PV coverage already meet
 # "98% of days with energy, no stretch over 2 days" (more PV barely helps beyond that); margin and inverter ceiling are policy, so
 # they take the "Mínimo aceptable" neighbourhood. Everything else (hidden goals) follows the "Recomendado" tier.
+DEFAULT_MAX_FAIL_DAYS = 2.0           # off-grid: days a year the system may fall short of the load (5-year average), pre-filled
+DEFAULT_OUTAGE_COVER_PCT = 90.0       # hybrid: share of real grid outages the battery must outlast (the fleet simulation's own bar), pre-filled
+DEFAULT_NIGHT_COVER_PCT = 90.0        # hybrid: share of nights the battery must carry to sunrise, pre-filled
 DEFAULT_ROOF_PANEL_W = 620.0      # pre-filled value of the editable "Potencia del panel de referencia" field (the user owns the number)
 DATA_PRESET = "datos_reales"
 _DATA_PRESET_LABEL = "Según datos reales"
@@ -60,6 +63,10 @@ FIELD_SPECS: dict[str, list[dict]] = {
     "off_grid": [
         {"name": "autonomy_days", "label": "Días de autonomía", "unit": "días", "kind": _N, "step": 0.25,
          "help": "Días de consumo que el banco de baterías debe cubrir sin generación solar."},
+        {"name": "max_fail_days_year", "label": "Días al año sin cubrir el consumo (máximo)", "unit": "días/año", "kind": _N, "step": 0.5, "optional": True,
+         "help": "Cuántos días al año, como máximo, puede quedar el sistema sin cubrir todo el consumo (promedio de {años} de clima real de la zona del sitio). Los paneles y la batería salen de la combinación más barata que lo cumple; la autonomía y la cobertura FV de abajo quedan como mínimos. Vacío = solo las fórmulas. Rango 0.5–15."},
+        {"name": "typical_min_soc_pct", "label": "Nivel mínimo típico de la batería (opcional)", "unit": "%", "kind": _N, "step": 5, "optional": True,
+         "help": "Hasta dónde baja la batería en un día normal (antes del amanecer). Si lo pones, la batería se agranda lo necesario para no bajar de ahí, medido con el clima y los consumos reales de la flota. Vacío = no se pide. Rango 30–95 %."},
         {"name": "reserve_soc_pct", "label": "Margen ante falla de FV", "unit": "%", "kind": _N, "step": 5,
          "help": "Batería extra que no cuentas en la autonomía, por si falla la generación. Más margen = batería más grande (35 % pide ≈40 % más batería que 10 %). Sugerido: 20–35 %."},
         {"name": "pv_design_factor", "label": "Cobertura FV", "unit": "× consumo diario", "kind": _N, "step": 0.05,
@@ -93,6 +100,10 @@ FIELD_SPECS: dict[str, list[dict]] = {
          "help": "Noches de la carga crítica que la batería debe sostener durante un corte."},
         {"name": "cycling_nights", "label": "Noches de ciclado", "unit": "noches", "kind": _N, "step": 0.05,
          "help": "Noches de la carga servida que la ventana diaria de ciclado (sobre la reserva) debe cubrir."},
+        {"name": "outage_cover_pct", "label": "Cortes de red que debe aguantar (mínimo)", "unit": "% de los cortes", "kind": _N, "step": 1, "optional": True,
+         "help": "Qué parte de los cortes de red reales (duración medida en la flota) debe aguantar la batería con las cargas críticas, con {años} de clima real de la zona del sitio. La batería sale del tamaño más chico que lo cumple; las noches de respaldo y de ciclado de abajo quedan como mínimos. Vacío = solo las fórmulas. Rango 50–99 %."},
+        {"name": "night_cover_pct", "label": "Noches que debe cubrir (mínimo)", "unit": "% de las noches", "kind": _N, "step": 1, "optional": True,
+         "help": "En qué parte de las noches la batería debe llegar al amanecer con la carga crítica, sin comprar a la red ({años} de clima real de la zona). Vacío = no se pide. Rango 50–99 %."},
         {"name": "battery_basis", "label": "Base de la batería", "unit": "", "kind": _S,
          "options": [("critical", "Cargas críticas"), ("critical_plus_comfort", "Críticas + confort"), ("whole_building", "Todo el edificio")],
          "help": "Se registra, pero esta versión del modelo siempre dimensiona con las cargas críticas."},
@@ -188,7 +199,9 @@ def _default_goals(system_type: str, daytime_fraction: float) -> dict:
     if system_type == "grid_zero":
         g = dt.grid_zero_default_goals(daytime_fraction)
         return {"reduction_target_pct": g.reduction_target_pct, "max_dc_ac_ratio": g.max_dc_ac_ratio, "max_system_kwp": None}
-    return {**_preset_goals(system_type, _default_preset(system_type)), "roof_area_m2": None, "roof_panel_w": DEFAULT_ROOF_PANEL_W,
+    return {**_preset_goals(system_type, _default_preset(system_type)), **({"max_fail_days_year": DEFAULT_MAX_FAIL_DAYS} if system_type == "off_grid" else {}),
+            **({"outage_cover_pct": DEFAULT_OUTAGE_COVER_PCT, "night_cover_pct": DEFAULT_NIGHT_COVER_PCT} if system_type == "hybrid" else {}),
+            "roof_area_m2": None, "roof_panel_w": DEFAULT_ROOF_PANEL_W,
             "roof_panel_len_m": dt.ROOF_DEFAULT_PANEL_LEN_M, "roof_panel_wid_m": dt.ROOF_DEFAULT_PANEL_WID_M, "roof_packing_pct": dt.ROOF_DEFAULT_PACKING_PCT}
 
 
@@ -264,7 +277,8 @@ def _inputs(blob: dict, system_type: str, peak_basis: str | None = None) -> dict
         if avg_kwh <= 0:
             missing.append("Falta el consumo mensual promedio (Paso 5).")
         avg_irr = sum(monthly) / 12 if len(monthly) == 12 else 127.0
-        return {"missing": missing, "avg_kwh_month": avg_kwh, "avg_irradiance_kwh_kwp_month": avg_irr}
+        return {"missing": missing, "avg_kwh_month": avg_kwh, "avg_irradiance_kwh_kwp_month": avg_irr,
+                "site_lat": site.get("lat"), "site_lon": site.get("lon")}
 
     if len(monthly) != 12:
         missing.append("Falta la irradiancia PVGIS del sitio (Paso 3).")
@@ -282,7 +296,7 @@ def _inputs(blob: dict, system_type: str, peak_basis: str | None = None) -> dict
         if daily <= 0 and lines:
             missing.append("El consumo diario calculado es 0 (Paso 5).")
         return {"missing": missing, "daily_kwh": daily, "peak_kw": peak, "monthly_kwh_kwp": monthly,
-                "daily_kwh_max": consumption.get("daily_kwh_max")}
+                "daily_kwh_max": consumption.get("daily_kwh_max"), "site_lat": site.get("lat"), "site_lon": site.get("lon")}
 
     # hybrid — same derivation the generator's own test page uses for the whole-home figures
     critical_daily = float(consumption.get("daily_kwh_diversified", consumption.get("daily_kwh", 0.0)) or 0)
@@ -310,7 +324,7 @@ def _inputs(blob: dict, system_type: str, peak_basis: str | None = None) -> dict
     return {"missing": missing, "critical_daily_kwh": critical_daily,
             "critical_peak_kw": design["used_kw"] if design else peak, "critical_peak_calc_kw": peak, "peak_design": design,
             "whole_home_daily_kwh": critical_daily + main_daily, "whole_home_peak_kw": peak + main_peak,
-            "monthly_kwh_kwp": monthly}
+            "monthly_kwh_kwp": monthly, "site_lat": site.get("lat"), "site_lon": site.get("lon")}
 
 
 # ── parsing, validation ──────────────────────────────────────────────────
@@ -350,6 +364,17 @@ def _status(system_type: str, goals: dict, assumptions: dict, daytime_fraction: 
         return {"errors": st["errors"], "needs_ack": st["needs_acknowledgement"], "ceiling_pct": st["ceiling_pct"]}
 
     errors = dt.validate_goals(system_type, _tier_from_goals(system_type, goals))
+    fd = goals.get("max_fail_days_year") if system_type == "off_grid" else None
+    if fd is not None and not (0.5 <= fd <= 15.0):
+        errors.append(f"max_fail_days_year: debe estar entre 0.5 y 15 días/año o quedar vacío (recibido {fd:g})")
+    if system_type == "hybrid":
+        for _k, _lab in (("outage_cover_pct", "cortes de red"), ("night_cover_pct", "noches")):
+            v = goals.get(_k)
+            if v is not None and not (50.0 <= v <= 99.0):
+                errors.append(f"{_k}: % de {_lab} debe estar entre 50 y 99 o quedar vacío (recibido {v:g})")
+    soc_t = goals.get("typical_min_soc_pct") if system_type == "off_grid" else None
+    if soc_t is not None and not (30.0 <= soc_t <= 95.0):
+        errors.append(f"typical_min_soc_pct: debe estar entre 30 y 95 % o quedar vacío (recibido {soc_t:g})")
     roof = goals.get("roof_area_m2")
     if roof is not None and roof <= 0:
         errors.append("roof_area_m2: debe ser mayor que 0 o quedar vacío")
@@ -387,6 +412,181 @@ def _fmt(value, nd=1):
     return "—" if value is None else f"{value:,.{nd}f}"
 
 
+_COST_CACHE: dict = {}
+
+
+def _unit_costs() -> tuple[float, float] | None:
+    """(US$ per kWp of panels, US$ per kWh of battery): the catalog's median cost per unit. None when the catalog can't say."""
+    import statistics
+    import time
+
+    hit = _COST_CACHE.get("v")
+    if hit and time.time() - hit[0] < 600:
+        return hit[1]
+    try:
+        from database import equipment_db
+
+        pan = [float(p["cost_usd"]) / (float(p["wp"]) / 1000.0) for p in equipment_db.list_panels() if p.get("cost_usd") and p.get("wp")]
+        bat = [float(b["cost_usd"]) / float(b["capacity_kwh"]) for b in equipment_db.list_batteries() if b.get("cost_usd") and b.get("capacity_kwh")]
+        val = (statistics.median(pan), statistics.median(bat)) if pan and bat else None
+    except Exception:                                   # noqa: BLE001
+        val = None
+    _COST_CACHE["v"] = (time.time(), val)
+    return val
+
+
+def _apply_reliability(band: dict, goals: dict, inputs: dict) -> dict:
+    """Off-Grid "días al año sin cubrir" goal: Piso / Óptimo / Techo (2x / 1x / 0.5x the goal) take the cheapest array + battery that meets
+    it with the real weather of the site's zone (`fleet_simulation.cheapest_design`). The formula band stays as the floor: autonomy and PV
+    coverage are never lowered. Adds `rel_goal` to each column; no goal, no history for the zone or no prices -> band unchanged."""
+    goal = goals.get("max_fail_days_year")
+    if not goal:
+        return band
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds, costs = fs.get_dataset(), _unit_costs()
+        zone = fs.nearest_zone(ds, inputs.get("site_lat"), inputs.get("site_lon")) if ds else None
+        if not (zone and costs and ds.get("k")):
+            return band
+        len_m, wid_m, packing = dt.roof_geometry(goals)
+        cap = dt.roof_capacity_kwp(goals.get("roof_area_m2"), goals.get("roof_panel_w"), len_m, wid_m, packing)
+        top = max(c["system_kw"] for c in band.values())
+        names = {"piso": 2.0, "optimo": 1.0, "techo": 0.5}
+        targets = {n: {"days": float(goal) * m, "kwp_min": float(band[n]["system_kw"]), "kwh_min": float(band[n]["battery_nominal_kwh"])} for n, m in names.items()}
+        res = fs.cheapest_design(ds, zone, float(inputs["daily_kwh"]), targets,
+                                 kwp_max=max(float(cap), top) if cap else top * 1.8,
+                                 usd_per_kwp=costs[0], usd_per_kwh=costs[1])
+    except Exception:                                   # noqa: BLE001 — best-effort, Objetivos never breaks on it
+        return band
+    if not res:
+        return band
+    out = {}
+    for name, col in band.items():
+        col, r = dict(col), res[name]
+        scale = r["kwp"] / col["system_kw"] if col["system_kw"] else 1.0
+        col["target_daily_generation_kwh"] = col["target_daily_generation_kwh"] * scale
+        if col.get("worst_month_load_coverage") is not None:
+            col["worst_month_load_coverage"] *= scale
+            col["worst_month_covers_load"] = col["worst_month_load_coverage"] >= 1.0
+        if col["battery_nominal_kwh"]:
+            col["battery_usable_kwh"] = col["battery_usable_kwh"] * r["battery_kwh"] / col["battery_nominal_kwh"]
+        col["system_kw"], col["battery_nominal_kwh"], col["rel_goal"] = r["kwp"], r["battery_kwh"], r
+        out[name] = col
+    return out
+
+
+def _apply_grid_zero_climate(band: dict, goals: dict, inputs: dict) -> dict:
+    """Grid Zero with the zone's real weather: each column's array is the smallest one whose kWh reduction reaches that column's target
+    when the site's load is replayed hour by hour against 5 years of sun with zero export (`fleet_simulation.grid_zero_size`). The formula
+    model assumes every kWh produced up to the daytime consumption is used, which is true only if production and use coincide hour by
+    hour; the hourly replay does not assume that. Replaces the column's kWp, inverter and reduction and adds `climate` to it. No
+    history for the zone -> band unchanged."""
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds = fs.get_dataset()
+        zone = fs.nearest_zone(ds, inputs.get("site_lat"), inputs.get("site_lon")) if ds else None
+        if not (zone and ds.get("k")):
+            return band
+        daily = float(inputs["avg_kwh_month"]) / 30.4
+        ratio = float(goals["max_dc_ac_ratio"])
+        cap = goals.get("max_system_kwp")
+        out = {}
+        for name, col in band.items():
+            eff = min(float(col["reduction_target_pct"]), float(col["ceiling_pct"]))
+            r = fs.grid_zero_size(ds, zone, daily, eff, ratio)
+            if r is None:
+                return band
+            kwp, capped = r["kwp"], False
+            if cap is not None and kwp > float(cap):
+                kwp, capped = float(cap), True
+                r = {**r, **(fs.grid_zero_reduction(ds, zone, daily, kwp, ratio) or {})}
+            out[name] = {**col, "system_kw": kwp, "inverter_kw": kwp / ratio, "reduction_pct": r["mean_pct"], "capped_by_max_kwp": capped,
+                         "climate": {"worst_pct": r["worst_pct"], "use_pct": r["use_pct"], "zone_label": r["zone_label"], "years": r["years"],
+                                     "reached": r["reached"] and not capped, "formula_kwp": col["system_kw"]}}
+        return out
+    except Exception:                                   # noqa: BLE001 — best-effort, Objetivos never breaks on it
+        return band
+
+
+def _apply_hybrid_reliability(band: dict, goals: dict, inputs: dict) -> dict:
+    """Hybrid goals "cortes de red que aguanta" / "noches que cubre": each column's battery grows, when needed, to the smallest bank that
+    meets them with the real weather of the site's zone (5 years) and the fleet's real grid outages (`fleet_simulation.hybrid_battery_for`).
+    Piso / Óptimo / Techo ask 5 points less / the goal / 5 points more. The formula battery is the floor and the panels are untouched
+    (the grid is the fallback, so panels are an energy-savings question). Adds `rel_goal` to each column; nothing set / no zone history
+    / too few real outages -> band unchanged."""
+    out_goal, night_goal = goals.get("outage_cover_pct"), goals.get("night_cover_pct")
+    if not (out_goal or night_goal):
+        return band
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds = fs.get_dataset()
+        zone = fs.nearest_zone(ds, inputs.get("site_lat"), inputs.get("site_lon")) if ds else None
+        if not (zone and ds.get("k") and ds.get("hybrid")):
+            return band
+        len_m, wid_m, packing = dt.roof_geometry(goals)
+        cap = dt.roof_capacity_kwp(goals.get("roof_area_m2"), goals.get("roof_panel_w"), len_m, wid_m, packing)
+        kwp = float(band["optimo"]["system_kw"])
+        kwp = min(kwp, float(cap)) if cap else kwp
+        step = {"piso": -5.0, "optimo": 0.0, "techo": 5.0}
+        targets = {n: {"outage_pct": None if not out_goal else min(99.0, max(50.0, float(out_goal) + d)),
+                       "night_pct": None if not night_goal else min(99.0, max(50.0, float(night_goal) + d))} for n, d in step.items()}
+        res = fs.hybrid_battery_for(ds, zone, float(inputs["critical_daily_kwh"]), kwp, float(goals.get("reserve_soc_pct") or 30.0), targets)
+    except Exception:                                   # noqa: BLE001 — best-effort, Objetivos never breaks on it
+        return band
+    if not res:
+        return band
+    out, floor = {}, 0.0
+    for name in ("piso", "optimo", "techo"):
+        col, r = dict(band[name]), res[name]
+        from_kwh = col["battery_nominal_kwh"]
+        floor = max(floor, from_kwh, r["kwh"])          # keeps Piso <= Óptimo <= Techo
+        col["battery_nominal_kwh"] = floor
+        col["rel_goal"] = {**r, "outage_target": targets[name]["outage_pct"], "night_target": targets[name]["night_pct"],
+                           "from_kwh": from_kwh, "to_kwh": floor, "raised": floor > from_kwh + 1e-9}
+        out[name] = col
+    return out
+
+
+def _apply_typical_soc(band: dict, target_pct, daily_kwh: float) -> dict:
+    """Off-Grid "nivel mínimo típico" goal: each column's battery grows, when needed, to the smallest bank whose typical daily low
+    stays at or above the goal — replayed against the fleet's real sun and load patterns (`fleet_simulation`). Adds `soc_goal` to the
+    column: {"target", "from_kwh", "to_kwh", "status": "raised" | "met" | "unattainable" | "pending"}. No goal -> band unchanged."""
+    if not target_pct:
+        return band
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds = fs.get_dataset()
+    except Exception:                                   # noqa: BLE001 — best-effort, never block Objetivos
+        ds = None
+    # One requirement, measured with the Punto óptimo's array and applied to all three columns, so Piso <= Óptimo <= Techo
+    # still holds for the battery (a smaller array would otherwise ask for a bigger bank than the optimum).
+    res = None
+    if ds is not None and ds.get("k"):
+        try:
+            res = fs.battery_for_typical_soc(ds, float(daily_kwh), float(band["optimo"]["system_kw"]), float(target_pct))
+        except Exception:                               # noqa: BLE001
+            res = None
+    out = {}
+    for name, col in band.items():
+        col = dict(col)
+        goal = {"target": float(target_pct), "from_kwh": col["battery_nominal_kwh"], "to_kwh": col["battery_nominal_kwh"], "status": "pending"}
+        if res is not None:
+            need = res["kwh"]
+            if need is None:
+                goal["status"] = "unattainable"
+            elif need > col["battery_nominal_kwh"] + 1e-9:
+                col["battery_nominal_kwh"], goal["to_kwh"], goal["status"] = need, need, "raised"
+            else:
+                goal["status"] = "met"
+        col["soc_goal"] = goal
+        out[name] = col
+    return out
+
+
 def _raw_band(system_type: str, goals: dict, assumptions: dict, inputs: dict, daytime_fraction: float):
     """(band, goals object) — the numeric Piso / Punto óptimo / Techo targets, shared by the display block below
     and by the goals-vs-design check at Equipos so the two always judge against the same numbers."""
@@ -394,18 +594,22 @@ def _raw_band(system_type: str, goals: dict, assumptions: dict, inputs: dict, da
         g = dt.GridZeroGoals(
             reduction_target_pct=float(goals["reduction_target_pct"]), max_dc_ac_ratio=float(goals["max_dc_ac_ratio"]),
             max_system_kwp=goals.get("max_system_kwp"))
-        return dt.grid_zero_target_band(
+        band = dt.grid_zero_target_band(
             g, avg_kwh_month=inputs["avg_kwh_month"],
-            avg_irradiance_kwh_kwp_month=inputs["avg_irradiance_kwh_kwp_month"], daytime_fraction=daytime_fraction), g
+            avg_irradiance_kwh_kwp_month=inputs["avg_irradiance_kwh_kwp_month"], daytime_fraction=daytime_fraction)
+        return _apply_grid_zero_climate(band, goals, inputs), g
     tier = _tier_from_goals(system_type, goals)
     if system_type == "off_grid":
-        return dt.offgrid_target_band(tier, daily_kwh=inputs["daily_kwh"], peak_kw=inputs["peak_kw"],
-                                      monthly_kwh_kwp=inputs["monthly_kwh_kwp"]), tier
+        band = dt.offgrid_target_band(tier, daily_kwh=inputs["daily_kwh"], peak_kw=inputs["peak_kw"],
+                                      monthly_kwh_kwp=inputs["monthly_kwh_kwp"])
+        band = _apply_reliability(band, goals, inputs)
+        return _apply_typical_soc(band, goals.get("typical_min_soc_pct"), inputs["daily_kwh"]), tier
     kw = dict(critical_daily_kwh=inputs["critical_daily_kwh"], critical_peak_kw=inputs["critical_peak_kw"],
               whole_home_daily_kwh=inputs["whole_home_daily_kwh"], whole_home_peak_kw=inputs["whole_home_peak_kw"],
               monthly_kwh_kwp=inputs["monthly_kwh_kwp"], daytime_fraction=_hybrid_daytime(),
               night_load_fraction=assumptions.get("night_load_fraction"))
-    return dt.hybrid_target_band(tier, reduction_target_pct=goals.get("reduction_target_pct"), **kw), tier
+    band = dt.hybrid_target_band(tier, reduction_target_pct=goals.get("reduction_target_pct"), **kw)
+    return _apply_hybrid_reliability(band, goals, inputs), tier
 
 
 def _roof_rows_notes(cols: list, goals: dict, inputs: dict, daily_kwh: float | None):
@@ -455,11 +659,20 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             {"label": "Inversor (potencia AC)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
             {"label": "Reducción de kWh que entrega", "unit": "%", "values": [_fmt(c["reduction_pct"]) for c in cols]},
         ]
+        clim = band["optimo"].get("climate")
+        if all(c.get("climate") for c in cols):
+            rows += [{"label": f"Peor de los {_yrs()}", "unit": "%", "values": [_fmt(c["climate"]["worst_pct"]) for c in cols], "sub": "extra"},
+                     {"label": "Parte de lo que producen los paneles que se aprovecha", "unit": "%",
+                      "values": [_fmt(c["climate"]["use_pct"], 0) for c in cols], "sub": "extra"}]
         notes = [f"Máximo alcanzable sin baterías: {_fmt(band['optimo']['ceiling_pct'])}% — solo el consumo diurno "
                  f"({_fmt(daytime_fraction * 100, 0)}% del total) puede servirse con solar sin exportar.",
-                 "Modelo de promedio mensual con cero exportación, el mismo que usa el paso de Equipos."]
+                 (f"Hora por hora con {clim['years']} años de clima real de {clim['zone_label']} y cero exportación: el sol no coincide con el consumo, "
+                  f"así que se necesita más panel que con el promedio mensual ({_fmt(clim['formula_kwp'])} kWp en el punto óptimo con ese modelo)."
+                  if clim else "Modelo de promedio mensual con cero exportación, el mismo que usa el paso de Equipos.")]
         if not band["optimo"]["attainable"]:
             notes.append("La meta excede ese máximo: el tamaño mostrado entrega el máximo, no la meta.")
+        elif clim and not clim["reached"] and not band["optimo"]["capped_by_max_kwp"]:
+            notes.append("Con el clima y los consumos reales ni el arreglo más grande de la simulación llega a la meta: baja la meta.")
         if band["optimo"]["capped_by_max_kwp"]:
             notes.append("El tope de tamaño limita el sistema; la reducción mostrada es la que entrega ese tope.")
         return {"rows": rows, "notes": notes, "headline": notes[0], "warnings": notes[2:],
@@ -473,6 +686,9 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
             {"label": "Batería (capacidad nominal)", "unit": "kWh", "values": [_fmt(c["battery_nominal_kwh"]) for c in cols]},
             {"label": "Inversor (potencia AC continua)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
         ]
+        if all(c.get("rel_goal") for c in cols):
+            rows += [{"label": f"Días al año sin cubrir el consumo (promedio de {_yrs()})", "unit": "días", "values": [_fmt(c["rel_goal"]["days_year"]) for c in cols]},
+                     {"label": f"Peor de los {_yrs()}", "unit": "días", "values": [_fmt(c["rel_goal"]["days_year_worst"], 0) for c in cols], "sub": "extra"}]
         roof_row, roof_notes, roof_warn = _roof_rows_notes(cols, goals, inputs, inputs["daily_kwh"])
         if roof_row:
             rows[1:1] = roof_row
@@ -483,16 +699,35 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
                  f"Paneles según el rendimiento promedio anual × PR {a['array_pr']}. Inversor = pico ÷ {_fmt(a['inverter_loading_target_pct'], 0)}%."]
         if not band["optimo"]["worst_month_covers_load"]:
             notes.append("En el peor mes el arreglo recomendado no alcanza a cubrir el consumo diario.")
+        soc_warn, soc_text = [], ""
+        rg = band["optimo"].get("rel_goal")
+        if rg:
+            soc_text = (f"Meta de {_fmt(rg['target'], 1)} días/año sin cubrir: la combinación más barata que la cumple con el clima real de {rg['zone_label']} "
+                        f"({rg['years']} años) es {_fmt(band['optimo']['system_kw'])} kWp y {_fmt(band['optimo']['battery_nominal_kwh'])} kWh "
+                        f"({_fmt(rg['days_year'])} días/año; peor año {_fmt(rg['days_year_worst'], 0)}). ")
+            if not rg["met"]:
+                soc_warn.append("Ninguna combinación de la búsqueda llega a la meta de días sin cubrir: sube la meta, o revisa el techo disponible.")
+        g_opt = band["optimo"].get("soc_goal")
+        if g_opt:
+            if g_opt["status"] == "raised":
+                soc_text += (f"Nivel mínimo típico {_fmt(g_opt['target'], 0)} %: la batería sube de {_fmt(g_opt['from_kwh'])} a {_fmt(g_opt['to_kwh'])} kWh "
+                                "(punto óptimo) para que en un día normal no baje de ahí, según el clima y los consumos reales de la flota.")
+            elif g_opt["status"] == "met":
+                soc_text += f"Nivel mínimo típico {_fmt(g_opt['target'], 0)} %: ya se cumple con la batería del punto óptimo (no la agranda)."
+            elif g_opt["status"] == "unattainable":
+                soc_warn.append(f"Ninguna batería razonable logra un nivel mínimo típico de {_fmt(g_opt['target'], 0)} % con estos paneles: sube la cobertura FV o baja la meta.")
+            else:
+                soc_text += "Nivel mínimo típico: la prueba con datos de la flota se está preparando; recarga en un momento y la batería se ajusta."
         dmax = inputs.get("daily_kwh_max")
         if dmax and inputs["daily_kwh"] > 0:
             # Same goals, same formulas, only the load basis changes -> the all-at-maximum case for comparison.
             mx = dt.offgrid_targets(tier, daily_kwh=dmax, peak_kw=inputs["peak_kw"], monthly_kwh_kwp=inputs["monthly_kwh_kwp"])
             notes.insert(1, f"Base de consumo: USO ESPERADO ({_fmt(inputs['daily_kwh'])} kWh/día). Si todo se usara al máximo declarado: "
                             f"{_fmt(dmax)} kWh/día → {_fmt(mx['system_kw'])} kWp de paneles y {_fmt(mx['battery_nominal_kwh'])} kWh de batería (punto óptimo).")
-        warnings = ([roof_warn] if roof_warn else []) + (["En el peor mes el arreglo recomendado no alcanza a cubrir el consumo diario."]
-                                                          if not band["optimo"]["worst_month_covers_load"] else [])
+        warnings = ([roof_warn] if roof_warn else []) + soc_warn + (["En el peor mes el arreglo recomendado no alcanza a cubrir el consumo diario."]
+                                                                    if not band["optimo"]["worst_month_covers_load"] else [])
         details = [n for n in notes[1:] if not n.startswith("En el peor mes el arreglo recomendado")]
-        return {"rows": rows, "notes": notes, "headline": notes[0], "warnings": warnings, "details": details,
+        return {"rows": rows, "notes": notes, "headline": (notes[0] + (" " + soc_text if soc_text else "")), "warnings": warnings, "details": details,
                 "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
     # hybrid
@@ -503,6 +738,12 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
         {"label": "Inversor (potencia AC, en isla)", "unit": "kW", "values": [_fmt(c["inverter_kw"]) for c in cols]},
         {"label": "Reducción de kWh que entrega", "unit": "%", "values": [_fmt(c["kwh_reduction_pct_at_size"]) for c in cols]},
     ]
+    rel = all(c.get("rel_goal") for c in cols)
+    if rel:
+        if goals.get("outage_cover_pct"):
+            rows.append({"label": f"Cortes de red que aguanta (clima real de {_yrs()})", "unit": "%", "values": [_fmt(c["rel_goal"]["outage_cover_pct"], 0) for c in cols]})
+        if goals.get("night_cover_pct"):
+            rows.append({"label": f"Noches que cubre (clima real de {_yrs()})", "unit": "%", "values": [_fmt(c["rel_goal"]["nights_ok_pct"], 0) for c in cols]})
     roof_row, roof_notes, roof_warn = _roof_rows_notes(cols, goals, inputs, None)
     if roof_row:
         rows[1:1] = roof_row
@@ -518,9 +759,19 @@ def _block(system_type: str, goals: dict, assumptions: dict, inputs: dict, dayti
     if not assumptions.get("site_exports_to_grid") and tier.pv_coverage > dt.NON_EXPORTING_COVERAGE_CEILING:
         notes.append(f"Cobertura {_fmt(tier.pv_coverage, 2)}× supera ~{dt.NON_EXPORTING_COVERAGE_CEILING}×: un sitio que no exporta no aprovecharía el excedente.")
     n_roof = len(roof_notes)
-    warnings = ([roof_warn] if roof_warn else []) + [n for n in notes if n.startswith("Cobertura ") and "no exporta" in n]
+    rel_text, rel_warn = "", []
+    if rel:
+        rg = band["optimo"]["rel_goal"]
+        want = " y ".join(t for t in (f"aguantar {_fmt(rg['outage_target'], 0)} % de los cortes de red" if rg["outage_target"] else "",
+                                      f"cubrir {_fmt(rg['night_target'], 0)} % de las noches" if rg["night_target"] else "") if t)
+        rel_text = (f"Meta: {want}, con el clima real de {rg['zone_label']} ({rg['years']} años) y los cortes reales de la flota. "
+                    + (f"La batería sube de {_fmt(rg['from_kwh'])} a {_fmt(rg['to_kwh'])} kWh (punto óptimo)." if rg["raised"]
+                       else f"La batería de la fórmula ({_fmt(rg['from_kwh'])} kWh) ya lo cumple."))
+        if not all(c["rel_goal"]["met"] for c in cols):
+            rel_warn.append("Con las baterías de la búsqueda no se llega a la meta de cortes o noches en algún escenario: baja la meta o revisa la reserva de SoC.")
+    warnings = ([roof_warn] if roof_warn else []) + rel_warn + [n for n in notes if n.startswith("Cobertura ") and "no exporta" in n]
     details = [n for n in notes[n_roof + 1:] if n not in warnings] + list(roof_notes[:1])
-    return {"rows": rows, "notes": notes, "headline": notes[n_roof], "warnings": warnings, "details": details,
+    return {"rows": rows, "notes": notes, "headline": notes[n_roof] + (" " + rel_text if rel_text else ""), "warnings": warnings, "details": details,
             "optimo": {"kwp": band["optimo"]["system_kw"], "battery_kwh": band["optimo"]["battery_nominal_kwh"], "inverter_kw": band["optimo"]["inverter_kw"], "peak_kw": inputs.get("peak_kw") or inputs.get("critical_peak_kw")}}
 
 
@@ -615,6 +866,12 @@ def _current(blob: dict, system_type: str, daytime_fraction: float) -> dict:
     if stored.get("system_type") == system_type and stored.get("goals"):
         defaults = _default_goals(system_type, daytime_fraction)
         goals = {**defaults, **stored["goals"]}
+        if system_type == "off_grid" and "max_fail_days_year" not in stored["goals"]:
+            goals["max_fail_days_year"] = None              # goals saved before this one existed keep the sizing they were confirmed with
+        if system_type == "hybrid":
+            for _k in ("outage_cover_pct", "night_cover_pct"):
+                if _k not in stored["goals"]:
+                    goals[_k] = None                        # same for hybrid drafts saved before these goals existed
         assumptions = {**_default_assumptions(system_type), **(stored.get("assumptions") or {})}
         if system_type == "hybrid" and "peak_basis" not in (stored.get("assumptions") or {}):
             assumptions["peak_basis"] = "calculated"        # a draft saved before the option existed keeps the peak it was sized with
@@ -633,6 +890,13 @@ def _daytime_fraction(blob: dict, system_type: str, vid: str | None) -> tuple[fl
     return _hybrid_daytime(), ""
 
 
+def _yrs() -> str:
+    """"5 años": how many years of real weather back the reliability goals (grows as the climate history is updated)."""
+    from calculations import climate_history
+
+    return climate_history.years_text()
+
+
 def build_context(blob: dict, vid: str | None = None) -> dict:
     blob = blob or {}
     system_type = _system_type(blob)
@@ -646,7 +910,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
     ack_ok = (not status["needs_ack"]) or cur["ack_ceiling_pct"] == status["ceiling_pct"]
     field_errors = {e.split(":", 1)[0]: e.split(":", 1)[1].strip() for e in status["errors"] if ":" in e}
     fields = [
-        {**spec, "value": goals.get(spec["name"]), "error": field_errors.get(spec["name"]),
+        {**spec, "help": (spec.get("help") or "").replace("{años}", _yrs()), "value": goals.get(spec["name"]), "error": field_errors.get(spec["name"]),
          "min": _range(system_type, spec["name"])[0], "max": _range(system_type, spec["name"])[1]}
         for spec in FIELD_SPECS[system_type]
     ]

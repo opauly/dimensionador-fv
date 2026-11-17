@@ -30,6 +30,7 @@
       <div class="simc-stat"><div class="v {{ 'ok' if sc.fail_pct <= sc.fail_target else 'bad' }}">{{ '%.1f'|format(sc.fail_pct) }} %</div><div class="l">de los días con apagón (meta ≤ {{ '%.0f'|format(sc.fail_target) }} %)</div></div>
       <div class="simc-stat"><div class="v {{ 'ok' if sc.streak <= sc.streak_target else 'bad' }}">{{ '%.0f'|format(sc.streak) }} día(s)</div><div class="l">apagón más largo (meta ≤ {{ sc.streak_target }})</div></div>
       <div class="simc-stat"><div class="v">{{ '%.0f'|format(sc.battery_min) if sc.battery_min else '—' }} kWh</div><div class="l">batería mínima que cumple (instalada: {{ '%.0f'|format(sc.battery) }})</div></div>
+      {% if sc.soc_typ_pct is not none %}<div class="simc-stat"><div class="v">{{ '%.0f'|format(sc.soc_typ_pct) }} %</div><div class="l">nivel mínimo típico de la batería (un día normal)</div></div>{% endif %}
       <div class="simc-stat"><div class="v">{{ '%.1f'|format(sc.reserve_days_pct) }} %</div><div class="l">de los días tocan el margen de {{ '%.0f'|format(sc.reserve_pct) }} %</div></div>
     {% else %}
       <div class="simc-stat"><div class="v {{ 'ok' if sc.nights_ok_pct >= sc.night_target else 'bad' }}">{{ '%.0f'|format(sc.nights_ok_pct) }} %</div><div class="l">de las noches cubiertas (meta ≥ {{ '%.0f'|format(sc.night_target) }} %)</div></div>

@@ -231,9 +231,12 @@ def check_grid_zero(goals: "dt.GridZeroGoals", band: dict, facts: dict, ack: boo
     rows.append(_row("dcac", "Relación DC/AC", _f(ratio, 2), f"≤ {_f(goals.max_dc_ac_ratio, 2)}", "tope",
                      at_most_status(ratio, goals.max_dc_ac_ratio, TOLERANCE_RATIO)))
     ceiling = band["optimo"]["ceiling_pct"]
+    real = facts.get("reduction_real")
     rows.append(_row("reduction", "Reducción de kWh mensual", f"{_f(facts['reduction_pct'], 0)}%", f"{_f(goals.reduction_target_pct, 0)}%", "meta",
                      at_least_points_status(facts["reduction_pct"], goals.reduction_target_pct),
-                     f"Máximo alcanzable sin baterías {_f(ceiling, 0)}%." + (" Meta por encima del máximo, reconocida." if ack and goals.reduction_target_pct > ceiling else "")))
+                     f"Máximo alcanzable sin baterías {_f(ceiling, 0)}%." + (" Meta por encima del máximo, reconocida." if ack and goals.reduction_target_pct > ceiling else "")
+                     + (f" Hora por hora con {real['years']} años de clima real de {real['zone_label']}: promedio {_f(real['mean_pct'], 0)}%, peor año {_f(real['worst_pct'], 0)}%; "
+                        f"se aprovecha el {_f(real['use_pct'], 0)}% de lo que producen los paneles." if real else "")))
     if goals.max_system_kwp is not None:
         rows.append(_row("cap", "Tope de tamaño del sistema", f"{_f(facts['system_kw'])} kWp", f"≤ {_f(goals.max_system_kwp)} kWp", "tope",
                          "ok" if facts["system_kw"] <= goals.max_system_kwp + 1e-9 else "bajo"))

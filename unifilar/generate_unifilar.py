@@ -50,7 +50,7 @@ DEFAULTS = {
         "count": 4, "label": "Pylontech Fidus", "short": "Fidus", "kwh_each": 4.8,
         "fuse_prefix": "FB", "can_master": True,
         "lynx": "power_in",            # "power_in" o "power_in_distributor"
-        "cables_note": ["Cables batería a Power In (+ / -):", "no listados en BOM, por definir"],
+        "cables_note": ["Cables batería a Power In (+ / -):", "por definir"],
     },
     "gx": {"label": "EKRANO GX", "power_note": ["+ / - #12 AWG", "(fusible interno)"]},
     "export": "grid_zero",             # "grid_zero" o "inyeccion"
@@ -60,9 +60,9 @@ DEFAULTS = {
     },
     "grid": {"voltage": "120/240 V · 60 Hz"},
     "meter": None,                     # {"title": "MEDIDOR VM-3P75CT", "lines": [...], "comm": "..."} si el proyecto lleva medidor de energía
-    "comms_notes": {"vebus": "VE.Bus (cable no listado en BOM)",
-                    "can": "CAN-bus BMS (Fidus #1 a Ekrano GX) · cable no listado en BOM",
-                    "eth": "Ethernet / Modbus TCP (control de potencia del Fronius) · UTP no listado en BOM"},
+    "comms_notes": {"vebus": "VE.Bus (UTP RJ-45)",
+                    "can": "CAN-bus BMS (Fidus #1 a Ekrano GX) · cable VE.CAN",
+                    "eth": "Ethernet / Modbus TCP (control de potencia del Fronius) · UTP"},
 }
 
 
@@ -206,7 +206,7 @@ def _hybrid_ac(c, h, cfg):
     P, PV, FR, MU, BA, GX, SP = (cfg[k] for k in ("project", "pv", "fronius", "multis", "battery", "gx", "subpanel"))
     n_str, n_mod, n_bat = PV["strings"], PV["modules_per_string"], BA["count"]
     dist = BA["lynx"] == "power_in_distributor"
-    assert n_str in (1, 2), "pv.strings debe ser 1 o 2 (un MPPT por string)"
+    assert 1 <= len(_sizes(PV)) <= 4, "el arreglo debe tener de 1 a 4 entradas MPPT con strings"
     assert 1 <= n_bat <= (4 if dist else 24), "battery.count: máx. 4 con Distributor"
     grid_zero = cfg["export"] == "grid_zero"
 
@@ -220,21 +220,8 @@ def _hybrid_ac(c, h, cfg):
         txt(1196, 748, 'BORRADOR · REV ' + P["revision"].split()[0], 10, 'Helvetica-Bold', RED, 'r')
 
     # ---------- arreglo FV ----------
-    ys = [665, 635] if n_str == 2 else [650]
-    box(40, 590, 240, 120, LGRAY)
-    txt(160, 697, 'ARREGLO FOTOVOLTAICO', 8, 'Helvetica-Bold')
-    kwp = n_str * n_mod * PV["module_w"] / 1000
-    n_inv = int(PV.get("inverters") or 1)
-    txt(160, 686, f"{n_str * n_mod} × {PV['module_label']} · {kwp:.2f} kWp" + (f" · por inversor (× {n_inv})" if n_inv > 1 else ""), 7)
-    pitch = min(24, 188 / n_mod); mw = pitch - 4
-    for i, yc in enumerate(ys):
-        txt(48, yc - 2.5, f"S{i + 1}", 7, 'Helvetica-Bold', NAVY, 'l')
-        for k in range(n_mod):
-            c.saveState(); c.setFillColor(HexColor('#DCE8F5')); c.setStrokeColor(NAVY); c.setLineWidth(0.8)
-            c.rect(62 + k * pitch, yc - 7, mw, 14, fill=1, stroke=1); c.restoreState()
-    foot = f"{n_str} {'string' if n_str == 1 else 'strings'} × {n_mod} módulos en serie" + (f" · {PV['roof_m2']} m2 de techo" if PV["roof_m2"] else "")
-    txt(160, 600, foot, 6.5, 'Helvetica', GRAY)
-    seg([(150, 590), (150, 572)], GRN, 1.1, (3, 2)); ground(150, 572); lab(160, 570, PV["ground_wire"], GRN, 'l')
+    ys = _pv_array(c, h, PV)
+    n_runs = len(ys)
 
     box(340, 600, 130, 105, white)
     txt(405, 692, 'GABINETE DC', 7.5, 'Helvetica-Bold')
@@ -243,7 +230,7 @@ def _hybrid_ac(c, h, cfg):
     box(560, 590, 200, 120, LGRAY)
     txt(660, 696, 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold')
     txt(660, 685, FR["label"], 7)
-    txt(660, 675, f"{FR['kw']} kW · {n_str} MPPT", 6.5, 'Helvetica', GRAY)
+    txt(660, 675, f"{FR['kw']} kW · {n_runs} MPPT", 6.5, 'Helvetica', GRAY)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {i + 1}", 6.5, 'Helvetica', GRAY, 'l')
         seg([(254, yc), (560, yc)], ORANGE, 1.6)
@@ -346,8 +333,7 @@ def _hybrid_ac(c, h, cfg):
         box(400, 265, 190, 28, white, black, 1.4)
         txt(495, 276, 'LYNX DISTRIBUTOR · fusibles MEGA', 7, 'Helvetica-Bold')
     else:
-        box(40, 265, 550, 28, white, black, 1.4)
-        txt(315, 276, _lynx_title(BA, n_bat), 7, 'Helvetica-Bold')
+        _lynx_bars(c, h, BA, n_bat, [(450, False), (520, False)], [], min_right=590)
 
     for idx, (xr, mp) in enumerate(((446, 'MP#1'), (516, 'MP#2'))):
         seg([(xr, 293), (xr, 372)], RED, 1.8); seg([(xr + 8, 293), (xr + 8, 372)], black, 1.8)
@@ -375,7 +361,7 @@ def _hybrid_ac(c, h, cfg):
     if dist:
         seg([(560, 265), (560, 250), (660, 250)], BLUE, 1.1, (4, 2)); txt(610, 253, 'VE.Can', 6, 'Helvetica', BLUE)
     seg([(545, 372), (545, 330), (700, 330), (700, 295)], BLUE, 1.1, (4, 2)); txt(640, 334, CN["vebus"], 6, 'Helvetica', BLUE, 'l')
-    seg([(xs[0], 170), (xs[0], 155), (725, 155), (725, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE)
+    seg(_can_start(BA) + [(725, 155), (725, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE); _can_note(c, h, BA)
     seg([(760, 650), (1070, 650), (1070, 265), (800, 265)], BLUE, 1.1, (4, 2))
     txt(915, 655, CN["eth"], 6, 'Helvetica', BLUE)
 
@@ -396,7 +382,8 @@ def _slots(n, limit=4):
 
 def _batteries(c, h, BA, n_bat):
     """Banco de baterías con su fusible MEGA. Con más de 4 se dibujan #1, #2, «…» y la última; el cableado se repite igual.
-    Devuelve (x del centro de la 1.ª batería, cantidad de posiciones dibujadas)."""
+    Con baterías Pylontech Fidus se dibujan sus dos LinkPort: el LinkPort 1 de cada una va al LinkPort 0 de la siguiente, y al
+    LinkPort 0 de la primera (maestra) llega el cable CAN tipo A. Devuelve (x del centro de la 1.ª batería, posiciones dibujadas)."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     slots = _slots(n_bat)
     for pos, num in slots:
@@ -410,6 +397,9 @@ def _batteries(c, h, BA, n_bat):
             txt(xc, 207, f"{BA['short']} #{num}", 7.5, 'Helvetica-Bold'); txt(xc, 196, f"{BA['kwh_each']:g} kWh", 6.5, 'Helvetica', GRAY)
             if num == 1 and BA["can_master"]:
                 txt(xc, 183, '(maestro CAN)', 5.8, 'Helvetica', BLUE)
+            if BA["can_master"]:
+                for px, name, al in ((x + 3, 'LP0', 'l'), (x + 73, 'LP1', 'r')):
+                    txt(px, 174, name, 5, 'Helvetica', BLUE, al)
             seg([(xc, 225), (xc, 265)], RED, 1.8); fuse(xc, 245)
             txt(xc + 7, 243, f"{BA['fuse_prefix']}{num}", 6, 'Helvetica', black, 'l')
         if pos < len(slots) - 1:
@@ -417,34 +407,155 @@ def _batteries(c, h, BA, n_bat):
     return 78, len(slots)
 
 
+def _can_start(BA):
+    """Puntos por donde sale el cable CAN del banco: del LinkPort 0 de la 1.ª Fidus (a la izquierda), o de abajo de la 1.ª batería."""
+    return [(40, 197), (29, 197), (29, 155)] if BA["can_master"] else [(78, 170), (78, 155)]
+
+
+def _can_note(c, h, BA, y=144):
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    if BA["can_master"]:
+        txt(400, y, 'Fidus #1 (maestra): terminal del cable CAN tipo A en el LinkPort 0 · '
+                    'LinkPort 1 de cada Fidus al LinkPort 0 de la siguiente', 5.8, 'Helvetica', BLUE)
+
+
+def _slot_x(n, i, centers, hidden_x):
+    """(x, oculta) donde se dibuja la conexión número i (1..n): la de su posición si se dibuja, o la de los puntos suspensivos."""
+    shown = {1: centers[0], 2: centers[1], n: centers[-1]} if n > 4 else {k: centers[k - 1] for k in range(1, n + 1)}
+    return (shown[i], False) if i in shown else (hidden_x, True)
+
+
+def _lynx_bars(c, h, BA, n_bat, mp_x, cc_x, min_right=0):
+    """Una caja por cada Lynx Power In que haga falta (4 conexiones cada uno: baterías, Multis y controladores, en ese orden), con lo que
+    lleva cada una; entre cajas va la unión de barras. Con un solo Lynx se dibuja como antes. Los Lynx cuyas conexiones no se dibujan
+    (el banco se abrevia con «···») se agrupan en una caja punteada. mp_x / cc_x: [(x, oculta)] por conexión. Devuelve el x final."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    bat_x = [_slot_x(n_bat, i, [78, 166, 254, 342] if n_bat > 4 else [78 + 88 * k for k in range(n_bat)], 254) for i in range(1, n_bat + 1)]
+    conns = [("bat", *t) for t in bat_x] + [("mp", *t) for t in mp_x] + [("cc", *t) for t in cc_x]
+    n_bars = max(1, -(-len(conns) // 4))
+    if n_bars == 1:
+        right = max(max(x for _, x, _ in conns) + 34, min_right)
+        box(40, 265, right - 40, 28, white, black, 1.4)
+        txt(40 + (right - 40) / 2, 276, _lynx_title(BA, n_bat), 7, 'Helvetica-Bold')
+        return right
+    names = {"bat": ("batería", "baterías"), "mp": ("MultiPlus", "MultiPlus"), "cc": ("MPPT", "MPPT")}
+    # items: drawn bars (con al menos una conexión dibujada) o grupos de Lynx ocultos consecutivos
+    items = []
+    for k in range(n_bars):
+        g = conns[k * 4:(k + 1) * 4]
+        drawn = [x for _, x, hid in g if not hid]
+        if drawn:
+            items.append({"nums": [k + 1], "g": g, "lo": min(drawn) - 38, "hi": max(drawn) + 38, "ref": (min(drawn), max(drawn))})
+        elif items and items[-1].get("hidden"):
+            items[-1]["nums"].append(k + 1)
+        else:
+            hx = [x for _, x, _ in g]
+            items.append({"nums": [k + 1], "g": g, "hidden": True, "lo": min(hx) - 38, "hi": max(hx) + 38, "ref": (min(hx), max(hx))})
+    items[0]["lo"] = 40
+    items[-1]["hi"] = max(items[-1]["hi"], min_right)
+    for a, b2 in zip(items, items[1:]):
+        if b2["lo"] < a["hi"] + 12:
+            mid = (a["ref"][1] + b2["ref"][0]) / 2
+            a["hi"], b2["lo"] = min(a["hi"], mid - 6), max(b2["lo"], mid + 6)
+            if b2["lo"] < a["hi"] + 12:
+                a["hi"], b2["lo"] = mid - 6, mid + 6
+    for k, it in enumerate(items):
+        lo, hi, mid_x = it["lo"], it["hi"], (it["lo"] + it["hi"]) / 2
+        nums = it["nums"]
+        tag = f"#{nums[0]}" if len(nums) == 1 else f"#{nums[0]} a #{nums[-1]}"
+        if it.get("hidden"):
+            c.saveState(); c.setDash(3, 2); box(lo, 265, hi - lo, 28, white, black, 1.0); c.restoreState()
+            txt(mid_x, 277, '· · ·', 10, 'Helvetica-Bold', GRAY); txt(mid_x, 268.5, f"LYNX {tag} · mismo arreglo", 5.4, 'Helvetica', GRAY)
+        else:
+            box(lo, 265, hi - lo, 28, white, black, 1.4)
+            txt(mid_x, 277, f"LYNX POWER IN {tag} · bus DC 48 V", 6.8, 'Helvetica-Bold')
+            parts = []
+            for kind in ("bat", "mp", "cc"):
+                cnt = sum(1 for t, _, _ in it["g"] if t == kind)
+                if cnt:
+                    parts.append(f"{cnt} {names[kind][0 if cnt == 1 else 1]}")
+            txt(mid_x, 268.5, " + ".join(parts) + f" · {len(it['g'])} de 4 conexiones", 5.6, 'Helvetica', GRAY)
+        if k < len(items) - 1:
+            seg([(hi, 279), (items[k + 1]["lo"], 279)], black, 4)
+    return items[-1]["hi"]
+
+
 def _ys(n):
     return {1: [650], 2: [665, 635], 3: [668, 648, 628], 4: [668, 651, 634, 617]}[n]
 
 
+def _sizes(PV):
+    """Strings en cada tendido FV (uno por entrada MPPT; los que comparten entrada se juntan con conectores MC4 en Y)."""
+    sizes = PV.get("sizes")
+    return list(sizes) if sizes and sum(sizes) == PV["strings"] else [1] * PV["strings"]
+
+
+def _string_rows(sizes, shown):
+    """(y de cada fila de string, y de cada tendido, [(tendido, filas)], compacto) para los tendidos dibujados. Sin strings en paralelo, las
+    posiciones de siempre; con ellos, una fila por string (hasta 6) centradas en el arreglo, o, si no caben (compacto), una fila por tendido."""
+    n_runs = len(shown)
+    if all(k == 1 for _, k in shown):
+        ys = _ys(n_runs)
+        return ys, ys, [(i, [i]) for i in range(n_runs)], False
+    total = sum(k for _, k in shown)
+    if total > 6:
+        ys = _ys(n_runs)
+        return ys, ys, [(i, [i]) for i in range(n_runs)], True
+    step = min(17, 51 / max(1, total - 1))
+    top = 639 + step * (total - 1) / 2
+    ys = [top - step * i for i in range(total)]
+    groups, k0 = [], 0
+    for i, (_, k) in enumerate(shown):
+        groups.append((i, list(range(k0, k0 + k)))); k0 += k
+    return ys, [sum(ys[j] for j in rows) / len(rows) for _, rows in groups], groups, False
+
+
 def _pv_array(c, h, PV, rows=None):
-    """Arreglo FV con sus strings (1 a 4 filas) y tierra. Con `rows` (de _slots) se dibujan S1, S2, «…» y el último.
-    Devuelve la y de cada fila."""
+    """Arreglo FV con sus strings y tierra. Cada tendido (entrada MPPT) es una fila; los strings que comparten entrada se dibujan juntos y se
+    unen con un conector MC4 en Y (si son más de 6 strings en total, una sola fila por tendido con «× N strings»). Con `rows` (de _slots,
+    sobre los tendidos) se dibujan el 1.º, el 2.º, «…» y el último. Devuelve la y de cada tendido (la de «…» incluida)."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     n_str, n_mod = PV["strings"], PV["modules_per_string"]
-    rows = rows or [(i, i + 1) for i in range(n_str)]
-    ys = _ys(len(rows))
+    sizes = _sizes(PV)
+    rows = rows or [(i, i + 1) for i in range(len(sizes))]
+    shown = [(num, None if num is None else sizes[num - 1]) for _, num in rows]
+    starts = [sum(sizes[:num - 1]) + 1 if num else 0 for _, num in rows]
+    merged = any(k and k > 1 for _, k in shown)
+    row_k = [(num, k or 1) for num, k in shown]
+    row_ys, run_ys, groups, packed = _string_rows(sizes, row_k) if merged else (_ys(len(rows)), _ys(len(rows)), [(i, [i]) for i in range(len(rows))], False)
     box(40, 590, 240, 120, LGRAY)
     txt(160, 697, 'ARREGLO FOTOVOLTAICO', 8, 'Helvetica-Bold')
     kwp = n_str * n_mod * PV["module_w"] / 1000
-    txt(160, 686, f"{n_str * n_mod} × {PV['module_label']} · {kwp:.2f} kWp", 7)
-    pitch = min(24, 188 / n_mod); mw = pitch - 4
-    for (pos, num), yc in zip(rows, ys):
+    n_inv = int(PV.get("inverters") or 1)
+    txt(160, 686, f"{n_str * n_mod} × {PV['module_label']} · {kwp:.2f} kWp" + (f" · por inversor (× {n_inv})" if n_inv > 1 else ""), 7)
+    if merged:
+        txt(160, 677, 'strings en paralelo: conectores MC4 en Y', 6, 'Helvetica', GRAY)
+    x0 = 74 if packed else 62                # en el dibujo compacto la etiqueta del string es más larga («S11+12»)
+    pitch = min(24, (250 - x0) / n_mod); mw = pitch - 4
+    for (i, idxs), yc_run, (pos, num), first in zip(groups, run_ys, rows, starts):
         if num is None:
-            txt(160, yc - 4, '· · ·', 12, 'Helvetica-Bold', GRAY)
+            txt(160, yc_run - 4, '· · ·', 12, 'Helvetica-Bold', GRAY)
             continue
-        txt(48, yc - 2.5, f"S{num}", 7, 'Helvetica-Bold', NAVY, 'l')
-        for k in range(n_mod):
-            c.saveState(); c.setFillColor(HexColor('#DCE8F5')); c.setStrokeColor(NAVY); c.setLineWidth(0.8)
-            c.rect(62 + k * pitch, yc - 7, mw, 14, fill=1, stroke=1); c.restoreState()
-    foot = f"{n_str} {'string' if n_str == 1 else 'strings'} × {n_mod} módulos en serie" + (f" · {PV['roof_m2']} m2 de techo" if PV["roof_m2"] else "")
+        k = sizes[num - 1]
+        stacked = merged and not packed          # una fila por string, unidas por la Y
+        for j, ri in enumerate(idxs if stacked else [i]):
+            yc = row_ys[ri]
+            tag = f"S{first + j}" if stacked or k == 1 else (f"S{first}+{first + 1}" if k == 2 else f"S{first}–{first + k - 1}")
+            txt(48, yc - 2.5, tag, 5.6 if len(tag) > 4 else 6.2 if len(tag) > 3 else 7, 'Helvetica-Bold', NAVY, 'l')
+            rh = min(12, (row_ys[0] - row_ys[1]) - 3) if stacked and len(row_ys) > 1 else 14
+            for m in range(n_mod):
+                c.saveState(); c.setFillColor(HexColor('#DCE8F5')); c.setStrokeColor(NAVY); c.setLineWidth(0.8)
+                c.rect(x0 + m * pitch, yc - rh / 2, mw, rh, fill=1, stroke=1); c.restoreState()
+            if stacked and k > 1:
+                seg([(x0 + n_mod * pitch - 4, yc), (246, yc), (254, yc_run)], ORANGE, 1.6)
+        if k > 1:
+            lab(258, yc_run + 11, f"Y × {k}" if packed else 'Y MC4', GRAY, 'l')
+    n_runs = len(sizes)
+    foot = (f"{n_str} {'string' if n_str == 1 else 'strings'} × {n_mod} módulos en serie"
+            + (f" · {n_runs} MPPT" if merged else "") + (f" · {PV['roof_m2']} m2 de techo" if PV["roof_m2"] else ""))
     txt(160, 600, foot, 6.5, 'Helvetica', GRAY)
     seg([(150, 590), (150, 572)], GRN, 1.1, (3, 2)); ground(150, 572); lab(160, 570, PV["ground_wire"], GRN, 'l')
-    return ys
+    return run_ys
 
 
 def _chint_sub(n_strings):
@@ -456,7 +567,7 @@ def _dc_box(c, h, PV, ys, wire_out=None, title='CENTRO DE CARGA DC', sub=None):
     """Centro de carga DC con un breaker por string; las líneas naranja cruzan la caja hasta x = 560."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     box(340, 590, 130, 120, white)
-    txt(405, 697, title, 7, 'Helvetica-Bold'); txt(405, 688, sub or _chint_sub(PV['strings']), 6, 'Helvetica', GRAY)
+    txt(405, 697, title, 7, 'Helvetica-Bold'); txt(405, 688, sub or _chint_sub(len(_sizes(PV))), 6, 'Helvetica', GRAY)
     for i, yc in enumerate(ys):
         seg([(254, yc), (560, yc)], ORANGE, 1.6)
     for i, yc in enumerate(ys):
@@ -467,45 +578,31 @@ def _dc_box(c, h, PV, ys, wire_out=None, title='CENTRO DE CARGA DC', sub=None):
 
 
 def _dc_box_combined(c, h, PV, ys, n_cc, rows=None):
-    """Centro de carga DC de un sistema con controladores: un breaker por string; los strings de cada controlador se
-    combinan en una barra y entran a su MPPT con un par de conductores. Con `rows` (dibujo abreviado) cada fila es un
-    controlador con su string y la fila «…» no se dibuja. Devuelve la y de salida de cada fila (None en la de «…»)."""
+    """Centro de carga DC de un sistema con controladores: un breaker por tendido, o sea por controlador (los strings que comparten
+    controlador ya llegan juntos por la Y del techo). Con `rows` (dibujo abreviado) la fila «…» no se dibuja. Devuelve la y de salida de
+    cada fila (None en la de «…»)."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     nums = [r[1] for r in rows] if rows else list(range(1, len(ys) + 1))
-    if rows:
-        groups = [[i] for i in range(len(ys))]
-    else:
-        per = -(-len(ys) // n_cc)
-        groups = [list(range(g * per, min((g + 1) * per, len(ys)))) for g in range(n_cc) if g * per < len(ys)]
     box(340, 590, 130, 120, white)
-    txt(405, 697, 'CENTRO DE CARGA DC', 7, 'Helvetica-Bold'); txt(405, 688, _chint_sub(PV['strings']), 6, 'Helvetica', GRAY)
+    txt(405, 697, 'CENTRO DE CARGA DC', 7, 'Helvetica-Bold'); txt(405, 688, _chint_sub(len(_sizes(PV))), 6, 'Helvetica', GRAY)
+    out_w = PV.get("dc_out_wire") or PV["dc_wire"]
     outs = []
-    for g, idx in enumerate(groups):
-        if rows and nums[idx[0]] is None:
-            txt(405, ys[idx[0]] - 4, '· · ·', 12, 'Helvetica-Bold', GRAY)
+    for i, yc in enumerate(ys):
+        if rows and nums[i] is None:
+            txt(405, yc - 4, '· · ·', 12, 'Helvetica-Bold', GRAY)
             outs.append(None)
             continue
-        yg = sum(ys[i] for i in idx) / len(idx)
-        outs.append(yg)
-        for i in idx:
-            seg([(254, ys[i]), (462, ys[i])], ORANGE, 1.6)
-            bx = (372 if i % 2 == 0 else 430) if len(ys) >= 4 else 385     # con 4 strings los breakers se alternan para que no se pisen los rótulos
-            breaker(bx, ys[i])
-            txt(bx, ys[i] + 10, f"QS{nums[i]} · {PV['string_breaker']}", 6, 'Helvetica', black)
-            if len(ys) <= 2:
-                lab(311, ys[i] + 6, '+ ' + PV["dc_wire"], RED); lab(311, ys[i] - 9, '- ' + PV["dc_wire"], black)
-            else:
-                lab(311, ys[i] + 3, '+/- ' + PV["dc_wire"], black)
-        if len(idx) > 1:
-            seg([(462, ys[idx[0]]), (462, ys[idx[-1]])], ORANGE, 1.6)
-            for i in idx:
-                dot(462, ys[i])
-        seg([(462, yg), (560, yg)], ORANGE, 1.6)
-        out_w = PV.get("dc_out_wire") or PV["dc_wire"]
-        if n_cc >= 3:
-            lab(515, yg + 3, '+/- ' + out_w, black)
+        outs.append(yc)
+        seg([(254, yc), (560, yc)], ORANGE, 1.6)
+        bx = (372 if i % 2 == 0 else 430) if len(ys) >= 4 else 385     # con 4 tendidos los breakers se alternan para que no se pisen los rótulos
+        breaker(bx, yc)
+        txt(bx, yc + 10, f"QS{nums[i]} · {PV['string_breaker']}", 6, 'Helvetica', black)
+        if len(ys) <= 2:
+            lab(311, yc + 6, '+ ' + PV["dc_wire"], RED); lab(311, yc - 9, '- ' + PV["dc_wire"], black)
+            lab(515, yc + 6, '+ ' + out_w, RED); lab(515, yc - 9, '- ' + out_w, black)
         else:
-            lab(515, yg + 6, '+ ' + out_w, RED); lab(515, yg - 9, '- ' + out_w, black)
+            lab(311, yc + 3, '+/- ' + PV["dc_wire"], black)
+            lab(515, yc + 3, '+/- ' + out_w, black)
     return outs
 
 
@@ -548,7 +645,7 @@ def _grid_zero(c, h, cfg):
     PV, FR, BS, SP, M = cfg["pv"], cfg["fronius"], cfg["base"], cfg["subpanel"], cfg.get("meter")
     n_str, n_mod = PV["strings"], PV["modules_per_string"]
     n_inv = int(FR.get("qty") or 1)          # inversores en paralelo: se dibuja uno, «igual en cada inversor»
-    assert 1 <= n_str <= 4, "pv.strings debe ser de 1 a 4 por inversor"
+    assert 1 <= len(_sizes(PV)) <= 4, "el arreglo debe tener de 1 a 4 entradas MPPT con strings por inversor"
     kwp = n_inv * n_str * n_mod * PV["module_w"] / 1000
     fr_name = f"{n_inv} × {FR['label']}" if n_inv > 1 else FR['label']
     txt(30, 748, 'DIAGRAMA UNIFILAR', 17, 'Helvetica-Bold', NAVY, 'l')
@@ -619,7 +716,7 @@ def _off_grid(c, h, cfg):
     PV, CC, MU, BA, GX, SP, M = (cfg[k] for k in ("pv", "controllers", "multis", "battery", "gx", "subpanel", "meter"))
     n_str, n_mod, n_bat, n_cc, n_mp = PV["strings"], PV["modules_per_string"], BA["count"], CC["count"], MU["qty"]
     collapsed = n_cc > 4          # más de 4 controladores: se dibujan MPPT 1, MPPT 2, «…» y el último, cada uno con su string
-    assert 1 <= n_cc <= 24 and (n_cc <= n_str if collapsed else 1 <= n_str <= 4) and 1 <= n_bat <= 24 and 1 <= n_mp <= 8
+    assert 1 <= n_cc <= 24 and (n_cc <= n_str if collapsed else 1 <= n_str) and 1 <= n_bat <= 24 and 1 <= n_mp <= 8
     grid = cfg.get("grid_in")
     total_kwh = n_bat * BA["kwh_each"]
     kwp = n_str * n_mod * PV["module_w"] / 1000
@@ -629,7 +726,7 @@ def _off_grid(c, h, cfg):
     if cfg["project"]["draft"]:
         txt(1196, 748, 'BORRADOR · REV ' + cfg["project"]["revision"].split()[0], 10, 'Helvetica-Bold', RED, 'r')
 
-    rows = _slots(n_str, 4) if collapsed else None
+    rows = _slots(len(_sizes(PV)), 4) if collapsed else None
     ys = _pv_array(c, h, PV, rows)
     outs = _dc_box_combined(c, h, PV, ys, n_cc, rows)
     cc_nums = [r[1] for r in _slots(n_cc, 4)] if collapsed else list(range(1, len(outs) + 1))
@@ -648,9 +745,14 @@ def _off_grid(c, h, cfg):
     xs = [x0_bat]
     for k, t in enumerate(BA["cables_note"][:3]):
         lab(40 + n_slots * 88 + 2, 248 - k * 7, t, GRAY, 'l')
-    bar_end = 700 + 18 * n_disp
-    box(40, 265, bar_end - 40, 28, white, black, 1.4)
-    txt(315, 276, _lynx_title(BA, n_bat), 7, 'Helvetica-Bold')
+    many_mp = n_mp >= 3
+    mp_feed_x = ([410, 446, 520] if many_mp else [446, 516][:n_mp])
+    mp_x = ([((mp_feed_x[0] if i == 1 else mp_feed_x[1] if i == 2 else mp_feed_x[2]) + 4, False) if i in (1, 2, n_mp) else (490, True)
+             for i in range(1, n_mp + 1)] if many_mp else [(x + 4, False) for x in mp_feed_x])
+    cc_drawn = [700 + 18 * k + 4 for k in range(n_disp)]
+    cc_x = [(_slot_x(n_cc, i, cc_drawn, cc_drawn[2]) if collapsed else (cc_drawn[min(i - 1, len(cc_drawn) - 1)], False))
+            for i in range(1, n_cc + 1)]
+    bar_end = _lynx_bars(c, h, BA, n_bat, mp_x, cc_x, min_right=700 + 18 * n_disp)
     # salida DC de los controladores hacia el Lynx
     for k in range(n_disp):
         xr = 700 + 18 * k
@@ -711,7 +813,7 @@ def _off_grid(c, h, cfg):
         _ac_center_box(c, h, 690, mid_y, cfg["ac_out_center"])
     box(sx0, 366, 180, 140, LGRAY)
     txt(sx0 + 90, 494, 'SUB-PANEL CARGAS CRÍTICAS', 7, 'Helvetica-Bold'); txt(sx0 + 90, 485, '120/240 V', 6.5, 'Helvetica', GRAY)
-    seg([(sx0 + 20, mid_y), (sx0 + 190, mid_y)], black, 1.8)
+    seg([(sx0, mid_y), (sx0 + 190, mid_y)], black, 1.8)
     if not cfg.get("ac_out_center"):
         breaker(sx0 + 30, mid_y); txt(sx0 + 30, mid_y + 10, 'Q2', 7, 'Helvetica-Bold'); txt(sx0 + 30, mid_y - 12, SP["q2"], 6.5)
     breaker(sx0 + 150, mid_y); txt(sx0 + 150, mid_y + 10, 'Q4', 7, 'Helvetica-Bold'); txt(sx0 + 150, mid_y + 19, SP["q4"], 6, 'Helvetica', GRAY)
@@ -756,7 +858,7 @@ def _off_grid(c, h, cfg):
     CN = cfg["comms_notes"]
     seg([(545, my), (545, 330 if n_mp == 2 else 340), (gx0 + 50, 330 if n_mp == 2 else 340), (gx0 + 50, 295)], BLUE, 1.1, (4, 2))
     txt(692, (334 if n_mp == 2 else 344), CN["vebus"], 6, 'Helvetica', BLUE, 'r')
-    seg([(xs[0], 170), (xs[0], 155), (gx0 + 90, 155), (gx0 + 90, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE)
+    seg(_can_start(BA) + [(gx0 + 90, 155), (gx0 + 90, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE); _can_note(c, h, BA)
 
 
 DRAWINGS = {"hybrid_ac": _hybrid_ac, "grid_zero": _grid_zero, "off_grid": _off_grid}

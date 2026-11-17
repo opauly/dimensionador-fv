@@ -201,8 +201,13 @@ def _scenario_projection(
     avg_bill_crc: float,
     tariff_info: dict | None,
     daytime_fraction: float = 0.45,
+    real: dict | None = None,
 ) -> dict:
     """
+    `real` (from `sim_check.grid_zero_real`): the hourly replay with 5 years of the zone's real sun. When given, the share of consumption
+    avoided comes from it instead of the monthly-average formula below (which assumes every kWh made up to the daytime consumption is
+    used, true only if production and use coincide hour by hour); generation (PVGIS) and the bill math stay the same.
+
     Zero-export model: no energy fed to grid; excess solar is curtailed.
     Verbatim port of wizard/grid_zero.py's own `_scenario_projection()`
     (L590-643) — kept here rather than imported from `wizard/grid_zero.py`
@@ -227,8 +232,12 @@ def _scenario_projection(
     gen = round(system_kw * avg_irradiance)
 
     daytime_kwh = avg_kwh * daytime_fraction
-    self_consumed = min(float(gen), daytime_kwh)
-    curtailed = max(0, gen - int(daytime_kwh))
+    if real:
+        self_consumed = min(float(gen), real["mean_pct"] / 100.0 * avg_kwh)
+        curtailed = max(0, int(round(gen - self_consumed)))
+    else:
+        self_consumed = min(float(gen), daytime_kwh)
+        curtailed = max(0, gen - int(daytime_kwh))
     grid_kwh = max(0.0, avg_kwh - self_consumed)
 
     coverage = round(self_consumed / avg_kwh * 100, 1) if avg_kwh > 0 else 0.0
@@ -248,7 +257,20 @@ def _scenario_projection(
         "new_bill": int(new_bill) if new_bill is not None else None,
         "savings": savings,
         "self_consumption_pct": self_consumption_pct,
+        # sized past what more panels can still add (real mode) / the old "uses under half of what it makes" rule
+        "oversized": (real["mean_pct"] >= 0.93 * real["asym_pct"]) if real else self_consumption_pct < 50,
+        "real": {"worst_pct": real["worst_pct"], "zone_label": real["zone_label"], "years": real["years"]} if real else None,
     }
+
+
+def _real_projector(blob: dict, inverter_kw_total: float, **common):
+    """`project(system_kw)`: `_scenario_projection` with the hourly 5-year replay when the zone's history is there."""
+    from webapp.wizard_steps import sim_check
+
+    def project(system_kw: float) -> dict:
+        return _scenario_projection(system_kw, real=sim_check.grid_zero_real(blob, float(system_kw), inverter_kw_total), **common)
+
+    return project
 
 
 # ── equipment selection (do-not-drop item 11) ───────────────────────────
@@ -314,6 +336,14 @@ def calc_mppt(blob: dict) -> dict:
     fraction, note = daytime_fraction_for(loads, location)      # the real fleet's median, the AI estimate only as fallback
     daytime_kwh = avg_kwh * fraction
     target_kw = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
+    try:                                                # the array that meets the Objetivos goal, hour by hour with the zone's real sun
+        from webapp.wizard_steps import s6_objetivos
+
+        opt = ((s6_objetivos.sweet_spot(blob) or {}).get("band") or {}).get("optimo") or {}
+        if opt.get("climate") and opt.get("system_kw"):
+            target_kw = float(opt["system_kw"])
+    except Exception:                                   # noqa: BLE001 — keep the monthly-average target
+        pass
 
     qty = sel["inverter_qty"]
     # Each of the `qty` identical inverters takes an equal share of the target; the scenarios come back as whole-system totals.
@@ -416,9 +446,8 @@ def save_step(blob: dict) -> dict | None:
     tariff_info = _tariff_info(utility)
 
     chosen_scenario = dict(chosen)
-    projection = _scenario_projection(
-        chosen_scenario["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
-    )
+    projection = _real_projector(blob, float(selected_inverter.get("kw") or 0) * sel["inverter_qty"], avg_irradiance=avg_irradiance, avg_kwh=avg_kwh,
+                                 avg_bill_crc=avg_bill_crc, tariff_info=tariff_info, daytime_fraction=daytime_fraction)(chosen_scenario["system_kw"])
 
     return {
         "panel_id": selected_panel["id"],
@@ -475,6 +504,8 @@ def build_context(blob: dict) -> dict:
     daytime_kwh = avg_kwh * daytime_fraction
 
     tariff_info = _tariff_info(utility)
+    proj_of = _real_projector(blob, float(selected_inverter.get("kw") or 0) * sel["inverter_qty"], avg_irradiance=avg_irradiance, avg_kwh=avg_kwh,
+                              avg_bill_crc=avg_bill_crc, tariff_info=tariff_info, daytime_fraction=daytime_fraction)
 
     scenarios = s6.get("scenarios")
     using_manual = bool(s6.get("use_manual"))
@@ -489,7 +520,7 @@ def build_context(blob: dict) -> dict:
     if scenarios:
         valid_scenarios = [s for s in scenarios if s["within_limits"]]
         for s in scenarios:
-            proj = _scenario_projection(s["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction)
+            proj = proj_of(s["system_kw"])
             scenario_rows.append({
                 "escenario": s["scenario"],
                 "panels_per_string": s["panels_per_string"],
@@ -509,18 +540,36 @@ def build_context(blob: dict) -> dict:
                 "is_valid": s["within_limits"],
                 "is_selected": (s["scenario"] == effective_label) and not using_manual,
             })
-        all_saturated = len(scenarios) > 1 and all(c["proj"]["curtailed"] > 0 for c in scenario_cards)
+        real_mode = bool(scenario_cards) and all(c["proj"].get("real") for c in scenario_cards)
+        all_saturated = len(scenarios) > 1 and (all(c["proj"]["oversized"] for c in scenario_cards) if real_mode
+                                                else all(c["proj"]["curtailed"] > 0 for c in scenario_cards))
         if all_saturated:
             optimal_kw = round(daytime_kwh / avg_irradiance, 2) if avg_irradiance > 0 else None
+            if real_mode:
+                try:
+                    from webapp.wizard_steps import s6_objetivos
+
+                    opt = ((s6_objetivos.sweet_spot(blob) or {}).get("band") or {}).get("optimo") or {}
+                    optimal_kw = round(float(opt["system_kw"]), 2) if opt.get("climate") else optimal_kw
+                except Exception:               # noqa: BLE001
+                    pass
 
     note_parts = []
     if ai_note:
         note_parts.append(f"🤖 IA — Perfil de consumo: {ai_note}")
-    note_parts.append(
-        "ℹ️ Zero-export: el excedente solar no se inyecta a la red — se descarta. La cobertura está "
-        "limitada por el consumo diurno estimado. Autoconsumo = fracción de la generación que "
-        "efectivamente desplaza consumo de la red."
-    )
+    real_note = next((c["proj"]["real"] for c in scenario_cards if c["proj"].get("real")), None)
+    if real_note:
+        note_parts.append(
+            f"ℹ️ Zero-export: el excedente solar no se inyecta a la red — se descarta. La cobertura se calcula hora por hora con "
+            f"{real_note['years']} años de clima real de {real_note['zone_label']} y los consumos de la flota (el sol no coincide del todo con el "
+            "consumo, así que parte de lo que producen los paneles se pierde). Autoconsumo = fracción de la generación que efectivamente desplaza consumo de la red."
+        )
+    else:
+        note_parts.append(
+            "ℹ️ Zero-export: el excedente solar no se inyecta a la red — se descarta. La cobertura está "
+            "limitada por el consumo diurno estimado. Autoconsumo = fracción de la generación que "
+            "efectivamente desplaza consumo de la red."
+        )
 
     # ── Manual design (do-not-drop items 8, 14) ───────────────────────────
     inverter_qty = sel["inverter_qty"]
@@ -532,9 +581,7 @@ def build_context(blob: dict) -> dict:
     manual_area_m2 = manual_design.get("area_m2") or round(manual_design["total_panels"] * area_panel, 1)
     manual_proj = None
     if avg_kwh > 0:
-        manual_proj = _scenario_projection(
-            manual_design["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
-        )
+        manual_proj = proj_of(manual_design["system_kw"])
 
     # ── Chosen config (resolved once — reused by Validación/Margen/
     # Dimensionamiento/Generación-vs-consumo/Estadísticas below) ──────────
@@ -555,9 +602,7 @@ def build_context(blob: dict) -> dict:
 
         margin_chart_html = fig_to_fragment(gz_margin_bars_fig(margin_items))
 
-        chosen_proj = _scenario_projection(
-            chosen["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
-        )
+        chosen_proj = proj_of(chosen["system_kw"])
 
         gen_chart_html = None
         if chosen_proj["gen"] > 0:
@@ -597,9 +642,7 @@ def build_context(blob: dict) -> dict:
 
             coverage_chart_html = fig_to_fragment(monthly_coverage_fig(gen_m, monthly_kwh_real, flag_shortfall=False))
 
-        step6_proj = _scenario_projection(
-            chosen["system_kw"], avg_irradiance, avg_kwh, avg_bill_crc, tariff_info, daytime_fraction,
-        )
+        step6_proj = chosen_proj if chosen_proj is not None else proj_of(chosen["system_kw"])
         self_consumption_pct = step6_proj["self_consumption_pct"]
         used_kwh_month = round(step6_proj["gen"] - step6_proj["curtailed"])
         curtailed_kwh_month = round(step6_proj["curtailed"])
@@ -615,7 +658,7 @@ def build_context(blob: dict) -> dict:
             "utilization_chart_html": utilization_chart_html,
             "self_consumption_pct": self_consumption_pct,
             "ai_note": ai_note,
-            "oversized": self_consumption_pct < 50,
+            "oversized": step6_proj["oversized"],
         }
 
     # Goals-vs-design check (Phase 24 Step 4): the chosen design against the Objetivos sweet spot. Informational.
@@ -623,10 +666,16 @@ def build_context(blob: dict) -> dict:
     if chosen_ctx:
         from webapp.wizard_steps import goals_check
 
+        from webapp.wizard_steps import sim_check
+
+        inv_kw = float(selected_inverter.get("kw") or 0) * inverter_qty
+        real = sim_check.grid_zero_real(blob, float(chosen_ctx["system_kw"]), inv_kw)
         goals_check_ctx = goals_check.build(blob, {
             "system_kw": float(chosen_ctx["system_kw"]),
-            "inverter_kw": float(selected_inverter.get("kw") or 0) * inverter_qty,
-            "reduction_pct": float(chosen_ctx["proj"]["coverage"]),
+            "inverter_kw": inv_kw,
+            # the hourly replay with the zone's real weather when it can run; else the monthly-average projection
+            "reduction_pct": float(real["mean_pct"]) if real else float(chosen_ctx["proj"]["coverage"]),
+            "reduction_real": real,
         })
 
     # How many inverters the daytime target needs: the target array kW over the largest array ONE inverter accepts.

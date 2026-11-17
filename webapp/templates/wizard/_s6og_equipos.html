@@ -322,7 +322,12 @@
           {% if rl and rl.pending %}<span style="color:#6b7280;">⏳ Prueba con datos reales en preparación…</span><br>
           {% elif rl and rl.kind == 'off_grid' %}
             {% if c.autonomy_days is not none %}<span>🔋 Autonomía sin sol: <b>{{ '%.2f'|format(c.autonomy_days) }} días</b></span><br>{% endif %}
+            {% if rl.soc_typ_pct is not none %}<span>🔋 Nivel mínimo típico: <b>{{ '%.0f'|format(rl.soc_typ_pct) }}%</b> <span style="color:#6b7280;">(un día normal, antes del amanecer)</span></span><br>{% endif %}
+            {% if rl.days_year is defined and rl.days_year is not none %}
+            <span style="color:{{ '#166534' if rl.ok else '#991b1b' }};">{{ '✅' if rl.ok else '❌' }} Clima real ({{ rl.years }} años): <b>{{ '%.1f'|format(rl.days_year) }}</b> días/año sin cubrir (meta ≤ {{ '%g'|format(rl.days_target) }}) · peor año <b>{{ '%.0f'|format(rl.days_year_worst) }}</b></span><br>
+            {% else %}
             <span style="color:{{ '#166534' if rl.ok else '#991b1b' }};">{{ '✅' if rl.ok else '❌' }} Con clima real: apagón el <b>{{ '%.1f'|format(rl.fail_pct) }}%</b> de los días · el más largo <b>{{ '%.0f'|format(rl.streak) }}</b> día(s)</span><br>
+            {% endif %}
           {% elif rl %}
             <span style="color:{{ '#166534' if rl.ok else '#991b1b' }};">{{ '✅' if rl.ok else '❌' }} Datos reales: <b>{{ '%.0f'|format(rl.nights_ok_pct) }}%</b> de noches cubiertas{% if rl.outage_cover_pct is not none %} · <b>{{ '%.0f'|format(rl.outage_cover_pct) }}%</b> de cortes aguantados{% endif %}</span><br>
           {% endif %}
@@ -465,7 +470,7 @@
         {{ ((['configuración'] if not chosen.is_valid else []) + (['Voc'] if not chosen.voc_ok else []) + (['corriente'] if not chosen.imp_ok else []) + (['inversor'] if (ac and ac.ac_summary.ac_out.exceeds_available) else []))|join(', ') }}</span>
       {% else %}<span class="techd-st ok">✅ Voc {{ chosen.voc_total }} V · corriente {{ chosen.imp_total }} A{% if ac %} · breaker AC {{ ac.ac_summary.ac_out.breaker_a or '—' }} A{% endif %}</span>{% endif %}
     {% endif %}
-    <span class="techd-sub">protecciones, cableado, dimensionamiento y gráficos</span>
+    <span class="techd-sub">protecciones, dimensionamiento y gráficos</span>
   </summary>
 
 {% if chosen %}
@@ -567,8 +572,7 @@
   <p class="card-note-sm">No hay líneas de carga del Paso 4/5 para calcular la demanda eléctrica.</p>
 {% endif %}
 
-{# Cableado y canalizaciones — fragmento propio (og_wiring.py); se pide al abrir la sección (o al cargar si ya viene abierta). #}
-<div id="wiring-panel" hx-get="{{ url_for('wizard.paso6og_cableado', vid=vid) }}" hx-trigger="{{ 'load' if tech_bad else 'toggle from:closest details.techd once' }}" hx-swap="outerHTML"></div>
+{# El cableado, el acople FV, las protecciones de AC y el techo viven ahora en el paso 8 (Instalación). #}
 
 <h5 class="techd-h">Dimensionamiento calculado</h5>
 {% if dim.scenario_note %}<p class="card-note-sm">Configuración activa: {{ dim.scenario_note }}</p>{% endif %}

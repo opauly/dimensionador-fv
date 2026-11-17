@@ -17,6 +17,7 @@
 .wiz-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
 .wiz-error { color: #B84345; font-size: 13px; margin: 8px 0 0; }
 .wiz-note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+.wiz-readonly { background: #f1f5f9; color: #475569; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; margin: 0 0 12px; }
 .btn-outline { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
 .btn[disabled] { background: #e2e8f0; color: #94a3b8; cursor: default; }
 </style>
@@ -40,5 +41,10 @@
 </div>
 <hr>
 
+{% if readonly %}
+<div class="wiz-readonly">🔒 Versión bloqueada — solo lectura. Para cambiar algo, crea una versión nueva desde la lista de cotizaciones.</div>
+<fieldset disabled style="border:0;padding:0;margin:0;min-width:0;">
+{% endif %}
 {% block wizard_body %}{% endblock %}
+{% if readonly %}</fieldset>{% endif %}
 {% endblock %}

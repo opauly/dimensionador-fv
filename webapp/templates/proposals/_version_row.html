@@ -9,6 +9,7 @@
     <div class="vrow-badges">
       {{ pill('Bloqueada', '#f1f5f9', '#64748b') if v.locked else pill('Borrador', '#fef9c3', '#a16207') }}
       {% if v.sent %}{{ pill('Enviada', '#dbeafe', '#1d4ed8') }}{% endif %}
+      {% if v.won %}{{ pill('Ganadora', '#dcfce7', '#166534') }}{% endif %}
     </div>
     {% if v.note %}<div class="vrow-note">{{ v.note }}</div>{% endif %}
   </div>
@@ -17,6 +18,7 @@
     <div class="vrow-total-date">{{ v.created }}</div>
   </div>
   <div class="vrow-col vrow-pdf">
+    {% if v.locked %}<button type="button" class="vrow-pill-btn" hx-get="{{ url_for('documentos.menu', vid=v.id) }}" hx-target="body" hx-swap="beforeend">👁 Ver</button>{% endif %}
     {# Streamlit only shows the PDF affordance (link or "Generar PDF") for
        locked versions — a draft version's PDF would read stale numbers the
        moment it's edited again. #}

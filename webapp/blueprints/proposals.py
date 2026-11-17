@@ -92,13 +92,18 @@ def _row(proposal: dict) -> dict:
     # With more than one version the status alone says nothing about WHICH one the client has: name the last version sent and
     # whether the newest one is still unsent ("v1 enviada · v2 sin enviar").
     sent_nums = sorted(v["version_number"] for v in versions_emb if v.get("sent_to_client"))
-    sent_hint = ""
-    if len(versions_emb) > 1 and sent_nums:
-        sent_hint = (f"v{cur_vnum} enviada" if cur_vnum in sent_nums
-                     else f"v{sent_nums[-1]} enviada · v{cur_vnum} sin enviar")
+    # Two short stacked lines at most (never wider than "v4 sin enviar", however many versions exist).
+    sent_hint, unsent_hint = "", ""
+    if status == "won" and len(versions_emb) > 1:
+        sent_hint = f"v{cur_vnum} ganada"
+    elif len(versions_emb) > 1 and sent_nums:
+        sent_hint = f"v{cur_vnum if cur_vnum in sent_nums else sent_nums[-1]} enviada"
+        if cur_vnum not in sent_nums:
+            unsent_hint = f"v{cur_vnum} sin enviar"
 
     return {
         "sent_hint": sent_hint,
+        "unsent_hint": unsent_hint,
         "id": proposal["id"],
         "client_name": client_name,
         "sys_label": sys_label,
@@ -250,6 +255,7 @@ def _version_row_ctx(v: dict, proposal: dict) -> dict:
         "vquote": format_quote_number(proposal.get("quote_number"), proposal.get("created_at", ""), v["version_number"]),
         "locked": v.get("locked", False),
         "sent": v.get("sent_to_client", False),
+        "won": proposal.get("status") == "won" and v["version_number"] == proposal.get("current_version_number"),
         "note": v.get("version_note") or "",
         "total_str": f"${total:,.0f}" if total else "—",
         "created": (v.get("created_at") or "")[:10] or "—",
@@ -301,7 +307,18 @@ def _detail_ctx(proposal: dict, versions: list[dict], versions_error: str | None
 
     badge_label, badge_bg, badge_fg = STATUS_BADGE.get(status, ("—", "#f1f5f9", "#64748b"))
 
+    # "Ganada" must say WHICH version the client accepted: only locked versions can have gone out. With 2+ of them the panel
+    # shows a selector (default: the last one sent, else the newest); with one it is used as is.
+    locked_vs = sorted((v for v in versions if v.get("locked")), key=lambda v: v["version_number"])
+    won_default = next((v for v in reversed(locked_vs) if v.get("sent_to_client")), locked_vs[-1] if locked_vs else None)
+    won_choices = [{"n": v["version_number"],
+                    "label": f"v{v['version_number']} · {('$' + format(v['total_usd'], ',.0f')) if v.get('total_usd') else '—'}"
+                             + (" · enviada" if v.get("sent_to_client") else ""),
+                    "selected": bool(won_default and v["version_number"] == won_default["version_number"])}
+                   for v in locked_vs] if len(locked_vs) > 1 else []
+
     return {
+        "won_choices": won_choices,
         "pid": pid,
         "status": status,
         "badge_label": badge_label,
@@ -372,17 +389,35 @@ def estado(pid):
             message = ("error", f"Error: {exc}")
         else:
             if next_status == "won":
+                # Which version did the client accept? It becomes the current one (project, contract and list read it).
+                from database.proposals_db import set_current_version
+
+                locked_nums = sorted(v["version_number"] for v in _versions if v.get("locked"))
+                try:
+                    posted = int(request.form.get("version") or 0)
+                except ValueError:
+                    posted = 0
+                chosen = posted if posted in locked_nums else (locked_nums[0] if len(locked_nums) == 1 else None)
+                set_err = None
+                if chosen and chosen != proposal.get("current_version_number"):
+                    try:
+                        set_current_version(pid, chosen)
+                    except Exception as exc:
+                        set_err = f"no se pudo fijar la versión {chosen}: {exc}"
+                vtxt = f" — versión v{chosen}" if chosen and len(_versions) > 1 else ""
                 prospect_id = proposal.get("prospect_id")
                 if prospect_id:
                     from database.clients_db import promote_prospect
 
                     try:
                         promote_prospect(prospect_id)
-                        message = ("info", "🎉 Propuesta ganada — cliente movido de Prospectos a Clientes.")
+                        message = ("info", f"🎉 Propuesta ganada{vtxt} — cliente movido de Prospectos a Clientes.")
                     except Exception as promo_err:
-                        message = ("warn", f"Propuesta ganada, pero no se pudo promover el prospecto: {promo_err}")
+                        message = ("warn", f"Propuesta ganada{vtxt}, pero no se pudo promover el prospecto: {promo_err}")
                 else:
-                    message = ("info", "🎉 Propuesta ganada.")
+                    message = ("info", f"🎉 Propuesta ganada{vtxt}.")
+                if set_err:
+                    message = ("error", f"Propuesta ganada, pero {set_err}")
 
     proposal, versions, versions_error = _load_detail(pid)
     if proposal is None:

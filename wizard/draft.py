@@ -56,26 +56,30 @@ _SECTIONS = ("meta", "client", "site", "utility", "consumption", "equipment", "c
 # else reads it (proposals/generator.py only reads the original seven), so goals never reach the client PDF.
 
 # Wizard step numbering revision. Rev 2 (Phase 24) inserted Objetivos as Step 6, so Equipos/Costos/Revisión moved
-# from 6/7/8 to 7/8/9. `meta.wizard_rev` says which numbering a draft's `meta.step_reached` is written in; a draft
-# without the marker predates the insert and is mapped on read by `effective_step_reached()`. Nothing outside this
-# module should read `meta.step_reached` directly.
-WIZARD_REV = 2
-_LEGACY_STEP_TO_REV2 = {6: 7, 7: 8, 8: 9}
+# from 6/7/8 to 7/8/9. Rev 3 inserted Instalación as Step 8, so Costos/Revisión moved again to 9/10 (steps 1-8 keep
+# their numbers). `meta.wizard_rev` says which numbering a draft's `meta.step_reached` is written in; a draft without the
+# marker predates rev 2 and one stamped 2 predates rev 3: both are mapped on read by `effective_step_reached()`.
+# Nothing outside this module should read `meta.step_reached` directly.
+WIZARD_REV = 3
+_LEGACY_STEP_TO_REV3 = {6: 7, 7: 9, 8: 10}      # no stamp: the old 1-8 numbering
+_REV2_STEP_TO_REV3 = {8: 9, 9: 10}              # stamped 2: Costos 8 -> 9, Revisión 9 -> 10
 
 
 def effective_step_reached(meta: dict | None) -> int:
-    """The furthest unlocked step, in the CURRENT (rev 2) numbering.
+    """The furthest unlocked step, in the CURRENT (rev 3) numbering.
 
-    A draft stamped `wizard_rev == WIZARD_REV` is trusted as stored. One without the stamp was written under the
-    old 1-8 numbering: steps 1-5 are unchanged, and 6/7/8 (Equipos/Costos/Revisión) become 7/8/9, so an old draft
-    resumes on the same CONTENT it was on rather than silently landing on the new step 6, and can only reach the
-    new Review through Costos. The converted value is persisted (with the stamp) the next time `set_step()` runs,
+    A draft stamped `wizard_rev == WIZARD_REV` is trusted as stored. An older one is converted so it resumes on the same
+    CONTENT it was on (a draft that had reached Costos still lands on Costos, and one that had only reached Equipos
+    passes through Instalación). The converted value is persisted (with the stamp) the next time `set_step()` runs,
     so each old draft is converted exactly once."""
     meta = meta or {}
     raw = meta.get("step_reached", 1) or 1
-    if meta.get("wizard_rev") == WIZARD_REV:
+    rev = meta.get("wizard_rev")
+    if rev == WIZARD_REV:
         return raw
-    return _LEGACY_STEP_TO_REV2.get(raw, raw)
+    if rev == 2:
+        return _REV2_STEP_TO_REV3.get(raw, raw)
+    return _LEGACY_STEP_TO_REV3.get(raw, raw)
 
 
 def _empty_blob() -> dict:
@@ -110,6 +114,12 @@ def load(version_id: str) -> dict:
 
 def save(version_id: str, blob: dict) -> None:
     """Persist the whole blob in one upsert. Every mutation is a save."""
+    try:                                    # read-only view of a locked version: never write (e.g. lazy PVGIS backfill)
+        from flask import g, has_request_context
+        if has_request_context() and getattr(g, "wizard_readonly", False):
+            return
+    except Exception:                       # noqa: BLE001
+        pass
     from database.proposals_db import upsert_version
 
     total_usd = (blob.get("costs") or {}).get("total_usd")

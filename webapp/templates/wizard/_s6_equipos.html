@@ -181,9 +181,14 @@
 
     {% if all_saturated %}
       <p class="wiz-error" style="margin-top:10px;">
+        {% if scenario_cards and scenario_cards[0].proj.real %}
+        ⚠️ Los tres escenarios están por encima de lo que más paneles todavía pueden aportar (la reducción casi no sube). Tamaño de la meta de Objetivos:
+        <b>≈ {{ optimal_kw if optimal_kw is not none else '—' }} kWp</b>. Recalcula MPPT para ver escenarios ajustados.
+        {% else %}
         ⚠️ Los tres escenarios generan más que el consumo diurno estimado ({{ '{:,}'.format(daytime_kwh|round|int) }} kWh/mes),
         por lo que la factura estimada es igual en todos. Tamaño óptimo sin recorte para este perfil de cargas:
         <b>≈ {{ optimal_kw if optimal_kw is not none else '—' }} kW</b>. Recalcula MPPT para ver escenarios ajustados.
+        {% endif %}
       </p>
     {% endif %}
     <p style="margin-top:8px;">
@@ -261,7 +266,7 @@
         {% if manual.proj.new_bill is not none %}💳 Factura est.: <b>₡{{ '{:,}'.format(manual.proj.new_bill) }}/mes</b><br>{% endif %}
         {% if manual.proj.savings is not none %}<span style="color:#166534;">💰 Ahorro/mes: <b>₡{{ '{:,}'.format(manual.proj.savings) }}</b></span><br>{% endif %}
         <span style="color:#1d4ed8;">⚡ Autoconsumo: <b>{{ manual.proj.self_consumption_pct }}%</b></span>
-        {% if manual.proj.self_consumption_pct < 50 %}
+        {% if manual.proj.oversized %}
           <div style="margin-top:0.4rem;font-size:0.72rem;color:#92400e;">⚠️ Solo el {{ manual.proj.self_consumption_pct }}% de la generación se usa — sistema sobredimensionado.</div>
         {% endif %}
       </div>

@@ -45,6 +45,8 @@
   cargas, con un mínimo y un máximo); en el paso de Equipos se compara lo que elijas contra ella. Este paso es obligatorio.
 </p>
 
+<div hx-get="{{ url_for('wizard.clima_estado') }}" hx-trigger="load" hx-target="this" hx-swap="outerHTML"></div>
+
 {% if from_default and not confirmed %}
   <div class="obj-warn">Se muestran los objetivos sugeridos por defecto. Confírmalos o ajústalos para continuar.</div>
 {% endif %}
@@ -281,7 +283,7 @@
       <p class="obj-note" style="font-size:0.9rem;color:inherit;margin-top:0;">Con {{ '%.1f'|format(sm.kwp) }} kWp{% if sm.roof_capped %} (lo que cabe en el techo){% endif %} y {{ '%.1f'|format(sm.daily_kwh) }} kWh/día,
         la batería mínima es <b>{{ '%.0f'|format(sm.battery_min_physical) }} kWh</b> usando el banco hasta 10 %,
         o <b>{{ '%.0f'|format(sm.battery_min_reserve) if sm.battery_min_reserve else '—' }} kWh</b> sin tocar el margen de {{ '%.0f'|format(sm.reserve_pct) }} %.
-        {% if fo %}La fórmula da {{ '%.0f'|format(fo.battery) }} kWh.{% endif %}</p>
+        {% if fo %}La fórmula da {{ '%.0f'|format(fo.battery) }} kWh{% if fo.soc_typ_pct is defined %}; con ella la batería baja en un día normal hasta <b>{{ '%.0f'|format(fo.soc_typ_pct) }} %</b>{% endif %}.{% endif %}</p>
       {% else %}
       <p class="obj-note" style="font-size:0.9rem;color:#991b1b;margin-top:0;">Con {{ '%.1f'|format(sm.kwp) }} kWp{% if sm.roof_capped %} (lo que cabe en el techo){% endif %} para {{ '%.1f'|format(sm.daily_kwh) }} kWh/día,
         ninguna batería cumple la meta: los paneles no alcanzan para recargarla. Hacen falta más paneles (o menos consumo).
@@ -297,12 +299,13 @@
     {% if system_type == 'off_grid' %}
       {% if sm.compare %}
       <table style="margin-top:8px;">
-        <thead><tr><th>Si instalas…</th><th>Batería</th><th>Días con apagón</th><th>Días que tocan el margen</th><th>Racha máx.</th></tr></thead>
+        <thead><tr><th>Si instalas…</th><th>Batería</th><th>Días con apagón</th><th>Días que tocan el margen</th><th>Racha máx.</th><th>Nivel mínimo típico</th></tr></thead>
         <tbody>{% for c in sm.compare %}
           <tr><td>{{ 'Lo que da la fórmula' if c.name == 'formula' else 'Lo que usa la flota sana' }}</td>
               <td>{{ '%.1f'|format(c.battery) }}<span class="u">kWh</span></td>
               <td>{{ '%.1f'|format(c.fail_pct_physical) }} %</td><td>{{ '%.1f'|format(c.fail_pct_reserve) }} %</td>
-              <td>{{ '%.0f'|format(c.streak_p90) }} día(s)</td></tr>{% endfor %}
+              <td>{{ '%.0f'|format(c.streak_p90) }} día(s)</td>
+              <td>{{ '%.0f'|format(c.soc_typ_pct) ~ ' %' if c.soc_typ_pct is defined and c.soc_typ_pct is not none else '—' }}</td></tr>{% endfor %}
         </tbody>
       </table>
       {% endif %}

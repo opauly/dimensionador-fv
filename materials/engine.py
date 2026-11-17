@@ -110,6 +110,30 @@ METER_BASE_KEY = "interconexion-base-para-medidor-monofasica-con-interruptor-pri
 METER_BREAKER_KEY = "interconexion-breaker-30a-compatible-con-base-para-medidor"
 PADLOCK_KEY = "interconexion-candado-pequeno-para-base-medidor"
 
+def _tidy(name: str) -> str:
+    """Display name: the gauge sign sticks to the number ("#1/0", not "# 1/0" or "Cable# 1/0"), no doubled spaces, no space before a comma."""
+    import re
+
+    name = re.sub(r"(?<=\w)#", " #", name)
+    name = re.sub(r"#\s+(?=\d)", "#", name)
+    return re.sub(r"\s+,", ",", re.sub(r"\s{2,}", " ", name)).strip()
+
+
+for _r in CATALOG:
+    _r["name"] = _tidy(_r["name"])
+
+_GAUGE_ORDER = ("18", "16", "14", "12", "10", "8", "6", "4", "3", "2", "1", "1/0", "2/0", "3/0", "4/0")
+_COLOR_ORDER = ("negro", "rojo", "blanco", "verde", "azul", "amarillo")
+
+
+def _cable_rank(kind: str, gauge: str, color: str) -> tuple:
+    """Sort key that keeps one cable together: gauge from thin to thick, and all colours of a gauge side by side."""
+    anchor = min((_INDEX[r["key"]] for r in CATALOG if r.get("kind") == kind), default=len(CATALOG))
+    g = _GAUGE_ORDER.index(str(gauge)) if str(gauge) in _GAUGE_ORDER else len(_GAUGE_ORDER)
+    c = _COLOR_ORDER.index(color) if color in _COLOR_ORDER else len(_COLOR_ORDER)
+    return (anchor, g, c)
+
+
 _SECTION_RANK = {s: i for i, s in enumerate(SECTIONS)}
 _BY_NAME = {(r["section"], r["name"]): r for r in CATALOG}
 _BY_KEY = {r["key"]: r for r in CATALOG}
@@ -154,7 +178,7 @@ class Collector:
 
     def add(self, row: dict | None, qty: float, *, name: str | None = None, unit: str = "un", section: str = "Generales",
             group: str | None = None, sibling: dict | None = None, where: str | None = None, note: str | None = None,
-            source: str = "regla", comment: str | None = None) -> None:
+            source: str = "regla", comment: str | None = None, rank: tuple | None = None) -> None:
         if qty is None or qty <= 0:
             return
         if row is not None:
@@ -168,6 +192,8 @@ class Collector:
             idx = max((_INDEX[r["key"]] for r in CATALOG if r["section"] == section and r["group"] == group), default=len(CATALOG))
             self._dyn += 1
             order = (_SECTION_RANK.get(section, 9), idx, self._dyn)
+        if rank:                 # keeps related lines together (all the colours of one cable gauge), whether or not they are in the master list
+            order = (order[0], *rank, 0)
         line = self.lines.get(key)
         if line is None:
             line = {"id": key, "name": name, "unit": unit, "section": section, "group": group, "qty": 0.0, "in_master": in_master,
@@ -409,6 +435,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
         for color in ("rojo", "negro"):
             c.add(_find("cable_thhn", gauge=GX_CABLE_GAUGE, color=color), GX_CABLE_M, name=f"Cable #{GX_CABLE_GAUGE} AWG THHN, CU, color {color}", unit="m",
                   section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=GX_CABLE_GAUGE, color="negro"), where="Alimentación Ekrano/Cerbo",
+                  rank=_cable_rank("cable_thhn", GX_CABLE_GAUGE, color),
                   note=f"{GX_CABLE_M} m de #{GX_CABLE_GAUGE} para alimentar el Ekrano/Cerbo desde la barra Lynx (+ rojo, - negro); lleva fusible interno, sin breaker")
 
     counts = layout_counts(eq.get("panel") or {}, int(eq.get("panel_count") or 0), layout)
@@ -436,6 +463,7 @@ def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: 
     for color in ("rojo", "verde", "blanco"):
         c.add(_find("cable_thhn", gauge="12", color=color), MONITOR_CIRCUIT_M, name=f"Cable #12 AWG THHN, CU, color {color}", unit="m",
               section="Generales", group="Cable", sibling=_find("cable_thhn", gauge="12", color="negro"), where="Toma de monitoreo",
+              rank=_cable_rank("cable_thhn", "12", color),
               note=f"{MONITOR_CIRCUIT_M} m para el circuito de la toma de monitoreo (fase, neutro y tierra)")
 
 
@@ -527,7 +555,7 @@ def _cables(c: Collector, branches: list[dict]) -> None:
             total_m += t["m"]
         colors.add(color)
         c.add(row, qty, name=name, unit="m", section=section, group=group, sibling=_find(kind, gauge="10", color=color) or _find(kind, gauge="4", color=color),
-              where=" · ".join(t["where"]), note=note)
+              where=" · ".join(t["where"]), note=note, rank=_cable_rank(kind, g, color))
 
     for g, lg in lugs.items():
         n = math.ceil(lg["n"] * (1 + WASTE))
@@ -669,7 +697,8 @@ def _centers(c: Collector, wiring_ctx: dict, eq: dict, grid_zero: bool) -> None:
             for color in ("negro", "rojo"):
                 c.add(_find("cable_thhn", gauge=METER_FEED_GAUGE, color=color), METER_FEED_M, name=f"Cable #{METER_FEED_GAUGE} AWG THHN, CU, color {color}", unit="m",
                       section="Generales", group="Cable", sibling=_find("cable_thhn", gauge=METER_FEED_GAUGE, color="negro"),
-                      where="Centro de carga → Smart Meter", note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
+                      where="Centro de carga → Smart Meter", rank=_cable_rank("cable_thhn", METER_FEED_GAUGE, color),
+                      note=f"{METER_FEED_M} m de #{METER_FEED_GAUGE} para alimentar el Smart Meter desde su breaker del centro de carga")
         return
     if disc.get("ac_out") == "center":
         items = []

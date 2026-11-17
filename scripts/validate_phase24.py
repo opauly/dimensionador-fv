@@ -380,19 +380,21 @@ def check_wizard_numbering() -> int:
 
         # ── effective_step_reached(): the one place that interprets the stored integer ──
         eff = draft.effective_step_reached
-        expect("old drafts (no marker): 1-5 unchanged, 6/7/8 -> 7/8/9",
-               [eff({"step_reached": r}) for r in range(1, 9)] == [1, 2, 3, 4, 5, 7, 8, 9])
+        expect("old drafts (no marker): 1-5 unchanged, 6/7/8 -> 7/9/10 (Instalación is 8 now)",
+               [eff({"step_reached": r}) for r in range(1, 9)] == [1, 2, 3, 4, 5, 7, 9, 10])
+        expect("rev-2 drafts: 1-7 unchanged, Costos 8 -> 9, Revisión 9 -> 10",
+               [eff({"step_reached": r, "wizard_rev": 2}) for r in range(1, 10)] == [1, 2, 3, 4, 5, 6, 7, 9, 10])
         expect("marked drafts are trusted as stored; missing meta defaults to 1",
-               eff({"step_reached": 6, "wizard_rev": 2}) == 6 and eff({"step_reached": 9, "wizard_rev": 2}) == 9
+               eff({"step_reached": 6, "wizard_rev": 3}) == 6 and eff({"step_reached": 10, "wizard_rev": 3}) == 10
                and eff(None) == 1 and eff({}) == 1)
 
         # ── guard on a draft saved under the OLD numbering ──
-        max_allowed = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 8, 7: 9, 8: 9}   # highest step each old draft may open now
-        resume_on = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 7, 7: 8, 8: 9}      # where its redirect sends a too-far request
+        max_allowed = {1: 2, 2: 3, 3: 4, 4: 5, 5: 6, 6: 8, 7: 10, 8: 10}   # highest step each old draft may open now
+        resume_on = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 7, 7: 9, 8: 10}      # where its redirect sends a too-far request
         bad = []
         for r in range(1, 9):
             vid = mk({"step_reached": r})
-            for n in range(1, 10):
+            for n in range(1, 11):
                 resp = get(f"{base}/{vid}/paso/{n}")
                 if n <= max_allowed[r]:
                     if resp.status_code != 200:
@@ -402,18 +404,18 @@ def check_wizard_numbering() -> int:
         expect("every old draft (saved at 1-8): opens exactly what it could before, shifted; too-far requests land on its own content", not bad, "; ".join(bad[:3]))
 
         old7 = mk({"step_reached": 7})
-        expect("old draft at Costos (7) is on new Costos (8) and may open Review (9)",
-               get(f"{base}/{old7}/paso/9").status_code == 200 and target(get(f"{base}/{old7}/abrir")) == "8")
+        expect("old draft at Costos (7) is on new Costos (9) and may open Review (10)",
+               get(f"{base}/{old7}/paso/10").status_code == 200 and target(get(f"{base}/{old7}/abrir")) == "9")
         old5 = mk({"step_reached": 5})
         expect("old draft at step 5 must pass through Objetivos: it can open 6 but not Equipos (7)",
                get(f"{base}/{old5}/paso/6").status_code == 200 and get(f"{base}/{old5}/paso/7").status_code == 303)
-        newd = mk({"step_reached": 6, "wizard_rev": 2}, objectives=confirmed_og())
+        newd = mk({"step_reached": 6, "wizard_rev": 3}, objectives=confirmed_og())
         expect("marked draft at Objetivos (6) with CONFIRMED goals may open 7 but not 8", get(f"{base}/{newd}/paso/7").status_code == 200
                and get(f"{base}/{newd}/paso/8").status_code == 303)
         expect("abrir resumes on the effective step (marked 6 -> 6)", target(get(f"{base}/{newd}/abrir")) == "6")
 
         # ── Objetivos Siguiente: advances, converts, never lowers ──
-        d = mk({"step_reached": 6, "wizard_rev": 2})
+        d = mk({"step_reached": 6, "wizard_rev": 3})
         resp = client.post(f"{base}/{d}/paso/6", data=og_form())
         meta = store[d]["data"]["meta"]
         expect("Objetivos POST with a valid form advances to Equipos (7) and records it",
@@ -421,19 +423,19 @@ def check_wizard_numbering() -> int:
         d = mk({"step_reached": 5})
         client.post(f"{base}/{d}/paso/6", data=og_form())
         meta = store[d]["data"]["meta"]
-        expect("an old draft at 5 is converted on first save (step 7, wizard_rev 2)", meta["step_reached"] == 7 and meta["wizard_rev"] == 2)
+        expect("an old draft at 5 is converted on first save (step 7, wizard_rev 3)", meta["step_reached"] == 7 and meta["wizard_rev"] == 3)
         d = mk({"step_reached": 7})
         client.post(f"{base}/{d}/paso/6", data=og_form())
         meta = store[d]["data"]["meta"]
-        expect("revisiting Objetivos on an old Costos draft converts it to 8 and never lowers it", meta["step_reached"] == 8 and meta["wizard_rev"] == 2)
-        d = mk({"step_reached": 7, "wizard_rev": 2})
+        expect("revisiting Objetivos on an old Costos draft converts it to 9 and never lowers it", meta["step_reached"] == 9 and meta["wizard_rev"] == 3)
+        d = mk({"step_reached": 7, "wizard_rev": 3})
         resp = client.post(f"{base}/{d}/paso/7/atras")
         expect("Atrás from Equipos (7) goes to Objetivos (6)", resp.status_code == 303 and target(resp) == "6")
 
         # ── nueva stamps new drafts ──
         resp = client.post(f"{base}/nueva", data={"name": "Cliente QA"})
         meta = store.get("new1", {}).get("data", {}).get("meta", {})
-        expect("a new draft is stamped wizard_rev 2 at step 2", resp.status_code == 303 and meta.get("wizard_rev") == 2 and meta.get("step_reached") == 2)
+        expect("a new draft is stamped wizard_rev 3 at step 2", resp.status_code == 303 and meta.get("wizard_rev") == 3 and meta.get("step_reached") == 2)
 
         # ── routes: every former Equipos/Costos/Revisión route moved, none left behind, each guard matches ──
         rules = [(r.rule, r.methods) for r in create_app().url_map.iter_rules() if "/paso/" in r.rule]
@@ -441,11 +443,12 @@ def check_wizard_numbering() -> int:
         numbers = {int(re.search(r"/paso/(\d+)/", rule).group(1)) for rule, _ in literal}
         paths = {rule for rule, _ in literal}
         expect("action routes exist at the new numbers",
-               {f"{base}/<vid>/paso/7/equipo", f"{base}/<vid>/paso/7/og/manual", f"{base}/<vid>/paso/8/tabla",
-                f"{base}/<vid>/paso/8/og/refrescar", f"{base}/<vid>/paso/9/bloquear", f"{base}/<vid>/paso/9/pdf/descargar"} <= paths)
+               {f"{base}/<vid>/paso/7/equipo", f"{base}/<vid>/paso/7/og/manual", f"{base}/<vid>/paso/8/cableado", f"{base}/<vid>/paso/8/techo",
+                f"{base}/<vid>/paso/9/tabla", f"{base}/<vid>/paso/9/og/refrescar", f"{base}/<vid>/paso/10/bloquear",
+                f"{base}/<vid>/paso/10/pdf/descargar"} <= paths)
         expect("no action route is left at an old number (only Objetivos' own recalcular lives at 6)",
-               not ({f"{base}/<vid>/paso/6/equipo", f"{base}/<vid>/paso/7/tabla", f"{base}/<vid>/paso/8/bloquear",
-                     f"{base}/<vid>/paso/8/pdf"} & paths)
+               not ({f"{base}/<vid>/paso/6/equipo", f"{base}/<vid>/paso/7/tabla", f"{base}/<vid>/paso/7/cableado", f"{base}/<vid>/paso/8/tabla",
+                     f"{base}/<vid>/paso/8/bloquear", f"{base}/<vid>/paso/9/bloquear", f"{base}/<vid>/paso/9/pdf"} & paths)
                and {p for p in paths if "/paso/6/" in p} == {f"{base}/<vid>/paso/6/recalcular"})
         bad, guarded = [], 0
         for rule, methods in sorted(literal):
@@ -453,55 +456,55 @@ def check_wizard_numbering() -> int:
             if n < 7:
                 continue
             guarded += 1
-            vid = mk({"step_reached": n - 2, "wizard_rev": 2})
+            vid = mk({"step_reached": n - 2, "wizard_rev": 3})
             path = re.sub(r"<[^>]+>", "A", rule.replace("<vid>", vid))
             resp = client.post(path) if "POST" in methods else get(path)
             if not (resp.status_code == 303 and target(resp) == str(n - 2)):
                 bad.append(f"{rule} -> {resp.status_code} {target(resp)}")
-        expect(f"all {guarded} routes at steps 7-9 reject a request one step too far (guard number matches the path)",
-               guarded == 21 and not bad, "; ".join(bad[:3]) or f"expected 21 routes (Equipos 5+4, Costos 4+4, Revisión 4), found {guarded}")
+        expect(f"all {guarded} routes at steps 7-10 reject a request one step too far (guard number matches the path)",
+               guarded == 24 and not bad, "; ".join(bad[:3]) or f"expected 24 routes (Equipos 10, Instalación 2, Costos 8, Revisión 4), found {guarded}")
 
         # ── Objetivos gate (plan §1.8): server-side, every route, grandfathering ──
-        d = mk({"step_reached": 6, "wizard_rev": 2})
+        d = mk({"step_reached": 6, "wizard_rev": 3})
         expect("no objectives: Equipos (7) is closed even though step 6 was reached", get(f"{base}/{d}/paso/7").status_code == 303
                and target(get(f"{base}/{d}/paso/7")) == "6")
         unconf = confirmed_og()
         unconf["confirmed"] = False
-        d = mk({"step_reached": 9, "wizard_rev": 2}, objectives=unconf)
-        blocked = [get(f"{base}/{d}/paso/8"), client.post(f"{base}/{d}/paso/8/tabla"), client.post(f"{base}/{d}/paso/9/bloquear"),
-                   get(f"{base}/{d}/paso/9/pdf/descargar"), client.post(f"{base}/{d}/paso/7/og/manual")]
-        expect("unconfirmed objectives close Equipos/Costos/Revisión by page AND by direct action URL (5 requests, even at step 9)",
+        d = mk({"step_reached": 10, "wizard_rev": 3}, objectives=unconf)
+        blocked = [get(f"{base}/{d}/paso/9"), client.post(f"{base}/{d}/paso/9/tabla"), client.post(f"{base}/{d}/paso/10/bloquear"),
+                   get(f"{base}/{d}/paso/10/pdf/descargar"), client.post(f"{base}/{d}/paso/7/og/manual"), get(f"{base}/{d}/paso/8")]
+        expect("unconfirmed objectives close Equipos/Costos/Revisión by page AND by direct action URL (6 requests, even at the last step)",
                all(r.status_code == 303 and target(r) == "6" for r in blocked), str([(r.status_code, target(r)) for r in blocked]))
         d = mk({"step_reached": 7})   # old draft already at Costos: no objectives key at all
         expect("a draft that predates objectives (old step 7, no objectives) is grandfathered and not blocked",
-               get(f"{base}/{d}/paso/8").status_code == 200 and get(f"{base}/{d}/paso/9").status_code == 200)
+               get(f"{base}/{d}/paso/9").status_code == 200 and get(f"{base}/{d}/paso/10").status_code == 200)
         hy_conf = {**confirmed_og(), "system_type": "hybrid"}
-        d = mk({"step_reached": 8, "wizard_rev": 2}, objectives=hy_conf)
+        d = mk({"step_reached": 8, "wizard_rev": 3}, objectives=hy_conf)
         expect("goals confirmed for another system type do not open Equipos", get(f"{base}/{d}/paso/7").status_code == 303)
 
-        d = mk({"step_reached": 6, "wizard_rev": 2})
+        d = mk({"step_reached": 6, "wizard_rev": 3})
         client.post(f"{base}/{d}/paso/6", data=og_form())
         sd = store[d]["data"]
         expect("confirming stores the goals, marks them confirmed and mirrors autonomy for Equipos",
                sd["objectives"]["confirmed"] is True and sd["objectives"]["goals"]["autonomy_days"] == 2.25
                and sd["consumption"]["autonomy_days"] == 2.25 and get(f"{base}/{d}/paso/7").status_code == 200)
-        d = mk({"step_reached": 6, "wizard_rev": 2})
+        d = mk({"step_reached": 6, "wizard_rev": 3})
         resp = client.post(f"{base}/{d}/paso/6")
         expect("an empty POST (no form fields) cannot confirm the pre-filled defaults",
                resp.status_code == 200 and not store[d]["data"].get("objectives", {}).get("confirmed"))
-        d = mk({"step_reached": 6, "wizard_rev": 2})
+        d = mk({"step_reached": 6, "wizard_rev": 3})
         resp = client.post(f"{base}/{d}/paso/6", data=og_form(autonomy_days=9))
         sd = store[d]["data"]
         expect("an out-of-range goal is rejected, the typed value is kept, and the draft stays unconfirmed",
                resp.status_code == 200 and sd["objectives"]["confirmed"] is False and sd["objectives"]["goals"]["autonomy_days"] == 9.0
                and get(f"{base}/{d}/paso/7").status_code == 303)
-        d = mk({"step_reached": 6, "wizard_rev": 2}, objectives=confirmed_og())
+        d = mk({"step_reached": 6, "wizard_rev": 3}, objectives=confirmed_og())
         client.post(f"{base}/{d}/paso/6/recalcular", data=og_form(autonomy_days=3))
         expect("editing a confirmed goal through the live recompute un-confirms it and re-closes Equipos",
                store[d]["data"]["objectives"]["confirmed"] is False and get(f"{base}/{d}/paso/7").status_code == 303)
         resp = client.post(f"{base}/{d}/paso/6/recalcular", data=og_form(autonomy_days=3))
         expect("the live recompute renders the fragment (with the sweet-spot panel)", resp.status_code == 200 and b"Recomendaci" in resp.data)
-        d = mk({"step_reached": 6, "wizard_rev": 2}, objectives=confirmed_og())
+        d = mk({"step_reached": 6, "wizard_rev": 3}, objectives=confirmed_og())
         client.post(f"{base}/{d}/paso/6/recalcular", data=og_form())
         expect("re-posting identical goals keeps them confirmed", store[d]["data"]["objectives"]["confirmed"] is True)
 
@@ -554,12 +557,12 @@ def check_objetivos() -> int:
 
     line = lambda kw, f=0.9: {"category": "x", "quantity": 1, "connected_power_kw": kw, "demand_factor_pct": f}
     site = {"pvgis_data": {"monthly_kwh_kwp": MONTHLY_KWH_KWP}}
-    og = {"meta": {"system_type": "off_grid", "step_reached": 5, "wizard_rev": 2}, "site": site,
+    og = {"meta": {"system_type": "off_grid", "step_reached": 5, "wizard_rev": 3}, "site": site,
           "consumption": {"daily_kwh": 12.0, "profile": {"lines": [line(5.0)]}}}
-    hy = {"meta": {"system_type": "hybrid", "step_reached": 5, "wizard_rev": 2}, "site": site,
+    hy = {"meta": {"system_type": "hybrid", "step_reached": 5, "wizard_rev": 3}, "site": site,
           "consumption": {"daily_kwh_diversified": 8.0, "profile": {"lines": [line(3.0, 1.0)]},
                           "main_panel": {"avg_kwh_month": 22.0 * 30.4, "mode": "bill"}}}
-    gz = {"meta": {"system_type": "grid_zero", "step_reached": 5, "wizard_rev": 2},
+    gz = {"meta": {"system_type": "grid_zero", "step_reached": 5, "wizard_rev": 3},
           "site": {"pvgis_data": {"monthly_kwh_kwp": [130.0] * 12}}, "consumption": {"avg_kwh": 800.0}}
     avg_daily = sum(m / d for m, d in zip(MONTHLY_KWH_KWP, [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])) / 12
     deliverable = avg_daily * 0.88
@@ -669,7 +672,7 @@ def check_objetivos() -> int:
 
         # ── the gate ──
         ready = ob.is_ready
-        expect("is_ready: new draft before objectives = False", not ready({"meta": {"step_reached": 5, "wizard_rev": 2, "system_type": "off_grid"}}))
+        expect("is_ready: new draft before objectives = False", not ready({"meta": {"step_reached": 5, "wizard_rev": 3, "system_type": "off_grid"}}))
         expect("is_ready: confirmed for this system type = True", ready(conf))
         expect("is_ready: confirmed but for another system type = False",
                not ready({**conf, "meta": {**conf["meta"], "system_type": "hybrid"}}))
@@ -800,7 +803,7 @@ def check_goals() -> int:
 
     # ── glue + template ──
     line = lambda kw, f=0.9: {"category": "x", "quantity": 1, "connected_power_kw": kw, "demand_factor_pct": f}
-    og = {"meta": {"system_type": "off_grid", "step_reached": 7, "wizard_rev": 2}, "site": site,
+    og = {"meta": {"system_type": "off_grid", "step_reached": 7, "wizard_rev": 3}, "site": site,
           "consumption": {"daily_kwh": 12.0, "profile": {"lines": [line(5.0)]}}}
     ctx = glue.build(og, at_spot)
     expect("glue: a grandfathered draft is judged against the default goals and flagged as such; Off-Grid carries the legacy-model note",
@@ -813,7 +816,7 @@ def check_goals() -> int:
     expect("glue: confirmed custom goals (4 days) are what the check judges: the same bank now misses the autonomy goal",
            ctx2 and not ctx2["default_goals"] and st(ctx2["rows"], "autonomy") in ("bajo", "justo"))
     expect("glue: no inputs or invalid goals = no strip (never a crash)", glue.build({"meta": {"system_type": "off_grid"}}, at_spot) is None)
-    gzb = {"meta": {"system_type": "grid_zero", "step_reached": 7, "wizard_rev": 2},
+    gzb = {"meta": {"system_type": "grid_zero", "step_reached": 7, "wizard_rev": 3},
            "site": {"pvgis_data": {"monthly_kwh_kwp": [130.0] * 12}}, "consumption": {"avg_kwh": 800.0}}
     expect("grid-zero daytime fraction for the strip: Objetivos' cache first, else Equipos' own estimate, else 0.45 (never an AI call)",
            ob._cached_fraction(gzb, "grid_zero") == 0.45

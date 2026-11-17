@@ -554,5 +554,12 @@ check("grid zero list: 2 DC breakers, 2 MC4 Y pieces", (_GL19["Breaker DC para r
 # DC-coupled: 12 strings on 6 controllers draw as 6 runs of 2, abbreviated
 check("DC-coupled 6 controllers x 2 strings: 6 runs in the drawing config", (cfg_cc6["pv"]["sizes"], cfg_cc6["pv"]["strings"]), ([2] * 6, 12))
 
+# Batch 20: BOM format -- gauge sign glued to the number, and one cable kept together (gauge thin -> thick, colours side by side)
+check("1/0 cable name has no space after the #", [r["name"] for r in engine.CATALOG if "1/0" in r["name"] and r.get("kind") == "cable_thhn"], ["Cable #1/0 AWG THHN, CU, color negro"])
+check("no catalog name keeps '# 1' or 'Cable#'", [r["name"] for r in engine.CATALOG if "# " in r["name"] or "Cable#" in r["name"]], [])
+_cab = [ln for ln in engine.build_list(_GE19, _GW19, {}, None, "grid_zero")["lines"] if ln["qty"] and ln["name"].startswith("Cable #") and "THHN" in ln["name"]]
+_gk = [(engine._GAUGE_ORDER.index(ln["name"].split("#")[1].split(" ")[0]), engine._COLOR_ORDER.index(ln["name"].rsplit("color ", 1)[1])) for ln in _cab]
+check("THHN cable lines come ordered by gauge, then colour", _gk, sorted(_gk))
+
 print("\n" + ("ALL MATERIALS CHECKS PASSED" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

@@ -229,6 +229,15 @@ def create_version(proposal_id: str, data: dict, version_note: str = "") -> dict
     return version
 
 
+def set_current_version(proposal_id: str, version_number: int) -> None:
+    """Make `version_number` the proposal's current version (used when the client accepts an older version: the project, the contract
+    and the list all read the current one). `create_version` numbers from the highest existing version, so this never collides."""
+    get_client().table("proposals").update({
+        "current_version_number": int(version_number),
+        "updated_at": _now(),
+    }).eq("id", proposal_id).execute()
+
+
 def get_version(version_id: str) -> dict | None:
     result = (
         get_client()

@@ -88,6 +88,18 @@ def drawing_kind(project: dict, wiring: dict) -> str | None:
     return None
 
 
+def _dc_breaker(amps) -> str:
+    """Label of the DC breaker of a PV run; with no commercial size for the combined current the drawing says it is to be defined."""
+    return f"{amps} A 2P DC" if amps else "por definir"
+
+
+def _pv_sizes(wiring: dict, strings: int) -> list[int]:
+    """Strings in each PV run (one run per MPPT input; strings that share an input are joined with MC4 Y connectors). Without the sized
+    wiring, one string per run."""
+    sizes = (wiring.get("pv_groups") or {}).get("sizes")
+    return list(sizes) if sizes and sum(sizes) == strings else [1] * int(strings)
+
+
 def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[str]:
     """Reasons the drawing cannot be generated (empty list = go)."""
     out: list[str] = []
@@ -98,17 +110,17 @@ def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[st
         out.append("Falta un diseño completo: " + (wiring.get("reason") or "el cableado no se puede dimensionar"))
         return out
     if kind == "grid_zero":
-        n = int(eq.get("n_strings") or (eq.get("chosen_scenario") or {}).get("strings") or 0)
-        if not 1 <= n <= 4:
-            out.append(f"El dibujo admite de 1 a 4 strings; el diseño tiene {n}.")
+        runs = int((wiring.get("pv_groups") or {}).get("per_inverter") or 0)
+        if not 1 <= runs <= 4:
+            out.append(f"El dibujo admite de 1 a 4 entradas MPPT con strings por inversor; el diseño tiene {runs}.")
         return out
     if kind == "off_grid":
         inv, qty = eq.get("inverter") or {}, int(eq.get("inverter_qty") or 1)
         if not 1 <= qty <= 8:
             out.append(f"El dibujo admite de 1 a 8 inversores Victron; este diseño tiene {qty}.")
         n_str, n_cc = int(eq.get("n_strings") or 0), int(eq.get("charge_controller_qty") or 1)
-        if not 1 <= n_str <= (4 if n_cc <= 4 else 200):
-            out.append(f"El dibujo admite de 1 a 4 strings (más solo con más de 4 controladores); el diseño tiene {n_str}.")
+        if n_str < 1:
+            out.append("El diseño no tiene strings.")
         if n_cc < 1:
             out.append("El diseño no tiene controladores de carga.")
         elif n_cc > 4 and n_str < n_cc:
@@ -129,8 +141,9 @@ def check_scope(project: dict, eq: dict, wiring: dict, answers: dict) -> list[st
         out.append("El dibujo supone Multis de 120 V en split-phase; el inversor del diseño no es de 120 V.")
     if int(cpl.get("qty") or 1) != 1:
         out.append("El dibujo tiene un solo inversor FV.")
-    if int(cpl.get("strings") or 0) not in (1, 2):
-        out.append(f"El dibujo admite 1 o 2 strings (un MPPT cada uno); el diseño tiene {cpl.get('strings')}.")
+    runs = int((wiring.get("pv_groups") or {}).get("runs") or 0)
+    if not 1 <= runs <= 4:
+        out.append(f"El dibujo admite de 1 a 4 entradas MPPT con strings (los que comparten entrada se juntan con MC4 en Y); el diseño tiene {runs}.")
     n_bat = int((eq.get("battery_bank") or {}).get("battery_count") or 0)
     dist = answers.get("lynx") == "power_in_distributor"
     if not 1 <= n_bat <= (4 if dist else 24):
@@ -189,10 +202,10 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
             "revision": answers["revision"], "draft": bool(answers["draft"]),
         },
         "pv": {
-            "strings": int(cpl["strings"]), "modules_per_string": int(cpl["series"]), "module_w": int(panel.get("wp") or 0),
+            "strings": int(cpl["strings"]), "sizes": _pv_sizes(wiring, int(cpl["strings"])), "modules_per_string": int(cpl["series"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(),
             "roof_m2": (eq.get("array") or {}).get("area_m2"),
-            "string_breaker": f"{string_a} A 2P DC", "dc_wire": f"{_g(pv['ugc'])} SOLAR",
+            "string_breaker": _dc_breaker(string_a), "dc_wire": f"{_g(pv['ugc'])} SOLAR",
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
@@ -222,9 +235,9 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
             "loads": [x for x in (answers["loads1"], answers["loads2"]) if x],
         },
         "comms_notes": {
-            "vebus": "VE.Bus (UTP RJ-45, en lista de materiales)",
-            "can": f"CAN-bus BMS ({bat.get('model') or 'batería'} #1 a {mon.get('model') or 'GX'}) · cable VE.CAN en lista de materiales",
-            "eth": "Ethernet / Modbus TCP (control de potencia del Fronius) · UTP en lista de materiales",
+            "vebus": "VE.Bus (UTP RJ-45)",
+            "can": f"CAN-bus BMS ({bat.get('model') or 'batería'} #1 a {mon.get('model') or 'GX'}) · cable VE.CAN",
+            "eth": "Ethernet / Modbus TCP (control de potencia del Fronius) · UTP",
         },
     }
     cfg = _latinize(cfg)
@@ -330,9 +343,9 @@ def _build_grid_zero(project: dict, d: dict, answers: dict, string_breaker_a: in
         "kind": "grid_zero", "project": _project_block(project, d, answers), "meter": _meter(eq, grid_zero=True),
         "disconnect": _disconnect_cfg(wiring, "gz_disc", meter_fed=bool(eq.get("monitoring"))),
         "pv": {
-            "strings": strings_each, "inverters": n_inv, "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
+            "strings": strings_each, "sizes": _pv_sizes(wiring, strings_each), "inverters": n_inv, "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": None,
-            "string_breaker": f"{string_a} A 2P DC", "dc_wire": f"{_g(pv['ugc'])} SOLAR", "dc_inv_wire": f"{_g(dc_inv['ugc'])} SOLAR",
+            "string_breaker": _dc_breaker(string_a), "dc_wire": f"{_g(pv['ugc'])} SOLAR", "dc_inv_wire": f"{_g(dc_inv['ugc'])} SOLAR",
             "ground_wire": f"T {_g(_egc(pv) or pv['ugc'])} verde",
         },
         "fronius": {
@@ -371,9 +384,9 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "kind": "off_grid", "project": _project_block(project, d, answers), "meter": _meter(eq),
         "ac_out_center": _ac_center_cfg(wiring, "out"), "ac_in_center": _ac_center_cfg(wiring, "in"),
         "pv": {
-            "strings": int(eq["n_strings"]), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
+            "strings": int(eq["n_strings"]), "sizes": _pv_sizes(wiring, int(eq["n_strings"])), "modules_per_string": int(eq["panels_per_string"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(), "roof_m2": (eq.get("array") or {}).get("area_m2"),
-            "string_breaker": f"{string_breaker_a or pv_cc['ocpd_a']} A 2P DC", "dc_wire": f"{_g(pv_cc['ugc'])} SOLAR",
+            "string_breaker": _dc_breaker(string_breaker_a or pv_cc["ocpd_a"]), "dc_wire": f"{_g(pv_cc['ugc'])} SOLAR",
             "dc_out_wire": f"{_g(dc_cc['ugc'])} SOLAR", "ground_wire": f"T {_g(_egc(pv_cc) or pv_cc['ugc'])} verde",
         },
         "controllers": {
@@ -398,11 +411,11 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "subpanel": {"q2": f"{'2P' if (leg_240 or qty >= 2) else '1P'} {ac_out['ocpd_a']} A", "q4": answers["q4"], "spd": _spd_label(answers),
                      "loads": [x for x in (answers["loads1"], answers["loads2"]) if x]},
         "comms_notes": {
-            "vebus": "VE.Bus (UTP RJ-45, en lista de materiales)",
-            "can": f"CAN-bus BMS ({bat.get('model') or 'batería'} #1 a {mon.get('model') or 'GX'}) · cable VE.CAN en lista de materiales",
+            "vebus": "VE.Bus (UTP RJ-45)",
+            "can": f"CAN-bus BMS ({bat.get('model') or 'batería'} #1 a {mon.get('model') or 'GX'}) · cable VE.CAN",
         },
     }
-    return _latinize(cfg), {"blockers": [], "warnings": warnings_off_grid(project, eq, wiring, answers, int(string_breaker_a or pv_cc["ocpd_a"]))}
+    return _latinize(cfg), {"blockers": [], "warnings": warnings_off_grid(project, eq, wiring, answers, string_breaker_a or pv_cc["ocpd_a"])}
 
 
 def _latinize(x):
@@ -431,18 +444,8 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
     if ac_in and rated_in:
         add("info", f"Q1 (AC-IN): 2P {ac_in['ocpd_a']} A sobre {_g(ac_in['ugc'])} ({ac_in.get('ugc_ampacity'):g} A a 75 °C); cada Multi admite {rated_in:g} A de entrada AC. "
                     f"Un breaker de 100 A estaría por encima de ese límite.")
-    isc = float(panel.get("isc") or 0)
-    need = 1.56 * isc
-    if string_a < need:
-        add("warn", f"Breaker de string {string_a} A es menor que 1.56 × Isc = {need:.1f} A.")
-    else:
-        ms = float(panel.get("max_series_fuse_a") or 0)
-        if ms and string_a > ms:
-            add("warn", f"Breaker de string {string_a} A supera la protección máxima en serie del módulo ({ms:g} A, datasheet).")
-        series_txt = (f"protección máxima en serie del módulo {ms:g} A: cumple" if ms
-                      else "falta cargar en el catálogo la protección máxima en serie del módulo (datasheet)")
-        add("info", f"Breaker de string {string_a} A ≥ 1.56 × Isc ({need:.1f} A); {series_txt}. "
-                    f"Confirmar que su tensión nominal CC cubra el Voc del string ({cpl['check']['voc_string']:.0f} V).")
+    for w in _string_checks(panel, string_a, cpl["check"]["voc_string"], "por tendido", int((wiring.get("pv_groups") or {}).get("per_run") or 1)):
+        add(w["level"], w["text"])
     if fr:
         add("info", (f"Breaker del Fronius en el centro de carga del AC Out: 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A." if fr.get("key") == "pv_disc"
                      else f"Q3 (Fronius): 2P {fr['ocpd_a']} A ≥ 125 % de {fr['current_a']:.1f} A."))
@@ -462,32 +465,48 @@ def warnings(project: dict, d: dict, answers: dict, string_a: int) -> list[dict]
         add("warn", "Fusibles MEGA de las baterías sin calibre definido (según manual de la batería): falta el dato en el catálogo.")
     add("info", "El sub-panel de cargas críticas lo pone el propietario o constructor y no va en la lista; en la lista están los breakers Q1, Q2 y Q3 (Q4 y los circuitos del sub-panel quedan a su cargo).")
     if answers.get("export") == "grid_zero":
-        add("info", "Grid Zero requiere el UTP Fronius ↔ Ekrano (incluido en la lista de materiales).")
+        add("info", "Grid Zero requiere el UTP Fronius ↔ Ekrano.")
     add("info", "Calibres y breakers salen del dimensionamiento de la pestaña Técnico con los largos por defecto; ajusta los largos de obra antes de emitir el plano.")
     return out
 
 
-def _string_checks(panel: dict, string_a: int, voc_string: float | None, per: str) -> list[dict]:
+def _string_checks(panel: dict, string_a: int | None, voc_string: float | None, per: str, per_run: int = 1) -> list[dict]:
+    """Review notes for the DC breaker of a PV run. With several strings joined by MC4 Y connectors (`per_run` > 1) the breaker carries the
+    sum, so the need is 1.56 x Isc x strings, and the module's maximum series fuse is judged by the reverse current between strings instead."""
     out: list[dict] = []
     isc = float(panel.get("isc") or 0)
-    need = 1.56 * isc
+    need = 1.56 * isc * max(1, per_run)
     ms = float(panel.get("max_series_fuse_a") or 0)
-    if string_a < need:
-        out.append({"level": "warn", "text": f"Breaker {string_a} A {per} es menor que 1.56 × Isc = {need:.1f} A."})
+    join = f" ({per_run} strings juntos con MC4 en Y)" if per_run > 1 else ""
+    if string_a is None:
+        out.append({"level": "warn", "text": f"No hay un breaker CC comercial para {need:.1f} A (1.56 × Isc{f' × {per_run} strings' if per_run > 1 else ''}): "
+                                              f"con tantos strings por entrada hace falta un fusible por string y una caja combinadora, o menos strings por MPPT."})
+    elif string_a < need:
+        out.append({"level": "warn", "text": f"Breaker {string_a} A {per}{join} es menor que 1.56 × Isc{f' × {per_run}' if per_run > 1 else ''} = {need:.1f} A."})
     else:
-        if ms and string_a > ms:
+        if per_run <= 1 and ms and string_a > ms:
             out.append({"level": "warn", "text": f"Breaker {string_a} A {per} supera la protección máxima en serie del módulo ({ms:g} A, datasheet)."})
-        series_txt = (f"protección máxima en serie del módulo {ms:g} A: cumple" if ms
-                      else "falta cargar en el catálogo la protección máxima en serie del módulo (datasheet)")
+        if per_run > 1 and ms:
+            back = (per_run - 1) * isc
+            if back > ms:
+                out.append({"level": "warn", "text": f"Con {per_run} strings en paralelo la corriente inversa ({back:.1f} A) supera la protección máxima en serie del módulo "
+                                                      f"({ms:g} A): cada string necesita su fusible (NEC 690.9); los conectores Y no lo reemplazan."})
+        if per_run > 1:
+            series_txt = (f"corriente inversa {(per_run - 1) * isc:.1f} A ≤ protección máxima en serie del módulo {ms:g} A: los Y no necesitan fusible por string"
+                          if ms and (per_run - 1) * isc <= ms else "falta cargar en el catálogo la protección máxima en serie del módulo (datasheet)" if not ms
+                          else "revisar la protección por string (ver aviso)")
+        else:
+            series_txt = (f"protección máxima en serie del módulo {ms:g} A: cumple" if ms
+                          else "falta cargar en el catálogo la protección máxima en serie del módulo (datasheet)")
         volt = f" Confirmar que su tensión nominal CC cubra el Voc del string ({voc_string:.0f} V)." if voc_string else ""
-        out.append({"level": "info", "text": f"Breaker {string_a} A {per} ≥ 1.56 × Isc ({need:.1f} A); {series_txt}.{volt}"})
+        out.append({"level": "info", "text": f"Breaker {string_a} A {per}{join} ≥ 1.56 × Isc{f' × {per_run}' if per_run > 1 else ''} ({need:.1f} A); {series_txt}.{volt}"})
     return out
 
 
 def warnings_grid_zero(eq: dict, wiring: dict, string_a: int) -> list[dict]:
     panel, inv = eq["panel"], eq["inverter"]
     ch = eq.get("chosen_scenario") or {}
-    out = _string_checks(panel, string_a, ch.get("voc_total"), "por string")
+    out = _string_checks(panel, string_a, ch.get("voc_total"), "por tendido", int((wiring.get("pv_groups") or {}).get("per_run") or 1))
     ac = _branch(wiring["branches"], "gz_ac")
     if ac:
         out.append({"level": "info", "text": f"Fronius → base de medidor de generación: breaker 2P {ac['ocpd_a']} A sobre {_g(ac['ugc'])}"
@@ -518,7 +537,7 @@ def _abbreviated_note(eq: dict, qty: int | None = None) -> dict | None:
 def warnings_off_grid(project: dict, eq: dict, wiring: dict, answers: dict, string_a: int) -> list[dict]:
     panel, inv = eq["panel"], eq["inverter"]
     branches = wiring["branches"]
-    out = _string_checks(panel, string_a, None, "por string")
+    out = _string_checks(panel, string_a, None, "por tendido", int((wiring.get("pv_groups") or {}).get("per_run") or 1))
     note = _abbreviated_note(eq, int(eq.get("inverter_qty") or 1))
     if note:
         out.append(note)

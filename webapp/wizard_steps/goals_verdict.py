@@ -49,17 +49,28 @@ def _sim_rows(sc: dict) -> list[dict]:
                      note="La primera vez tarda cerca de un minuto; recarga en un momento.")]
     ok = lambda good: "ok" if good else "bajo"          # noqa: E731
     if sc["kind"] == "off_grid":
-        rows = [_row("Días con apagón (clima real)", f"{sc['fail_pct']:.1f} %", f"≤ {sc['fail_target']:.0f} %", ok(sc["fail_pct"] <= sc["fail_target"]), source=src,
-                     note=f"{sc['scenarios']} escenarios con clima y consumos reales."),
-                _row("Apagón más largo (clima real)", f"{sc['streak']:.0f} día(s)", f"≤ {sc['streak_target']:.0f} día(s)", ok(sc["streak"] <= sc["streak_target"]), source=src)]
-        if sc.get("battery_min"):
+        if sc.get("days_year") is not None:
+            rows = [_row("Días al año sin cubrir el consumo", f"{sc['days_year']:.1f}", f"≤ {sc['days_target']:g}", ok(sc["days_year"] <= sc["days_target"] + 1e-9),
+                         source=src, note=f"Promedio de {sc['years']} años de clima real de {sc['zone_label']} × consumos de la flota. Peor año: {sc['days_year_worst']:.0f} días.")]
+        else:
+            rows = [_row("Días con apagón (clima real)", f"{sc['fail_pct']:.1f} %", f"≤ {sc['fail_target']:.0f} %", ok(sc["fail_pct"] <= sc["fail_target"]), source=src,
+                         note=f"{sc['scenarios']} escenarios con clima y consumos reales."),
+                    _row("Apagón más largo (clima real)", f"{sc['streak']:.0f} día(s)", f"≤ {sc['streak_target']:.0f} día(s)", ok(sc["streak"] <= sc["streak_target"]), source=src)]
+        if sc.get("soc_typ_pct") is not None:
+            tgt = sc.get("soc_typ_target")
+            rows.append(_row("Nivel mínimo típico de la batería", f"{sc['soc_typ_pct']:.0f} %", f"≥ {tgt:.0f} %" if tgt else "—",
+                             ok(sc["soc_typ_pct"] >= tgt - 0.5) if tgt else "info", source=src, key="soc_typ",
+                             note="Mediana del punto más bajo de cada día, con clima y consumos reales."))
+        if sc.get("battery_min") and sc.get("days_year") is None:
             rows.append(_row("Batería mínima que cumple", f"{sc['battery']:.0f} kWh instalada", f"≥ {sc['battery_min']:.0f} kWh", "info", source=src,
                              note=f"Sin tocar el margen de {sc['reserve_pct']:.0f} % harían falta {sc['battery_min_reserve']:.0f} kWh." if sc.get("battery_min_reserve") else ""))
         return rows
+    wx = f"{sc['years']} años de clima real de {sc['zone_label']}" if sc.get("zone_label") else f"{sc['scenarios']} escenarios con clima y consumos reales"
     rows = [_row("Noches cubiertas", f"{sc['nights_ok_pct']:.0f} %", f"≥ {sc['night_target']:.0f} %", ok(sc["nights_ok_pct"] >= sc["night_target"]), source=src,
-                 note=f"{sc['scenarios']} escenarios con clima y consumos reales.")]
+                 note=f"{wx}.")]
     if sc.get("outage_cover_pct") is not None:
-        rows.append(_row("Cortes de red que aguanta", f"{sc['outage_cover_pct']:.0f} %", f"≥ {sc['outage_target']:.0f} %", ok(sc["outage_cover_pct"] >= sc["outage_target"]), source=src))
+        rows.append(_row("Cortes de red que aguanta", f"{sc['outage_cover_pct']:.0f} %", f"≥ {sc['outage_target']:.0f} %", ok(sc["outage_cover_pct"] >= sc["outage_target"]), source=src,
+                         note=f"Con {wx} y los cortes reales de la flota." if sc.get("zone_label") else ""))
     rows.append(_row("Carga que sigues comprando a la red", f"{sc['import_pct']:.0f} %", "—", "info", source=src,
                      note=f"Real típico ≈ {sc['import_pct_adj']:.0f} %." if sc.get("import_pct_adj") is not None else ""))
     return rows
@@ -82,8 +93,8 @@ def build(blob: dict, goals_check: dict | None, sim_check: dict | None, roof_fit
                          note="" if fits else f"Los {roof_fit['extra']} restantes ({roof_fit['extra_kwp']:.1f} kWp) necesitan ~{roof_fit['extra_area_m2']:.0f} m² más."))
     hint = None
     if sim_check:
-        rows += [r for r in _sim_rows(sim_check) if r["status"] != "info" or sim_check.get("pending")]
-        if sim_check.get("kind") == "off_grid" and sim_check.get("battery_min"):
+        rows += [r for r in _sim_rows(sim_check) if r["status"] != "info" or sim_check.get("pending") or r["key"] == "soc_typ"]
+        if sim_check.get("kind") == "off_grid" and sim_check.get("battery_min") and sim_check.get("days_year") is None:
             hint = f"Con clima y consumos reales, la batería mínima que cumple es {sim_check['battery_min']:.0f} kWh (tienes {sim_check['battery']:.0f})."
     summary = gc.summarize(rows)
     level = {"ok": 0, "justo": 1, "sobre": 1, "bajo": 2}[summary["overall"]]

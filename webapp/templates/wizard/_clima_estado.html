@@ -1,0 +1,23 @@
+{# Small line under the Objetivos intro: how fresh the multi-year climate history is, with a button to download the missing years. #}
+<div id="clima-estado" class="obj-note" style="margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
+     {% if job.running %}hx-get="{{ url_for('wizard.clima_estado') }}" hx-trigger="every 3s" hx-target="this" hx-swap="outerHTML"{% endif %}>
+  {% if job.running %}
+    <span>⏳ Actualizando el clima… {{ job.done }} de {{ job.total or '?' }} años por zona descargados (unos minutos; puedes seguir trabajando).</span>
+  {% elif not st.ok %}
+    <span>Clima: no se pudo leer el historial.</span>
+  {% elif not st.zones %}
+    <span style="color:#92400e;">⚠ Clima: todavía no hay historial cargado.</span>
+  {% else %}
+    <span {% if st.stale %}style="color:#92400e;"{% endif %}>
+      {% if st.stale %}⚠ {% endif %}Clima real: {{ st.zones }} zonas · {{ st.first_year }}–{{ st.last_year }} · descargado el {{ st.fetched_on }}
+      {% if st.stale %}· falta{{ 'n' if st.missing_years|length > 1 }} {{ st.missing_years|join(', ') }}{% endif %}
+    </span>
+  {% endif %}
+  {% if not job.running %}
+    <button type="button" class="btn btn-outline" style="padding:1px 8px;font-size:12px;"
+            hx-post="{{ url_for('wizard.clima_actualizar') }}" hx-target="#clima-estado" hx-swap="outerHTML"
+            title="Descarga de Open-Meteo solo los años completos que faltan">Actualizar clima</button>
+    {% if job.error %}<span style="color:#b91c1c;">No se pudo actualizar: {{ job.error }}</span>
+    {% elif job.finished_at and not st.stale and st.ok %}<span class="obj-ok">Al día.</span>{% endif %}
+  {% endif %}
+</div>

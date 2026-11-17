@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / ".cache" / "fleet_sim.pkl"
 STALE_HOURS = 24
-DATASET_VERSION = 2              # bump when the cached dataset gains fields; older caches are rebuilt in the background
+DATASET_VERSION = 3              # bump when the cached dataset gains fields; older caches are rebuilt in the background
 LOCAL_UTC_OFFSET_H = -6          # Costa Rica / the fleet's region (no daylight saving)
 SHIFT_MIN = 60                   # site bucket start -> hour-ending label, matches Open-Meteo's "average of the preceding hour"
 ETA_CHARGE = ETA_DISCHARGE = 0.98    # ~sqrt of the 0.96 round-trip default used by design_targets (0.9798)
@@ -94,6 +94,38 @@ def _replay_soc(pv_kwh, load_kwh, nominal, soc0_pct, floor_pct):
             e -= min(-net / ETA_DISCHARGE, max(0.0, e - lo))
         soc[i] = 100.0 * e / nominal
     return soc
+
+
+def _load_climate() -> dict:
+    """Multi-year hourly sunlight per reference climate zone (`public.climate_ghi_history`, filled by scripts/fetch_climate_history.py):
+    {zone: {"label", "lat", "lon", "ghi": hourly W/m2 Series on a UTC index}}. Empty when the table is missing or empty."""
+    try:
+        from database.supabase_client import get_client
+
+        rows = get_client().table("climate_ghi_history").select("zone,label,lat,lon,year,ghi_wm2").order("year").execute().data or []
+    except Exception:                                       # noqa: BLE001 — the fleet window alone still works
+        log.warning("fleet_simulation: could not read climate_ghi_history", exc_info=True)
+        return {}
+    out: dict = {}
+    for r in rows:
+        z = out.setdefault(r["zone"], {"label": r["label"], "lat": float(r["lat"]), "lon": float(r["lon"]), "parts": []})
+        start = pd.Timestamp(year=int(r["year"]), month=1, day=1, tz="UTC")
+        z["parts"].append(pd.Series(np.asarray(r["ghi_wm2"], dtype=float), index=pd.date_range(start, periods=len(r["ghi_wm2"]), freq="1h")))
+    for z in out.values():
+        z["ghi"] = pd.concat(z.pop("parts")).sort_index()
+    return out
+
+
+def nearest_zone(ds: dict, lat, lon) -> str | None:
+    """Key of the reference climate zone closest to a site (None without coordinates or without climate history)."""
+    clim = (ds or {}).get("climate") or {}
+    if not clim or lat is None or lon is None:
+        return None
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return None
+    return min(clim, key=lambda z: (clim[z]["lat"] - la) ** 2 + ((clim[z]["lon"] - lo) * 0.985) ** 2)
 
 
 def build_dataset() -> dict:
@@ -156,7 +188,7 @@ def build_dataset() -> dict:
               "gap_range": (float(np.percentile(gaps, 25)), float(np.percentile(gaps, 75))) if gaps else None,
               "k_sites": [v["k_site"] for v in hyb_val if v["k_site"]], "outages": _fetch_outages(vrm, hybrid_ids)}
     return {"version": DATASET_VERSION, "built_at": time.time(), "weather": weather, "loads": loads, "k": k, "validation": validation,
-            "hybrid": hybrid,
+            "hybrid": hybrid, "climate": _load_climate(),
             "window": (min(s.index[0] for s in weather.values()), max(s.index[-1] for s in weather.values()))}
 
 
@@ -306,7 +338,60 @@ def daytime_load_share(ds: dict | None = None, start_h: int = 7, end_h: int = 17
 
 # ── the simulation ───────────────────────────────────────────────────────
 
-def _scenarios(ds: dict) -> dict | None:
+_SC_CACHE: dict = {}
+
+
+def _climate_scenarios(ds: dict, zone: str) -> dict | None:
+    """One reference zone's multi-year weather x every fleet load pattern. A load pattern only spans the fleet's ~90 days, so its real
+    days are cycled over the years (day-to-day load variety is kept; it is not paired with the weather of the day it was measured)."""
+    z, loads = (ds.get("climate") or {}).get(zone), ds.get("loads") or {}
+    if not z or not loads:
+        return None
+    shift = pd.Timedelta(hours=LOCAL_UTC_OFFSET_H)
+    ghi = z["ghi"]
+    day0 = (ghi.index[0] + shift).ceil("D") - shift                        # first local midnight
+    n_days = int((ghi.index[-1] + pd.Timedelta(hours=1) - day0) / pd.Timedelta(days=1))
+    index = pd.date_range(day0, periods=n_days * 24, freq="1h")
+    g = ghi.reindex(index).values
+    if np.isnan(g).mean() > 0.01 or n_days < 365:
+        return None
+    g = np.nan_to_num(g) / 1000.0
+    unit = []
+    for name, s in loads.items():
+        d0 = (s.index[0] + shift).ceil("D") - shift
+        nd = int((s.index[-1] + pd.Timedelta(hours=1) - d0) / pd.Timedelta(days=1))
+        if nd < MIN_OVERLAP_DAYS:
+            continue
+        arr = s.reindex(pd.date_range(d0, periods=nd * 24, freq="1h")).values.reshape(nd, 24) / (s.sum() / (len(s) / 24.0))
+        arr = arr[~np.isnan(arr).any(axis=1)]                              # whole days only
+        if len(arr) < MIN_OVERLAP_DAYS:
+            continue
+        unit.append(arr[np.arange(n_days) % len(arr)].reshape(-1))
+    if not unit:
+        return None
+    S = len(unit)
+    counted = np.ones((S, n_days), dtype=bool)
+    counted[:, :WARMUP_DAYS] = False
+    years = (index[::24] + shift).year.values
+    return {"ghi": np.tile(g, (S, 1)), "unit": np.array(unit), "counted": counted, "valid": np.ones((S, n_days * 24), dtype=bool),
+            "n_days": n_days, "n": S, "locations": 1, "patterns": S, "index": index, "years": years, "zone": zone,
+            "zone_label": z["label"]}
+
+
+def _scenarios(ds: dict, zone: str | None = None) -> dict | None:
+    """Scenarios for a design run. With `zone` (and that zone's multi-year history in the dataset): the zone's weather x the fleet's load
+    patterns over all the years; otherwise the fleet's own ~90-day window. Cached per dataset and zone."""
+    key = (id(ds), zone if zone and (ds.get("climate") or {}).get(zone) else None)
+    if key not in _SC_CACHE:
+        if len(_SC_CACHE) > 8:
+            _SC_CACHE.clear()
+        _SC_CACHE[key] = _climate_scenarios(ds, key[1]) if key[1] else _fleet_scenarios(ds)
+        if _SC_CACHE[key] is None and key[1]:
+            _SC_CACHE[key] = _fleet_scenarios(ds)                          # zone data unusable -> the fleet window
+    return _SC_CACHE[key]
+
+
+def _fleet_scenarios(ds: dict) -> dict | None:
     """Stack every (weather location x load pattern) pair onto one local-midnight-aligned hourly grid."""
     weather, loads = ds["weather"], ds["loads"]
     if not weather or not loads:
@@ -345,6 +430,7 @@ def _run(sc: dict, k: float, daily_kwh: float, kwp: np.ndarray, batt: np.ndarray
     lo = nom3 * (floors[:, None, None] / 100.0)
     e = np.broadcast_to(nom3, (F, P, S)).copy()
     uns_day = np.zeros((F, P, S, sc["n_days"]))
+    low_day = np.ones((F, P, S, sc["n_days"]))                             # lowest level (share of nominal) reached each day
     for t in range(T):
         pv = k * kwp3 * sc["ghi"][:, t][None, None, :]                    # (1,P,S) kWh this hour
         net = pv - daily_kwh * sc["unit"][:, t][None, None, :] / ETA_INVERTER
@@ -354,6 +440,7 @@ def _run(sc: dict, k: float, daily_kwh: float, kwp: np.ndarray, batt: np.ndarray
         short = np.maximum(0.0, need - avail)
         e = np.where(net >= 0, gain, e - np.minimum(need, avail))
         uns_day[..., t // 24] += short * ETA_DISCHARGE * ETA_INVERTER
+        low_day[..., t // 24] = np.minimum(low_day[..., t // 24], e / nom3)
     counted = sc["counted"][None, None]                                    # (1,1,S,D)
     fail = (uns_day > FAIL_KWH) & counted
     fail_pct = 100.0 * fail.sum(axis=(2, 3)) / max(1, counted.sum())
@@ -362,7 +449,17 @@ def _run(sc: dict, k: float, daily_kwh: float, kwp: np.ndarray, batt: np.ndarray
         run = np.where(counted[..., d], (run + 1) * fail[..., d], 0.0)
         best = np.maximum(best, run)
     unserved_pct = 100.0 * (uns_day * counted).sum(axis=(2, 3)) / max(1e-9, daily_kwh * counted.sum())
-    return {"fail_pct": fail_pct, "streak_p90": np.percentile(best, 90, axis=2), "unserved_pct": unserved_pct}
+    out_years = {}
+    if sc.get("years") is not None:                                        # multi-year climate: days a year without full service
+        yrs = sc["years"]
+        per_year = np.stack([(fail & (yrs == y)[None, None, None, :]).sum(axis=3) for y in np.unique(yrs)], axis=-1)   # (F,P,S,Y)
+        days_in = np.array([((yrs == y) & True).sum() for y in np.unique(yrs)], dtype=float)
+        scale = (365.0 / days_in)[None, None, None, :]
+        out_years = {"fail_days_year_mean": (per_year * scale).mean(axis=(2, 3)),
+                     "fail_days_year_worst": np.percentile((per_year * scale).max(axis=3), 90, axis=2)}
+    # Typical lowest level of a day (median over every counted day of every scenario), % of the nominal capacity.
+    soc_typ = 100.0 * np.nanmedian(np.where(counted, low_day, np.nan).reshape(F, P, -1), axis=2)
+    return {"fail_pct": fail_pct, "streak_p90": np.percentile(best, 90, axis=2), "unserved_pct": unserved_pct, "soc_typ_pct": soc_typ, **out_years}
 
 
 def _meets(res: dict) -> np.ndarray:
@@ -397,7 +494,8 @@ def design(ds: dict, daily_kwh: float, kwp: float, *, reserve_pct: float,
            "compare": [{"name": n, "battery": b,
                         "fail_pct_physical": float(res["fail_pct"][0, len(grid) + i]),
                         "fail_pct_reserve": float(res["fail_pct"][1, len(grid) + i]),
-                        "streak_p90": float(res["streak_p90"][0, len(grid) + i])} for i, (n, b) in enumerate(extras.items())],
+                        "streak_p90": float(res["streak_p90"][0, len(grid) + i]),
+                        "soc_typ_pct": float(res["soc_typ_pct"][0, len(grid) + i])} for i, (n, b) in enumerate(extras.items())],
            "validation": [v for v in ds["validation"]]}
     # Panels: with the reserve-respecting battery (or the physical one if that is unreachable), the smallest array that meets the target.
     battery = out["battery_min_reserve"] or out["battery_min_physical"]
@@ -409,6 +507,97 @@ def design(ds: dict, daily_kwh: float, kwp: float, *, reserve_pct: float,
         out["kwp_min_for_battery"] = float(battery)
     else:
         out["kwp_min"], out["kwp_min_for_battery"] = None, None
+    return out
+
+
+_CHEAPEST_CACHE: dict = {}
+
+
+def cheapest_design(ds: dict, zone: str, daily_kwh: float, targets: dict[str, dict], *, kwp_max: float,
+                    usd_per_kwp: float, usd_per_kwh: float) -> dict | None:
+    """For each named target, the cheapest array + battery that keeps the days a year without full service (average over the zone's
+    real years x the fleet's load patterns) at or under it. A target is {"days", "kwp_min", "kwh_min"}: the minimum array / battery the
+    other goals already ask for (they are floors, never lowered). Every pair on a grid of kWp x battery is replayed once, then each
+    target takes the lowest-cost pair above its floors. Returns {name: {kwp, battery_kwh, days_year, days_year_worst, soc_typ_pct,
+    cost_usd, met, ...}} (`met` False: nothing on the grid reaches the target, the best one is returned), or None when the zone has no
+    usable history. Cached."""
+    k = ds.get("k")
+    if not k or daily_kwh <= 0:
+        return None
+    key = (id(ds), zone, round(daily_kwh, 3), tuple(sorted((n, tuple(round(x, 2) for x in t.values())) for n, t in targets.items())),
+           round(kwp_max, 2), round(usd_per_kwp), round(usd_per_kwh))
+    if key in _CHEAPEST_CACHE:
+        return _CHEAPEST_CACHE[key]
+    sc = _scenarios(ds, zone)
+    if not sc or sc.get("zone") != zone:
+        return None
+    kwp_lo = min(t["kwp_min"] for t in targets.values())
+    kwh_lo = min(t["kwh_min"] for t in targets.values())
+    kwps = np.unique(np.concatenate([np.linspace(kwp_lo, max(kwp_max, kwp_lo), 7), [t["kwp_min"] for t in targets.values()]]))
+    batts = np.unique(np.concatenate([np.linspace(max(kwh_lo, daily_kwh * 0.4), daily_kwh * 6.0, 26), [t["kwh_min"] for t in targets.values()]]))
+    pk, pb = np.meshgrid(kwps, batts, indexing="ij")
+    pk, pb = pk.reshape(-1), pb.reshape(-1)
+    res = _run(sc, k, daily_kwh, pk, pb, np.array([PHYSICAL_FLOOR_PCT]))
+    days, worst, soc = res["fail_days_year_mean"][0], res["fail_days_year_worst"][0], res["soc_typ_pct"][0]
+    cost = usd_per_kwp * pk + usd_per_kwh * pb
+    out = {}
+    for name, t in targets.items():
+        allowed = np.where((pk >= t["kwp_min"] - 1e-9) & (pb >= t["kwh_min"] - 1e-9))[0]
+        ok = allowed[days[allowed] <= t["days"]]
+        i = int(ok[np.argmin(cost[ok])]) if len(ok) else int(allowed[np.argmin(days[allowed])])
+        out[name] = {"kwp": float(pk[i]), "battery_kwh": float(pb[i]), "days_year": float(days[i]), "days_year_worst": float(worst[i]),
+                     "soc_typ_pct": float(soc[i]), "cost_usd": float(cost[i]), "met": bool(len(ok)), "target": float(t["days"]),
+                     "zone": zone, "zone_label": sc.get("zone_label"), "years": int(len(np.unique(sc["years"])))}
+    if len(_CHEAPEST_CACHE) > 100:
+        _CHEAPEST_CACHE.clear()
+    _CHEAPEST_CACHE[key] = out
+    return out
+
+
+def evaluate_zone(ds: dict, zone: str, daily_kwh: float, kwp: float, battery_kwh: float) -> dict | None:
+    """How one given array + battery fares in a zone's real years: days a year without full service (5-year average and the 90th
+    percentile worst year) and the typical lowest daily level. None when the zone has no usable history."""
+    k = ds.get("k")
+    if not k or daily_kwh <= 0 or kwp <= 0 or battery_kwh <= 0:
+        return None
+    key = ("eval", id(ds), zone, round(daily_kwh, 3), round(kwp, 2), round(battery_kwh, 2))
+    if key in _CHEAPEST_CACHE:
+        return _CHEAPEST_CACHE[key]
+    sc = _scenarios(ds, zone)
+    if not sc or sc.get("zone") != zone:
+        return None
+    r = _run(sc, k, daily_kwh, np.array([kwp]), np.array([battery_kwh]), np.array([PHYSICAL_FLOOR_PCT]))
+    out = {"days_year": float(r["fail_days_year_mean"][0, 0]), "days_year_worst": float(r["fail_days_year_worst"][0, 0]),
+           "soc_typ_pct": float(r["soc_typ_pct"][0, 0]), "zone": zone, "zone_label": sc.get("zone_label"), "years": int(len(np.unique(sc["years"])))}
+    _CHEAPEST_CACHE[key] = out
+    return out
+
+
+_SOC_BATT_CACHE: dict = {}
+
+
+def battery_for_typical_soc(ds: dict, daily_kwh: float, kwp: float, target_pct: float) -> dict | None:
+    """Smallest battery (nominal kWh) whose typical lowest daily level stays at or above `target_pct`, for this load and array,
+    replayed against the fleet's real sun and load patterns (bank usable down to PHYSICAL_FLOOR_PCT).
+    Returns {"kwh": float | None (None = no battery up to 6 days of load gets there), "soc_pct": level reached} or None when
+    the dataset cannot support a simulation."""
+    k = ds.get("k")
+    if not k or daily_kwh <= 0 or kwp <= 0:
+        return None
+    key = (id(ds), round(daily_kwh, 3), round(kwp, 2), round(target_pct, 1))
+    if key in _SOC_BATT_CACHE:
+        return _SOC_BATT_CACHE[key]
+    sc = _scenarios(ds)
+    if not sc:
+        return None
+    grid = daily_kwh * np.linspace(0.4, 6.0, 57)
+    res = _run(sc, k, daily_kwh, np.full(len(grid), kwp), grid, np.array([PHYSICAL_FLOOR_PCT]))
+    soc = res["soc_typ_pct"][0]
+    idx = np.where(soc >= target_pct)[0]
+    out = {"kwh": float(grid[idx[0]]) if len(idx) else None, "soc_pct": float(soc[idx[0]] if len(idx) else soc[-1])}
+    if len(_SOC_BATT_CACHE) > 200:
+        _SOC_BATT_CACHE.clear()
+    _SOC_BATT_CACHE[key] = out
     return out
 
 
@@ -489,11 +678,12 @@ def _coverage_pct(surv_sorted: np.ndarray, durations_h: list[float]) -> float:
 
 
 def design_hybrid(ds: dict, critical_daily_kwh: float, kwp: float, *, reserve_pct: float,
-                  compare_batteries: dict[str, float] | None = None) -> dict | None:
-    """Hybrid design test: real sun + fleet load patterns + real grid outages. See the module docstring."""
+                  compare_batteries: dict[str, float] | None = None, zone: str | None = None) -> dict | None:
+    """Hybrid design test: real sun + fleet load patterns + real grid outages. See the module docstring.
+    With `zone`, the sun is that climate zone's multi-year history instead of the fleet's ~90-day window."""
     hyb = ds.get("hybrid")
     k = ds.get("k")
-    sc = _scenarios(ds)
+    sc = _scenarios(ds, zone)
     if hyb is None or not k or not sc or critical_daily_kwh <= 0 or kwp <= 0:
         return None
     reserve = float(min(max(reserve_pct, PHYSICAL_FLOOR_PCT), 60.0))
@@ -516,6 +706,8 @@ def design_hybrid(ds: dict, critical_daily_kwh: float, kwp: float, *, reserve_pc
     cover = np.array([_coverage_pct(s, durations) for s in surv]) if have_outages else np.full(len(cands), np.nan)
     out = {"k": k, "scenarios": sc["n"], "locations": sc["locations"], "patterns": sc["patterns"], "days": int(sc["counted"].sum()),
            "window": ds["window"], "reserve_pct": reserve, "kwp": kwp, "daily_kwh": critical_daily_kwh,
+           "zone": sc.get("zone"), "zone_label": sc.get("zone_label"),
+           "years": int(len(set(sc["years"]))) if sc.get("years") is not None else None,
            "gap_pts": gap, "gap_range": hyb.get("gap_range"), "gap_sites": hyb.get("accepted", 0),
            "night_target": NIGHT_TARGET_PCT, "outage_target": OUTAGE_TARGET_PCT,
            "battery_min_nights": first(run["nights_ok_pct"] >= NIGHT_TARGET_PCT),
@@ -542,3 +734,117 @@ def design_hybrid(ds: dict, critical_daily_kwh: float, kwp: float, *, reserve_pc
                             for i, f in enumerate(factors)]
         out["kwp_curve_battery"] = float(ref_b)
     return out
+
+
+_HYB_CACHE: dict = {}
+
+
+def hybrid_battery_for(ds: dict, zone: str, critical_daily_kwh: float, kwp: float, reserve_pct: float,
+                       targets: dict[str, dict]) -> dict | None:
+    """Smallest battery per column that meets the hybrid reliability goals with the zone's multi-year weather and the fleet's real grid
+    outages. `targets`: {name: {"outage_pct", "night_pct"}} (a None target is not asked). Returns {name: {"kwh", "outage_cover_pct",
+    "nights_ok_pct", "met", "zone_label", "years"}}, or None when the simulation cannot run (no outage data, no zone history...).
+    One run at the given array serves every column, so Piso <= Optimo <= Techo holds."""
+    key = (id(ds), zone, round(critical_daily_kwh, 2), round(kwp, 2), round(reserve_pct, 1),
+           tuple(sorted((n, t.get("outage_pct"), t.get("night_pct")) for n, t in targets.items())))
+    if key in _HYB_CACHE:
+        return _HYB_CACHE[key]
+    hyb, k = ds.get("hybrid"), ds.get("k")
+    sc = _scenarios(ds, zone)
+    if hyb is None or not k or not sc or sc.get("zone") != zone or critical_daily_kwh <= 0 or kwp <= 0:
+        return None
+    durations = hyb["outages"]["hours"]
+    if len(durations) < MIN_OUTAGES:
+        return None
+    reserve = float(min(max(reserve_pct, PHYSICAL_FLOOR_PCT), 60.0))
+    grid = critical_daily_kwh * np.linspace(0.3, 6.0, 40)
+    run = _run_hybrid(sc, k, critical_daily_kwh, np.full(len(grid), kwp), grid, reserve, keep_state=True)
+    surv = _outage_survival(sc, critical_daily_kwh, grid, run["state"], run["counted_h"])
+    cover = np.array([_coverage_pct(s, durations) for s in surv])
+    nights = np.asarray(run["nights_ok_pct"], dtype=float)
+    out = {}
+    for name, t in targets.items():
+        ok = np.ones(len(grid), dtype=bool)
+        if t.get("outage_pct") is not None:
+            ok &= cover >= t["outage_pct"]
+        if t.get("night_pct") is not None:
+            ok &= nights >= t["night_pct"]
+        idx = np.where(ok)[0]
+        i = int(idx[0]) if len(idx) else len(grid) - 1
+        out[name] = {"kwh": float(grid[i]), "outage_cover_pct": float(cover[i]), "nights_ok_pct": float(nights[i]), "met": bool(len(idx)),
+                     "zone_label": sc["zone_label"], "years": int(len(set(sc["years"])))}
+    if len(_HYB_CACHE) > 100:
+        _HYB_CACHE.clear()
+    _HYB_CACHE[key] = out
+    return out
+
+
+# ── grid zero (no battery, no export) ────────────────────────────────────
+
+_GZ_CACHE: dict = {}
+_GZ_X = np.concatenate([np.arange(0.02, 0.30, 0.02), np.arange(0.30, 1.51, 0.05)])    # kWp per (kWh/day of consumption)
+
+
+def grid_zero_curve(ds: dict, zone: str, dc_ac_ratio: float) -> dict | None:
+    """Share of the consumption a zero-export array with no battery avoids buying, hour by hour, as the array grows.
+    Each hour the solar that is used is min(array output limited by the inverter, load); the rest is curtailed. The curve is
+    per kWp of array per kWh/day of consumption (the answer scales with consumption), over the zone's real years x the fleet's load
+    patterns. Returns {"x", "mean" (avg of the years, %), "worst" (worst year, %), "gen" (generation / consumption), "zone_label",
+    "years"} or None when the zone has no usable history."""
+    k = ds.get("k")
+    sc = _scenarios(ds, zone) if k else None
+    if not sc or sc.get("zone") != zone:
+        return None
+    key = (id(ds), zone, round(float(dc_ac_ratio), 2))
+    if key in _GZ_CACHE:
+        return _GZ_CACHE[key]
+    ghi, unit = sc["ghi"], sc["unit"]
+    yrs = np.repeat(sc["years"], 24)
+    masks = [yrs == y for y in sorted(set(yrs))]
+    load_y = np.array([unit[:, m].sum() for m in masks])
+    mean, worst, gen = [], [], []
+    for x in _GZ_X:
+        pv = k * x * ghi
+        used = np.minimum(np.minimum(pv, x / dc_ac_ratio), unit)
+        red = np.array([used[:, m].sum() for m in masks]) / load_y
+        mean.append(100.0 * red.mean())
+        worst.append(100.0 * red.min())
+        gen.append(float(pv.sum() / unit.sum()))
+    out = {"x": _GZ_X, "mean": np.array(mean), "worst": np.array(worst), "gen": np.array(gen),
+           "zone_label": sc["zone_label"], "years": int(len(masks))}
+    if len(_GZ_CACHE) > 40:
+        _GZ_CACHE.clear()
+    _GZ_CACHE[key] = out
+    return out
+
+
+def grid_zero_reduction(ds: dict, zone: str, daily_kwh: float, kwp: float, dc_ac_ratio: float) -> dict | None:
+    """What an array of `kwp` really avoids buying: {"mean_pct", "worst_pct", "use_pct" (share of its output that gets used),
+    "zone_label", "years"}."""
+    cur = grid_zero_curve(ds, zone, dc_ac_ratio)
+    if cur is None or daily_kwh <= 0 or kwp <= 0:
+        return None
+    x = kwp / daily_kwh
+    mean = float(np.interp(x, cur["x"], cur["mean"]))
+    gen = float(np.interp(x, cur["x"], cur["gen"]))
+    return {"mean_pct": mean, "worst_pct": float(np.interp(x, cur["x"], cur["worst"])),
+            "use_pct": 100.0 * mean / 100.0 / gen if gen > 0 else None, "asym_pct": float(cur["mean"][-1]),
+            "zone_label": cur["zone_label"], "years": cur["years"]}
+
+
+def grid_zero_size(ds: dict, zone: str, daily_kwh: float, target_pct: float, dc_ac_ratio: float) -> dict | None:
+    """Smallest array (kWp) whose 5-year average reduction reaches `target_pct`; `reached` is False when no array on the curve gets
+    there (the biggest one is returned with what it delivers)."""
+    cur = grid_zero_curve(ds, zone, dc_ac_ratio)
+    if cur is None or daily_kwh <= 0:
+        return None
+    idx = np.where(cur["mean"] >= target_pct)[0]
+    if len(idx):
+        i = int(idx[0])
+        x = float(np.interp(target_pct, [cur["mean"][max(i - 1, 0)], cur["mean"][i]], [cur["x"][max(i - 1, 0)], cur["x"][i]])) if i > 0 else float(cur["x"][0])
+        reached = True
+    else:
+        x, reached = float(cur["x"][-1]), False
+    kwp = x * daily_kwh
+    r = grid_zero_reduction(ds, zone, daily_kwh, kwp, dc_ac_ratio)
+    return {"kwp": kwp, "reached": reached, **(r or {})}

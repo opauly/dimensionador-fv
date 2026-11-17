@@ -2,7 +2,7 @@
 and options `pages/02_new_proposal.py` and `wizard/common.py` hard-code.
 
 Step numbering follows the *displayed* order — 1 Cliente, 2 Tipo e idioma,
-3 Sitio, 4..9 (Objetivos is 6 since Phase 24) — i.e. this port drops `pages/02_new_proposal.py`'s legacy
+3 Sitio, 4..10 (Objetivos is 6 since Phase 24, Instalación is 8 since rev 3) — i.e. this port drops `pages/02_new_proposal.py`'s legacy
 name inversion (display step 1 renders step2_client(), display step 2
 renders step1_system_type()). Not a behaviour change, just saner names.
 """
@@ -24,6 +24,7 @@ STEP_LABELS_GRID_ZERO = [
     "Consumo",
     "Objetivos",
     "Equipos",
+    "Instalación",
     "Costos",
     "Revisión y PDF",
 ]
@@ -36,6 +37,7 @@ STEP_LABELS_OFF_GRID = [
     "Demanda",
     "Objetivos",
     "Equipos",
+    "Instalación",
     "Costos",
     "Revisión y PDF",
 ]

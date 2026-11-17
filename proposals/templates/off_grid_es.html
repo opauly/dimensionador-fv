@@ -112,7 +112,8 @@
     <tr>
       <th rowspan="{{ 2 if rf else 1 }}">Capacidad de<br>batería @10h (kWh)</th>
       {% if technical.usable_kwh %}<th rowspan="{{ 2 if rf else 1 }}">Capacidad utilizable<br>de baterías (kWh)</th>{% endif %}
-      {% if technical.autonomy_days %}<th rowspan="{{ 2 if rf else 1 }}">Autonomía sin<br>sol (días)</th>{% endif %}
+      {% if technical.autonomy_days %}<th rowspan="{{ 2 if rf else 1 }}">Autonomía sin<br>sol (días)</th>
+      {% if technical.typical_min_soc %}<th rowspan="{{ 2 if rf else 1 }}">Nivel mínimo típico<br>de la batería</th>{% endif %}{% endif %}
       <th rowspan="{{ 2 if rf else 1 }}">Descarga máxima<br>de batería</th>
       {% if rf %}<th colspan="2">Techo (~{{ rf.roof_area_m2 }} m²)</th>{% endif %}
     </tr>
@@ -123,6 +124,7 @@
       <td>{{ technical.battery_kwh }}</td>
       {% if technical.usable_kwh %}<td>{{ technical.usable_kwh }}</td>{% endif %}
       {% if technical.autonomy_days %}<td>{{ technical.autonomy_days }}</td>{% endif %}
+      {% if technical.typical_min_soc %}<td>{{ technical.typical_min_soc }}</td>{% endif %}
       <td>{{ technical.discharge_pct }}</td>
       {% if rf %}
         {% if rf.extra > 0 %}

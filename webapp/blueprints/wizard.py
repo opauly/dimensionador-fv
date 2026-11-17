@@ -45,7 +45,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from flask import Blueprint, abort, redirect, render_template, request, send_file, url_for
+from flask import Blueprint, Response, abort, g, redirect, render_template, request, send_file, url_for
 
 from wizard import draft
 from webapp.wizard_steps import common as step_common
@@ -53,7 +53,7 @@ from webapp.wizard_steps import (
     gz_s4_utility, gz_s5_consumption, gz_s6_equipment, gz_s7_costs, gz_s8_review,
     hy_s4_loads, hy_s5_demand,
     disconnect_center, og_coupling, og_s4_loads, og_s5_demand, og_s6_equipment, og_s7_costs, og_s8_review, og_wiring,
-    s1_client, s2_type, s3_site, s6_objetivos,
+    s1_client, s2_type, s3_site, s6_objetivos, s_instalacion,
 )
 
 bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
@@ -63,8 +63,9 @@ bp = Blueprint("wizard", __name__, url_prefix="/cotizaciones/asistente")
 # `_check_step_tables()` fails the import if the dispatch tables and the label lists ever drift apart.
 STEP_OBJETIVOS = 6
 STEP_EQUIPOS = 7
-STEP_COSTOS = 8
-STEP_REVISION = 9
+STEP_INSTALACION = 8
+STEP_COSTOS = 9
+STEP_REVISION = 10
 
 STEP_MODULES = {
     1: {"*": s1_client},
@@ -78,6 +79,7 @@ STEP_MODULES = {
     # `off_grid.step7_costs()` verbatim.
     STEP_OBJETIVOS: {"*": s6_objetivos},
     STEP_EQUIPOS: {"grid_zero": gz_s6_equipment, "off_grid": og_s6_equipment, "hybrid": og_s6_equipment},
+    STEP_INSTALACION: {"*": s_instalacion},
     STEP_COSTOS: {"grid_zero": gz_s7_costs, "off_grid": og_s7_costs, "hybrid": og_s7_costs},
     STEP_REVISION: {"grid_zero": gz_s8_review, "off_grid": og_s8_review, "hybrid": og_s8_review},
 }
@@ -89,6 +91,7 @@ STEP_TEMPLATES = {
     5: {"grid_zero": "wizard/gz_s5_consumption.html", "off_grid": "wizard/og_s5_demand.html", "hybrid": "wizard/hy_s5_demand.html"},
     STEP_OBJETIVOS: {"*": "wizard/s6_objetivos.html"},
     STEP_EQUIPOS: {"grid_zero": "wizard/gz_s6_equipment.html", "off_grid": "wizard/og_s6_equipment.html", "hybrid": "wizard/og_s6_equipment.html"},
+    STEP_INSTALACION: {"*": "wizard/s_instalacion.html"},
     STEP_COSTOS: {"grid_zero": "wizard/gz_s7_costs.html", "off_grid": "wizard/og_s7_costs.html", "hybrid": "wizard/og_s7_costs.html"},
     STEP_REVISION: {"grid_zero": "wizard/gz_s8_review.html", "off_grid": "wizard/og_s8_review.html", "hybrid": "wizard/og_s8_review.html"},
 }
@@ -150,6 +153,7 @@ def shell_ctx(vid: str | None, n: int, blob: dict, **extra) -> dict:
         "labels": step_common.step_labels(system_type),
         "step_reached": step_reached,
         "title": _title(vid, blob),
+        "readonly": bool(getattr(g, "wizard_readonly", False)),
         **extra,
     }
 
@@ -172,6 +176,18 @@ def _step_template(n: int, blob: dict) -> str | None:
     return templates.get(_system_type(blob)) or templates.get("*")
 
 
+# Pages a locked version may still *read*: a step page and the wiring block that loads under the Equipos step.
+READONLY_GET = ("wizard.paso", "wizard.paso6og_cableado")
+
+
+def _go(url: str):
+    """Redirect that also works for htmx requests: a plain 303 would make htmx swap the whole target page (the quotes list, another wizard
+    step) INSIDE the wizard panel, so for htmx we ask the browser to navigate instead."""
+    if request.headers.get("HX-Request"):
+        return Response("", 204, {"HX-Redirect": url})
+    return redirect(url, code=303)
+
+
 def _guard(vid: str, n: int):
     """Locked-version + step-ahead guards, shared by every GET/POST/action
     route below (PLAN §1.2). Returns a redirect Response to short-circuit
@@ -180,16 +196,20 @@ def _guard(vid: str, n: int):
     if not version:
         abort(404)
     if version.get("locked"):
-        return redirect(url_for("proposals.index", aviso="bloqueada"), code=303)
+        # Locked versions can be *viewed* (GET of a step page only); every action/POST stays blocked.
+        if request.method == "GET" and request.endpoint in READONLY_GET:
+            g.wizard_readonly = True
+        else:
+            return _go(url_for("proposals.index", aviso="bloqueada"))
 
     blob = draft.load(vid)
     step_reached = draft.effective_step_reached(blob.get("meta"))
     if n > step_reached + 1:
-        return redirect(url_for("wizard.paso", vid=vid, n=step_reached), code=303)
+        return _go(url_for("wizard.paso", vid=vid, n=step_reached))
     # Objetivos is mandatory (plan §1.8): Equipos and everything after stay closed — every page and every htmx
     # action route, including a direct URL — until the goals are confirmed (or the draft predates objectives).
     if n >= STEP_EQUIPOS and not s6_objetivos.is_ready(blob):
-        return redirect(url_for("wizard.paso", vid=vid, n=STEP_OBJETIVOS), code=303)
+        return _go(url_for("wizard.paso", vid=vid, n=STEP_OBJETIVOS))
     return None
 
 
@@ -493,6 +513,9 @@ def paso_post(vid, n):
                 error="Selecciona un escenario automático válido o configura un diseño manual válido para continuar.",
             )
         blob = draft.patch(vid, "equipment", result)
+
+    elif n == STEP_INSTALACION:
+        pass            # every answer on this step saves as it changes (cableado / techo routes): Siguiente only advances
 
     elif n == STEP_COSTOS and _step_module(n, blob) is gz_s7_costs:
         blob = draft.patch(vid, "costs", gz_s7_costs.save_step(blob, request.form))
@@ -1249,6 +1272,29 @@ def paso6og_manual_validar(vid):
     return _s6og_render(vid, blob)
 
 
+# ── Climate history freshness (small line + button in Objetivos) ─────────────
+
+
+def _clima_render():
+    from calculations import climate_history
+
+    return render_template("wizard/_clima_estado.html", st=climate_history.status(force=climate_history.job_state()["running"]),
+                           job=climate_history.job_state())
+
+
+@bp.route("/clima/estado")
+def clima_estado():
+    return _clima_render()
+
+
+@bp.route("/clima/actualizar", methods=["POST"])
+def clima_actualizar():
+    from calculations import climate_history
+
+    climate_history.start_update()
+    return _clima_render()
+
+
 # ── Step 6 (Objetivos) live recompute — one route for every system type ──────
 
 
@@ -1274,31 +1320,16 @@ def paso6_objetivos_recalcular(vid):
 # lengths in blob["scratch"]["wiring"].
 
 
-def _roof_context(blob: dict, coupling: dict | None = None) -> dict | None:
-    """The roof-layout question under the wiring block: the saved answer, the module count it applies
-    to and the mounting counts it gives. None until a panel is chosen (nothing to lay out yet)."""
-    from materials import engine
-
-    eq = (blob or {}).get("equipment") or {}
-    panel, n_panels = eq.get("panel") or {}, int(eq.get("panel_count") or 0)
-    if not (panel and n_panels):
-        return None
-    layout = engine.with_default_rows({**engine.DEFAULT_LAYOUT, **engine.layout_from_blob(blob)}, engine.string_count(eq, coupling))
-    return {"layout": layout, "n_panels": n_panels, "counts": engine.layout_counts(panel, n_panels, layout),
-            "has_dims": bool(panel.get("width_m") and panel.get("height_m"))}
-
-
 def _wiring_render(vid: str, blob: dict):
-    ctx = og_wiring.build_context(blob)
-    return render_template("wizard/_wiring.html", vid=vid, roof=_roof_context(blob, ctx.get("coupling")), **ctx)
+    return render_template("wizard/_wiring.html", vid=vid, **s_instalacion.wiring_context(blob))
 
 
-@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/techo", methods=["POST"])
+@bp.route(f"/<vid>/paso/{STEP_INSTALACION}/techo", methods=["POST"])
 def paso6og_techo(vid):
     """Save the roof layout (rows, orientation, rail length, foot spacing) next to the cable lengths."""
     from materials import engine
 
-    guard = _guard(vid, STEP_EQUIPOS)
+    guard = _guard(vid, STEP_INSTALACION)
     if guard:
         return guard
     f = request.form
@@ -1309,9 +1340,9 @@ def paso6og_techo(vid):
     return _wiring_render(vid, blob)
 
 
-@bp.route(f"/<vid>/paso/{STEP_EQUIPOS}/cableado", methods=["GET", "POST"])
+@bp.route(f"/<vid>/paso/{STEP_INSTALACION}/cableado", methods=["GET", "POST"])
 def paso6og_cableado(vid):
-    guard = _guard(vid, STEP_EQUIPOS)
+    guard = _guard(vid, STEP_INSTALACION)
     if guard:
         return guard
     blob = draft.load(vid)

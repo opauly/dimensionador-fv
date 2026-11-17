@@ -278,11 +278,31 @@ def _roof_fit(blob: dict, is_off_grid: bool, panel_count: int, panel: dict):
     return roof_fit_from_blob(blob, panel_count, panel)
 
 
+def _typical_min_soc(blob: dict, system_kw: float, total_kwh: float, daily_kwh: float, reserve_pct: float) -> float | None:
+    """Lowest battery level of a normal day (median), replaying this system against the fleet's real sun and load patterns.
+    None when the fleet dataset isn't ready or can't support it (the PDF then simply omits the figure)."""
+    from calculations import fleet_simulation as fs
+
+    if system_kw <= 0 or total_kwh <= 0 or daily_kwh <= 0:
+        return None
+    ds = fs.get_dataset()
+    if ds is None or not ds.get("k"):
+        return None
+    site = blob.get("site") or {}
+    zone = fs.nearest_zone(ds, site.get("lat"), site.get("lon"))
+    if zone:                                            # the site's climate zone, 5 real years
+        ev = fs.evaluate_zone(ds, zone, daily_kwh, system_kw, total_kwh)
+        if ev:
+            return float(ev["soc_typ_pct"])
+    res = fs.design(ds, daily_kwh, system_kw, reserve_pct=reserve_pct, compare_batteries={"installed": total_kwh})
+    return float(res["compare"][0]["soc_typ_pct"]) if res else None
+
+
 def _autonomy_figures(blob: dict, is_off_grid: bool, system_type: str, battery: dict, battery_bank: dict,
-                      consumption: dict, monthly_coverage: dict) -> dict:
+                      consumption: dict, monthly_coverage: dict, system_kw: float = 0.0) -> dict:
     """Usable battery energy, days of autonomy with no sun (Off-Grid) and the worst month's solar coverage of the load (Off-Grid),
     for the PDF's second technical table. Any figure that cannot be computed is None and simply not shown."""
-    out = {"usable_kwh": None, "autonomy_days": None, "worst_month_cov": None}
+    out = {"usable_kwh": None, "autonomy_days": None, "worst_month_cov": None, "typical_min_soc": None}
     if not is_off_grid:
         return out
     try:
@@ -295,6 +315,10 @@ def _autonomy_figures(blob: dict, is_off_grid: bool, system_type: str, battery: 
             out["usable_kwh"] = total * window / 100.0
             if system_type == "off_grid":
                 out["autonomy_days"] = dt.offgrid_autonomy_days_achieved(total, float(consumption.get("daily_kwh") or 0), window)
+                try:
+                    out["typical_min_soc"] = _typical_min_soc(blob, float(system_kw or 0), total, float(consumption.get("daily_kwh") or 0), reserve)
+                except Exception:                       # noqa: BLE001 — fleet figure is optional
+                    pass
         if system_type == "off_grid":
             gen, con = monthly_coverage.get("generation"), monthly_coverage.get("consumption")
             if gen and con and len(gen) == 12 and len(con) == 12:
@@ -507,6 +531,7 @@ def _build_context_off_grid(data: dict, language: str) -> dict:
             "usable_kwh":             _kwh(tech["usable_kwh"], 1) if tech.get("usable_kwh") else None,
             "autonomy_days":          f"{tech['autonomy_days']:.1f}" if tech.get("autonomy_days") else None,
             "worst_month_cov":        f"{tech['worst_month_cov']:.1f}×" if tech.get("worst_month_cov") else None,
+            "typical_min_soc":        f"{tech['typical_min_soc']:.0f}%" if tech.get("typical_min_soc") is not None else None,
         },
         # Hybrid only — Off-Grid has no grid bill to compare against, so this
         # stays None there (guarded in the template with {% if hybrid_savings %}).
@@ -676,7 +701,22 @@ def build_from_wizard_blob(
             tariff_type = next((t for t in tt_list if t["id"] == tariff_type_id), {})
 
             sizing = size_system(avg_kwh, pvgis_monthly, float(panel.get("wp") or 620), panel_count)
-            avg_b  = compute_avg_billing(monthly_kwh, sizing["monthly_generation"], tariff_type, tiers, xr)
+            bill_gen = sizing["monthly_generation"]
+            if not is_off_grid:
+                # Zero export: only the solar that is used at the moment it is made lowers the bill. The hourly replay with the zone's real
+                # 5-year sun says how much of the consumption that is; the month-by-month shape follows the PVGIS generation, never above that
+                # month's consumption. No history for the zone -> the old figure (all generation counts).
+                try:
+                    from webapp.wizard_steps import sim_check
+
+                    real = sim_check.grid_zero_real(blob, system_kw, float(inverter.get("kw") or 0) * inv_qty)
+                    avg_gen = sum(bill_gen) / len(bill_gen) if bill_gen else 0.0
+                    if real and avg_gen > 0:
+                        used_avg = min(avg_gen, real["mean_pct"] / 100.0 * avg_kwh)
+                        bill_gen = [min(g * used_avg / avg_gen, kwh) for g, kwh in zip(bill_gen, monthly_kwh)]
+                except Exception:
+                    pass
+            avg_b  = compute_avg_billing(monthly_kwh, bill_gen, tariff_type, tiers, xr)
 
             sc = float(avg_b.get("savings_crc") or 0)
             billing_avg = {
@@ -797,7 +837,7 @@ def build_from_wizard_blob(
             "self_consumption_pct": (equipment.get("projection") or {}).get("self_consumption_pct"),
             # Off-Grid/Hybrid only: installed panels vs. the roof area stated in Objetivos (None when none was stated).
             "roof_fit": _roof_fit(blob, is_off_grid, panel_count, panel),
-            **_autonomy_figures(blob, is_off_grid, system_type, equipment.get("battery") or {}, battery_bank, consumption, monthly_coverage),
+            **_autonomy_figures(blob, is_off_grid, system_type, equipment.get("battery") or {}, battery_bank, consumption, monthly_coverage, system_kw),
         },
         # Hybrid only — set by wizard/off_grid.py Step 6 when grid-connected
         # with a known tariff; None (and unused) for Off-Grid/Grid Zero.

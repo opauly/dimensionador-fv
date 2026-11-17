@@ -1,0 +1,15 @@
+{% extends "wizard/shell.html" %}
+{% block wizard_body %}
+<h3 style="margin:0 0 4px;">Instalación</h3>
+<p class="card-note-sm" style="margin:0 0 10px;">Los largos de cable, el acople FV, las protecciones de AC y el montaje en el techo. Con esto se calculan el cable, los breakers, la tubería y la lista de materiales: los valores de arriba son los que luego se usan en el proyecto.</p>
+
+{# The fragment brings its own forms (they save as you change a field), so it sits outside the navigation form: forms cannot nest. #}
+{% include "wizard/_wiring.html" %}
+
+<form method="post" action="{{ url_for('wizard.paso_post', vid=vid, n=n) }}">
+  <div class="wiz-nav">
+    <button class="btn btn-outline" type="submit" formaction="{{ url_for('wizard.paso_atras', vid=vid, n=n) }}">← Atrás</button>
+    <button class="btn" type="submit">Siguiente →</button>
+  </div>
+</form>
+{% endblock %}
