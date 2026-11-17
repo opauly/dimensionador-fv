@@ -34,7 +34,11 @@
   <div class="s8-row" style="margin-top:14px;">
     <div class="s8-kv"><div class="s8-kv-label">Paneles</div><div class="s8-kv-value">{{ panel_count }}</div>{% if panel_sub %}<div class="s8-kv-sub">{{ panel_sub }}</div>{% endif %}</div>
     <div class="s8-kv"><div class="s8-kv-label">Inversores</div><div class="s8-kv-value">{{ inv_qty }}</div>{% if inverter_sub %}<div class="s8-kv-sub">{{ inverter_sub }}</div>{% endif %}</div>
+    {% if ac_coupled %}
+    <div class="s8-kv"><div class="s8-kv-label">Inversor FV (acople AC)</div><div class="s8-kv-value">{{ pv_inv_qty }}</div>{% if pv_inv_sub %}<div class="s8-kv-sub">{{ pv_inv_sub }}</div>{% endif %}</div>
+    {% else %}
     <div class="s8-kv"><div class="s8-kv-label">Controlador(es)</div><div class="s8-kv-value">{{ cc_qty }}</div>{% if cc_sub %}<div class="s8-kv-sub">{{ cc_sub }}</div>{% endif %}</div>
+    {% endif %}
     <div class="s8-kv"><div class="s8-kv-label">Baterías</div><div class="s8-kv-value">{{ battery_count }}</div>{% if battery_sub %}<div class="s8-kv-sub">{{ battery_sub }}</div>{% endif %}</div>
   </div>
 
