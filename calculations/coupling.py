@@ -117,6 +117,8 @@ def pv_inverter_ac_current_a(pv_inv: dict) -> float:
     cur = _f(pv_inv, "ac_output_current_a")
     if cur:
         return cur
+    if str(pv_inv.get("phase") or "").strip().lower().startswith(("3", "three", "tri")):      # three-phase: I = P / (sqrt3 x V_LL)
+        return _f(pv_inv, "kw") * 1000.0 / (math.sqrt(3.0) * (_f(pv_inv, "output_v") or 208.0))
     from calculations.datasheet_limits import fronius_limits
 
     ds = fronius_limits(pv_inv.get("model"))                 # Fronius datasheet: max continuous output current @240 V

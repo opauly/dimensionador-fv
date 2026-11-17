@@ -104,11 +104,12 @@ def vdrop_dc(gauge: str, current_a: float, length_m: float) -> float:
     return 2.0 * current_a * T.T8_R_DC_CU_OHM_KM[gauge] * length_m / 1000.0
 
 
-def vdrop_ac(gauge: str, current_a: float, length_m: float, pf: float = AC_POWER_FACTOR) -> float:
+def vdrop_ac(gauge: str, current_a: float, length_m: float, pf: float = AC_POWER_FACTOR, phases: int = 1) -> float:
+    """Line-to-line drop: 2 x I x Z for a single-phase (two-wire) run, sqrt(3) x I x Z for a three-phase one."""
     x_km, r_km = T.T9_AC_PVC_CU[gauge]
     phi = math.acos(pf)
     z = (r_km * math.cos(phi) + x_km * math.sin(phi)) * length_m / 1000.0
-    return 2.0 * current_a * z
+    return (math.sqrt(3.0) if phases == 3 else 2.0) * current_a * z
 
 
 def egc_gauge(ugc_initial: str, ugc_final: str) -> str:
@@ -197,7 +198,7 @@ def size_branch(
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
     egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
     min_gauge: str | None = None, max_gauge: str | None = None, shared_conduit: bool = False,
-    stocked_only: bool = False, min_conduit_trade: str | None = None,
+    stocked_only: bool = False, min_conduit_trade: str | None = None, phases: int = 1,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
     factors (used for voltage drop, like the workbook); `factor` is the multiplier that
@@ -230,12 +231,14 @@ def size_branch(
         "length_m": length_m, "v_ref": round(v_ref, 1), "notes": notes, "ok": True,
         "insulation": insulation, "protection": protection, "raceways": 1 if shared_conduit else qty,
     }
+    if ugc_i is not None and kind == "ac" and ugc_i not in T.T9_AC_PVC_CU:     # beyond the impedance table (> 1000 kcmil): same case
+        ugc_i = None
     if ugc_i is None:
         out.update(ok=False, ugc=None, ocpd_a=ocpd_override or ocpd_size(design_a), conduit=None)
         notes.append("La corriente excede la tabla T310.15(B)(16): requiere conductores en paralelo (fuera del alcance de esta herramienta).")
         return out
 
-    vd = vdrop_dc if kind == "dc" else vdrop_ac
+    vd = vdrop_dc if kind == "dc" else (lambda g, i, l: vdrop_ac(g, i, l, phases=phases))
     start_g = ugc_i
     if ugc_raw != ugc_i:
         notes.append(f"El calibre mínimo seguro sería {ugc_raw} AWG, pero no se vende: se usa {ugc_i} AWG.")
@@ -321,7 +324,7 @@ def size_branch(
         "ugc_initial": ugc_i, "ugc_from": start_g, "ugc": ugc, "ugc_ampacity": amp, "upsized_for_vd": ugc != start_g,
         "ocpd_a": ocpd, "vd_v": round(vd_v, 2), "vd_pct": round(vd_pct, 2), "vd_pct_initial": round(vd_pct_initial, 2),
         "egc": egc if egc_included else None, "conductors": rows, "total_mm2": round(total_mm2, 1), "conduit": conduit,
-        "hot": hot, "neutral": neutral, "egc_included": egc_included, "shared_conduit": shared_conduit,
+        "hot": hot, "neutral": neutral, "egc_included": egc_included, "shared_conduit": shared_conduit, "phases": phases,
         "egc_rule": egc_rule,
     })
     return out
@@ -390,7 +393,7 @@ def apply_manual(b: dict, manual: dict | None) -> dict:
             msgs.append(f"{ocpd} A difiere del calculado ({calc_a} A) pero está dentro de los límites.")
 
     # recompute what depends on the manual values
-    kind_vd = vdrop_dc if b["kind"] == "dc" else vdrop_ac
+    kind_vd = vdrop_dc if b["kind"] == "dc" else (lambda g, i, l: vdrop_ac(g, i, l, phases=b.get("phases", 1)))
     vd_v = kind_vd(ugc, b["current_a"], b["length_m"])
     egc = None
     if b.get("egc_included") or b.get("egc"):

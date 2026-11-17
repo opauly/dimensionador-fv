@@ -18,6 +18,32 @@
     </div>
   </div>
 
+  <div class="fgrid" style="margin-top:12px;">
+    <div>
+      <label class="flabel">Servicio eléctrico</label>
+      <select class="finput" name="service_phases" id="svc-phases"
+              onchange="document.getElementById('svc-3f').style.display = this.value === '3' ? '' : 'none'">
+        <option value="1" {{ 'selected' if service.phases != 3 else '' }}>Monofásico (120/240 V)</option>
+        <option value="3" {{ 'selected' if service.phases == 3 else '' }}>Trifásico</option>
+      </select>
+    </div>
+  </div>
+  <div id="svc-3f" class="fgrid" style="{{ '' if service.phases == 3 else 'display:none;' }}margin-top:8px;">
+    <div>
+      <label class="flabel">Voltaje entre fases (V)</label>
+      <select class="finput" name="service_v_ll">
+        {% for v in v_ll_options %}<option value="{{ v|int }}" {{ 'selected' if v == service.v_ll else '' }}>{{ v|int }} V</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="flabel">Planta de referencia (perfil de carga medido)</label>
+      <select class="finput" name="profile_site_id">
+        {% for r in reference_sites %}<option value="{{ r.site_id }}" {{ 'selected' if r.site_id == service.profile_site_id else '' }}>{{ r.name }}</option>{% endfor %}
+        {% if not reference_sites %}<option value="">(sin plantas de referencia)</option>{% endif %}
+      </select>
+    </div>
+  </div>
+
   {% include "wizard/_s4_tarifa.html" %}
 
   {% if error %}<p class="wiz-error">{{ error }}</p>{% endif %}

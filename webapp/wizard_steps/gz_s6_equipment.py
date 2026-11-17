@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import math
 
+from calculations import industrial_profiles as ip
+from calculations import three_phase
 from calculations.mppt import check_design, validate_string_design
 
 
@@ -104,6 +106,48 @@ def _avg_irradiance(site: dict) -> float:
     return sum(pvgis_monthly) / 12 if pvgis_monthly else 127.0
 
 
+def _target(blob: dict, fraction: float) -> tuple[float | None, float | None]:
+    """(whole-system array kWp the design should reach, max DC/AC ratio of the goals). The array that meets the Objetivos goal hour by
+    hour with the zone's real sun when that can run, else the monthly-average one (daytime kWh / irradiance)."""
+    consumption, site = blob.get("consumption") or {}, blob.get("site") or {}
+    avg_kwh = consumption.get("avg_kwh", 0) or 0
+    avg_irradiance = _avg_irradiance(site)
+    target_kw = (avg_kwh * fraction / avg_irradiance) if avg_irradiance > 0 else None
+    ratio = None
+    try:
+        from webapp.wizard_steps import s6_objetivos
+
+        sp = s6_objetivos.sweet_spot(blob) or {}
+        opt = (sp.get("band") or {}).get("optimo") or {}
+        if opt.get("climate") and opt.get("system_kw"):
+            target_kw = float(opt["system_kw"])
+        ratio = (sp.get("goals") or {}).get("max_dc_ac_ratio")
+    except Exception:                                   # noqa: BLE001 — keep the monthly-average target
+        pass
+    return target_kw, ratio
+
+
+def _is_three_phase(inv: dict) -> bool:
+    return str(inv.get("phase") or "").strip().lower().startswith(("3", "three", "tri"))
+
+
+def _three_phase_inverters(blob: dict, panel: dict | None, inverters: list[dict]) -> tuple[list[dict], dict | None]:
+    """Three-phase service: the recommended minimum inverter (a stand-in row, not from the catalog) first, then the catalog's three-phase
+    inverters. The recommendation reaches the Objetivos target with this panel at the service voltage (`calculations/three_phase.py`).
+    If it cannot be built, or the catalog has no three-phase inverter either, the full catalog stays so the step never empties."""
+    svc = ip.service_of(blob)
+    s6 = _s6(blob)
+    fraction = float((s6.get("coverage_ai") or {}).get("fraction") or 0) or (ip.day_share(ip.profile_id_for(blob)) or (0.45, ""))[0]
+    target_kw, ratio = _target(blob, fraction)
+    rec = None
+    if panel and target_kw:
+        kwargs = {"ratio_max": float(ratio)} if ratio else {}
+        rec = three_phase.recommend(panel, target_kw, v_ll=svc["v_ll"], **kwargs)
+    virtual = three_phase.virtual_inverter(rec) if rec and rec["ok"] else None
+    out = ([virtual] if virtual else []) + [i for i in inverters if _is_three_phase(i)]
+    return (out or inverters), rec
+
+
 def _resolve_selection(blob: dict) -> dict:
     """Panel/inverter/monitoring currently in play, plus the manual
     series/parallel currently in play — the one place every action + render
@@ -121,8 +165,14 @@ def _resolve_selection(blob: dict) -> dict:
     inverter_qty = _qty(s6.get("inverter_qty") if s6.get("inverter_qty") is not None else current.get("inverter_qty"))
 
     selected_panel = _find(panels, panel_id) or (panels[0] if panels else None)
+    reco = None
+    if ip.is_three_phase(blob):
+        inverters, reco = _three_phase_inverters(blob, selected_panel, inverters)
+        inverter_id = s6.get("inverter_id") or current.get("inverter_id") or (inverters[0]["id"] if inverters else None)
     selected_inverter = _find(inverters, inverter_id) or (inverters[0] if inverters else None)
     selected_monitoring = _find(monitoring_devices, monitoring_id)
+    if selected_inverter and selected_inverter.get("generic") and reco and reco.get("ok"):
+        inverter_qty = int(reco["inverter"]["qty"])          # the stand-in's strings were laid out for exactly this many units
 
     # Manual series/parallel defaults to Escenario B's combo when scenarios
     # exist, else 6/2 — verbatim port of step6_equipment()'s
@@ -143,6 +193,7 @@ def _resolve_selection(blob: dict) -> dict:
         "m_series": m_series,
         "m_parallel": m_parallel,
         "inverter_qty": inverter_qty,
+        "reco": reco,
     }
 
 
@@ -333,17 +384,9 @@ def calc_mppt(blob: dict) -> dict:
 
     from calculations.fleet_shares import daytime_fraction_for
 
-    fraction, note = daytime_fraction_for(loads, location)      # the real fleet's median, the AI estimate only as fallback
-    daytime_kwh = avg_kwh * fraction
-    target_kw = (daytime_kwh / avg_irradiance) if avg_irradiance > 0 else None
-    try:                                                # the array that meets the Objetivos goal, hour by hour with the zone's real sun
-        from webapp.wizard_steps import s6_objetivos
-
-        opt = ((s6_objetivos.sweet_spot(blob) or {}).get("band") or {}).get("optimo") or {}
-        if opt.get("climate") and opt.get("system_kw"):
-            target_kw = float(opt["system_kw"])
-    except Exception:                                   # noqa: BLE001 — keep the monthly-average target
-        pass
+    # the measured plant's share on a three-phase service; else the real fleet's median, the AI estimate only as fallback
+    fraction, note = daytime_fraction_for(loads, location, ip.profile_id_for(blob))
+    target_kw, _ratio = _target(blob, fraction)         # the Objetivos array hour by hour when it can run, else the monthly-average one
 
     qty = sel["inverter_qty"]
     # Each of the `qty` identical inverters takes an equal share of the target; the scenarios come back as whole-system totals.
@@ -693,7 +736,8 @@ def build_context(blob: dict) -> dict:
                         "short": need > inverter_qty}
 
     return {
-        "inverter_qty": inverter_qty, "max_inverters": MAX_INVERTERS, "qty_hint": qty_hint,
+        "inverter_qty": inverter_qty, "max_inverters": MAX_INVERTERS, "qty_hint": None if selected_inverter.get("generic") else qty_hint,
+        "reco": sel.get("reco"), "three_phase": ip.is_three_phase(blob),
         "goals_check": goals_check_ctx,
         "panels": panels, "inverters": inverters, "monitoring_devices": monitoring_devices,
         "selected_panel": selected_panel, "selected_inverter": selected_inverter,

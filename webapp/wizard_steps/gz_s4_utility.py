@@ -91,10 +91,27 @@ def save_step(form) -> dict:
     distributor_id = (form.get("distributor_id") or "").strip() or None
     tariff_type_id = (form.get("tariff_type_id") or "").strip() or None
     nise = (form.get("nise") or "").strip() or "N/A"
-    return {**_utility_for(distributor_id, tariff_type_id), "nise": nise}
+    return {**_utility_for(distributor_id, tariff_type_id), "nise": nise, **_service_fields(form)}
+
+
+SERVICE_V_LL_OPTIONS = (208.0, 220.0, 480.0)
+
+
+def _service_fields(form) -> dict:
+    """The electrical service the plant is quoted for. Single-phase (the default, and what every draft had before) stores nothing else;
+    three-phase adds the line-to-line voltage and the measured plant used as the load reference (`calculations/industrial_profiles.py`)."""
+    if str(form.get("service_phases") or "1") != "3":
+        return {"service_phases": "1", "service_v_ll": None, "profile_site_id": None}
+    try:
+        v_ll = float(str(form.get("service_v_ll") or "208").replace(",", "."))
+    except ValueError:
+        v_ll = 208.0
+    return {"service_phases": "3", "service_v_ll": v_ll, "profile_site_id": (form.get("profile_site_id") or "").strip() or None}
 
 
 def build_context(blob: dict) -> dict:
+    from calculations import industrial_profiles as ip
+
     blob = blob or {}
     utility = blob.get("utility") or {}
     client = blob.get("client") or {}
@@ -118,5 +135,8 @@ def build_context(blob: dict) -> dict:
         "selected_tariff": selected_tariff,
         "nise": utility.get("nise") or client.get("nise") or "N/A",
         "fixed_charge_disclaimer": FIXED_CHARGE_DISCLAIMER,
+        "service": ip.service_of(blob),
+        "v_ll_options": SERVICE_V_LL_OPTIONS,
+        "reference_sites": ip.list_reference_sites(),
         "can_continue": selected_tariff is not None,
     }

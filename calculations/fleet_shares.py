@@ -57,9 +57,16 @@ def fleet_shares() -> dict | None:
     return val
 
 
-def daytime_fraction_for(loads: list, city: str) -> tuple[float, str]:
-    """(share of consumption during solar hours, short note for the wizard). The fleet's median when available, else the AI
-    estimate from the loads list (its old behaviour, with its own 45 % fallback)."""
+def daytime_fraction_for(loads: list, city: str, profile_site_id: str | None = None) -> tuple[float, str]:
+    """(share of consumption during solar hours, short note for the wizard). On a three-phase service, the measured plant's own share
+    (`industrial_profiles`); otherwise the fleet's median when available, else the AI estimate from the loads list (its old behaviour,
+    with its own 45 % fallback)."""
+    if profile_site_id:
+        from calculations.industrial_profiles import day_share
+
+        measured = day_share(profile_site_id)
+        if measured:
+            return measured
     fs = fleet_shares()
     if fs:
         lo, hi = fs["day_range"]

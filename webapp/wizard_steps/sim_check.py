@@ -81,7 +81,9 @@ def grid_zero_real(blob: dict, kwp: float, inverter_kw: float) -> dict | None:
     try:
         from calculations import fleet_simulation as fs
 
-        ds = fs.get_dataset()
+        from calculations import industrial_profiles as ip
+
+        ds = ip.dataset_for_blob(fs.get_dataset(), blob)       # three-phase service: the measured plant's load pattern
         site = blob.get("site") or {}
         avg = float((blob.get("consumption") or {}).get("avg_kwh") or 0)
         if not ds or not ds.get("k") or kwp <= 0 or avg <= 0:

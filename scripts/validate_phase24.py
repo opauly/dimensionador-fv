@@ -568,7 +568,7 @@ def check_objetivos() -> int:
     deliverable = avg_daily * 0.88
     calls = []
 
-    def fake_daytime(loads, city):
+    def fake_daytime(loads, city, profile_site_id=None):
         calls.append((len(loads), city))
         return 0.45, "nota IA"
 

@@ -243,11 +243,12 @@ def _match_preset(system_type: str, goals: dict) -> str:
 # ── Grid Zero's AI daytime fraction (computed on first view, cached) ─────
 
 
-def _estimate_daytime(loads: list, city: str) -> tuple[float, str]:
-    """The real fleet's median daytime share when available, else the AI estimate from the loads list."""
+def _estimate_daytime(loads: list, city: str, profile_site_id: str | None = None) -> tuple[float, str]:
+    """The measured plant's daytime share on a three-phase service, else the real fleet's median when available, else the AI estimate
+    from the loads list."""
     from calculations.fleet_shares import daytime_fraction_for
 
-    return daytime_fraction_for(loads, city)
+    return daytime_fraction_for(loads, city, profile_site_id)
 
 
 def _daytime(blob: dict, vid: str | None) -> dict:
@@ -255,11 +256,15 @@ def _daytime(blob: dict, vid: str | None) -> dict:
     obj_scratch = scratch.get("obj") or {}
     loads = (scratch.get("s5") or {}).get("loads_data") or []
     city = (blob.get("site") or {}).get("city") or "Costa Rica"
-    key = hashlib.sha1(json.dumps([loads, city], sort_keys=True, default=str).encode()).hexdigest()[:16]
+    from calculations import industrial_profiles as ip
+
+    profile_id = ip.profile_id_for(blob)
+    # the plant is part of the key only on a three-phase service, so single-phase drafts keep the keys they already cached
+    key = hashlib.sha1(json.dumps([loads, city] + ([profile_id] if profile_id else []), sort_keys=True, default=str).encode()).hexdigest()[:16]
     cached = obj_scratch.get("daytime") or {}
     if cached.get("key") == key and cached.get("fraction"):
         return cached
-    fraction, note = _estimate_daytime(loads, city)
+    fraction, note = _estimate_daytime(loads, city, profile_id)
     fresh = {"key": key, "fraction": float(fraction), "note": note}
     if vid:
         draft.patch(vid, "scratch", {"obj": {**obj_scratch, "daytime": fresh}})
@@ -277,13 +282,15 @@ def _inputs(blob: dict, system_type: str, peak_basis: str | None = None) -> dict
     missing: list[str] = []
 
     if system_type == "grid_zero":
+        from calculations import industrial_profiles as ip
+
         # Grid Zero Step 6 falls back to 127 kWh/kWp/month when PVGIS isn't there; this block does the same.
         avg_kwh = float(consumption.get("avg_kwh") or 0)
         if avg_kwh <= 0:
             missing.append("Falta el consumo mensual promedio (Paso 5).")
         avg_irr = sum(monthly) / 12 if len(monthly) == 12 else 127.0
         return {"missing": missing, "avg_kwh_month": avg_kwh, "avg_irradiance_kwh_kwp_month": avg_irr,
-                "site_lat": site.get("lat"), "site_lon": site.get("lon")}
+                "site_lat": site.get("lat"), "site_lon": site.get("lon"), "profile_site_id": ip.profile_id_for(blob)}
 
     if len(monthly) != 12:
         missing.append("Falta la irradiancia PVGIS del sitio (Paso 3).")
@@ -493,7 +500,9 @@ def _apply_grid_zero_climate(band: dict, goals: dict, inputs: dict) -> dict:
     try:
         from calculations import fleet_simulation as fs
 
-        ds = fs.get_dataset()
+        from calculations import industrial_profiles as ip
+
+        ds = ip.dataset_for(fs.get_dataset(), inputs.get("profile_site_id"))   # three-phase service: the measured plant's load pattern
         zone = fs.nearest_zone(ds, inputs.get("site_lat"), inputs.get("site_lon")) if ds else None
         if not (zone and ds.get("k")):
             return band

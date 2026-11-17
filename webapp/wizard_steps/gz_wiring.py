@@ -11,6 +11,7 @@ Four runs, as Oscar draws them:
 from __future__ import annotations
 
 from calculations import coupling as C
+from calculations import meter_cts
 from calculations import pv_groups
 from calculations import wiring as W
 from calculations.datasheet_limits import fronius_limits
@@ -93,14 +94,18 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
     )
     dc_inv["ocpd_a"] = None
 
+    three = meter_cts.phases(inverter) == 3                  # three-phase inverter: 3 lines + neutral at the service's line-to-line voltage
+    ac_v = float(inverter.get("output_v") or 208.0) if three else C.PV_INVERTER_AC_V
+    ac_kw = dict(hot=3, neutral=1, phases=3) if three else dict(hot=2, neutral=0)
+    ac_conductors = "L1 + L2 + L3 + neutro + tierra" if three else "L1 + L2 + tierra, sin neutro"
     out_a = C.pv_inverter_ac_current_a(inverter)
     out_total = out_a * n_inv          # several Fronius in parallel: what reaches the base is the sum
     ac = _size(
         "Inversor → base de medidor de generación", kind="ac", qty=1, current_a=out_total, factor=W.CONTINUOUS_FACTOR,
-        v_ref=C.PV_INVERTER_AC_V, length_m=L["ac_out_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+        v_ref=ac_v, length_m=L["ac_out_m"], **ac_kw, insulation=ins, conduit_type=conduit,
         note=(f"Salida del inversor: corriente máxima {out_a:.1f} A × 1.25 (NEC 705 / 690.8). " if n_inv == 1
               else f"Suma de {n_inv} inversores en paralelo: {n_inv} × {out_a:.1f} A = {out_total:.1f} A × 1.25 (NEC 705 / 690.8). ")
-             + "L1 + L2 + tierra, sin neutro. El breaker va en la base de medidor de generación (interruptor principal).",
+             + ac_conductors + ". El breaker va en la base de medidor de generación (interruptor principal).",
     )
     ds = fronius_limits(inverter.get("model")) or {}
     max_ocpd = _f(inverter, "max_ocpd_a") or ds.get("ocpd_a")
@@ -114,8 +119,8 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
     # Interconnection with the existing consumption meter base: the same conductors that reach the generation base, its own length.
     link = _size(
         "Base de generación → base de consumo", kind="ac", qty=1, current_a=out_total, factor=W.CONTINUOUS_FACTOR,
-        v_ref=C.PV_INVERTER_AC_V, length_m=L["gz_link_m"], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
-        note="Mismo conductor que llega a la base de medidor de generación (L1 + L2 + tierra); interconecta con la base de medición de consumo "
+        v_ref=ac_v, length_m=L["gz_link_m"], **ac_kw, insulation=ins, conduit_type=conduit,
+        note=f"Mismo conductor que llega a la base de medidor de generación ({ac_conductors}); interconecta con la base de medición de consumo "
              "existente. Lo protege el breaker de la base de generación, por eso no lleva uno propio.",
     )
     link["ocpd_a"] = None
@@ -128,9 +133,9 @@ def build_context(blob: dict, lengths_override: dict | None = None, manual_overr
         ac["notes"].append("Sale del centro de carga de desconexión (4 espacios) junto al Fronius; el breaker de la base de generación sigue siendo el interruptor principal.")
         to_center = _size(
             "Inversor → centro de carga de desconexión", kind="ac", qty=n_inv, current_a=out_a, factor=W.CONTINUOUS_FACTOR,
-            v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY], hot=2, neutral=0, insulation=ins, conduit_type=conduit,
+            v_ref=ac_v, length_m=L[disconnect_center.LENGTH_KEY], **ac_kw, insulation=ins, conduit_type=conduit,
             note=f"Salida de cada inversor ({out_a:.1f} A × 1.25) al centro de carga de desconexión: un tendido por Fronius ({n_inv}), cada uno a su breaker de "
-                 "2 polos. L1 + L2 + tierra, sin neutro." + (" Las barras del centro de carga juntan los inversores." if n_inv > 1 else ""),
+                 f"{'3 polos' if three else '2 polos'}. {ac_conductors}." + (" Las barras del centro de carga juntan los inversores." if n_inv > 1 else ""),
         )
         if max_ocpd or ds.get("ocpd_a"):
             cap = int(max_ocpd or ds.get("ocpd_a"))

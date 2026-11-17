@@ -63,22 +63,35 @@
             hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
             hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
       {% for inv in inverters %}
-        <option value="{{ inv.id }}" {{ 'selected' if inv.id == selected_inverter.id else '' }}>{{ inv.brand }} {{ inv.model }} — {{ inv.kw }} kW</option>
+        <option value="{{ inv.id }}" {{ 'selected' if inv.id == selected_inverter.id else '' }}>{% if inv.generic %}★ Recomendado: {{ reco.inverter.qty }} × {{ inv.model }} (por especificar){% else %}{{ inv.brand }} {{ inv.model }} — {{ inv.kw }} kW{% endif %}</option>
       {% endfor %}
     </select>
+    {% if selected_inverter.generic %}
+    <div class="s6-note" style="margin-top:8px;font-size:12px;">
+      <b>{{ inverter_qty }} inversores de {{ selected_inverter.kw|round(0)|int }} kW</b> ({{ reco.ac.ac_kw_total|round(0)|int }} kW de CA en total, CC/CA {{ reco.array.dc_ac_ratio }}).
+      El mínimo que alcanza el objetivo con este panel a {{ selected_inverter.output_v|int }} V; los strings de abajo ya están repartidos por igual entre ellos.
+      Los datos de abajo son los <b>requisitos mínimos</b> que debe cumplir el modelo comercial que se elija.
+    </div>
+    {% else %}
     <label class="flabel" style="margin-top:8px;">Cantidad de inversores (en paralelo)</label>
     <select class="finput" name="inverter_qty" style="max-width:120px;" hx-include="#s6-form"
             hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
             hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
       {% for n in range(1, max_inverters + 1) %}<option value="{{ n }}" {{ 'selected' if n == inverter_qty else '' }}>{{ n }}</option>{% endfor %}
     </select>
-    {% if qty_hint and qty_hint.short %}
+    {% endif %}
+    {% if reco and not reco.ok %}
+      <div class="s6-note" style="margin-top:4px;font-size:12px;color:#92400e;">No se pudo armar el inversor recomendado: {{ reco.reasons|join(' ') }}</div>
+    {% endif %}
+    {% if selected_inverter.generic %}
+      {% for w in reco.warnings %}<div class="s6-note" style="margin-top:4px;font-size:12px;color:#92400e;">⚠ {{ w }}</div>{% endfor %}
+    {% elif qty_hint and qty_hint.short %}
       <div class="s6-note" style="margin-top:4px;font-size:12px;color:#92400e;">Para cubrir {{ qty_hint.target_kw }} kW hacen falta {{ qty_hint.needed }} inversores: lo recomendable es hasta {{ qty_hint.cap_one_kw }} kW de paneles por inversor (1.2 × su potencia).</div>
     {% elif inverter_qty > 1 %}
       <div class="s6-note" style="margin-top:4px;font-size:12px;">{{ inverter_qty }} inversores iguales: los strings y paneles de abajo son el total del sistema, repartidos por igual entre ellos. Con varios Fronius el centro de carga de desconexión junta sus salidas.</div>
     {% endif %}
     <div class="s6-spec">
-      <b>{{ selected_inverter.brand }} {{ selected_inverter.model }}</b><br>
+      <b>{% if selected_inverter.generic %}Requisitos mínimos por inversor · {{ selected_inverter.model }} · {{ reco.inverter.wires }} · {{ reco.inverter.hz|int }} Hz · {{ reco.inverter.ac_current_a }} A{% else %}{{ selected_inverter.brand }} {{ selected_inverter.model }}{% endif %}</b><br>
       Vmax: {{ selected_inverter.vmax or '—' }} V<br>
       MPPT: {{ selected_inverter.vmin_mppt or '—' }}–{{ selected_inverter.vmax_mppt or '—' }} V<br>
       Imax MPPT: {{ selected_inverter.imax_mppt or '—' }} A<br>
