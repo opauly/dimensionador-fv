@@ -173,6 +173,13 @@
     <span class="obj-unit">— sistemas {{ 'aislados' if system_type == 'off_grid' else 'híbridos' }} ya instalados</span></p>
   {% if ref.comparable %}
     <p class="obj-note" style="margin-top:0;">{{ ref.comparable|length }} sistema(s) del mismo tipo ya instalados ({{ ref.verdicts.sano }} sano(s)). Qué usan ellos para un consumo como el tuyo ({{ '%.1f'|format(fleet.daily_kwh) }} kWh/día):</p>
+    {% if fleet.where %}{% set w = fleet.where %}
+    <p class="obj-note" style="margin-top:0;">
+      Tu consumo estimado ({{ '%.1f'|format(fleet.daily_kwh) }} kWh/día) está
+      {% if w.above %}<b>por encima de todos</b> los {{ w.n }} sitios medidos (máximo {{ '%.0f'|format(w.max) }}){% elif w.below %}<b>por debajo de todos</b> los {{ w.n }} sitios medidos (mínimo {{ '%.0f'|format(w.min) }}){% else %}en el <b>percentil {{ '%.0f'|format(w.pct) }}</b> de {{ w.n }} sitios medidos (mediana {{ '%.0f'|format(w.median) }}, rango {{ '%.0f'|format(w.min) }}–{{ '%.0f'|format(w.max) }} kWh/día){% endif %}.
+      {% if w.pct >= 90 or w.above %}Está en el extremo alto: conviene revisar si alguna carga pesa de más (horas de uso o factor de demanda).{% endif %}
+    </p>
+    {% endif %}
     {% if ref.suggestion %}
       {% set sg = ref.suggestion %}
       <table>

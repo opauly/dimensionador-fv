@@ -349,10 +349,35 @@ def _og_scenario_projection(
     }
 
 
+def _day_share() -> float:
+    """Share of consumption in the solar hours: the monitored fleet's median when it is available, else the old fixed 45 %."""
+    try:
+        from calculations.fleet_shares import fleet_shares
+
+        fs = fleet_shares()
+        return float(fs["day"]) if fs else 0.45
+    except Exception:                                   # noqa: BLE001 — optional
+        return 0.45
+
+
+def _served_pcts(c: dict, pairs: list[tuple[float, float]]) -> list[float | None]:
+    """Hour-by-hour share of the house served by solar + battery for each (kWp, battery kWh), from the fleet replay; None when the fleet
+    dataset cannot run it (the caller then falls back to the daily battery simulation). Only meaningful when the whole site is backed up."""
+    try:
+        from calculations import fleet_simulation as fs
+
+        ds = fs.get_dataset()
+        site = c.get("site") or {}
+        return fs.hybrid_solar_served_pct(ds, float(c["daily_kwh"]), pairs, reserve_pct=100.0 - float(c["dod_pct"]),
+                                          lat=site.get("lat"), lon=site.get("lon")) if ds else [None] * len(pairs)
+    except Exception:                                   # noqa: BLE001 — optional
+        return [None] * len(pairs)
+
+
 def _hybrid_savings_pct(
     hybrid_savings_enabled: bool, whole_home_avg_kwh_month: float, daily_kwh: float, utility: dict,
     avg_peak_sun_hours: float, system_kw: float, daily_generation_kwh: float | None = None,
-    all_critical: bool = False, utilization_pct: float | None = None,
+    all_critical: bool = False, utilization_pct: float | None = None, served_pct: float | None = None,
 ) -> float | None:
     """Verbatim port of step6_equipment()'s local `_scenario_savings_pct()`
     closure (L917-928) — kept as a module-level function (not a closure)
@@ -372,7 +397,8 @@ def _hybrid_savings_pct(
     result = estimate_hybrid_savings_pct(
         daily_generation_kwh=daily_generation_kwh, critical_daily_kwh=daily_kwh,
         whole_home_avg_kwh_month=whole_home_avg_kwh_month,
-        daytime_fraction=0.45, tariff_info=utility, all_critical=all_critical, utilization_pct=utilization_pct,
+        daytime_fraction=_day_share(), tariff_info=utility, all_critical=all_critical, utilization_pct=utilization_pct,
+        solar_served_pct=served_pct,
     )
     return result["savings_pct"]
 
@@ -669,12 +695,15 @@ def save_step(blob: dict, vid: str | None = None) -> dict | None:
     if c["hybrid_savings_enabled"]:
         from calculations.sizing_off_grid import estimate_hybrid_savings_pct
 
+        _all_critical = c["consumption"].get("panel_scope") != "secondary"
+        _served = _served_pcts(c, [(float(chosen["system_kw"]), float((c.get("battery_bank") or {}).get("total_kwh_installed") or 0))])[0] if _all_critical else None
         hybrid_savings = estimate_hybrid_savings_pct(
             daily_generation_kwh=c["display_daily_generation"], critical_daily_kwh=c["daily_kwh"],
             whole_home_avg_kwh_month=c["whole_home_avg_kwh_month"],
-            daytime_fraction=0.45, tariff_info=c["utility"],
-            all_critical=(c["consumption"].get("panel_scope") != "secondary"),
+            daytime_fraction=_day_share(), tariff_info=c["utility"],
+            all_critical=_all_critical,
             utilization_pct=(c.get("battery_bank") or {}).get("utilization_pct"),
+            solar_served_pct=_served,
         )
 
     monitoring = c["monitoring"]
@@ -756,10 +785,21 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
 
     all_critical = consumption.get("panel_scope") != "secondary"      # one panel for the whole site: everything is backed up
 
-    def _savings(system_kw: float, daily_generation_kwh: float | None = None, utilization_pct: float | None = None) -> float | None:
+    # Hour-by-hour solar share for every scenario at once (one replay for all of them; cached), only when the whole site is backed up.
+    _served_pairs = [(float(s["system_kw"]), float((s.get("battery") or {}).get("total_kwh_installed") or 0)) for s in (c.get("scenarios") or [])]
+    _mp = c.get("mp")
+    if _mp and c.get("m"):
+        _served_pairs.append((float(c["m"]["system_kw"]), float(_mp["battery_kwh"])))
+    _served_map = {}
+    if hybrid_savings_enabled and all_critical and _served_pairs:
+        _served_map = dict(zip(_served_pairs, _served_pcts(c, _served_pairs)))
+
+    def _savings(system_kw: float, daily_generation_kwh: float | None = None, utilization_pct: float | None = None,
+                 battery_kwh: float | None = None) -> float | None:
         return _hybrid_savings_pct(
             hybrid_savings_enabled, c["whole_home_avg_kwh_month"], daily_kwh, c["utility"],
             avg_peak_sun_hours, system_kw, daily_generation_kwh, all_critical=all_critical, utilization_pct=utilization_pct,
+            served_pct=_served_map.get((float(system_kw), float(battery_kwh))) if battery_kwh is not None else None,
         )
 
     # ── Scenario table + projection cards ─────────────────────────────────
@@ -788,7 +828,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "inverter_load_ratio_pct": s["inverter_load_ratio_pct"],
             "battery_count": bank["battery_count"], "battery_kwh": bank["total_kwh_installed"],
             "min_soc_actual_pct": bank["min_soc_actual_pct"],
-            "reduccion_factura": _savings(s["system_kw"], utilization_pct=bank.get("utilization_pct")) if hybrid_savings_enabled else None,
+            "reduccion_factura": _savings(s["system_kw"], utilization_pct=bank.get("utilization_pct"), battery_kwh=bank["total_kwh_installed"]) if hybrid_savings_enabled else None,
             "within_limits": s["within_limits"], "notes": s["notes"],
             "target_kwp": s.get("target_kwp"), "target_battery_kwh": s.get("target_battery_kwh"), "real": real,
             "layout_text": s.get("layout_text"), "coupling": s.get("coupling"), "autonomy_days": s.get("autonomy_days"),
@@ -805,7 +845,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "inverter_load_ratio_pct": s["inverter_load_ratio_pct"],
             "total_panels": s["total_panels"], "panels_per_string": s["panels_per_string"], "strings": s["strings"],
             "inverter_qty": s["inverter_qty"], "inverter_power_w": s["inverter_power_w"],
-            "savings_pct": _savings(s["system_kw"], utilization_pct=bank.get("utilization_pct")) if hybrid_savings_enabled else None,
+            "savings_pct": _savings(s["system_kw"], utilization_pct=bank.get("utilization_pct"), battery_kwh=bank["total_kwh_installed"]) if hybrid_savings_enabled else None,
             "real": real, "layout_text": s.get("layout_text"), "coupling": s.get("coupling"), "autonomy_days": s.get("autonomy_days"),
             "ac_pv_inverter": (s.get("ac_limits") or {}).get("pv_inverter"),
         })
@@ -821,7 +861,7 @@ def build_context(blob: dict, vid: str | None = None) -> dict:
             "imp_limit": imp_limit_m,
             "can_select": bool(m.get("within_limits")),
             "proj": mp,
-            "savings_pct": _savings(m["system_kw"], mp["daily_generation"]) if (mp and hybrid_savings_enabled) else None,
+            "savings_pct": _savings(m["system_kw"], mp["daily_generation"], battery_kwh=mp["battery_kwh"]) if (mp and hybrid_savings_enabled) else None,
         }
 
     # ── Chosen config ──────────────────────────────────────────────────────

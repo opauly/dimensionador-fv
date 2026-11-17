@@ -755,6 +755,7 @@ def estimate_hybrid_savings_pct(
     tariff_info: dict,
     all_critical: bool = False,
     utilization_pct: float | None = None,
+    solar_served_pct: float | None = None,
 ) -> dict:
     """
     Hybrid bill-reduction estimate: how much of the whole home's monthly
@@ -814,7 +815,10 @@ def estimate_hybrid_savings_pct(
         # (utilization from the daily battery simulation) — or, without a simulation, the daytime share served directly plus the
         # remainder that reaches the night load through the battery (90 % round trip) — never more than the house consumes.
         gen_month = daily_generation_kwh * 30.4
-        if utilization_pct is not None:
+        if solar_served_pct is not None:
+            # Hour-by-hour replay with the fleet's real load shapes: share of the house's energy served by solar + battery.
+            used_month = whole_home_avg_kwh_month * max(0.0, min(100.0, solar_served_pct)) / 100.0
+        elif utilization_pct is not None:
             used_month = gen_month * max(0.0, min(100.0, utilization_pct)) / 100.0
         else:
             direct = min(gen_month, whole_home_avg_kwh_month * daytime_fraction)

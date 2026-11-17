@@ -855,7 +855,13 @@ def _fleet_block(system_type: str, inputs: dict, block: dict | None, goals: dict
     except Exception:                                   # noqa: BLE001 — informational
         peak = None
     calc_peak = inputs.get("critical_peak_calc_kw") if system_type == "hybrid" else inputs.get("peak_kw")
-    return {"ref": ref, "sim": sim, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"),
+    loads = sorted(x["avg_load_kwh"] for x in sites)
+    where = None
+    if len(loads) >= 3:         # where the design's daily consumption falls among the real sites of this type (informational)
+        pct = 100.0 * sum(1 for v in loads if v <= float(daily)) / len(loads)
+        where = {"pct": pct, "n": len(loads), "median": loads[len(loads) // 2] if len(loads) % 2 else (loads[len(loads) // 2 - 1] + loads[len(loads) // 2]) / 2,
+                 "min": loads[0], "max": loads[-1], "above": float(daily) > loads[-1], "below": float(daily) < loads[0]}
+    return {"ref": ref, "sim": sim, "coverage": coverage, "daily_kwh": daily, "formula": block.get("optimo"), "where": where,
             "peak": peak, "calc_peak_kw": calc_peak,
             "roof_kwp": dt.roof_capacity_kwp((goals or {}).get("roof_area_m2"), (goals or {}).get("roof_panel_w"), *dt.roof_geometry(goals)),
             "sites": [{"name": x["name"], "load": x["avg_load_kwh"], "kwp": x["kwp"], "battery": x["battery_nominal_kwh"], "inverter": x["inverter_kw"],

@@ -737,6 +737,33 @@ def design_hybrid(ds: dict, critical_daily_kwh: float, kwp: float, *, reserve_pc
 
 
 _HYB_CACHE: dict = {}
+_SERVED_CACHE: dict = {}
+
+
+def hybrid_solar_served_pct(ds: dict, daily_kwh: float, pairs: list[tuple[float, float]], *, reserve_pct: float,
+                            lat=None, lon=None) -> list[float | None]:
+    """For each (kWp, battery kWh): % of the site's load served by solar + battery (the grid import avoided), replayed hour by hour with the
+    zone's real weather (or the fleet window) and the fleet's real load shapes, plus the gap measured on cycling hybrids (a replay
+    under-states real grid import). One list item per pair; None for all when the fleet dataset cannot run a hybrid replay."""
+    hyb, k = (ds or {}).get("hybrid"), (ds or {}).get("k")
+    none = [None] * len(pairs)
+    if not (hyb and k) or daily_kwh <= 0 or not pairs:
+        return none
+    zone = nearest_zone(ds, lat, lon) if (lat is not None and lon is not None) else None
+    sc = _scenarios(ds, zone)
+    if not sc:
+        return none
+    reserve = float(min(max(reserve_pct, PHYSICAL_FLOOR_PCT), 60.0))
+    gap = hyb.get("gap_pts") or 0.0
+    keys = [(ds.get("built_at"), zone, round(float(daily_kwh), 2), round(float(kw), 2), round(float(b), 2), round(reserve, 1)) for kw, b in pairs]
+    missing = [i for i, key in enumerate(keys) if key not in _SERVED_CACHE]
+    if missing:
+        kwp = np.array([float(pairs[i][0]) for i in missing])
+        batt = np.array([max(0.0, float(pairs[i][1])) for i in missing])
+        run = _run_hybrid(sc, k, float(daily_kwh), kwp, batt, reserve)
+        for j, i in enumerate(missing):
+            _SERVED_CACHE[keys[i]] = float(max(0.0, min(100.0, 100.0 - min(100.0, float(run["import_pct"][j]) + gap))))
+    return [_SERVED_CACHE[key] for key in keys]
 
 
 def hybrid_battery_for(ds: dict, zone: str, critical_daily_kwh: float, kwp: float, reserve_pct: float,

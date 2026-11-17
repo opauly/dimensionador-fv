@@ -962,6 +962,15 @@ def check_hybrid_savings_all_critical() -> int:
     expect("never more than the house consumes", cap["self_consumed_kwh_month"] <= month + 1e-6 and cap["savings_pct"] <= 100.0)
     fb = estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff, all_critical=True)
     expect("without a simulation: daytime direct use + night via the battery (90 %), capped at consumption", 0 < fb["self_consumed_kwh_month"] <= month)
+    hr = estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff, all_critical=True, utilization_pct=80.0, solar_served_pct=60.0)
+    expect("hour-by-hour served share wins over the daily utilization: used = consumption x served %", abs(hr["self_consumed_kwh_month"] - month * 0.6) < 0.2)
+    expect("served share is clamped to 0-100 %", estimate_hybrid_savings_pct(gen_day, month / 30.4, month, 0.45, tariff, all_critical=True, solar_served_pct=150.0)["savings_pct"] <= 100.0)
+    from calculations import fleet_simulation as fsim
+    expect("no fleet dataset -> served share is None (callers fall back to the daily simulation)", fsim.hybrid_solar_served_pct(None, 30.0, [(9.6, 20.0)], reserve_pct=30.0) == [None])
+    ds = fsim.get_dataset()
+    if ds and ds.get("hybrid") and ds.get("k"):
+        a_, b_, c_ = fsim.hybrid_solar_served_pct(ds, 30.0, [(4.0, 20.0), (9.6, 20.0), (9.6, 40.0)], reserve_pct=30.0)
+        expect("more panels or more battery serve more of the house", a_ < b_ <= c_ and 0 < a_ and c_ <= 100)
     return failures
 
 
