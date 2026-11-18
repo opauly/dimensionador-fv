@@ -105,9 +105,9 @@ def menu_proyecto(pid):
     items = [
         {"icon": "📄", "title": "Propuesta (PDF)", "sub": "Lo que ve el cliente" if pdf_url else "La cotización no tiene PDF generado",
          "href": pdf_url, "new_tab": True},
-        {"icon": "🧾", "title": "Lista de materiales (BOM)", "sub": empty or "Editable: cantidades, comentarios y extras; descarga en PDF o Excel", "href": None if empty else url_for("projects.lista", pid=pid)},
-        {"icon": "⚡", "title": "Diagrama unifilar", "sub": empty or "Editable: responde las preguntas del diseño y descarga el dibujo", "href": None if empty else url_for("projects.unifilar", pid=pid)},
-        {"icon": "📐", "title": "Plano de taller", "sub": empty or "Editable: pared, márgenes y acomodo de equipos", "href": None if empty else url_for("projects.plano", pid=pid)},
+        {"icon": "🧾", "title": "Lista de materiales (BOM)", "sub": empty or "Editable: cantidades, comentarios y extras; descarga en PDF o Excel", "href": None if empty else url_for("projects.documento", pid=pid, tab="lista")},
+        {"icon": "⚡", "title": "Diagrama unifilar", "sub": empty or "Editable: responde las preguntas del diseño y descarga el dibujo", "href": None if empty else url_for("projects.documento", pid=pid, tab="unifilar")},
+        {"icon": "📐", "title": "Plano de taller", "sub": empty or "Editable: pared, márgenes y acomodo de equipos", "href": None if empty else url_for("projects.documento", pid=pid, tab="plano")},
         {"icon": "👁", "title": "Cotización completa (wizard)", "sub": "Los 9 pasos, solo lectura",
          "href": url_for("wizard.abrir", vid=chosen["id"]) if chosen.get("locked") else None},
     ]
