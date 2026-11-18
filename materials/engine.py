@@ -32,7 +32,8 @@ from webapp.wizard_steps import disconnect_center
 WASTE = 0.10             # cut-offs and slack on cable and conduit
 CABLE_STEP_M = 5         # cable is bought by the metre; round the request up to 5 m
 TUBE_M = 3.0             # standard conduit length
-SPARE_PCT = 5            # spare mounting hardware
+RAIL_SPARE = 1           # rails are long and costly: one spare is enough
+SPARE_UNITS = 2          # spare mounting hardware (feet, clamps, rail splices): two extra in case one breaks or is missing (Oscar, 2026-11-17)
 FEET_PER_SILICONE = 20   # one tube of roof sealant per this many feet (L brackets)
 EMT_STUBS_PER_INVERTER = 4   # short 1" EMT pieces (about 50 cm each) joining the wire duct to each inverter
 EMT_TUBES_PER_INVERTER = 1   # linear rule from his purchase: one 3 m tube per inverter (2 inverters -> 2 tubes)
@@ -104,6 +105,7 @@ ALIASES = {
     "Monitoreo Victron Cerbo GX": ["cerbo"],
     "Medidor Victron VM-3P75CT": ["vm 3p75ct"],
 }
+NEUTRAL_STUB_M = 1.0     # per inverter: neutral from the inverter terminals to the distribution block inside the gabinete (assumed)
 VM_BREAKER_A = 15      # breaker that feeds the Victron VM meter (the Fronius Smart Meter uses the same one: METER_BREAKER_A)
 CT_PER_METER = 2   # split-phase: one current transformer per line
 BATTERY_STAND_SLOTS = 6  # US5000/UF5000 per metal stand (3 levels x 2), to be confirmed by Oscar
@@ -141,6 +143,11 @@ def cable_name(kind: str, gauge: str, color: str) -> str:
 
 def lug_name(gauge: str) -> str:
     return f"Conector de ojo #{gauge} AWG"
+
+
+def block_name(gauge: str) -> str:
+    """`Borne de distribución #2 AWG`: joins the neutrals of several inverters (sized for the thicker neutral conductor)."""
+    return f"Borne de distribución #{gauge} AWG"
 
 
 def shrink_name(gauge: str, color: str) -> str:
@@ -483,20 +490,19 @@ def _mounting(c: Collector, eq: dict, layout: dict, pending: list[str]) -> None:
     if counts is None:
         pending.append("Falta el layout del techo (filas de paneles): rieles, patas y clamps no se calculan sin él.")
         return
-    spare = 1 + SPARE_PCT / 100
     desc = (f"{counts['rows']} fila(s) de {counts['per_row']} módulos ({layout['orientation']})"
             f"{', un string por fila' if layout.get('rows_auto') else ''}, "
             f"{counts['row_len_m']} m por fila, 2 rieles por fila")
-    for name, key, base, why in (
-        ("Rieles (largueros)", "rails", counts["rails"], f"{desc}; rieles de {layout['rail_len_m']} m"),
-        ("Patas tipo \"L\" / Escuadra de fijación", "feet", counts["feet"], f"una pata cada {layout['foot_spacing_m']} m de riel + 1 por línea"),
-        ("Midclamp", "mid", counts["mid"], "2 por cada espacio entre módulos de una fila"),
-        ("Endclamp", "end", counts["end"], "4 por fila (2 en cada extremo)"),
+    for name, key, base, why, spare in (
+        ("Rieles (largueros)", "rails", counts["rails"], f"{desc}; rieles de {layout['rail_len_m']} m", RAIL_SPARE),
+        ("Patas tipo \"L\" / Escuadra de fijación", "feet", counts["feet"], f"una pata cada {layout['foot_spacing_m']} m de riel + 1 por línea", SPARE_UNITS),
+        ("Midclamp", "mid", counts["mid"], "2 por cada espacio entre módulos de una fila", SPARE_UNITS),
+        ("Endclamp", "end", counts["end"], "4 por fila (2 en cada extremo)", SPARE_UNITS),
     ):
-        c.add(_named(name, "Paneles solares"), math.ceil(base * spare), note=f"{why}; {base} calculados + {SPARE_PCT} % de repuesto")
+        c.add(_named(name, "Paneles solares"), base + spare, note=f"{why}; {base} calculados" + (f" + {spare} de repuesto" if spare else ""))
     c.add(_named("Tierras para rieles", "Paneles solares"), counts["rails"], note="una tierra por riel")
     if counts["splices"]:
-        c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"], note="una unión por empalme de riel")
+        c.add(_named("Uniones de riel", "Paneles solares"), counts["splices"] + SPARE_UNITS, note=f"una unión por empalme de riel ({counts['splices']}) + {SPARE_UNITS} de repuesto")
 
 
 def _project_kit(c: Collector, eq: dict, coupling: dict, layout: dict, pending: list[str], grid_zero: bool = False,
@@ -630,6 +636,11 @@ def _cable_lines(branches: list[dict]) -> tuple[dict, dict]:
                 elif key in ("pv_inv_ac", "gz_ac", "gz_link", "gz_disc", "pv_disc", "out_feed", "in_feed") and r["role"] != "Neutro":
                     put("cable_thhn", g, "negro", L, where, 2, "fase L1")
                     put("cable_thhn", g, "rojo", L, where, 2, "fase L2")
+                elif r["role"] == "Neutro" and b.get("shared_neutral"):
+                    # AC OUT / AC IN with several inverters: one neutral per inverter inside the gabinete, joined in a distribution block,
+                    # and ONE neutral along the run (the panel side). Counted once, plus a short stub per inverter.
+                    if i == 0:
+                        put("cable_thhn", g, "blanco", n * (L + b["qty"] * NEUTRAL_STUB_M), where, b["qty"] * n, "neutro")
                 elif r["role"] == "Neutro":
                     put("cable_thhn", g, "blanco", n * L, where, 2 * n, "neutro")
                 else:   # AC phases: inverter 1 on L1 (black), inverter 2 on L2 (red)
@@ -656,6 +667,14 @@ def _cables(c: Collector, branches: list[dict]) -> None:
         colors.add(color)
         c.add(row, qty, name=name, unit="m", section=section, group=group, sibling=_find(kind, gauge="10", color=color) or _find(kind, gauge="4", color=color),
               where=" · ".join(t["where"]), note=note, rank=_cable_rank(kind, g, color))
+
+    for b in branches:
+        if b.get("shared_neutral"):
+            ng = next((r["gauge"] for r in b.get("conductors") or [] if r["role"] == "Neutro"), None)
+            if ng:
+                c.add(None, 1, name=block_name(ng), section="Generales", group="Accesorios eléctricos",
+                      sibling=_find("lug", gauge=ng) or _named("Kit barra de tierras", "Generales"), where=f"{WHERE.get(b.get('key'), b['label'])} (neutro)",
+                      note=f"junta los {b['qty']} neutros de los inversores en el gabinete; sale un solo neutro hacia el tablero")
 
     for g, lg in lugs.items():
         n = math.ceil(lg["n"] * (1 + WASTE))

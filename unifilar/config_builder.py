@@ -16,6 +16,7 @@ import re
 from datetime import date
 
 from calculations import wiring as W
+from calculations.bom import lynx_bars
 
 # Questions the drawing cannot infer and the wizard must never assume (docs/unifilar/CONTEXTO.md §3.4, §7).
 EXPORT_CHOICES = (("grid_zero", "Cero inyección (Grid Zero)"), ("inyeccion", "Con inyección a la red"))
@@ -228,7 +229,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
         "battery": {
             "count": n_bat, "label": _model(bat), "short": bat.get("model") or "Batería", "kwh_each": float(bat.get("capacity_kwh") or 0),
             "can_master": "pylontech" in (bat.get("brand") or "").lower(), "lynx": answers["lynx"],
-            "lynx_bars": 1 if answers["lynx"] == "power_in_distributor" else max(1, -(-(n_bat + 2) // 4)),
+            "lynx_bars": 1 if answers["lynx"] == "power_in_distributor" else lynx_bars(n_bat + 2),
             "cables_note": (["Cables batería a Power In (+ / -):", "juego de cables de la batería"] if "pylontech" in (bat.get("brand") or "").lower()
                             else ["Cables batería a Power In (+ / -):", "por definir"]),
         },
@@ -407,7 +408,7 @@ def _build_off_grid(project: dict, d: dict, answers: dict, string_breaker_a: int
         "battery": {
             "count": n_bat, "label": _model(bat), "short": bat.get("model") or "Batería", "kwh_each": float(bat.get("capacity_kwh") or 0),
             "can_master": "pylontech" in (bat.get("brand") or "").lower(), "lynx": "power_in",
-            "lynx_bars": max(1, -(-(n_bat + qty + int(eq.get("charge_controller_qty") or 1)) // 4)),
+            "lynx_bars": lynx_bars(n_bat + qty + int(eq.get("charge_controller_qty") or 1)),
             "cables_note": (["Cables batería a Power In (+ / -):", "juego de cables de la batería"] if "pylontech" in (bat.get("brand") or "").lower()
                             else ["Cables batería a Power In (+ / -):", "por definir"]),
         },

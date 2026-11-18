@@ -50,7 +50,7 @@
     <p class="tc-sub">⚠️ Largos por defecto: ajústalos a las distancias reales de la obra para que calibres y materiales sean los correctos.</p>{% endif %}
 
   <p class="tc-h">Materiales y plano</p>
-  <p class="card-note-sm">La lista de compra (equipos, protecciones, cables, tubería, montaje) y el diagrama unifilar se generan con el dimensionamiento de arriba y viven en sus propias pestañas:
+  <p class="card-note-sm">La lista de compra (equipos, protecciones, cables, tubería, montaje) y el diagrama unifilar se generan con el dimensionamiento de arriba y se abren desde aquí o desde 👁 Ver:
     <a href="{{ url_for('projects.lista', pid=pid) }}" hx-get="{{ url_for('projects.lista', pid=pid) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">Lista de materiales</a> ·
     <a href="{{ url_for('projects.unifilar', pid=pid) }}" hx-get="{{ url_for('projects.unifilar', pid=pid) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">Unifilar</a>.
     Ajusta aquí los largos de obra{% if wiring.can_couple %} y el acople FV{% endif %}: la lista y el plano se recalculan con ellos.</p>
@@ -62,7 +62,7 @@
         {% for r in other_lines %}<tr><td>{{ r.item }}</td><td class="tc-num">{{ '%g'|format(r.qty) if r.qty else '—' }}</td><td class="tc-sub">{{ r.specs }}</td></tr>{% endfor %}
       </tbody>
     </table></div>
-    <p class="card-note-sm">Estos renglones del costo de la cotización no se desglosan aquí; el detalle por pieza está en la pestaña Lista de materiales.</p>
+    <p class="card-note-sm">Estos renglones del costo de la cotización no se desglosan aquí; el detalle por pieza está en 👁 Ver → Lista de materiales.</p>
   {% endif %}
 {% endif %}
 </div>

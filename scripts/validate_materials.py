@@ -76,9 +76,9 @@ q = lambda n: by[n]["qty"] if n in by else None  # noqa: E731
 check("layout: rows of 8 modules, 9.21 m, 4 rail lines, 8 rails", (r["counts"]["per_row"], r["counts"]["row_len_m"], r["counts"]["rail_lines"], r["counts"]["rails"]), (8, 9.21, 4, 8))
 check("rails 9 (she bought 9)", q("Rieles (largueros)"), 9)
 check("rail grounding lugs 8 (she bought 8)", q("Tierras para rieles"), 8)
-check("splices 4 (she bought 8: known gap)", q("Uniones de riel"), 4)
+check("splices: 4 for the rail joints + 2 spare (she bought 8)", q("Uniones de riel"), 6)
 check("mid clamps 30 (she bought 32)", q("Midclamp"), 30)
-check("end clamps 9 (she bought 10)", q("Endclamp"), 9)
+check("end clamps: 8 calculated + 2 spare = 10 (she bought 10)", q("Endclamp"), 10)
 check("MC4 8 (she bought 8)", q("MC4"), 8)
 check("SOLAR black / red by the metre: 2 strings x 15 m + 10 % = 35 m each", (q("Cable SOLAR CU #10 AWG negro"), q("Cable SOLAR CU #10 AWG rojo")), (35, 35))
 check("panels 16, Multis 2, Fidus 4, Ekrano 1", (q("Paneles solares"), q("Inversor Victron MultiPlus-II 48/5000 120V"), q("Batería Pylontech Fidus"), q("Monitoreo Victron Ekrano GX")), (16, 2, 4, 1))
@@ -295,6 +295,10 @@ out_h8 = io.BytesIO()
 build(cfg_h8, out_h8)
 check("AC-coupled hybrid with 8 batteries renders abbreviated", out_h8.getvalue()[:4], b"%PDF")
 
+_blocks = sorted(n for n in by if n.startswith("Borne de distribución"))
+check("AC OUT and AC IN with 2 inverters: one distribution block each (the neutrals of the inverters are joined in the gabinete)", (len(_blocks), sum(by[n]["qty"] for n in _blocks)), (2, 2))
+check("the block follows the neutral gauge", all(any(f"#{g} AWG" in n for n in _blocks) for g in {n.split("#")[1].split(" ")[0] for n in _blocks}), True)
+
 # ── Batch 9: Fronius Smart Meter + current transformers, interconnection cable, controllers with an ellipsis ───
 from calculations.meter_cts import ct_count  # noqa: E402
 SM = {"id": "sm", "brand": "Fronius", "model": "Smart Meter WR 100-600 V-3", "uses_cts": True}
@@ -367,7 +371,7 @@ _ld = _list({**EQ_DC, "energy_meter": {"brand": "Victron Energy", "model": "VM-3
 check("DC-coupled: DC breakers (one per MPPT input), controllers, Multis, batteries of the drawing = list",
       (sum(ln["qty"] for n, ln in _ld.items() if n.startswith("Breaker ") and n.endswith("DC riel DIN")), _ld["Controlador Victron SmartSolar MPPT 250/100"]["qty"], _ld["Inversor Victron MultiPlus-II 48/5000 120V"]["qty"], _ld["Batería Pylontech Fidus"]["qty"]),
       (len(cfg_dc["pv"]["sizes"]), cfg_dc["controllers"]["count"], cfg_dc["multis"]["qty"], cfg_dc["battery"]["count"]))
-check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Barra Victron Lynx Power In"]["qty"]), (ceil((4 + 2 + 1) / 4),) * 2)
+check("DC-coupled: Lynx bars of the drawing = list", (cfg_dc["battery"]["lynx_bars"], _ld["Barra Victron Lynx Power In"]["qty"]), (ceil((4 + 2 + 1 + 2) / 4),) * 2)
 check("DC-coupled: AC breakers of the drawing are on the list",
       [f"Breaker 2P{_amps(x)}A AC riel DIN" in _ld for x in ((cfg_dc["grid_in"] or {}).get("breaker"), cfg_dc["subpanel"]["q2"]) if x], [True, True])
 # Grid Zero

@@ -55,6 +55,12 @@ def equipment_rows(eq: dict, coupling: dict | None = None) -> list[dict]:
 
 
 LYNX_INPUTS = 4          # each Victron Lynx Power In takes four fused DC inputs
+LYNX_FREE_INPUTS = 2     # always leave two inputs free for the future (Oscar, 2026-11-17)
+
+
+def lynx_bars(inputs: int) -> int:
+    """Bars for `inputs` used DC inputs plus the two free ones."""
+    return max(1, math.ceil((int(inputs) + LYNX_FREE_INPUTS) / LYNX_INPUTS))
 BOLTS_PER_INPUT = 2      # one per polarity (+ and -)
 
 
@@ -73,8 +79,8 @@ def system_rows(eq: dict, coupling: dict | None, wiring_ctx: dict) -> list[dict]
     rows: list[dict] = []
     if inputs:
         parts = [f"{bat_qty} batería(s)", f"{inv_qty} inversor(es)"] + ([f"{cc_qty} controlador(es)"] if cc_qty else [])
-        rows.append({"item": "Victron Lynx Power In", "qty": math.ceil(inputs / LYNX_INPUTS),
-                     "note": f"{inputs} entradas fusionadas ({', '.join(parts)}); {LYNX_INPUTS} por barra"})
+        rows.append({"item": "Victron Lynx Power In", "qty": lynx_bars(inputs),
+                     "note": f"{inputs} entradas fusionadas ({', '.join(parts)}) + {LYNX_FREE_INPUTS} libres para el futuro; {LYNX_INPUTS} por barra"})
         rows.append({"item": "Pernos / roscas para Lynx Power In", "qty": inputs * BOLTS_PER_INPUT,
                      "note": f"{BOLTS_PER_INPUT} por entrada (+ y −)"})
     if bat_qty:

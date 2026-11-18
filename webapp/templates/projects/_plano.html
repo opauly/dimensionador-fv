@@ -17,7 +17,7 @@
   <div class="card"><p class="dtable-empty">{{ empty }}</p></div>
 {% else %}
   <p class="pl-h" style="margin-top:6px;">Plano de taller</p>
-  <p class="card-note-sm">Ubicación sugerida de los equipos sobre una pared, con las medidas de las fichas. Escribe el tamaño de la pared propuesta y la herramienta dice si cumple. Los equipos salen del mismo diseño y lista de materiales de las otras pestañas.</p>
+  <p class="card-note-sm">Ubicación sugerida de los equipos sobre una pared, con las medidas de las fichas. Escribe el tamaño de la pared propuesta y la herramienta dice si cumple. Los equipos salen del mismo diseño y lista de materiales del proyecto.</p>
 
   <form hx-post="{{ url_for('projects.plano_guardar', pid=pid) }}" hx-trigger="change delay:400ms" hx-target="#plano-panel" hx-swap="outerHTML">
     <div class="pl-grid">

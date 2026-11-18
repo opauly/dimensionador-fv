@@ -2,9 +2,7 @@
    (plan §1.4 items 9-11). Included by projects/page.html, which owns the
    "← Proyectos" back link and the tab bar around this block. #}
 <p class="section-title" style="margin-top:4px;">{{ client_name }}</p>
-<p class="section-sub">{{ sys_label }} &middot; Contrato {{ contract_str }}
-  {% if project.proposal_id %}&nbsp;<button type="button" class="btn btn-outline" style="padding:3px 12px;font-size:12px;"
-     hx-get="{{ url_for('documentos.menu_proyecto', pid=project.id) }}" hx-target="body" hx-swap="beforeend">📂 Documentos</button>{% endif %}</p>
+<p class="section-sub">{{ sys_label }} &middot; Contrato {{ contract_str }}</p>
 
 {# Quote vs final price — the quote lines are never edited to absorb a negotiated
    discount; the project keeps the quoted baseline + reason, and the gap is derived. #}

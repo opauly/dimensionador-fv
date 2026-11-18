@@ -96,10 +96,13 @@ TAB_SPECS = [
     {"key": "facturacion", "label": "Facturación"},
     {"key": "pagos", "label": "Pagos"},
     {"key": "tecnico", "label": "Técnico"},
-    {"key": "lista", "label": "Lista de materiales"},
-    {"key": "unifilar", "label": "Unifilar"},
-    {"key": "plano", "label": "Plano de taller"},
+    {"key": "lista", "label": "Lista de materiales", "in_ver": True},
+    {"key": "unifilar", "label": "Unifilar", "in_ver": True},
+    {"key": "plano", "label": "Plano de taller", "in_ver": True},
 ]
+# The engineering documents have no tab of their own in the bar: they sit behind the «Ver» button (same menu as Cotizaciones). Their routes
+# and URLs are unchanged.
+VER_KEYS = {t["key"] for t in TAB_SPECS if t.get("in_ver")}
 TAB_KEYS = [t["key"] for t in TAB_SPECS]
 LEDGER_TAB_CATEGORIES = {t["category"] for t in TAB_SPECS if "category" in t}
 
@@ -344,7 +347,8 @@ def detail_ctx(project_id: str, active_tab: str = "presupuesto") -> dict | None:
         ),
         "price_adjustment": price_adjustment_info(project, result),
         "active_tab": active_tab,
-        "tabs": [{"key": t["key"], "label": t["label"], "url": tab_url(project_id, t["key"])} for t in TAB_SPECS],
+        "tabs": [{"key": t["key"], "label": t["label"], "url": tab_url(project_id, t["key"])} for t in TAB_SPECS if not t.get("in_ver")],
+        "ver_active": active_tab in VER_KEYS,
     }
     ctx.update(_presupuesto_ctx(bundle, result))
     return ctx

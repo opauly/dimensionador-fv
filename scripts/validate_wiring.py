@@ -78,7 +78,12 @@ check("above largest table ampacity -> None", W.initial_gauge(9999.0), None)
 check("above 6000 A OCPD -> None", W.ocpd_size(7000), None)
 b = W.size_branch("t", kind="dc", qty=1, current_a=31.72, factor=1.5625, v_ref=161.8, length_m=15.0)
 check("size_branch PV (2 strings of 600 W panels): UGC", b["ugc"], "8")
-check("size_branch PV: conduit trade size (EGC by T250.122: 8 AWG + 10 AWG ground)", b["conduit"]["trade"], "1/2")
+check("size_branch PV: the fill allows 1/2, but every raceway is at least 1 in (workbook: 1/2)", (b["conduit"]["trade"], W.pick_conduit(b["total_mm2"])["trade"]), ("1", "1/2"))
+
+_ns = dict(kind="ac", qty=2, current_a=55.0, factor=1.25, v_ref=120.0, length_m=10.0, hot=1, neutral=1, shared_conduit=True)
+_a, _b = W.size_branch("n", **_ns), W.size_branch("n", shared_neutral=True, **_ns)
+check("a neutral joined at a distribution block counts once in the conduit fill (less area than one neutral per inverter)", _b["total_mm2"] < _a["total_mm2"], True)
+check("the joined neutral keeps the phase gauge and is flagged on the branch", (_b["ugc"] == _a["ugc"], _b["shared_neutral"], _a["shared_neutral"]), (True, True, False))
 
 # ── BOM assembly (calculations/bom.py) on a hand-checkable branch ──────────────
 from calculations import bom as B  # noqa: E402
