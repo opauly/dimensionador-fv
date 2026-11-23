@@ -128,7 +128,7 @@ def foto(kind, oid):
         return jsonify(ok=False, error=f"No se pudo guardar la foto: {exc}"), 500
     info = S.design_info(ctx["d"]) if not ctx["d"]["empty"] else {"counts": [], "panel_count": 0}
     plan = S.clean(ctx["plan_raw"], info)
-    plan = {**plan, "photo": {"path": path, "w": w, "h": h}, "scale": None, "roof": [], "strings": S.default_strings(info, {"w": w, "h": h})}
+    plan = {**plan, "photo": {"path": path, "w": w, "h": h}, "photo_rot": 0.0, "scale": None, "roof": [], "strings": S.default_strings(info, {"w": w, "h": h})}
     _save_plan(ctx, plan)
     return jsonify(ok=True, plan=plan, photoUrl=_signed_url(path))
 

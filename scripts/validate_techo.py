@@ -62,6 +62,7 @@ check("no saved strings -> the design strings (2 x 8), stacked", ([x["count"] fo
 check("scale 0 or missing is dropped", S.clean({"scale": {"px_per_m": 0}}, INFO)["scale"], None)
 check("rotation is kept inside 0-360, rows and count are clamped", (lambda q: (q["rot"], q["rows"], q["count"]))(S.clean({"strings": [{"id": 1, "count": 999, "rows": -3, "rot": -30}]}, INFO)["strings"][0]), (330.0, 1, 200))
 check("a roof outline needs 3 points", S.clean({"roof": [[0, 0], [1, 1]]}, INFO)["roof"], [])
+check("photo turn is kept in -180..180 and defaults to 0", (S.clean({"photo_rot": 190}, INFO)["photo_rot"], S.clean({"photo_rot": -3.5}, INFO)["photo_rot"], S.clean({}, INFO)["photo_rot"]), (-170.0, -3.5, 0.0))
 good = S.clean({"scale": {"px_per_m": 100}, "strings": [{"id": 1, "count": 8, "x": 1000, "y": 300}, {"id": 2, "count": 8, "x": 1000, "y": 700}]}, INFO)
 sm = S.summary(good, INFO)
 check("summary: 16 of 16 modules, 9.6 kWp, fits", (sm["placed"], sm["kwp"], sm["ok"]), (16, 9.6, True))
@@ -96,6 +97,9 @@ plan = S.clean({"photo": {"path": "x", "w": 1600, "h": 900}, "scale": {"px_per_m
 out = io.BytesIO()
 P.build({"project": {"name": "Prueba", "client": "X", "location": "Y", "date": "2026-11-23", "revision": "A (borrador)", "draft": True, "responsible": "Ing."}, "plan": plan, "info": INFO_AC, "photo_bytes": buf.getvalue()}, out)
 check("PDF renders", out.getvalue()[:4], b"%PDF")
+out2 = io.BytesIO()
+P.build({"project": {"name": "Prueba", "client": "X", "location": "Y", "date": "2026-11-23", "revision": "A (borrador)", "draft": True, "responsible": "Ing."}, "plan": {**plan, "photo_rot": 12.5}, "info": INFO_AC, "photo_bytes": buf.getvalue()}, out2)
+check("PDF with the photo turned renders", out2.getvalue()[:4], b"%PDF")
 check("the logo of the sheets is the image file", Path("proposals/assets/Logo_color_v3.png").exists(), True)
 
 print("\nALL TECHO CHECKS PASSED" if not fails else f"\n{len(fails)} FAILED: {fails}")

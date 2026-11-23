@@ -111,7 +111,11 @@ def build(data: dict, out) -> None:
         _t(c, 1196, 748, "BORRADOR · REV " + P["revision"].split()[0], 10, "Helvetica-Bold", RED, "r")
 
     # ---- photo with the modules ----
-    c.drawImage(ImageReader(buf), ox, oy, width=pw * fit, height=ph * fit)
+    c.saveState(); clip = c.beginPath(); clip.rect(ox, oy, pw * fit, ph * fit); c.clipPath(clip, stroke=0, fill=0)
+    c.setFillColor(HexColor("#EEF1F4")); c.rect(ox, oy, pw * fit, ph * fit, fill=1, stroke=0)
+    c.translate(ox + pw * fit / 2, oy + ph * fit / 2); c.rotate(-plan.get("photo_rot", 0.0))        # screen-clockwise = PDF counter-clockwise negated
+    c.drawImage(ImageReader(buf), -pw * fit / 2, -ph * fit / 2, width=pw * fit, height=ph * fit)
+    c.restoreState()
     c.setStrokeColor(black); c.setLineWidth(0.6); c.rect(ox, oy, pw * fit, ph * fit)
     c.saveState(); clip = c.beginPath(); clip.rect(ox, oy, pw * fit, ph * fit); c.clipPath(clip, stroke=0, fill=0)
     roof = [tuple(q) for q in plan["roof"]]

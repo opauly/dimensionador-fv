@@ -8,7 +8,7 @@
   const info = D.info, panel = info.panel;
   let plan = D.plan, photoUrl = D.photoUrl;
   let sel = plan.strings.length ? plan.strings[0].id : null;
-  let tool = 'select', tmp = [], view = { x: 0, y: 0, k: 1 }, drag = null, saveTimer = null;
+  let tool = 'select', tmp = [], view = { x: 0, y: 0, k: 1 }, drag = null, saveTimer = null, viewTouched = false;
 
   /* ---------- geometry (same maths as techo/geometry.py) ---------- */
   const pxPerM = () => (plan.scale ? plan.scale.px_per_m : (plan.photo ? plan.photo.w / 40 : 50));   // provisional 40 m wide until calibrated
@@ -74,8 +74,12 @@
     world.setAttribute('transform', `translate(${view.x} ${view.y}) scale(${view.k})`);
     world.textContent = '';
     $('tc-empty').hidden = !!(plan.photo && photoUrl);
-    if (plan.photo && photoUrl) el('image', { href: photoUrl, x: 0, y: 0, width: plan.photo.w, height: plan.photo.h });
-    const inv = 1 / view.k;
+    const inv = 1 / view.k, prot = plan.photo_rot || 0;
+    if (plan.photo && photoUrl) {
+      el('image', { href: photoUrl, x: 0, y: 0, width: plan.photo.w, height: plan.photo.h, transform: `rotate(${prot} ${plan.photo.w / 2} ${plan.photo.h / 2})`, 'pointer-events': 'none' });
+      // frame of the sheet: the PDF shows the photo cropped to this rectangle
+      el('rect', { x: 0, y: 0, width: plan.photo.w, height: plan.photo.h, fill: 'none', stroke: 'rgba(250,204,21,.8)', 'stroke-width': 1.5 * inv, 'stroke-dasharray': `${10 * inv} ${6 * inv}`, 'pointer-events': 'none' });
+    }
     if (plan.roof.length >= 3) el('polygon', { points: pts(plan.roof), fill: 'rgba(255,255,255,.06)', stroke: '#fff', 'stroke-width': 2 * inv, 'stroke-dasharray': `${8 * inv} ${5 * inv}`, 'pointer-events': 'none' });
     const c = checks();
     const bad = new Set([].concat(...c.overlaps));
@@ -117,6 +121,7 @@
       set('f-count', s.count); set('f-rows', s.rows); set('f-orient', s.orient); set('f-rot', +(s.rot || 0).toFixed(1));
     }
     if (document.activeElement !== $('f-gap')) $('f-gap').value = plan.gap_mm;
+    if (document.activeElement !== $('f-prot')) $('f-prot').value = +(plan.photo_rot || 0).toFixed(2);
     const placed = plan.strings.reduce((a, x) => a + (x.count | 0), 0), kwp = placed * panel.wp / 1000;
     const L = [];
     L.push(`Módulos: <b>${placed}</b> de ${info.panel_count} del diseño · ${kwp.toFixed(2)} kWp`);
@@ -175,7 +180,7 @@
   });
   svg.addEventListener('pointermove', (e) => {
     if (!drag) return;
-    if (drag.kind === 'pan') { view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; render(); return; }
+    if (drag.kind === 'pan') { viewTouched = true; view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; render(); return; }
     const p = toWorld(e); drag.s.x = p[0] + drag.dx; drag.s.y = p[1] + drag.dy; render();
   });
   const end = () => { if (drag && drag.kind === 'string') save(); drag = null; };
@@ -186,11 +191,13 @@
   svg.addEventListener('wheel', (e) => {
     e.preventDefault();
     const r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    viewTouched = true;
     const nk = Math.max(0.05, Math.min(40, view.k * f));
     view.x = mx - (mx - view.x) * (nk / view.k); view.y = my - (my - view.y) * (nk / view.k); view.k = nk; render();
   }, { passive: false });
   document.addEventListener('keydown', (e) => {
     if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    if (e.key === ',' || e.key === '.') { e.preventDefault(); turnPhoto((e.key === '.' ? 1 : -1) * (e.shiftKey ? 5 : 1)); return; }
     const s = plan.strings.find((x) => x.id === sel); if (!s) return;
     const step = (e.shiftKey ? 10 : 1) / view.k; let used = true;
     if (e.key === 'ArrowLeft') s.x -= step; else if (e.key === 'ArrowRight') s.x += step;
@@ -202,6 +209,10 @@
   });
 
   /* ---------- controls ---------- */
+  const normRot = (a) => (((a + 180) % 360) + 360) % 360 - 180;
+  function turnPhoto(delta) { plan.photo_rot = +normRot((plan.photo_rot || 0) + delta).toFixed(2); changed(); }
+  $('f-prot').oninput = (e) => { const v = parseFloat(e.target.value); plan.photo_rot = isNaN(v) ? 0 : +normRot(v).toFixed(2); changed(); };
+  document.querySelectorAll('[data-prot]').forEach((b) => b.onclick = () => turnPhoto(+b.dataset.prot));
   const cur = () => plan.strings.find((x) => x.id === sel);
   $('f-count').oninput = (e) => { const s = cur(); if (s) { s.count = Math.max(0, Math.min(200, parseInt(e.target.value, 10) || 0)); changed(); } };
   $('f-rows').oninput = (e) => { const s = cur(); if (s) { s.rows = Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)); changed(); } };
@@ -226,7 +237,7 @@
   $('tc-calib').onclick = () => { tool = tool === 'calib' ? 'select' : 'calib'; tmp = []; render(); };
   $('tc-roof').onclick = () => { tool = tool === 'roof' ? 'select' : 'roof'; tmp = []; render(); };
   $('tc-roof-clear').onclick = () => { plan.roof = []; changed(); };
-  $('tc-fit').onclick = () => { fit(); render(); };
+  $('tc-fit').onclick = () => { viewTouched = false; fit(); render(); };
   $('tc-file').onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
     $('tc-saved').textContent = 'Subiendo foto…';
@@ -239,6 +250,6 @@
     e.target.value = '';
   };
 
-  window.addEventListener('resize', () => { render(); });
+  window.addEventListener('resize', () => { if (!viewTouched) fit(); render(); });
   fit(); render();
 })();

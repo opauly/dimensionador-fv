@@ -5,6 +5,7 @@ The saved plan is one small dict, kept in the same two homes as the other design
 
     {"photo": {"path": storage path, "w": px, "h": px} | None,
      "scale": {"px_per_m": float, "p1": [x, y], "p2": [x, y], "dist_m": float} | None,      # set by clicking two points of a known length
+     "photo_rot": 0.0,                               # degrees clockwise the photo is turned to straighten it (the strings and the roof outline stay put)
      "gap_mm": 20,                                  # mid clamp between modules
      "strings": [{"id": 1, "count": 8, "rows": 1, "orient": "portrait" | "landscape", "x": px, "y": px, "rot": degrees clockwise}],
      "roof": [[x, y], ...]}                          # optional outline of the roof plane, photo pixels
@@ -116,6 +117,7 @@ def clean(plan: dict | None, info: dict | None = None) -> dict:
     roof = [[_f(p[0]), _f(p[1])] for p in (plan.get("roof") or []) if isinstance(p, (list, tuple)) and len(p) == 2]
     return {"photo": ph and {"path": ph["path"], "w": int(_f(ph.get("w"))), "h": int(_f(ph.get("h")))},
             "scale": sc and {"px_per_m": _f(sc["px_per_m"]), "p1": sc.get("p1"), "p2": sc.get("p2"), "dist_m": _f(sc.get("dist_m"))},
+            "photo_rot": round(((_f(plan.get("photo_rot")) + 180.0) % 360.0) - 180.0, 2),
             "gap_mm": max(0.0, min(200.0, _f(plan.get("gap_mm"), DEFAULT_GAP_MM))), "strings": strings, "roof": roof if len(roof) >= 3 else []}
 
 
