@@ -171,6 +171,22 @@ def stats(site_id: str | None) -> dict | None:
             "years": round(len(s) / 8766.0, 1), "hours": int(len(s))}
 
 
+def monthly_factors(site_id: str | None) -> list[float] | None:
+    """Calendar-month load factors of the measured plant (Jan..Dec, local time, mean 1.0): how much above/below its yearly average the
+    plant runs each month. Used to spread a yearly-flat estimate over 12 months. None without data."""
+    s = get_hourly(site_id)
+    if s is None:
+        return None
+    s = s.dropna()
+    if len(s) < 24 * 365:
+        return None
+    month = (s.index + pd.Timedelta(hours=LOCAL_UTC_OFFSET_H)).month
+    by = s.groupby(month).mean()
+    if len(by) != 12 or by.mean() <= 0:
+        return None
+    return [float(by[m] / by.mean()) for m in range(1, 13)]
+
+
 def day_share(site_id: str | None) -> tuple[float, str] | None:
     """(share of consumption during solar hours, note) for the wizard's daytime-fraction slot, or None."""
     st = stats(site_id)

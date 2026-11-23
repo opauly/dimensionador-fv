@@ -51,7 +51,7 @@ _SOURCE_LABELS = {"bill": "Factura eléctrica", "loads": "Cargas instaladas", "m
 # DEFAULT_LOADS (imported above) is calculations.load_estimator's own
 # default table, same shape/order Streamlit's _DEFAULT_LOADS used — imported
 # rather than re-typed so the two never drift.
-_LOADS_FIELDS = ["desc", "w", "und", "hd", "dm"]
+_LOADS_FIELDS = ["desc", "w", "und", "hd", "dm", "cat", "brd"]
 
 
 # ── scratch helpers ──────────────────────────────────────────────────────
@@ -73,6 +73,10 @@ def _rows_to_loads(rows: list[dict]) -> list[dict]:
             "h/día": to_float(row.get("hd"), 0.0) or 0.0,
             "días/mes": to_float(row.get("dm"), 0.0) or 0.0,
         })
+        if row.get("cat"):                       # industrial rows carry the category and board they were read from
+            loads[-1]["Categoría"] = row["cat"]
+        if row.get("brd"):
+            loads[-1]["Tablero"] = row["brd"]
     return loads
 
 
@@ -215,6 +219,52 @@ def extract_tablero(blob: dict, file_bytes: bytes, media_type: str) -> dict:
     return {**s5, "loads_data": loads, "loads_from_tablero": True}
 
 
+def _industrial_ctx(blob: dict, s5: dict, loads_data: list[dict], loads_total_kwh: float) -> dict:
+    """Three-phase service only: board reading report, category summary and the estimate against the measured plant."""
+    from calculations import industrial_profiles as ip
+
+    if not ip.is_three_phase(blob):
+        return {"industrial": False}
+    pid = ip.profile_id_for(blob)
+    st = ip.stats(pid)
+    est_kw = loads_total_kwh / 730.0
+    return {
+        "industrial": True,
+        "plano_boards": s5.get("plano_boards") or [],
+        "plano_notes": s5.get("plano_notes") or [],
+        "category_summary": category_summary(loads_data),
+        "industrial_check": {"est_avg_kw": est_kw, "ref_avg_kw": st["mean_kw"] if st else None,
+                             "ratio": (est_kw / st["mean_kw"]) if st and st["mean_kw"] else None} if loads_total_kwh > 0 else None,
+    }
+
+
+def extract_tablero_files(blob: dict, files: list[tuple[bytes, str]]) -> dict:
+    """The upload's core logic for one OR several files. A three-phase service reads the plant's drawings with the industrial reader
+    (every panel schedule on every page, categories, default hours); a single-phase one keeps the residential reader on the first file."""
+    from calculations import industrial_profiles as ip
+
+    if not ip.is_three_phase(blob):
+        data, media_type = files[0]
+        return extract_tablero(blob, data, media_type)
+    from calculations.tablero_industrial import parse_planos
+
+    res = parse_planos(files)
+    return {**_s5(blob), "loads_data": res["loads"], "loads_from_tablero": True, "plano_boards": res["boards"], "plano_notes": res["notes"]}
+
+
+def category_summary(loads: list[dict]) -> list[dict]:
+    """Installed kW and nominal kWh/month per industrial category (rows without one are grouped as 'Sin categoría')."""
+    out: dict[str, dict] = {}
+    for r in loads:
+        cat = r.get("Categoría") or "Sin categoría"
+        kw = float(r.get("W") or 0) * float(r.get("Und") or 1) / 1000.0
+        kwh = kw * float(r.get("h/día") or 0) * float(r.get("días/mes") or 0)
+        d = out.setdefault(cat, {"category": cat, "kw": 0.0, "kwh": 0.0})
+        d["kw"] += kw
+        d["kwh"] += kwh
+    return sorted(out.values(), key=lambda d: -d["kwh"])
+
+
 def update_loads_table(blob: dict, form) -> dict:
     """Plain cell-edit recompute for the loads table — PLAN §1.5's
     `change`-triggered pattern applied to this second editable grid (not
@@ -260,7 +310,16 @@ def apply_loads(blob: dict) -> dict:
     site = blob.get("site") or {}
     utility = blob.get("utility") or {}
 
-    monthly_kwh = estimate_loads_12_months_ai(loads_data, location=_location(site))
+    from calculations import industrial_profiles as ip
+
+    if ip.is_three_phase(blob):
+        # a plant runs flat all year: the nominal month, shaped by the measured plant's own month-to-month pattern (no AI seasonality)
+        from calculations.load_estimator import kwh_from_loads
+
+        factors = ip.monthly_factors(ip.profile_id_for(blob)) or [1.0] * 12
+        monthly_kwh = [kwh_from_loads(loads_data) * f for f in factors]
+    else:
+        monthly_kwh = estimate_loads_12_months_ai(loads_data, location=_location(site))
     tariff_info = _tariff_info(utility)
     grid = [
         {
@@ -278,7 +337,7 @@ def apply_loads(blob: dict) -> dict:
         "applied_months": grid,
         "applied_source_meta": {
             "source": "loads",
-            "label": f"Tablero · {n} circuitos" if from_tablero else f"Cargas instaladas · {n} equipos",
+            "label": (f"Planos · {n} circuitos" if ip.is_three_phase(blob) else f"Tablero · {n} circuitos") if from_tablero else f"Cargas instaladas · {n} equipos",
         },
     }
 
@@ -453,6 +512,7 @@ def build_context(blob: dict) -> dict:
         "loads_from_tablero": loads_from_tablero,
         "loads_total_kwh": loads_total_kwh,
         "loads_overwrite_note": loads_overwrite_note,
+        **_industrial_ctx(blob, s5, loads_data, loads_total_kwh),
         "icpe_usd": icpe,
         "can_continue": avg_kwh > 0,
     }

@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from calculations import coupling, industrial_profiles as ip, mppt, wiring as W  # noqa: E402
+from calculations import tablero_industrial as TI  # noqa: E402
 from calculations import three_phase as T  # noqa: E402
 
 fails: list[str] = []
@@ -92,6 +93,28 @@ from webapp.wizard_steps import gz_s4_utility as S4  # noqa: E402
 check("step 4 saves a three-phase service", S4._service_fields({"service_phases": "3", "service_v_ll": "208", "profile_site_id": "x"}),
       {"service_phases": "3", "service_v_ll": 208.0, "profile_site_id": "x"})
 check("step 4 default stays single-phase", S4._service_fields({})["service_phases"], "1")
+
+# ── Industrial plan reader (pure parts) ────────────────────────────────────────
+check("rack of compressors", TI.categorize("RACK DE COMPRESORES"), "compresores")
+check("maintenance outlet at the rack is an outlet, not a compressor", TI.categorize("TOMA DE MANTENIMIENTO (RACK EXTERIOR)"), "tomas")
+check("telecom rack is backup", TI.categorize("RACK DE TELECOMUNICACIONES"), "respaldo")
+check("defrost heater", TI.categorize("RESISTENCIA DESHIELO (TUNEL)"), "deshielo")
+check("door heaters", TI.categorize("RESISTENCIAS DE PUERTA (CAMARA CEVICHE)"), "puertas")
+check("condensing unit on an HVAC board is A/C", TI.categorize("UNIDAD CONDENSADORA UC-1 (OFICINAS)", "TABLERO CARGAS HVAC"), "hvac")
+check("evaporators on a refrigeration board", TI.categorize("EVAPORADORAS Y CONTROLADORES (CAMARA)", "TABLERO DE EQUIPOS DE REFRIGERACION"), "refrigeracion")
+check("sealer is process", TI.categorize("SELLADORA AL VACIO (PROCESOS INTERMEDIOS)"), "proceso")
+boards = [
+    {"board": "TP", "name": "TABLERO PRINCIPAL", "total_w": 1000, "reserved_w": 100, "circuits": [
+        {"description": "TABLERO - TR1", "load_w": 300}, {"description": "RACK DE COMPRESORES", "load_w": 600}]},
+    {"board": "TR1", "name": "TABLERO DE EQUIPOS DE REFRIGERACION", "total_w": 400, "reserved_w": 0, "circuits": [
+        {"description": "EVAPORADORAS (CAMARA)", "load_w": 400}, {"description": "PREVISTA", "load_w": 0}]},
+]
+res = TI.build_loads(boards)
+check("a line feeding a board that was read is not counted twice", sorted(r["Tablero"] for r in res["loads"]), ["TP", "TR1"])
+check("rows keep the Step 5 shape and carry category + board", sorted(res["loads"][0].keys()), sorted(["Descripción", "W", "Und", "h/día", "días/mes", "Categoría", "Tablero"]))
+check("circuits + reserved reconcile with the printed total -> no warning", [n for n in res["notes"] if "revisar" in n], [])
+bad = TI.build_loads([{"board": "TX", "name": "X", "total_w": 1000, "circuits": [{"description": "EVAPORADORA", "load_w": 500}]}])
+check("a board that does not add up is flagged", any("revisar" in n for n in bad["notes"]), True)
 
 print()
 print("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}")

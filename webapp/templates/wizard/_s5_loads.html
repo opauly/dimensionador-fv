@@ -3,18 +3,22 @@
    `row-<i>-<field>` names for webapp/wizard_steps/common.py:parse_rows(). #}
 <div class="card" style="margin:12px 0;">
   <details style="margin-bottom:14px;">
-    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Importar desde tablero eléctrico</summary>
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">{{ 'Importar desde los planos eléctricos' if industrial else 'Importar desde tablero eléctrico' }}</summary>
+    {% if industrial %}
+    <p class="card-note-sm" style="margin:8px 0;">Sube los planos eléctricos (uno o varios PDF o imágenes). La IA ubica cada tablero, lee todos sus circuitos y los clasifica; las horas de uso son valores por defecto que debes ajustar, sobre todo en refrigeración.</p>
+    {% else %}
     <p class="card-note-sm" style="margin:8px 0;">Sube una imagen o PDF del tablero eléctrico. La IA extrae los circuitos y estima horas de uso.</p>
+    {% endif %}
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-      <input id="s5-tablero-file" class="finput" type="file" name="file" accept="image/jpeg,image/png,application/pdf" style="max-width:340px;">
+      <input id="s5-tablero-file" class="finput" type="file" name="file" accept="image/jpeg,image/png,application/pdf" {{ 'multiple' if industrial else '' }} style="max-width:340px;">
       <button class="btn" type="button"
               hx-post="{{ url_for('wizard.paso5_tablero_extraer', vid=vid) }}"
               hx-include="#s5-tablero-file" hx-encoding="multipart/form-data"
               hx-target="#s5-consumo" hx-swap="outerHTML"
               hx-indicator="#s5-tablero-spin" hx-disabled-elt="this">
-        Extraer cargas del tablero
+        {{ 'Leer planos' if industrial else 'Extraer cargas del tablero' }}
       </button>
-      <span id="s5-tablero-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">Analizando tablero con IA…</span>
+      <span id="s5-tablero-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;">{{ 'Leyendo cada tablero de los planos con IA (puede tardar 1-2 min)…' if industrial else 'Analizando tablero con IA…' }}</span>
     </div>
   </details>
 
@@ -26,11 +30,13 @@
        hx-include="#s5-loads-rows input" hx-target="#s5-consumo" hx-swap="outerHTML">
     <div class="dtable-wrap">
       <table class="dtable">
-        <thead><tr><td>Descripción</td><td>Potencia (W)</td><td>Cantidad</td><td>Horas/día</td><td>Días/mes</td><td></td></tr></thead>
+        <thead><tr><td>Descripción</td>{% if industrial %}<td>Categoría</td>{% endif %}<td>Potencia (W)</td><td>Cantidad</td><td>Horas/día</td><td>Días/mes</td><td></td></tr></thead>
         <tbody>
           {% for row in loads_data %}
           <tr>
-            <td><input class="finput" type="text" name="row-{{ loop.index0 }}-desc" value="{{ row['Descripción'] }}"></td>
+            <td><input class="finput" type="text" name="row-{{ loop.index0 }}-desc" value="{{ row['Descripción'] }}">
+              <input type="hidden" name="row-{{ loop.index0 }}-cat" value="{{ row.get('Categoría', '') }}"><input type="hidden" name="row-{{ loop.index0 }}-brd" value="{{ row.get('Tablero', '') }}"></td>
+            {% if industrial %}<td style="font-size:12px;white-space:nowrap;">{{ row.get('Categoría', '') }}</td>{% endif %}
             <td><input class="finput" type="number" step="any" min="0" name="row-{{ loop.index0 }}-w" value="{{ row['W'] }}"></td>
             <td><input class="finput" type="number" min="1" step="1" name="row-{{ loop.index0 }}-und" value="{{ row['Und'] }}"></td>
             <td><input class="finput" type="number" min="0" max="24" step="any" name="row-{{ loop.index0 }}-hd" value="{{ row['h/día'] }}"></td>
@@ -52,6 +58,29 @@
           hx-include="#s5-loads-rows input"
           hx-target="#s5-consumo" hx-swap="outerHTML">+ Fila</button>
 
+  {% if industrial and (plano_boards or category_summary) %}
+  <details style="margin-top:10px;" {{ 'open' if plano_notes else '' }}>
+    <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Resumen de la lectura de los planos</summary>
+    {% if plano_boards %}
+    <div class="dtable-wrap" style="margin-top:6px;"><table class="dtable">
+      <thead><tr><td>Tablero</td><td>Circuitos (W)</td><td>Previsto (W)</td><td>Total del plano (W)</td><td>Contado (W)</td></tr></thead>
+      <tbody>{% for b in plano_boards %}<tr><td>{{ b.board }} · {{ b.name }}</td><td>{{ '{:,.0f}'.format(b.circuits_w) }}</td><td>{{ '{:,.0f}'.format(b.reserved_w or 0) }}</td><td>{{ '{:,.0f}'.format(b.printed_total_w) if b.printed_total_w else '—' }}</td><td>{{ '{:,.0f}'.format(b.counted_w) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    {% for n in plano_notes %}<p class="card-note-sm" style="margin:4px 0;">• {{ n }}</p>{% endfor %}
+    {% if category_summary %}
+    <div class="dtable-wrap" style="margin-top:8px;"><table class="dtable">
+      <thead><tr><td>Categoría</td><td>kW instalados</td><td>kWh/mes</td></tr></thead>
+      <tbody>{% for c in category_summary %}<tr><td>{{ c.category }}</td><td>{{ '{:,.1f}'.format(c.kw) }}</td><td>{{ '{:,.0f}'.format(c.kwh) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+  </details>
+  {% endif %}
+  {% if industrial and industrial_check and industrial_check.ref_avg_kw %}
+  <p class="card-note-sm" style="margin:10px 0 0;">Promedio estimado: <b>{{ '{:,.0f}'.format(industrial_check.est_avg_kw) }} kW</b> · la planta actual medida con eGauge promedia
+    <b>{{ '{:,.0f}'.format(industrial_check.ref_avg_kw) }} kW</b> (la estimada es {{ '{:,.1f}'.format(industrial_check.ratio) }} veces). Las horas por defecto son supuestos: ajusta refrigeración y proceso hasta que la relación tenga sentido para la planta nueva.</p>
+  {% endif %}
+
   {% if loads_overwrite_note %}<p class="wiz-error" style="margin-top:10px;">⚠ {{ loads_overwrite_note }}</p>{% endif %}
 
   <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;flex-wrap:wrap;gap:10px;">
@@ -64,7 +93,7 @@
               hx-indicator="#s5-cargas-apply-spin" hx-disabled-elt="this">
         Aplicar a 12 meses →
       </button>
-      <span id="s5-cargas-apply-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">Estimando variación estacional con IA…</span>
+      <span id="s5-cargas-apply-spin" class="htmx-indicator" style="color:var(--muted);font-size:12.5px;margin-left:8px;">{{ 'Aplicando el patrón mensual medido…' if industrial else 'Estimando variación estacional con IA…' }}</span>
     </div>
     {% endif %}
   </div>

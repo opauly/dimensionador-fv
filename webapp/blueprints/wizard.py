@@ -1065,11 +1065,11 @@ def paso5_tablero_extraer(vid):
     if guard:
         return guard
     blob = draft.load(vid)
-    uploaded = request.files.get("file")
-    if not uploaded or not uploaded.filename:
+    uploads = [f for f in request.files.getlist("file") if f and f.filename]
+    if not uploads:
         return _s5_render(vid, blob, error="Selecciona una imagen o PDF del tablero.")
     try:
-        new_s5 = gz_s5_consumption.extract_tablero(blob, uploaded.read(), uploaded.mimetype)
+        new_s5 = gz_s5_consumption.extract_tablero_files(blob, [(f.read(), f.mimetype) for f in uploads])
     except Exception as exc:
         return _s5_render(vid, blob, error=f"Error al analizar el tablero: {exc}")
     blob = _s5_patch(vid, new_s5)
