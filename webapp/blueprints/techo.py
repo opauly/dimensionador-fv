@@ -133,22 +133,21 @@ def foto(kind, oid):
     return jsonify(ok=True, plan=plan, photoUrl=_signed_url(path))
 
 
-@bp.route("/<kind>/<oid>/pdf")
-def pdf(kind, oid):
+def pdf_bytes(ctx: dict) -> bytes:
+    """The roof sheet of a ctx from `_ctx()`; raises ValueError with a user-facing message when it cannot be built."""
     from database.supabase_client import get_client
     from techo import pdf as P
 
-    ctx = _ctx(kind, oid)
     if ctx["d"]["empty"]:
-        return Response(ctx["d"]["empty"], status=409)
+        raise ValueError(ctx["d"]["empty"])
     info = S.design_info(ctx["d"])
     plan = S.clean(ctx["plan_raw"], info)
     if not plan["photo"]:
-        return Response("Sube primero la foto aérea del techo.", status=409)
+        raise ValueError("Sube primero la foto aérea del techo (Plano de techo).")
     try:
         photo_bytes = get_client().storage.from_(_BUCKET).download(plan["photo"]["path"])
     except Exception as exc:                            # noqa: BLE001
-        return Response(f"No se pudo leer la foto: {exc}", status=500)
+        raise ValueError(f"No se pudo leer la foto del techo: {exc}") from exc
     site = (ctx["d"].get("blob") or {}).get("site") or {}
     place = ", ".join(x for x in (site.get("city"), site.get("province")) if x)
     client = ctx["project"].get("client_name") or "Cliente"
@@ -158,5 +157,23 @@ def pdf(kind, oid):
                          "revision": "A (borrador)", "draft": True, "responsible": "Ing. Oscar Pauly Calvo · IE-30111",
                          **title_fields(ctx["project"], ctx["d"].get("blob"), "techo")},
              "plan": plan, "info": info, "photo_bytes": photo_bytes}, out)
-    return Response(out.getvalue(), mimetype="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{_safe(client)}_Plano_de_techo.pdf"'})
+    return out.getvalue()
+
+
+def has_photo(project: dict, d: dict) -> bool:
+    """Whether the roof plan of this quote version / project already has its aerial photo (the sheet cannot be built without it)."""
+    if d["empty"]:
+        return False
+    raw = ((project.get("tech_spec") or {}).get(S.SCRATCH_KEY) if project.get("id") else None) or ((d.get("blob") or {}).get("scratch") or {}).get(S.SCRATCH_KEY)
+    return bool((raw or {}).get("photo", {}) and (raw or {}).get("photo", {}).get("path"))
+
+
+@bp.route("/<kind>/<oid>/pdf")
+def pdf(kind, oid):
+    ctx = _ctx(kind, oid)
+    try:
+        data = pdf_bytes(ctx)
+    except ValueError as exc:
+        return Response(str(exc), status=409)
+    return Response(data, mimetype="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{_safe(ctx["project"].get("client_name") or "Cliente")}_Plano_de_techo.pdf"'})

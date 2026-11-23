@@ -77,7 +77,7 @@ check("system text: totals and powers", (lines[3], lines[-3:]), ("En total son 1
 # title block: numbering of the set and location fields
 from utils import pdf_sheet as PS  # noqa: E402
 
-check("sheet numbers: techo 1/3, unifilar 2/3, taller 3/3", [PS.sheet_no(k) for k in ("techo", "unifilar", "taller")], ["Hoja 1 de 3", "Hoja 2 de 3", "Hoja 3 de 3"])
+check("sheet numbers: unifilar 1/3, techo 2/3, taller 3/3", [PS.sheet_no(k) for k in ("unifilar", "techo", "taller")], ["Hoja 1 de 3", "Hoja 2 de 3", "Hoja 3 de 3"])
 blob = {"site": {"city": "Carrillo", "province": "Guanacaste"}, "client": {"location": "X, Y"}}
 check("location: canton falls back to the city, district empty", PS.location_fields({}, blob), {"province": "Guanacaste", "canton": "Carrillo", "district": ""})
 check("location: the project's own sheet data wins over the quote", PS.location_fields({"tech_spec": {"sheet_location": {"district": "Palmira", "canton": "Carrillo"}}}, blob),
@@ -85,6 +85,10 @@ check("location: the project's own sheet data wins over the quote", PS.location_
 check("location: a quote with canton and district uses them", PS.location_fields({}, {"site": {"province": "Heredia", "canton": "San Isidro", "district": "San Isidro"}}),
       {"province": "Heredia", "canton": "San Isidro", "district": "San Isidro"})
 check("location: only the client's «Ciudad, Provincia» text", PS.location_fields({}, {"client": {"location": "Liberia, Guanacaste"}}), {"province": "Guanacaste", "canton": "Liberia", "district": ""})
+
+check("sheet status: drafts by default (quote preview or unmarked project)", (PS.status_fields({}), PS.status_fields({"tech_spec": {}})), ({"revision": "A (borrador)", "draft": True},) * 2)
+check("sheet status: final sheets print just the revision letter", PS.status_fields({"tech_spec": {"sheet_status": {"draft": False, "revision": "B"}}}), {"revision": "B", "draft": False})
+check("sheet status flows into title_fields (it wins over a sheet's own default)", PS.title_fields({"tech_spec": {"sheet_status": {"draft": False, "revision": "A"}}}, {}, "techo")["draft"], False)
 
 # PDF
 from PIL import Image  # noqa: E402
@@ -101,6 +105,16 @@ out2 = io.BytesIO()
 P.build({"project": {"name": "Prueba", "client": "X", "location": "Y", "date": "2026-11-23", "revision": "A (borrador)", "draft": True, "responsible": "Ing."}, "plan": {**plan, "photo_rot": 12.5}, "info": INFO_AC, "photo_bytes": buf.getvalue()}, out2)
 check("PDF with the photo turned renders", out2.getvalue()[:4], b"%PDF")
 check("the logo of the sheets is the image file", Path("proposals/assets/Logo_color_v3.png").exists(), True)
+
+# the package: sheets joined in order with bookmarks
+from pypdf import PdfReader  # noqa: E402
+
+from webapp import laminas  # noqa: E402
+
+pkg = laminas.merge([("Diagrama unifilar", out.getvalue()), ("Plano de techo", out2.getvalue()), ("Plano de taller", out.getvalue())], "Prueba - Láminas")
+rd = PdfReader(io.BytesIO(pkg))
+check("package: 3 sheets, one bookmark each, in delivery order", (len(rd.pages), [o.title for o in rd.outline]), (3, ["Diagrama unifilar", "Plano de techo", "Plano de taller"]))
+check("the delivery order of the set is unifilar, techo, taller", laminas.ORDER, ("unifilar", "techo", "taller"))
 
 print("\nALL TECHO CHECKS PASSED" if not fails else f"\n{len(fails)} FAILED: {fails}")
 sys.exit(1 if fails else 0)

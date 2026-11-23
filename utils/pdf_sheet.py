@@ -25,7 +25,7 @@ def legend_text(c, x: float, row: int, text: str) -> None:
 
 
 # ── numbering and location of the sheets (the same on every sheet's title block) ──────────────────────────────────────
-SHEET_ORDER = ("techo", "unifilar", "taller")      # the set: 1 Plano de techo, 2 Diagrama unifilar, 3 Plano de taller
+SHEET_ORDER = ("unifilar", "techo", "taller")      # the set, in delivery order: 1 Diagrama unifilar, 2 Plano de techo, 3 Plano de taller
 
 
 def sheet_no(kind: str) -> str:
@@ -45,6 +45,15 @@ def location_fields(project: dict | None, blob: dict | None) -> dict:
             "district": own.get("district") or site.get("district") or ""}
 
 
+def status_fields(project: dict | None) -> dict:
+    """{revision, draft}: the one switch of the set. `tech_spec["sheet_status"] = {"draft": bool, "revision": "A"}`; without it the sheets are drafts
+    (a quote preview, or a project nobody has marked as final). Draft sheets print «BORRADOR · REV A» and «A (borrador)»; final ones just «A»."""
+    st = ((project or {}).get("tech_spec") or {}).get("sheet_status") or {}
+    draft = bool(st.get("draft", True))
+    rev = (st.get("revision") or "A").strip() or "A"
+    return {"revision": f"{rev} (borrador)" if draft else rev, "draft": draft}
+
+
 def title_fields(project: dict | None, blob: dict | None, kind: str) -> dict:
-    """The title-block keys every sheet adds to its project dict."""
-    return {**location_fields(project, blob), "sheet_no": sheet_no(kind)}
+    """The title-block keys every sheet adds to its project dict (they win over the sheet's own defaults)."""
+    return {**location_fields(project, blob), "sheet_no": sheet_no(kind), **status_fields(project)}

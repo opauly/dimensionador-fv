@@ -36,8 +36,7 @@
       {% endif %}
       <div><label><input type="checkbox" name="spd" value="1" {{ 'checked' if answers.spd else '' }}> Lleva supresor de picos (SPD)</label>
         <input type="text" name="spd_label" value="{{ answers.spd_label }}" style="margin-top:4px;"></div>
-      <div><label for="un-rev">Revisión</label><input id="un-rev" type="text" name="revision" value="{{ answers.revision }}">
-        <label style="margin-top:4px;"><input type="checkbox" name="draft" value="1" {{ 'checked' if answers.draft else '' }}> Marcar como BORRADOR</label></div>
+      <div><p class="card-note-sm" style="margin:0;">Revisión y marca de BORRADOR: se cambian para todas las láminas en <b>Técnico → Datos de las láminas</b>.</p></div>
     </div>
   </form>
 

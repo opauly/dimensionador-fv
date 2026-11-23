@@ -14,6 +14,12 @@ from flask import Blueprint, Response, abort, render_template, request, url_for
 bp = Blueprint("documentos", __name__, url_prefix="/documentos")
 
 
+def techo_has_photo(project: dict, d: dict) -> bool:
+    from webapp.blueprints.techo import has_photo
+
+    return has_photo(project, d)
+
+
 def _load(vid: str):
     """(version, proposal, virtual_project, design) — 404 for an unknown version."""
     from database.proposals_db import get_proposal, get_version
@@ -83,6 +89,9 @@ def menu(vid):
          "href": None if d["empty"] else url_for("documentos.plano", vid=vid)},
         {"icon": "🏠", "title": "Plano de techo", "sub": d["empty"] or "Foto aérea con los paneles a escala: ver si caben",
          "href": None if d["empty"] else url_for("techo.page", kind="c", oid=vid)},
+        {"icon": "📦", "title": "Láminas juntas (un solo PDF)",
+         "sub": d["empty"] or ("Unifilar, plano de techo y plano de taller, en ese orden" if techo_has_photo(project, d) else "Falta la foto aérea del plano de techo"),
+         "href": url_for("documentos.laminas_version", vid=vid) if (not d["empty"] and techo_has_photo(project, d)) else None},
         {"icon": "👁", "title": "Cotización completa (wizard)", "sub": "Los 9 pasos, solo lectura",
          "href": url_for("wizard.abrir", vid=vid) if version.get("locked") else None},
     ]
@@ -111,10 +120,35 @@ def menu_proyecto(pid):
         {"icon": "⚡", "title": "Diagrama unifilar", "sub": empty or "Editable: responde las preguntas del diseño y descarga el dibujo", "href": None if empty else url_for("projects.documento", pid=pid, tab="unifilar")},
         {"icon": "📐", "title": "Plano de taller", "sub": empty or "Editable: pared, márgenes y acomodo de equipos", "href": None if empty else url_for("projects.documento", pid=pid, tab="plano")},
         {"icon": "🏠", "title": "Plano de techo", "sub": empty or "Foto aérea con los paneles a escala: ver si caben", "href": None if empty else url_for("techo.page", kind="p", oid=pid)},
+        {"icon": "📦", "title": "Láminas juntas (un solo PDF)",
+         "sub": empty or ("Unifilar, plano de techo y plano de taller, en ese orden" if techo_has_photo(project, d) else "Falta la foto aérea del plano de techo"),
+         "href": url_for("documentos.laminas_proyecto", pid=pid) if (not empty and techo_has_photo(project, d)) else None},
         {"icon": "👁", "title": "Cotización completa (wizard)", "sub": "Los 9 pasos, solo lectura",
          "href": url_for("wizard.abrir", vid=chosen["id"]) if chosen.get("locked") else None},
     ]
     return render_template("documentos/_menu.html", title=project.get("client_name") or "Proyecto", client="Documentos del proyecto", items=items, note=None)
+
+
+@bp.route("/<vid>/laminas.pdf")
+def laminas_version(vid):
+    from webapp import laminas
+
+    try:
+        data, name = laminas.for_version(vid, request.args)
+    except ValueError as exc:
+        return Response(str(exc), status=409)
+    return Response(data, mimetype="application/pdf", headers={"Content-Disposition": f'attachment; filename="{_safe(name)}_Laminas.pdf"'})
+
+
+@bp.route("/proyecto/<pid>/laminas.pdf")
+def laminas_proyecto(pid):
+    from webapp import laminas
+
+    try:
+        data, name = laminas.for_project(pid)
+    except ValueError as exc:
+        return Response(str(exc), status=409)
+    return Response(data, mimetype="application/pdf", headers={"Content-Disposition": f'attachment; filename="{_safe(name)}_Laminas.pdf"'})
 
 
 # ── pages ────────────────────────────────────────────────────────────────
