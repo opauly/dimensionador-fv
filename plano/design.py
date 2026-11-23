@@ -75,6 +75,7 @@ def build_spec(project: dict, d: dict, lines: list[dict], *, dims=catalog_dims, 
             else:
                 spec.rack = L.part("rack", _short(_name(bat)), dims("batteries", bat.get("id")), n_bat)
     by = {ln["name"]: ln for ln in lines if ln.get("qty")}
+    by_id = {ln.get("id"): ln for ln in lines if ln.get("qty")}
     spec.gabinete = L.part("gabinete", "Gabinete 50x40x20", fixed.get("gabinete_50x40x20"), 1, note="medida nominal, por confirmar")
     if spec.gabinete:
         spec.gabinete.real = False      # the nominal 50x40x20 of the list line (POR CONFIRMAR MEDIDA)
@@ -87,7 +88,7 @@ def build_spec(project: dict, d: dict, lines: list[dict], *, dims=catalog_dims, 
         m = re.match(r"Tablero NEMA 3R (\d+) espacios", name)
         if m:
             spec.centers.append(L.center_part(int(m.group(1)), int(ln["qty"])))
-    lynx = by.get("Lynx Power In")
+    lynx = by_id.get("victron-energy-lynx-power-in") or by.get("Lynx Power In")
     if lynx:
         spec.lynx = L.part("lynx", "Lynx Power In", fixed.get("lynx_power_in"), int(lynx["qty"]))
     spec.centers = [c for c in spec.centers if c]

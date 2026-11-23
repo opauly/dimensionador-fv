@@ -416,8 +416,10 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
             "Inversor → centro de carga AC Out" if disc["out_center"] else "Inversor → tablero AC (salida)", kind="ac", qty=inv_qty,
             current_a=i_out, factor=W.CONTINUOUS_FACTOR,
             v_ref=leg_v, length_m=L[disconnect_center.LENGTH_KEY] if disc["out_center"] else L["ac_out_m"], hot=hot, neutral=1,
-            insulation=ins, conduit_type=conduit, shared_conduit=True,
+            insulation=ins, conduit_type=conduit, shared_conduit=True, shared_neutral=inv_qty > 1 and not disc["out_center"],
             note=f"Por inversor ({leg_v:.0f} V): {basis_label} ÷ {inv_qty} inversor(es), × 1.25. "
+                 f"{hot} {'fase' if hot == 1 else 'fases'} por inversor; los neutros se juntan en un borne de distribución en el gabinete y sale un solo neutro, más tierra." if (inv_qty > 1 and not disc["out_center"]) else
+                 f"Por inversor ({leg_v:.0f} V): {basis_label} ÷ {inv_qty} inversor(es), × 1.25. "
                  f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
         )
         out_branch["alt"] = {"label": alt_label, "current_a": round(i_alt, 1), "ocpd_a": W.ocpd_size(i_alt * W.CONTINUOUS_FACTOR)}
@@ -454,10 +456,11 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
                 "Centro de carga AC In → entrada AC del inversor" if disc["in_center"] else "Red → entrada AC del inversor", kind="ac", qty=inv_qty,
                 current_a=rated_in, factor=1.0,
                 v_ref=leg_v, length_m=L[disconnect_center.LENGTH_IN_KEY] if disc["in_center"] else L["ac_in_m"], hot=hot, neutral=1,
-                ocpd_override=max_in, insulation=ins, conduit_type=conduit, shared_conduit=True,
+                ocpd_override=max_in, insulation=ins, conduit_type=conduit, shared_conduit=True, shared_neutral=inv_qty > 1 and not disc["in_center"],
                 note=f"Por inversor: máxima corriente de entrada (passthrough) del datasheet, {rated_in:.0f} A. "
                      f"Breaker = el mayor estándar ≤ {rated_in:.0f} A ({max_in} A); el fabricante pide protección de {rated_in:.0f} A o menos. "
-                     f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor.",
+                     + (f"{hot} {'fase' if hot == 1 else 'fases'} por inversor; un solo neutro llega al gabinete y se reparte a cada inversor desde un borne de distribución, más tierra."
+                        if (inv_qty > 1 and not disc["in_center"]) else f"{hot} {'fase' if hot == 1 else 'fases'} + neutro + tierra por inversor."),
             )
             in_branch["max_ocpd_a"] = max_in
             in_branch["limited"] = True     # the breaker, not the load, caps this run (manufacturer limit)

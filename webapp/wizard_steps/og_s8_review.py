@@ -158,6 +158,21 @@ def _autonomy_days(blob: dict, battery_kwh: float, battery: dict) -> float | Non
         return None
 
 
+def _ac_pv(blob: dict, equipment: dict) -> dict:
+    """AC-coupled design: the panels feed a string inverter (Fronius), not charge controllers; the summary shows that instead."""
+    if equipment.get("coupling") != "ac":
+        return {"ac_coupled": False}
+    try:
+        from webapp.wizard_steps import og_coupling
+
+        cpl = og_coupling.from_blob(blob)
+        sel = next((i for i in og_coupling.pv_inverter_options() if i["id"] == cpl["pv_inverter_id"]), None)
+    except Exception:                                   # noqa: BLE001 — display only
+        cpl, sel = {"pv_inverter_qty": 1}, None
+    return {"ac_coupled": True, "pv_inv_qty": cpl.get("pv_inverter_qty") or 1,
+            "pv_inv_sub": f"{(sel or {}).get('brand', '')} {(sel or {}).get('model', '')}".strip()}
+
+
 def build_context(blob: dict, vid: str) -> dict:
     blob = blob or {}
     meta = blob.get("meta") or {}
@@ -201,6 +216,7 @@ def build_context(blob: dict, vid: str) -> dict:
         "roof_fit": tech.get("roof_fit"),
         "cc_qty": equipment.get("charge_controller_qty", 1),
         "cc_sub": cc_sub,
+        **_ac_pv(blob, equipment),
         "battery_count": battery_bank.get("battery_count", 0),
         "battery_sub": battery_sub,
         # ── Generación y autonomía ──

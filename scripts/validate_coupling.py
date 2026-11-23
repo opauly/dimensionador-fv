@@ -87,7 +87,7 @@ check("Lynx bolts: 2 per input (user: 'bolts are two per input')", rows["Pernos 
 check("UTP: VE.Bus 1 + MP-GX 1 + Fronius-GX 1 + router 1 (quote: 4 x UTP 3 m)", rows["Cable UTP con RJ-45 (3 m)"]["qty"], 4)
 check("VE.CAN cable x1 (quote: 1)", rows["Cable VE.CAN / CAN-bus de batería"]["qty"], 1)
 dc_rows = {r["item"]: r for r in B.system_rows(EQ, {"ac": False}, {})}
-check("DC-coupled adds the controllers as Lynx inputs: 8 inputs -> 2 bars", dc_rows["Victron Lynx Power In"]["qty"], 2)
+check("DC-coupled adds the controllers as Lynx inputs: 8 inputs + 2 free -> 3 bars", dc_rows["Victron Lynx Power In"]["qty"], 3)
 check("DC-coupled UTP has no Fronius link", dc_rows["Cable UTP con RJ-45 (3 m)"]["qty"], 3)
 eq_rows = {r["category"] for r in B.equipment_rows(EQ, ctx["coupling"])}
 check("equipment rows: PV inverter in, controller out", ("Inversor FV (acople AC)" in eq_rows, "Controlador de carga" in eq_rows), (True, False))

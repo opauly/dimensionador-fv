@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ client_name }} — Documentos{% endblock %}
+{% block content %}
+{# One engineering document of a project (Lista / Unifilar / Plano) on its own page: opened from «👁 Ver» in Proyectos. #}
+<style>
+.pd-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 14px; }
+.pd-tab { padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); font-size: 13px; font-weight: 600; color: var(--navy); text-decoration: none; background: #fff; }
+.pd-tab.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+</style>
+<div class="wiz-header" style="display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;">
+  <a class="wiz-back" style="color:var(--muted-2);font-size:13px;font-weight:600;" href="{{ url_for('projects.detalle', pid=pid) }}">← Proyecto</a>
+  <p class="section-title" style="margin:0;">{{ client_name }}{% if sys_label %} · {{ sys_label }}{% endif %}</p>
+</div>
+{% if error %}
+  <div class="card"><p class="dtable-empty">{{ error }}</p></div>
+{% else %}
+<div class="pd-tabs">
+  {% for key, label in doc_tabs %}
+    <a class="pd-tab{{ ' on' if key == doc_tab }}" href="{{ url_for('projects.documento', pid=pid, tab=key) }}">{{ label }}</a>
+  {% endfor %}
+</div>
+<div id="subpanel">{{ panel_html|safe }}</div>
+{% endif %}
+{% endblock %}

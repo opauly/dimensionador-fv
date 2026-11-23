@@ -147,6 +147,10 @@ def egc_gauge_ocpd(ocpd_a: float, ugc_start: str, ugc_vd: str) -> str:
     return T.GAUGE_ORDER[-1]
 
 
+# Every raceway is at least 1" (Oscar, 2026-11-17: the whole install is piped in 1" minimum, 3/4" is never pulled).
+MIN_CONDUIT_TRADE = "1"
+
+
 def pick_conduit(total_mm2: float, conduit_type: str = DEFAULT_CONDUIT, min_trade: str | None = None) -> dict | None:
     """Smallest PVC trade size whose 40 % fill area >= total conductor area, else None.
     `min_trade` is a practice floor (e.g. 1" for solar wiring)."""
@@ -164,7 +168,7 @@ def conductor_area(gauge: str, insulation: str = DEFAULT_INSULATION) -> float | 
 
 
 def build_rows(*, ugc: str, egc: str, hot: int, neutral: int, egc_included: bool, ocpd, protection: str,
-               current_a: float, qty: int, shared_conduit: bool, insulation: str, egc_rule: str):
+               current_a: float, qty: int, shared_conduit: bool, insulation: str, egc_rule: str, shared_neutral: bool = False):
     """One row per conductor type (phases / neutral / ground) with its gauge, ampacity and the rule
     that defines it, plus the total cross-section for the conduit fill. Phases pass through the
     breaker or fuse; neutral and ground go straight through (the ground is sized by that breaker)."""
@@ -177,7 +181,8 @@ def build_rows(*, ugc: str, egc: str, hot: int, neutral: int, egc_included: bool
     rule = {
         "UGC": (f"Fase{'s' if hot > 1 else ''}: pasa por el {protector} de {ocpd} A; ampacidad {amp_txt}" if ocpd is not None
                 else f"Fase{'s' if hot > 1 else ''}: ampacidad {amp_txt}"),
-        "Neutro": f"Va directo (sin {protector}); lleva la corriente de su fase ({current_a:.0f} A), mismo calibre",
+        "Neutro": (f"Un solo neutro en el tendido: el de cada inversor se junta en un borne de distribución en el gabinete; mismo calibre ({current_a:.0f} A por fase)"
+                   if shared_neutral else f"Va directo (sin {protector}); lleva la corriente de su fase ({current_a:.0f} A), mismo calibre"),
         "EGC": f"Va directo (sin {protector}); {egc_rule}",
     }
     rows, total_mm2, missing = [], 0.0, False
@@ -187,7 +192,7 @@ def build_rows(*, ugc: str, egc: str, hot: int, neutral: int, egc_included: bool
         if a is None:
             missing = True
         else:
-            total_mm2 += a * n * (1 if role == "EGC" else pipe_runs)   # one EGC serves every run in a shared pipe
+            total_mm2 += a * n * (1 if (role == "EGC" or (role == "Neutro" and shared_neutral)) else pipe_runs)   # one EGC (and a joined neutral) serves every run in a shared pipe
         rows.append({"role": role, "gauge": g, "count": n, "mm2": a, "ampacity": ampacity(g), "rule": rule[role]})
     return rows, total_mm2, missing
 
@@ -197,7 +202,7 @@ def size_branch(
     hot: int = 2, neutral: int = 0, ocpd_override: int | None = None,
     insulation: str = DEFAULT_INSULATION, conduit_type: str = DEFAULT_CONDUIT, note: str | None = None,
     egc_included: bool = True, protection: str = "breaker", ocpd_choices: tuple | None = None,
-    min_gauge: str | None = None, max_gauge: str | None = None, shared_conduit: bool = False,
+    min_gauge: str | None = None, max_gauge: str | None = None, shared_conduit: bool = False, shared_neutral: bool = False,
     stocked_only: bool = False, min_conduit_trade: str | None = None, phases: int = 1,
 ) -> dict:
     """Size one branch end to end. `current_a` is the branch current WITHOUT adjustment
@@ -216,7 +221,7 @@ def size_branch(
     inverters, share a pipe): the conduit is sized for all their conductors together and counted once.
 
     `stocked_only` skips the AWG sizes dealers do not carry (#3, #1): the next one up is used.
-    `min_conduit_trade` is a practice floor for the raceway (solar wiring is always at least 1").
+    `min_conduit_trade` is a practice floor for the raceway; every raceway is at least `MIN_CONDUIT_TRADE` (1").
     `min_gauge` is a practice floor (e.g. Pauly always pulls #10 solar cable): the conductor starts
     there when the ampacity would allow something smaller. The EGC still derives from the
     gauge the floor starts from, as the workbook derives it from the initial gauge.
@@ -312,7 +317,9 @@ def size_branch(
 
     rows, total_mm2, missing = build_rows(
         ugc=ugc, egc=egc, hot=hot, neutral=neutral, egc_included=egc_included, ocpd=ocpd, protection=protection,
-        current_a=current_a, qty=qty, shared_conduit=shared_conduit, insulation=insulation, egc_rule=egc_rule)
+        current_a=current_a, qty=qty, shared_conduit=shared_conduit, insulation=insulation, egc_rule=egc_rule,
+        shared_neutral=shared_neutral)
+    min_conduit_trade = min_conduit_trade or MIN_CONDUIT_TRADE
     conduit = None if missing else pick_conduit(total_mm2, conduit_type, min_conduit_trade)
     if conduit and min_conduit_trade and conduit["trade"] == min_conduit_trade and pick_conduit(total_mm2, conduit_type)["trade"] != min_conduit_trade:
         notes.append(f"Tubo mínimo de práctica: {min_conduit_trade}″ (el relleno permitiría uno menor).")
@@ -324,7 +331,8 @@ def size_branch(
         "ugc_initial": ugc_i, "ugc_from": start_g, "ugc": ugc, "ugc_ampacity": amp, "upsized_for_vd": ugc != start_g,
         "ocpd_a": ocpd, "vd_v": round(vd_v, 2), "vd_pct": round(vd_pct, 2), "vd_pct_initial": round(vd_pct_initial, 2),
         "egc": egc if egc_included else None, "conductors": rows, "total_mm2": round(total_mm2, 1), "conduit": conduit,
-        "hot": hot, "neutral": neutral, "egc_included": egc_included, "shared_conduit": shared_conduit, "phases": phases,
+        "hot": hot, "neutral": neutral, "egc_included": egc_included, "shared_conduit": shared_conduit, "shared_neutral": shared_neutral,
+        "phases": phases,
         "egc_rule": egc_rule,
     })
     return out
@@ -406,7 +414,7 @@ def apply_manual(b: dict, manual: dict | None) -> dict:
     rows, total_mm2, missing = build_rows(
         ugc=ugc, egc=egc or ugc, hot=b["hot"], neutral=b["neutral"], egc_included=bool(egc), ocpd=ocpd,
         protection=b.get("protection", "breaker"), current_a=b["current_a"], qty=b["qty"],
-        shared_conduit=bool(b.get("shared_conduit")), insulation=b["insulation"], egc_rule=egc_rule)
+        shared_conduit=bool(b.get("shared_conduit")), insulation=b["insulation"], egc_rule=egc_rule, shared_neutral=bool(b.get("shared_neutral")))
     conduit = None if missing else pick_conduit(total_mm2, (b.get("conduit") or {}).get("type") or DEFAULT_CONDUIT)
     b["calc"] = {"ocpd_a": calc_a, "ugc": calc_g, "egc": b.get("egc")}
     b.update({

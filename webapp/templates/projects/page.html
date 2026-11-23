@@ -32,7 +32,16 @@
         {{ tab.label }}
       </a>
     {% endfor %}
+    {% if project.proposal_id %}
+    <button type="button" class="pj-ver{{ ' on' if ver_active }}" hx-get="{{ url_for('documentos.menu_proyecto', pid=project.id) }}" hx-target="body" hx-swap="beforeend"
+            title="Lista de materiales, unifilar, plano de taller y propuesta">👁 Ver</button>
+    {% endif %}
   </div>
+  <style>
+    .pj-ver { margin-left: auto; align-self: center; display: inline-flex; align-items: center; height: 28px; padding: 0 14px; border-radius: 20px;
+              border: 1px solid var(--border); background: #fff; color: var(--navy); font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font); }
+    .pj-ver:hover, .pj-ver.on { border-color: var(--navy); }
+  </style>
 
   <div id="subpanel">{{ panel_html|safe }}</div>
 {% endif %}

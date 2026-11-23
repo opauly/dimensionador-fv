@@ -381,6 +381,29 @@ def plano(pid):
     return _project_page(pid, "plano")
 
 
+DOC_TABS = (("lista", "Lista de materiales"), ("unifilar", "Unifilar"), ("plano", "Plano de taller"))
+
+
+@bp.route("/<pid>/doc/<tab>")
+def documento(pid, tab):
+    """One engineering document of the project on its own page (what «Ver» opens): the same editable panel as the Lista / Unifilar / Plano
+    tabs, without the project header and its other tabs."""
+    if tab not in dict(DOC_TABS):
+        abort(404)
+    is_hx = bool(request.headers.get("HX-Request"))
+    try:
+        ctx = detail_ctx(pid, active_tab=tab)
+    except Exception as exc:
+        return render_template("projects/doc.html", error=f"Error cargando proyecto: {exc}", pid=pid, doc_tab=tab, doc_tabs=DOC_TABS, client_name="", panel_html="")
+    if ctx is None:
+        abort(404)
+    panel_html = _panel_for(ctx, tab)
+    if is_hx:
+        return panel_html
+    return render_template("projects/doc.html", error=None, pid=pid, doc_tab=tab, doc_tabs=DOC_TABS, client_name=ctx["client_name"],
+                           sys_label=ctx["sys_label"], panel_html=panel_html)
+
+
 @bp.route("/<pid>/estado", methods=["POST"])
 def estado(pid):
     """Status-pill change (plan §1.4 item 10). Server-side validation is not
