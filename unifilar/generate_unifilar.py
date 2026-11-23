@@ -135,28 +135,31 @@ def _frame(c, h, P):
         if value: txt(x + 4, y + 5, value, vs, 'Helvetica-Bold' if bold else 'Helvetica', black, 'l')
 
     c.setLineWidth(0.6); c.rect(X0, Y0 + 90, TW, 30)
-    txt(X0 + 8, Y0 + 101, 'pauly', 17, 'Helvetica-Bold', GREEN, 'l')
-    txt(X0 + 49, Y0 + 109, '&co', 7, 'Helvetica-Bold', NAVY, 'l')
-    txt(X0 + 8, Y0 + 92.5, 'Ingenieros y Arquitectos', 5.5, 'Helvetica', NAVY, 'l')
+    from utils.pdf_logo import draw_logo
+
+    draw_logo(c, X0 + 8, Y0 + 94, 22)
     txt(X0 + TW - 8, Y0 + 106, 'Pauly y Compañía Ingenieros y Arquitectos S.A.', 8, 'Helvetica-Bold', NAVY, 'r')
     txt(X0 + TW - 8, Y0 + 96, 'Céd. jurídica 3-101-798034 · www.paulyco.com · info@paulyco.com', 6.5, 'Helvetica', GRAY, 'r')
     cell(X0, Y0 + 66, TW, 24, 'PROYECTO', P["name"], 8.5, True)
-    cell(X0, Y0 + 42, 200, 24, 'CLIENTE', P["client"])
-    cell(X0 + 200, Y0 + 42, 262, 24, 'UBICACIÓN', P["location"])
+    cell(X0, Y0 + 42, 140, 24, 'CLIENTE', P["client"])
+    cell(X0 + 140, Y0 + 42, 100, 24, 'PROVINCIA', P.get("province", ""))
+    cell(X0 + 240, Y0 + 42, 110, 24, 'CANTÓN', P.get("canton", ""))
+    cell(X0 + 350, Y0 + 42, 112, 24, 'DISTRITO', P.get("district", ""))
     cell(X0, Y0 + 18, 262, 24, 'PLANO', 'DIAGRAMA UNIFILAR', 8.5, True)
     cell(X0 + 262, Y0 + 18, 60, 24, 'REVISIÓN', P["revision"], 7)
     cell(X0 + 322, Y0 + 18, 140, 24, 'FECHA', P["date"])
     cell(X0, Y0, 262, 18, '', ''); txt(X0 + 4, Y0 + 5.5, 'Resp.: ' + P["responsible"], 7, 'Helvetica', black, 'l')
     cell(X0 + 262, Y0, 100, 18, '', ''); txt(X0 + 266, Y0 + 5.5, 'Escala: sin escala', 7, 'Helvetica', black, 'l')
-    cell(X0 + 362, Y0, 100, 18, '', ''); txt(X0 + 366, Y0 + 5.5, 'Hoja 1 de 1', 7.5, 'Helvetica-Bold', black, 'l')
+    cell(X0 + 362, Y0, 100, 18, '', ''); txt(X0 + 366, Y0 + 5.5, P.get('sheet_no', 'Hoja 1 de 1'), 7.5, 'Helvetica-Bold', black, 'l')
 
 
 
 def _legend(c, h):
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
-    txt(30, 125, 'SIMBOLOGÍA', 7.5, 'Helvetica-Bold', NAVY, 'l')
-    c.setLineWidth(0.6); c.setStrokeColor(MGRAY); c.line(24, 120, 735, 120)
-    ly = [104, 85, 66, 47, 28]
+    from utils.pdf_sheet import LEGEND_ROWS, legend_header
+
+    legend_header(c)
+    ly = list(LEGEND_ROWS)
     seg([(30, ly[0]), (70, ly[0])], black, 1.8); txt(80, ly[0] - 2.5, 'AC', 7, 'Helvetica', black, 'l')
     seg([(30, ly[1]), (70, ly[1])], ORANGE, 1.6); txt(80, ly[1] - 2.5, 'DC fotovoltaico', 7, 'Helvetica', black, 'l')
     seg([(30, ly[2] + 2.5), (70, ly[2] + 2.5)], RED, 1.8); seg([(30, ly[2] - 2.5), (70, ly[2] - 2.5)], black, 1.8)

@@ -61,6 +61,8 @@ def _facts(blob: dict, project: dict) -> list[tuple[str, str]]:
 
 
 def render_panel(ctx: dict, *, message: str | None = None) -> str:
+    from utils.pdf_sheet import location_fields
+
     from calculations.bom import build_bom
     from webapp.blueprints import projects_design
     from webapp.blueprints.projects_common import fmt_usd
@@ -94,6 +96,7 @@ def render_panel(ctx: dict, *, message: str | None = None) -> str:
         facts=_facts(blob, project), bom=build_bom(eq, wiring_ctx), wiring=wiring_ctx,
         other_lines=other_lines, system_type=system_type,
         custom_lengths=bool(spec.get("wiring_lengths")),
+        sheet_loc=location_fields(project, blob),
     )
 
 
@@ -115,6 +118,8 @@ def register(bp):
             spec["version_id"] = form["version_id"]
         if any(k in form for k in og_wiring.DEFAULT_LENGTHS):
             spec["wiring_lengths"] = og_wiring.lengths_from_form(form, spec.get("wiring_lengths"))
+        if form.get("sheet_form"):
+            spec["sheet_location"] = {k: (form.get("sheet_" + k) or "").strip() for k in ("province", "canton", "district")}
         if form.get("manual_form"):
             spec["wiring_manual"] = og_wiring.manual_from_form(form)
         cpl = og_coupling.from_form(form)

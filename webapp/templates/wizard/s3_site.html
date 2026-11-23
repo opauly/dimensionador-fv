@@ -5,6 +5,10 @@
     <div><label class="flabel">Ciudad</label><input class="finput" type="text" name="city" value="{{ city }}"></div>
     <div><label class="flabel">Provincia</label><input class="finput" type="text" name="province" value="{{ province }}"></div>
   </div>
+  <div class="fgrid" style="margin-top:8px;">
+    <div><label class="flabel">Cantón <span style="color:var(--muted-2);font-weight:400;">(láminas; si queda vacío se usa la ciudad)</span></label><input class="finput" type="text" name="canton" value="{{ canton }}"></div>
+    <div><label class="flabel">Distrito <span style="color:var(--muted-2);font-weight:400;">(láminas)</span></label><input class="finput" type="text" name="district" value="{{ district }}"></div>
+  </div>
 
   <details style="margin-top:12px;">
     <summary style="cursor:pointer;font-size:13px;color:var(--muted-2);">Coordenadas manuales (opcional)</summary>

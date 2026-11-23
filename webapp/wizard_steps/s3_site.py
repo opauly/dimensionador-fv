@@ -51,6 +51,7 @@ def build_context(blob: dict) -> dict:
     return {
         "city": city,
         "province": province,
+        "canton": site.get("canton") or "", "district": site.get("district") or "",      # only for the title block of the sheets
         # Manual-override inputs default to whatever lat/lon is already
         # resolved — same as Streamlit's `value=float(current.get("lat", 0.0))`.
         "lat_manual": lat or 0.0,
@@ -76,6 +77,8 @@ def save_step(form) -> dict:
     return {
         "city": (form.get("city") or "").strip(),
         "province": (form.get("province") or "").strip(),
+        "canton": (form.get("canton") or "").strip(),
+        "district": (form.get("district") or "").strip(),
     }
 
 

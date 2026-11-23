@@ -81,6 +81,8 @@ def menu(vid):
          "href": None if d["empty"] else url_for("documentos.unifilar", vid=vid)},
         {"icon": "📐", "title": "Plano de taller", "sub": d["empty"] or "Acomodo de equipos en una pared y pared mínima",
          "href": None if d["empty"] else url_for("documentos.plano", vid=vid)},
+        {"icon": "🏠", "title": "Plano de techo", "sub": d["empty"] or "Foto aérea con los paneles a escala: ver si caben",
+         "href": None if d["empty"] else url_for("techo.page", kind="c", oid=vid)},
         {"icon": "👁", "title": "Cotización completa (wizard)", "sub": "Los 9 pasos, solo lectura",
          "href": url_for("wizard.abrir", vid=vid) if version.get("locked") else None},
     ]
@@ -108,6 +110,7 @@ def menu_proyecto(pid):
         {"icon": "🧾", "title": "Lista de materiales (BOM)", "sub": empty or "Editable: cantidades, comentarios y extras; descarga en PDF o Excel", "href": None if empty else url_for("projects.documento", pid=pid, tab="lista")},
         {"icon": "⚡", "title": "Diagrama unifilar", "sub": empty or "Editable: responde las preguntas del diseño y descarga el dibujo", "href": None if empty else url_for("projects.documento", pid=pid, tab="unifilar")},
         {"icon": "📐", "title": "Plano de taller", "sub": empty or "Editable: pared, márgenes y acomodo de equipos", "href": None if empty else url_for("projects.documento", pid=pid, tab="plano")},
+        {"icon": "🏠", "title": "Plano de techo", "sub": empty or "Foto aérea con los paneles a escala: ver si caben", "href": None if empty else url_for("techo.page", kind="p", oid=pid)},
         {"icon": "👁", "title": "Cotización completa (wizard)", "sub": "Los 9 pasos, solo lectura",
          "href": url_for("wizard.abrir", vid=chosen["id"]) if chosen.get("locked") else None},
     ]

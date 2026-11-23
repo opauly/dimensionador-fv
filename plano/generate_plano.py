@@ -57,17 +57,19 @@ def _frame(c, P):
         if value: _t(c, x + 4, y + 5, value, vs, "Helvetica-Bold" if bold else "Helvetica")
 
     c.setLineWidth(0.6); c.rect(X0, Y0 + 90, TW, 30)
-    _t(c, X0 + 8, Y0 + 101, "pauly", 17, "Helvetica-Bold", GREEN); _t(c, X0 + 49, Y0 + 109, "&co", 7, "Helvetica-Bold", NAVY)
-    _t(c, X0 + 8, Y0 + 92.5, "Ingenieros y Arquitectos", 5.5, color=NAVY)
+    from utils.pdf_logo import draw_logo
+
+    draw_logo(c, X0 + 8, Y0 + 94, 22)
     _t(c, X0 + TW - 8, Y0 + 106, "Pauly y Compañía Ingenieros y Arquitectos S.A.", 8, "Helvetica-Bold", NAVY, "r")
     _t(c, X0 + TW - 8, Y0 + 96, "Céd. jurídica 3-101-798034 · www.paulyco.com · info@paulyco.com", 6.5, color=GRAY, align="r")
     cell(X0, Y0 + 66, TW, 24, "PROYECTO", P["name"], 8.5, True)
-    cell(X0, Y0 + 42, 200, 24, "CLIENTE", P["client"]); cell(X0 + 200, Y0 + 42, 262, 24, "UBICACIÓN", P["location"])
-    cell(X0, Y0 + 18, 262, 24, "PLANO", "PLANO DE TALLER", 8.5, True)
+    cell(X0, Y0 + 42, 140, 24, "CLIENTE", P["client"]); cell(X0 + 140, Y0 + 42, 100, 24, "PROVINCIA", P.get("province", ""))
+    cell(X0 + 240, Y0 + 42, 110, 24, "CANTÓN", P.get("canton", "")); cell(X0 + 350, Y0 + 42, 112, 24, "DISTRITO", P.get("district", ""))
+    cell(X0, Y0 + 18, 262, 24, "PLANO", P.get("sheet", "PLANO DE TALLER"), 8.5, True)
     cell(X0 + 262, Y0 + 18, 60, 24, "REVISIÓN", P["revision"], 7); cell(X0 + 322, Y0 + 18, 140, 24, "FECHA", P["date"])
     cell(X0, Y0, 262, 18, "", ""); _t(c, X0 + 4, Y0 + 5.5, "Resp.: " + P["responsible"], 7)
     cell(X0 + 262, Y0, 100, 18, "", ""); _t(c, X0 + 266, Y0 + 5.5, "Escala: " + P["scale"], 7)
-    cell(X0 + 362, Y0, 100, 18, "", ""); _t(c, X0 + 366, Y0 + 5.5, "Hoja 1 de 1", 7.5, "Helvetica-Bold")
+    cell(X0 + 362, Y0, 100, 18, "", ""); _t(c, X0 + 366, Y0 + 5.5, P.get("sheet_no", "Hoja 1 de 1"), 7.5, "Helvetica-Bold")
 
 
 def build(data: dict, out) -> None:
@@ -174,10 +176,14 @@ def build(data: dict, out) -> None:
             else:
                 line = (line + " " + w_).strip()
         _t(c, rx, y, line, 6.5, color=GRAY); y -= 10
-    c.setDash(6, 4); c.setStrokeColor(GRAY); c.setLineWidth(1); c.line(30, 158, 60, 158); c.setDash()
-    _t(c, 66, 155.5, "Área mínima de trabajo", 6.5)
-    c.setDash(4, 3); c.setStrokeColor(black); c.setLineWidth(1.0); c.rect(190, 152, 22, 12); c.setDash()
-    _t(c, 218, 155.5, "Medida estimada o nominal (por confirmar)", 6.5)
-    c.setStrokeColor(black); c.setLineWidth(1.0); c.rect(400, 152, 22, 12)
-    _t(c, 428, 155.5, "Medida de la ficha", 6.5)
+    from utils.pdf_sheet import COL1_TEXT, LEGEND_ROWS, legend_header, legend_text
+
+    legend_header(c)
+    ly = LEGEND_ROWS
+    c.setDash(6, 4); c.setStrokeColor(GRAY); c.setLineWidth(1); c.line(30, ly[0], 70, ly[0]); c.setDash()
+    legend_text(c, COL1_TEXT, 0, "Área mínima de trabajo")
+    c.setDash(4, 3); c.setStrokeColor(black); c.setLineWidth(1.0); c.rect(40, ly[1] - 6, 20, 12); c.setDash()
+    legend_text(c, COL1_TEXT, 1, "Medida estimada o nominal (por confirmar)")
+    c.setStrokeColor(black); c.setLineWidth(1.0); c.rect(40, ly[2] - 6, 20, 12)
+    legend_text(c, COL1_TEXT, 2, "Medida de la ficha")
     c.showPage(); c.save()

@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from plano import design, layout as L
+from utils.pdf_sheet import title_fields
 
 SYSTEM_TEXT = {"hybrid": "Sistema híbrido", "off_grid": "Sistema aislado (off-grid)", "grid_zero": "Sistema Grid Zero"}
 
@@ -67,7 +68,8 @@ def pdf_data(project: dict, d: dict, comp: dict) -> dict:
     return {
         "project": {"name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
                     "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
-                    "revision": "A (borrador)", "draft": True, "responsible": "Ing. Oscar Pauly Calvo · IE-30111"},
+                    "revision": "A (borrador)", "draft": True, "responsible": "Ing. Oscar Pauly Calvo · IE-30111",
+                    **title_fields(project, d["blob"], "taller")},
         "title": comp["title"], "layout": comp["layout"], "check": comp["check"], "parts": comp["parts"], "margin": comp["margin"],
         "wall": comp["wall"], "notes": comp["notes"], "arrangement": comp["arrangement"],
     }

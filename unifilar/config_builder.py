@@ -17,6 +17,7 @@ from datetime import date
 
 from calculations import wiring as W
 from calculations.bom import lynx_bars
+from utils.pdf_sheet import title_fields
 
 # Questions the drawing cannot infer and the wizard must never assume (docs/unifilar/CONTEXTO.md §3.4, §7).
 EXPORT_CHOICES = (("grid_zero", "Cero inyección (Grid Zero)"), ("inyeccion", "Con inyección a la red"))
@@ -202,11 +203,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
     cfg = {
         "kind": "hybrid_ac", "meter": _meter(eq),
         "ac_out_center": _ac_center_cfg(wiring, "out"), "ac_in_center": _ac_center_cfg(wiring, "in"),
-        "project": {
-            "name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
-            "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
-            "revision": answers["revision"], "draft": bool(answers["draft"]),
-        },
+        "project": _project_block(project, d, answers),
         "pv": {
             "strings": int(cpl["strings"]), "sizes": _pv_sizes(wiring, int(cpl["strings"])), "modules_per_string": int(cpl["series"]), "module_w": int(panel.get("wp") or 0),
             "module_label": f"{panel.get('brand', '')} {panel.get('wp')} W".strip(),
@@ -256,7 +253,7 @@ def _project_block(project: dict, d: dict, answers: dict) -> dict:
     client = project.get("client_name") or "Cliente"
     return {"name": f"Proyecto {client}" + (f" en {place}" if place else ""), "client": client,
             "location": (place + ", Costa Rica") if place else "Costa Rica", "date": date.today().isoformat(),
-            "revision": answers["revision"], "draft": bool(answers["draft"])}
+            "revision": answers["revision"], "draft": bool(answers["draft"]), **title_fields(project, d["blob"], "unifilar")}
 
 
 def _ac_center_cfg(wiring: dict, which: str) -> dict | None:

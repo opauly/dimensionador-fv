@@ -18,6 +18,7 @@ def create_app() -> Flask:
     from webapp.blueprints.admin import bp as admin_bp
     from webapp.blueprints.dashboard import bp as dashboard_bp
     from webapp.blueprints.documentos import bp as documentos_bp
+    from webapp.blueprints.techo import bp as techo_bp
     from webapp.blueprints.maintenance import bp as maintenance_bp
     from webapp.blueprints.pricing import bp as pricing_bp
     from webapp.blueprints.projects import bp as projects_bp
@@ -28,6 +29,7 @@ def create_app() -> Flask:
     app.register_blueprint(admin_bp)
     app.register_blueprint(proposals_bp)
     app.register_blueprint(documentos_bp)
+    app.register_blueprint(techo_bp)
     app.register_blueprint(wizard_bp)
     app.register_blueprint(maintenance_bp)
     app.register_blueprint(projects_bp)

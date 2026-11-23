@@ -49,6 +49,15 @@
   {% if custom_lengths %}<p class="tc-sub">Largos de obra guardados en este proyecto.</p>{% elif wiring.ready %}
     <p class="tc-sub">⚠️ Largos por defecto: ajústalos a las distancias reales de la obra para que calibres y materiales sean los correctos.</p>{% endif %}
 
+  <p class="tc-h">Datos de las láminas</p>
+  <p class="card-note-sm">Provincia, cantón y distrito del cajetín del unifilar, el plano de taller y el plano de techo.</p>
+  <form hx-post="{{ url_for('projects.tecnico_guardar', pid=pid) }}" hx-trigger="change delay:500ms" hx-target="#tech-panel" hx-swap="outerHTML" style="display:flex;gap:10px;flex-wrap:wrap;">
+    <input type="hidden" name="sheet_form" value="1">
+    <label style="font-size:12px;">Provincia<br><input class="finput" type="text" name="sheet_province" style="width:170px;" value="{{ sheet_loc.province }}"></label>
+    <label style="font-size:12px;">Cantón<br><input class="finput" type="text" name="sheet_canton" style="width:170px;" value="{{ sheet_loc.canton }}"></label>
+    <label style="font-size:12px;">Distrito<br><input class="finput" type="text" name="sheet_district" style="width:170px;" value="{{ sheet_loc.district }}"></label>
+  </form>
+
   <p class="tc-h">Materiales y plano</p>
   <p class="card-note-sm">La lista de compra (equipos, protecciones, cables, tubería, montaje) y el diagrama unifilar se generan con el dimensionamiento de arriba y se abren desde aquí o desde 👁 Ver:
     <a href="{{ url_for('projects.lista', pid=pid) }}" hx-get="{{ url_for('projects.lista', pid=pid) }}" hx-target="#subpanel" hx-swap="innerHTML" hx-push-url="true">Lista de materiales</a> ·
