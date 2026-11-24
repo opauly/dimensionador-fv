@@ -123,6 +123,48 @@ def _helpers(c):
     return seg, txt, lab, box, breaker, fuse, ground, dot, stack
 
 
+def _fit(text, width, size=8, font='Helvetica-Bold'):
+    """Tamaño de letra (hasta `size`) con el que el texto cabe en `width` puntos."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    w = stringWidth(text, font, size)
+    return size if w <= width else round(size * width / w, 1)
+
+
+def _inv_symbol(c, x, y, s=22):
+    """Símbolo de inversor: cuadro con diagonal, DC (— —) arriba a la izquierda y AC (~) abajo a la derecha. (x, y) = esquina inferior izquierda."""
+    c.saveState(); c.setStrokeColor(black); c.setFillColor(white); c.setLineWidth(0.9)
+    c.rect(x, y, s, s, fill=1, stroke=1); c.line(x, y, x + s, y + s)
+    c.setLineWidth(0.7)
+    c.line(x + s * 0.14, y + s * 0.80, x + s * 0.46, y + s * 0.80)
+    c.line(x + s * 0.14, y + s * 0.66, x + s * 0.22, y + s * 0.66); c.line(x + s * 0.30, y + s * 0.66, x + s * 0.38, y + s * 0.66)
+    p = c.beginPath(); p.moveTo(x + s * 0.56, y + s * 0.22)
+    p.curveTo(x + s * 0.62, y + s * 0.40, x + s * 0.70, y + s * 0.40, x + s * 0.74, y + s * 0.22)
+    p.curveTo(x + s * 0.78, y + s * 0.06, x + s * 0.86, y + s * 0.06, x + s * 0.90, y + s * 0.24)
+    c.drawPath(p, stroke=1, fill=0)
+    c.restoreState()
+
+
+def _arrow_head(c, x, y, color=black, size=6, angle=0):
+    """Punta de flecha con la punta en (x, y); angle en grados: 0 = hacia la derecha, 90 = hacia arriba, -90 = hacia abajo."""
+    c.saveState(); c.setFillColor(color); c.setStrokeColor(color)
+    c.translate(x, y); c.rotate(angle); x = y = 0
+    p = c.beginPath(); p.moveTo(x, y); p.lineTo(x - size, y + size * 0.45); p.lineTo(x - size, y - size * 0.45); p.close()
+    c.drawPath(p, stroke=0, fill=1); c.restoreState()
+
+
+def _bus_tag(c, h, x=40):
+    """Rótulo único del bus de baterías, sobre el bloque del Lynx."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    txt(x + 2, 298, 'BUS DC 48 V', 6.5, 'Helvetica-Bold', GRAY, 'l')
+
+
+def _bat_ports(c, h, xr, y, black_dx=8):
+    """Puertos BAT+ / BAT- del equipo, en el borde inferior del bloque, de donde salen los cables rojo y negro hacia el Lynx."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    dot(xr, y); dot(xr + black_dx, y)
+    txt(xr - 3, y + 3.5, 'BAT+', 5.5, 'Helvetica-Bold', GRAY, 'r'); txt(xr + black_dx + 3, y + 3.5, 'BAT-', 5.5, 'Helvetica-Bold', GRAY, 'l')
+
+
 def _frame(c, h, P):
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     c.setStrokeColor(black); c.setLineWidth(1.6); c.rect(18, 18, W - 36, H - 36)
@@ -234,6 +276,7 @@ def _hybrid_ac(c, h, cfg):
     txt(660, 696, 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold')
     txt(660, 685, FR["label"], 7)
     txt(660, 675, f"{FR['kw']} kW · {n_runs} MPPT", 6.5, 'Helvetica', GRAY)
+    _inv_symbol(c, 722, 672)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {i + 1}", 6.5, 'Helvetica', GRAY, 'l')
         seg([(254, yc), (560, yc)], ORANGE, 1.6)
@@ -274,7 +317,7 @@ def _hybrid_ac(c, h, cfg):
         stack(333, 400, MU["ac_in_conductors"])
     else:
         breaker(325, 436)
-        txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, MU["ac_in_breaker"], 6.5)
+        txt(325, 446, 'Q1', 7, 'Helvetica'); txt(325, 424, MU["ac_in_breaker"], 6.5)
         stack(333, 413, MU["ac_in_conductors"])
     if cfg.get("meter"):
         _meter_block(c, h, cfg["meter"], 268, 436, above=True, gap=72)
@@ -285,8 +328,10 @@ def _hybrid_ac(c, h, cfg):
     txt(470, 501, 'Split-phase 120/240 V · VE.Bus', 6.5, 'Helvetica', GRAY)
     box(392, 445, 156, 45, LGRAY)
     txt(470, 473, 'MP#1 · L1 (maestro)', 7, 'Helvetica-Bold'); txt(470, 462, MU["model"], 6.5, 'Helvetica', GRAY)
+    _inv_symbol(c, 398, 456, 20)
     box(392, 382, 156, 45, LGRAY)
     txt(470, 410, 'MP#2 · L2 (esclavo)', 7, 'Helvetica-Bold'); txt(470, 399, MU["model"], 6.5, 'Helvetica', GRAY)
+    _inv_symbol(c, 398, 393, 20)
     for xa, xb in ((386, 392), (554, 548)):
         seg([(xa, 405), (xa, 467)], black, 1.4); seg([(xa, 467), (xb, 467)], black, 1.4); seg([(xa, 405), (xb, 405)], black, 1.4)
         dot(xa, 436)
@@ -302,13 +347,14 @@ def _hybrid_ac(c, h, cfg):
     # ---------- sub-panel de cargas críticas ----------
     box(640, 366, 180, 140, LGRAY)
     txt(752, 494, 'SUB-PANEL CARGAS CRÍTICAS', 7, 'Helvetica-Bold'); txt(752, 485, '120/240 V', 6.5, 'Helvetica', GRAY)
-    seg([(640, 436), (880, 436)], black, 1.8)
+    seg([(640, 436), (1040, 436)], black, 1.8); _arrow_head(c, 1048, 436, black, 8)
+    txt(960, 443, 'Va hacia cargas críticas', 7, 'Helvetica', GRAY)
     if not FR_C:
         seg([(690, 506), (690, 436)], black, 1.8); dot(690, 436)
         breaker(690, 466, vert=True); txt(698, 464, f"Q3 · {FR['ac_breaker']} (FV)", 6.5, 'Helvetica', black, 'l')
     if not cfg.get("ac_out_center"):
-        breaker(658, 436); txt(658, 446, 'Q2', 7, 'Helvetica-Bold'); txt(658, 424, SP["q2"], 6.5)
-    breaker(795, 436); txt(795, 446, 'Q4', 7, 'Helvetica-Bold'); txt(795, 455, SP["q4"], 6, 'Helvetica', GRAY)   # sobre la barra: abajo lo cruza el SPD
+        breaker(658, 436); txt(658, 446, 'Q2', 7, 'Helvetica'); txt(658, 424, SP["q2"], 6.5)
+    breaker(795, 436); txt(795, 446, 'Q4', 7, 'Helvetica'); txt(795, 455, SP["q4"], 6, 'Helvetica', GRAY)   # sobre la barra: abajo lo cruza el SPD
     if SP["spd"]:
         dot(775, 436)
         seg([(775, 436), (775, 408)], black, 1.4)
@@ -317,10 +363,6 @@ def _hybrid_ac(c, h, cfg):
         seg([(775, 394), (775, 354)], GRN, 1.1, (3, 2)); ground(775, 354); lab(785, 352, MU["ground_wire"], GRN, 'l')
         txt(766, 399, SP["spd"], 6.5, 'Helvetica', black, 'r')
     seg([(670, 366), (670, 352)], GRN, 1.1, (3, 2)); ground(670, 352); lab(680, 350, MU["ground_wire"], GRN, 'l')
-    box(880, 406, 170, 60, white)
-    txt(965, 449, 'CARGAS CRÍTICAS', 7.5, 'Helvetica-Bold')
-    for k, t in enumerate(SP["loads"][:2]):
-        txt(965, 438 - k * 9, t, 6.5, 'Helvetica', GRAY)
 
     # ---------- baterías + Lynx ----------
     x0_bat, n_slots = _batteries(c, h, BA, n_bat)
@@ -332,6 +374,7 @@ def _hybrid_ac(c, h, cfg):
     if dist:
         box(40, 265, 340, 28, white, black, 1.4)
         txt(210, 276, _lynx_title(BA, n_bat), 7, 'Helvetica-Bold')
+        _bus_tag(c, h)
         seg([(380, 279), (400, 279)], black, 4)
         box(400, 265, 190, 28, white, black, 1.4)
         txt(495, 276, 'LYNX DISTRIBUTOR · fusibles MEGA', 7, 'Helvetica-Bold')
@@ -340,6 +383,7 @@ def _hybrid_ac(c, h, cfg):
 
     for idx, (xr, mp) in enumerate(((446, 'MP#1'), (516, 'MP#2'))):
         seg([(xr, 293), (xr, 372)], RED, 1.8); seg([(xr + 8, 293), (xr + 8, 372)], black, 1.8)
+        _bat_ports(c, h, xr, 372)
         txt(xr - 4, 361, mp, 6, 'Helvetica', GRAY, 'r')
         if dist and idx == 1:     # con Distributor no hay espacio a la derecha (línea VE.Bus): ambos rótulos a la izquierda
             lab(xr - 4, 352, MU["dc_pos"], RED, 'r'); lab(xr - 4, 344, MU["dc_neg"], black, 'r')
@@ -351,12 +395,7 @@ def _hybrid_ac(c, h, cfg):
 
     # ---------- Ekrano GX ----------
     box(660, 235, 140, 60, LGRAY)
-    txt(730, 281, GX["label"], 8, 'Helvetica-Bold'); txt(730, 270, 'Monitoreo y control ESS', 6.5, 'Helvetica', GRAY)
-    if grid_zero:
-        txt(730, 260, 'Límite de inyección = 0 W', 6.5, 'Helvetica', GRAY); txt(730, 246, '(Grid Zero)', 6.5, 'Helvetica', GRAY)
-    else:
-        txt(730, 260, 'Excedentes a la red vía AC-IN', 6.5, 'Helvetica', GRAY)
-        txt(730, 246, '(según permiso de la distribuidora)', 6, 'Helvetica', GRAY)
+    txt(730, 262, GX["label"], _fit(GX["label"], 128), 'Helvetica-Bold')
     seg([(590, 286), (660, 286)], RED, 1.1); seg([(590, 282), (660, 282)], black, 1.1)
     [lab(625, 270 - 7 * i, t, GRAY) for i, t in enumerate(GX["power_note"])]
 
@@ -373,7 +412,7 @@ def _hybrid_ac(c, h, cfg):
 
 def _lynx_title(BA, n_bat):
     bars = int(BA.get("lynx_bars") or 1)
-    return f"LYNX POWER IN · bus DC 48 V · {n_bat} baterías con fusible MEGA" + (f" · {bars} barras en paralelo" if bars > 1 else "")
+    return f"LYNX POWER IN · {n_bat} baterías con fusible MEGA" + (f" · {bars} barras en paralelo" if bars > 1 else "")
 
 
 def _slots(n, limit=4):
@@ -440,7 +479,9 @@ def _lynx_bars(c, h, BA, n_bat, mp_x, cc_x, min_right=0):
         right = max(max(x for _, x, _ in conns) + 34, min_right)
         box(40, 265, right - 40, 28, white, black, 1.4)
         txt(40 + (right - 40) / 2, 276, _lynx_title(BA, n_bat), 7, 'Helvetica-Bold')
+        _bus_tag(c, h)
         return right
+    _bus_tag(c, h)
     names = {"bat": ("batería", "baterías"), "mp": ("MultiPlus", "MultiPlus"), "cc": ("MPPT", "MPPT")}
     # items: drawn bars (con al menos una conexión dibujada) o grupos de Lynx ocultos consecutivos
     items = []
@@ -471,7 +512,7 @@ def _lynx_bars(c, h, BA, n_bat, mp_x, cc_x, min_right=0):
             txt(mid_x, 277, '· · ·', 10, 'Helvetica-Bold', GRAY); txt(mid_x, 268.5, f"LYNX {tag} · mismo arreglo", 5.4, 'Helvetica', GRAY)
         else:
             box(lo, 265, hi - lo, 28, white, black, 1.4)
-            txt(mid_x, 277, f"LYNX POWER IN {tag} · bus DC 48 V", 6.8, 'Helvetica-Bold')
+            txt(mid_x, 277, f"LYNX POWER IN {tag}", 6.8, 'Helvetica-Bold')
             parts = []
             for kind in ("bat", "mp", "cc"):
                 cnt = sum(1 for t, _, _ in it["g"] if t == kind)
@@ -546,9 +587,14 @@ def _pv_array(c, h, PV, rows=None):
             tag = f"S{first + j}" if stacked or k == 1 else (f"S{first}+{first + 1}" if k == 2 else f"S{first}–{first + k - 1}")
             txt(48, yc - 2.5, tag, 5.6 if len(tag) > 4 else 6.2 if len(tag) > 3 else 7, 'Helvetica-Bold', NAVY, 'l')
             rh = min(12, (row_ys[0] - row_ys[1]) - 3) if stacked and len(row_ys) > 1 else 14
+            full = mw >= 15                          # si no caben todas las etiquetas: P1, P2, · · · y Pn
             for m in range(n_mod):
                 c.saveState(); c.setFillColor(HexColor('#DCE8F5')); c.setStrokeColor(NAVY); c.setLineWidth(0.8)
                 c.rect(x0 + m * pitch, yc - rh / 2, mw, rh, fill=1, stroke=1); c.restoreState()
+                if full or m in (0, 1, n_mod - 1):
+                    txt(x0 + m * pitch + mw / 2, yc - 1.8, f"P{m + 1}", 4.8 if rh < 13 else 5.2, 'Helvetica-Bold', NAVY)
+            if not full and n_mod > 3:
+                txt(x0 + n_mod / 2 * pitch + mw / 2, yc - 2.6, '· · ·', 7, 'Helvetica-Bold', GRAY)
             if stacked and k > 1:
                 seg([(x0 + n_mod * pitch - 4, yc), (246, yc), (254, yc_run)], ORANGE, 1.6)
         if k > 1:
@@ -610,24 +656,32 @@ def _dc_box_combined(c, h, PV, ys, n_cc, rows=None):
 
 
 def _meter_block(c, h, M, tap_x, bus_y, above=True, gap=72):
-    """Medidor de energía en paralelo sobre la barra del tablero principal (derivación de tensión + transformador de corriente)."""
+    """Medidor de energía en paralelo sobre la barra del tablero principal. Entre la barra y el medidor van DOS cables que no son de red:
+    la derivación de tensión (negro) y el cable de los transformadores de corriente (TC). El cable de red sale por el otro lado del
+    medidor, en azul y con flecha hacia el equipo al que va."""
     seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
     y = bus_y + gap if above else bus_y - gap - 44          # esquina inferior de la caja
     x = tap_x - 30
     edge = y if above else y + 44                            # borde de la caja que mira a la barra
+    far = y + 44 if above else y                             # borde opuesto (el de la salida de red)
     cx = tap_x + 24
+    ly = edge + (-12 if above else 5)                       # rótulos de los dos cables, pegados al medidor (fuera del tablero)
     dot(tap_x, bus_y)
     seg([(tap_x, bus_y), (tap_x, edge)], black, 1.2, (3, 2))
-    c.saveState(); c.setStrokeColor(BLUE); c.setFillColor(white); c.setLineWidth(1)
+    c.saveState(); c.setStrokeColor(black); c.setFillColor(white); c.setLineWidth(1)
     c.circle(cx, bus_y, 5.5, fill=0, stroke=1); c.restoreState()
-    seg([(cx, bus_y + (5.5 if above else -5.5)), (cx, edge)], BLUE, 0.9, (2, 1.5))
+    seg([(cx, bus_y + (5.5 if above else -5.5)), (cx, edge)], black, 0.9, (2, 1.5))
+    lab(tap_x - 4, ly, 'tensión', GRAY, 'r', 5.2)
+    lab(cx + 4, ly, 'cable de los TC', GRAY, 'l', 5.2)
     box(x, y, 118, 44, white, black, 1.2)
     txt(x + 59, y + 31, M["title"], 6.8, 'Helvetica-Bold')
     for k, t in enumerate(M["lines"][:3]):
         txt(x + 59, y + 21 - k * 8, t, 5.8, 'Helvetica', GRAY)
-    lab(cx, bus_y + 9, M["ct_label"], BLUE, 'c', 5.5)
     if M.get("comm"):
-        lab(x + 59, y + 50 if above else y - 8, M["comm"], BLUE)
+        d = 14 if above else -14                              # cable de red: sale por la cara opuesta a la barra, con flecha
+        seg([(x + 59, far), (x + 59, far + d - (3 if above else -3))], BLUE, 1.1, (4, 2))
+        _arrow_head(c, x + 59, far + d, BLUE, 5, 90 if above else -90)
+        lab(x + 59, far + d + (4 if above else -9), M["comm"], BLUE)
 
 
 def _spd(c, h, x, bus_y, label, ground_label, side='l'):
@@ -663,6 +717,7 @@ def _grid_zero(c, h, cfg):
     box(560, 590, 200, 120, LGRAY)
     txt(660, 696, f"{n_inv} × INVERSOR ON-GRID (FV)" if n_inv > 1 else 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold'); txt(660, 685, FR["label"], 7)
     txt(660, 675, f"{FR['kw']} kW · {FR['mppt']} MPPT" + (" · igual en cada inversor" if n_inv > 1 else ""), 6.5, 'Helvetica', GRAY)
+    _inv_symbol(c, 722, 672)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {min(i, FR['mppt'] - 1) + 1}", 6.5, 'Helvetica', GRAY, 'l')
     seg([(585, 590), (585, 572)], GRN, 1.1, (3, 2)); ground(585, 572); lab(595, 570, FR["ground_wire"], GRN, 'l')
@@ -784,16 +839,21 @@ def _off_grid(c, h, cfg):
                 txt(470, yy + 1, '· · ·', 12, 'Helvetica-Bold', GRAY)
             else:
                 box(392, yy, 156, hh, LGRAY)
+                _inv_symbol(c, 397, yy + 5, 18)
                 txt(470, yy + 15, f"MP#{num}", 7, 'Helvetica-Bold'); txt(470, yy + 6, MU["model"], 6.2, 'Helvetica', GRAY)
             yy -= 5
     elif n_mp == 2:
         box(392, 445, 156, 45, LGRAY); txt(470, 473, 'MP#1 · L1 (maestro)', 7, 'Helvetica-Bold'); txt(470, 462, MU["model"], 6.5, 'Helvetica', GRAY)
+        _inv_symbol(c, 398, 456, 20)
         box(392, 382, 156, 45, LGRAY); txt(470, 410, 'MP#2 · L2 (esclavo)', 7, 'Helvetica-Bold'); txt(470, 399, MU["model"], 6.5, 'Helvetica', GRAY)
+        _inv_symbol(c, 398, 393, 20)
     else:
         box(392, 408, 156, 45, LGRAY); txt(470, 436, 'INVERSOR/CARGADOR', 7, 'Helvetica-Bold'); txt(470, 425, MU["model"], 6.5, 'Helvetica', GRAY)
+        _inv_symbol(c, 398, 419, 20)
     feeds = ((410, 'MP#1'), (446, 'MP#2'), (520, f'MP#{n_mp}')) if many else tuple(zip((446, 516), ('MP#1', 'MP#2')))[:n_mp]
     for xr_i, (xr, mp) in enumerate(feeds):
         seg([(xr, 293), (xr, my)], RED, 1.8); seg([(xr + 8, 293), (xr + 8, my)], black, 1.8)
+        _bat_ports(c, h, xr, my)
         txt(xr - 4, my - 11, mp if (n_mp > 1) else 'INV', 6, 'Helvetica', GRAY, 'r')
         if many:
             if xr_i == 0:
@@ -816,18 +876,14 @@ def _off_grid(c, h, cfg):
         _ac_center_box(c, h, 690, mid_y, cfg["ac_out_center"])
     box(sx0, 366, 180, 140, LGRAY)
     txt(sx0 + 90, 494, 'SUB-PANEL CARGAS CRÍTICAS', 7, 'Helvetica-Bold'); txt(sx0 + 90, 485, '120/240 V', 6.5, 'Helvetica', GRAY)
-    seg([(sx0, mid_y), (sx0 + 190, mid_y)], black, 1.8)
+    seg([(sx0, mid_y), (sx0 + 300, mid_y)], black, 1.8); _arrow_head(c, sx0 + 308, mid_y, black, 8)
+    txt(sx0 + 250, mid_y + 7, 'Va hacia cargas críticas', 7, 'Helvetica', GRAY)
     if not cfg.get("ac_out_center"):
-        breaker(sx0 + 30, mid_y); txt(sx0 + 30, mid_y + 10, 'Q2', 7, 'Helvetica-Bold'); txt(sx0 + 30, mid_y - 12, SP["q2"], 6.5)
-    breaker(sx0 + 150, mid_y); txt(sx0 + 150, mid_y + 10, 'Q4', 7, 'Helvetica-Bold'); txt(sx0 + 150, mid_y + 19, SP["q4"], 6, 'Helvetica', GRAY)
+        breaker(sx0 + 30, mid_y); txt(sx0 + 30, mid_y + 10, 'Q2', 7, 'Helvetica'); txt(sx0 + 30, mid_y - 12, SP["q2"], 6.5)
+    breaker(sx0 + 150, mid_y); txt(sx0 + 150, mid_y + 10, 'Q4', 7, 'Helvetica'); txt(sx0 + 150, mid_y + 19, SP["q4"], 6, 'Helvetica', GRAY)
     if SP["spd"]:
         _spd(c, h, sx0 + 110, mid_y, SP["spd"], MU["ground_wire"])
     seg([(sx0 + 30, 366), (sx0 + 30, 352)], GRN, 1.1, (3, 2)); ground(sx0 + 30, 352); lab(sx0 + 40, 350, MU["ground_wire"], GRN, 'l')
-    box(sx0 + 200, 406, 170, 60, white)
-    txt(sx0 + 285, 449, 'CARGAS CRÍTICAS', 7.5, 'Helvetica-Bold')
-    for k, t in enumerate(SP["loads"][:2]):
-        txt(sx0 + 285, 438 - k * 9, t, 6.5, 'Helvetica', GRAY)
-    seg([(sx0 + 190, mid_y), (sx0 + 200, mid_y)], black, 1.8)
 
     # entrada AC (red o generador): tablero principal existente
     meter_in_sub = M
@@ -844,7 +900,7 @@ def _off_grid(c, h, cfg):
             _ac_center_box(c, h, 325, 436, cfg["ac_in_center"])
             stack(333, 400, grid["conductors"])
         else:
-            breaker(325, 436); txt(325, 446, 'Q1', 7, 'Helvetica-Bold'); txt(325, 424, grid["breaker"], 6.5)
+            breaker(325, 436); txt(325, 446, 'Q1', 7, 'Helvetica'); txt(325, 424, grid["breaker"], 6.5)
             stack(333, 413, grid["conductors"])
         if M:
             _meter_block(c, h, M, 268, 436, above=True, gap=72)
@@ -855,7 +911,7 @@ def _off_grid(c, h, cfg):
     # Ekrano GX y comunicaciones
     gx0 = 800
     box(gx0, 235, 140, 60, LGRAY)
-    txt(gx0 + 70, 281, GX["label"], 8, 'Helvetica-Bold'); txt(gx0 + 70, 270, 'Monitoreo y control', 6.5, 'Helvetica', GRAY)
+    txt(gx0 + 70, 262, GX["label"], _fit(GX["label"], 128), 'Helvetica-Bold')
     seg([(bar_end, 286), (gx0, 286)], RED, 1.1); seg([(bar_end, 282), (gx0, 282)], black, 1.1)
     [lab((bar_end + gx0) / 2, 270 - 7 * i, t, GRAY) for i, t in enumerate(GX["power_note"])]
     CN = cfg["comms_notes"]

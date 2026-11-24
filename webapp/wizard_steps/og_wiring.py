@@ -326,12 +326,12 @@ def build_context(blob: dict, lengths_override: dict | None = None, coupling_ove
         pv_ac = _size(
             "Inversor FV → centro de carga AC Out" if to_center else "Inversor FV → sub-panel de cargas críticas", kind="ac", qty=pv_qty,
             current_a=pv_ac_a, factor=W.CONTINUOUS_FACTOR,
-            v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY] if to_center else L["pv_inv_ac_m"], hot=2, neutral=0,
+            v_ref=C.PV_INVERTER_AC_V, length_m=L[disconnect_center.LENGTH_KEY] if to_center else L["pv_inv_ac_m"], hot=2, neutral=1, neutral_gauge=W.N_SENSE_GAUGE,
             insulation=ins, conduit_type=conduit,
             note=f"Salida del inversor FV: {_f(pv_inv, 'kw'):g} kW ÷ {C.PV_INVERTER_AC_V:.0f} V = {pv_ac_a:.1f} A, × 1.25. "
-                 + ("L1 + L2 + tierra, sin neutro; entra a un breaker de 2 polos del centro de carga del AC Out, junto con los Multis."
+                 + ("L1 + L2 + tierra + neutro de sensado (Nsense, calibre menor); entra a un breaker de 2 polos del centro de carga del AC Out, junto con los Multis."
                     if to_center else
-                    "L1 + L2 + tierra, sin neutro; entra al sub-panel de cargas críticas del lado de carga de los Multis."),
+                    "L1 + L2 + tierra + neutro de sensado (Nsense, calibre menor); entra al sub-panel de cargas críticas del lado de carga de los Multis."),
         )
         fr_ds = fronius_limits(pv_inv.get("model")) or {}
         fr_max = _f(pv_inv, "max_ocpd_a") or fr_ds.get("ocpd_a")      # catalog column first, the built-in datasheet table as fallback

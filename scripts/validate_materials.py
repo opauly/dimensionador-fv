@@ -134,7 +134,7 @@ check("only the injection question blocks the drawing until answered (the Lynx i
 ans = {"export": "grid_zero", "lynx": "power_in"}
 cfg, prob = CB.build_config(project, d, ans)
 check("drawn from the sized design: string breaker / wire", (cfg["pv"]["string_breaker"], cfg["pv"]["dc_wire"]), ("32 A 2P DC", "#10 AWG SOLAR"))
-check("Q3 Fronius breaker and conductors", (cfg["fronius"]["ac_breaker"], cfg["fronius"]["ac_conductors"]), ("2P 60 A", ["L1 #6 AWG negro", "L2 #6 AWG rojo", "T #10 AWG verde"]))
+check("Q3 Fronius breaker and conductors", (cfg["fronius"]["ac_breaker"], cfg["fronius"]["ac_conductors"]), ("2P 60 A", ["L1 #6 AWG negro", "L2 #6 AWG rojo", "N #12 AWG blanco (Nsense)", "T #10 AWG verde"]))
 check("Q1 from the manual limit: 2P 90 A on #2 AWG (no #3 sold)", (cfg["multis"]["ac_in_breaker"], cfg["multis"]["ac_in_conductors"][0]), ("2P 90 A", "L1 #2 AWG negro"))
 check("DC to the Multis uses the sized cable", (cfg["multis"]["dc_pos"], cfg["multis"]["dc_neg"]), ("+ #2 AWG rojo", "- #2 AWG negro"))
 check("layout 2 strings x 8, label and title", (cfg["pv"]["strings"], cfg["pv"]["modules_per_string"], cfg["project"]["name"]), (2, 8, "Proyecto María José Castro en Carrillo, Guanacaste"))
@@ -201,7 +201,7 @@ check("duct 4x4 x1 + 2 end caps", (_by["Ducto metálico cuadrado 4x4"]["qty"], _
 check("PG-21 cable glands x2", _by["Manguito prensacable de poliamida gris PG-21 (incluye contratuerca)"]["qty"], 2)
 check("EMT stubs to the 2 inverters: 2 tubes, 8 pressure connectors", (_by['Tubo EMT 1"']["qty"], _by['Conector de presión EMT 1"']["qty"]), (2, 8))
 check("monitoring outlet kit", [_by[n]["qty"] for n in ("Breaker 1P20A CH/SD (toma de monitoreo)", "Toma doble 15A 125V", "Placa de acero inoxidable para toma doble", 'Caja de intemperie rectangular 3 huecos 1/2"')], [1, 1, 1, 1])
-check("monitoring circuit: #12 red / green / white, 15 m each (+3 m red for the Ekrano supply)", [_by[f"Cable THHN CU #12 AWG {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [18, 15, 15])
+check("monitoring circuit: #12 red / green / white, 15 m each (+3 m red for the Ekrano supply); white also carries the Fronius Nsense run (10 m)", [_by[f"Cable THHN CU #12 AWG {c}"]["qty"] for c in ("rojo", "verde", "blanco")], [18, 15, 30])
 check("ties: one pack", _by["Gasas plásticas #8 (Negras)"]["qty"], 1)
 check("solar strings go in at least 1 in conduit", [b["conduit"]["trade"] for b in CTX["branches"] if b.get("key") == "pv_strings"], ["1"])
 check("no 3 AWG anywhere in the sized branches", any(b.get("ugc") in ("3", "1") for b in CTX["branches"]), False)

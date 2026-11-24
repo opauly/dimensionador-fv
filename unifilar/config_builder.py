@@ -195,9 +195,10 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
     client = project.get("client_name") or "Cliente"
     string_a = string_breaker_a or pv["ocpd_a"]
 
-    def hots(b, neutral=True):
+    def hots(b, neutral=True, n_label=""):
         g, e = b["ugc"], b.get("egc") or b["ugc"]
-        return [f"L1 {_g(g)} negro", f"L2 {_g(g)} rojo"] + ([f"N {_g(g)} blanco"] if neutral else []) + [f"T {_g(e)} verde"]
+        ng = next((r["gauge"] for r in b.get("conductors") or [] if r.get("role") == "Neutro"), g)      # Nsense: thinner than the phases
+        return [f"L1 {_g(g)} negro", f"L2 {_g(g)} rojo"] + ([f"N {_g(ng)} blanco{n_label}"] if neutral and (b.get("neutral") or not n_label) else []) + [f"T {_g(e)} verde"]
 
     multi_label = "MULTIPLUS-II " + (re.search(r"48/\d+", inv.get("model", "")) or re.search(r"\d+", inv.get("model", "") + "0"))[0]
     cfg = {
@@ -213,7 +214,7 @@ def build_config(project: dict, d: dict, answers: dict, string_breaker_a: int | 
         },
         "fronius": {
             "label": f"{_model(pv_inv)} 240 V", "kw": pv_inv.get("kw"), "ac_breaker": f"2P {fr['ocpd_a']} A", "to_center": to_center,
-            "ac_conductors": [x for x in hots(fr, neutral=False)], "ground_wire": f"T {_g(_egc(fr) or fr['ugc'])} verde",
+            "ac_conductors": hots(fr, neutral=True, n_label=" (Nsense)"), "ground_wire": f"T {_g(_egc(fr) or fr['ugc'])} verde",
         },
         "multis": {
             "label": multi_label, "model": f"{inv.get('model', '').split('/70')[0]} 120 V",
