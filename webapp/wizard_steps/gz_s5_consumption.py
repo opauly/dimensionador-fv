@@ -219,6 +219,42 @@ def extract_tablero(blob: dict, file_bytes: bytes, media_type: str) -> dict:
     return {**s5, "loads_data": loads, "loads_from_tablero": True}
 
 
+DEFAULT_PLANT_SCALE = 2.0            # new plant vs the measured one ("digamos 2 veces la actual", Oscar, 2026-11-23)
+
+
+def _plant_scale(s5: dict) -> float:
+    try:
+        v = float(s5.get("plant_scale"))
+        return v if v > 0 else DEFAULT_PLANT_SCALE
+    except (TypeError, ValueError):
+        return DEFAULT_PLANT_SCALE
+
+
+def calibrate_to_plant(blob: dict, loads: list[dict], scale: float) -> tuple[list[dict], dict | None]:
+    """Refrigeration hours so the list averages `scale` x the measured plant (eGauge mean). (loads, info), info None without a profile."""
+    from calculations import industrial_profiles as ip
+    from calculations.tablero_industrial import calibrate
+
+    st = ip.stats(ip.profile_id_for(blob))
+    if not st or not st.get("mean_kw"):
+        return loads, None
+    rows, info = calibrate(loads, st["mean_kw"] * scale, st.get("night_ratio"))
+    info.update(scale=scale, plant_kw=st["mean_kw"])
+    return rows, info
+
+
+def recalibrate(blob: dict, form) -> dict:
+    """The "Ajustar a la planta actual" button: the scale typed + the table as edited -> refrigeration hours recalculated."""
+    from webapp.wizard_steps.common import parse_rows, to_float
+
+    s5 = _s5(blob)
+    scale = to_float(form.get("plant_scale"), DEFAULT_PLANT_SCALE) or DEFAULT_PLANT_SCALE
+    rows = parse_rows(form, "row", _LOADS_FIELDS)
+    loads = _rows_to_loads(rows) if rows else (s5.get("loads_data") or [])
+    loads, info = calibrate_to_plant(blob, loads, scale)
+    return {**s5, "loads_data": loads, "plant_scale": scale, "plant_calibration": info}
+
+
 def _industrial_ctx(blob: dict, s5: dict, loads_data: list[dict], loads_total_kwh: float) -> dict:
     """Three-phase service only: board reading report, category summary and the estimate against the measured plant."""
     from calculations import industrial_profiles as ip
@@ -230,6 +266,8 @@ def _industrial_ctx(blob: dict, s5: dict, loads_data: list[dict], loads_total_kw
     est_kw = loads_total_kwh / 730.0
     return {
         "industrial": True,
+        "plant_scale": _plant_scale(s5),
+        "plant_calibration": s5.get("plant_calibration"),
         "plano_boards": s5.get("plano_boards") or [],
         "plano_notes": s5.get("plano_notes") or [],
         "category_summary": category_summary(loads_data),
@@ -249,7 +287,10 @@ def extract_tablero_files(blob: dict, files: list[tuple[bytes, str]]) -> dict:
     from calculations.tablero_industrial import parse_planos
 
     res = parse_planos(files)
-    return {**_s5(blob), "loads_data": res["loads"], "loads_from_tablero": True, "plano_boards": res["boards"], "plano_notes": res["notes"]}
+    s5 = _s5(blob)
+    loads, info = calibrate_to_plant(blob, res["loads"], _plant_scale(s5))
+    return {**s5, "loads_data": loads, "loads_from_tablero": True, "plano_boards": res["boards"], "plano_notes": res["notes"],
+            "plant_scale": _plant_scale(s5), "plant_calibration": info}
 
 
 def category_summary(loads: list[dict]) -> list[dict]:

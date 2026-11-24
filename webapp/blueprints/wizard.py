@@ -1106,6 +1106,16 @@ def paso5_cargas_fila_quitar(vid):
     return _s5_render(vid, blob)
 
 
+@bp.route("/<vid>/paso/5/cargas/calibrar", methods=["POST"])
+def paso5_cargas_calibrar(vid):
+    guard = _guard(vid, 5)
+    if guard:
+        return guard
+    blob = draft.load(vid)
+    blob = _s5_patch(vid, gz_s5_consumption.recalibrate(blob, request.form))
+    return _s5_render(vid, blob)
+
+
 @bp.route("/<vid>/paso/5/cargas/aplicar", methods=["POST"])
 def paso5_cargas_aplicar(vid):
     guard = _guard(vid, 5)

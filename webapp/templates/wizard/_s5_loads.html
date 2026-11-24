@@ -77,8 +77,23 @@
   </details>
   {% endif %}
   {% if industrial and industrial_check and industrial_check.ref_avg_kw %}
+  <div style="margin:12px 0 0;padding:10px 12px;border:1px solid var(--border, #e5e7eb);border-radius:8px;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <b style="font-size:13px;">Ajustar a la planta actual</b>
+      <label style="font-size:13px;">La planta nueva es
+        <input id="s5-plant-scale" class="finput" type="number" step="0.1" min="0.1" name="plant_scale" value="{{ plant_scale }}" style="width:80px;display:inline-block;"> × la actual</label>
+      <button class="btn btn-outline" type="button"
+              hx-post="{{ url_for('wizard.paso5_cargas_calibrar', vid=vid) }}"
+              hx-include="#s5-loads-rows input, #s5-plant-scale" hx-target="#s5-consumo" hx-swap="outerHTML">Ajustar horas de refrigeración</button>
+    </div>
+    <p class="card-note-sm" style="margin:6px 0 0;">La planta actual (eGauge) promedia <b>{{ '{:,.0f}'.format(industrial_check.ref_avg_kw) }} kW</b>, así que el objetivo es
+      <b>{{ '{:,.0f}'.format(industrial_check.ref_avg_kw * plant_scale) }} kW</b>. Compresores y evaporadores absorben la diferencia (los planos no dicen cuánto trabajan); el resto de las horas no se toca.
+      {% if plant_calibration and plant_calibration.note %}<br>{{ '⚠ ' if plant_calibration.status in ('cap', 'floor') else '✓ ' }}{{ plant_calibration.note }}{% endif %}</p>
+  </div>
+  {% endif %}
+  {% if industrial and industrial_check and industrial_check.ref_avg_kw %}
   <p class="card-note-sm" style="margin:10px 0 0;">Promedio estimado: <b>{{ '{:,.0f}'.format(industrial_check.est_avg_kw) }} kW</b> · la planta actual medida con eGauge promedia
-    <b>{{ '{:,.0f}'.format(industrial_check.ref_avg_kw) }} kW</b> (la estimada es {{ '{:,.1f}'.format(industrial_check.ratio) }} veces). Las horas por defecto son supuestos: ajusta refrigeración y proceso hasta que la relación tenga sentido para la planta nueva.</p>
+    <b>{{ '{:,.0f}'.format(industrial_check.ref_avg_kw) }} kW</b> (la estimada es {{ '{:,.1f}'.format(industrial_check.ratio) }} veces). Las horas de proceso, A/C e iluminación son supuestos: revísalas.</p>
   {% endif %}
 
   {% if loads_overwrite_note %}<p class="wiz-error" style="margin-top:10px;">⚠ {{ loads_overwrite_note }}</p>{% endif %}

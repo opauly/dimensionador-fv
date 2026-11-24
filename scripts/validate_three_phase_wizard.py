@@ -60,6 +60,14 @@ with app.test_request_context("/"):
     form = MultiDict({"row-0-desc": "a", "row-0-w": "1000", "row-0-und": "1", "row-0-hd": "10", "row-0-dm": "30", "row-0-cat": "Proceso / producción", "row-0-brd": "TR0"})
     upd = s5.update_loads_table(blob5, form)
     check("editing the table keeps category and board", (upd["loads_data"][0].get("Categoría"), upd["loads_data"][0].get("Tablero")), ("Proceso / producción", "TR0"))
+    check("step 5 defaults to a plant twice the measured one", c5["plant_scale"], 2.0)
+    check("step 5 renders the calibration block", "Ajustar a la planta actual" in h5 and 'name="plant_scale"' in h5)
+    rc_form = MultiDict({"plant_scale": "2", "row-0-desc": "rack", "row-0-w": "150000", "row-0-und": "1", "row-0-hd": "24", "row-0-dm": "30",
+                         "row-0-cat": "Compresores / rack", "row-0-brd": "TP"})
+    rc = s5.recalibrate(blob5, rc_form)
+    avg_kw = sum(r["W"] * r["Und"] * r["h/día"] * r["días/mes"] for r in rc["loads_data"]) / 1000.0 / 730.0
+    check("recalibrating sets the list average to 2 x the measured plant", abs(avg_kw - 2 * c5["industrial_check"]["ref_avg_kw"]) < 0.5)
+    check("the scale is remembered with the result", (rc["plant_scale"], rc["plant_calibration"]["status"]), (2.0, "ok"))
     months = [m["kwh"] for m in s5.apply_loads(blob5)["applied_months"]]
     check("12 months come from the nominal month shaped by the measured pattern", abs(sum(months) / 12 - s5.build_context(blob5)["loads_total_kwh"]) < 1.0)
     c1 = s5.build_context({**BASE, "scratch": {"s5": {"selected_source": "loads"}}})

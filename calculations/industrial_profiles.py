@@ -166,7 +166,9 @@ def stats(site_id: str | None) -> dict | None:
     local_h = (s.index.hour + LOCAL_UTC_OFFSET_H) % 24
     day = s[(local_h >= DAY_START_H) & (local_h < DAY_END_H)]
     mean = float(s.mean())
+    night = s[(local_h >= 22) | (local_h < 5)]
     return {"mean_kw": mean, "peak_kw": float(s.max()), "day_share": float(day.sum() / s.sum()),
+            "night_ratio": float(night.mean() / mean) if mean > 0 and len(night) else None,
             "day_p5_ratio": float(np.percentile(day, 5) / mean) if mean > 0 else None,
             "years": round(len(s) / 8766.0, 1), "hours": int(len(s))}
 

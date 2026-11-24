@@ -36,8 +36,8 @@ TOTAL_TOLERANCE = 0.02         # circuits vs the drawing's printed total
 # ── categories: key -> (label, h/día, días/mes, note) ─────────────────────────
 # First-pass assumptions. Refrigeration runs around the clock; its real duty depends on the chambers' heat load: estimate it.
 CATEGORIES: dict[str, tuple[str, float, int, str]] = {
-    "compresores":  ("Compresores / rack",            14.0, 30, "estimar: ciclo real del rack según la carga de las cámaras"),
-    "refrigeracion": ("Refrigeración (evaporadores)",  20.0, 30, "ventiladores y controles de cámaras, casi continuo"),
+    "compresores":  ("Compresores / rack",            24.0, 30, "la planta medida consume de noche el 80 % de su promedio: se calibra con ella"),
+    "refrigeracion": ("Refrigeración (evaporadores)",  24.0, 30, "ventiladores y controles de cámaras, continuo"),
     "deshielo":     ("Deshielo",                        1.5, 30, "unos 3 ciclos de 30 min al día"),
     "puertas":      ("Resistencias de puerta / drenaje", 8.0, 30, "con termostato"),
     "proceso":      ("Proceso / producción",           10.0, 26, "según turnos de producción"),
@@ -49,6 +49,77 @@ CATEGORIES: dict[str, tuple[str, float, int, str]] = {
     "respaldo":     ("UPS / telecom / alarmas",        24.0, 30, ""),
     "otros":        ("Otros",                           8.0, 26, "revisar"),
 }
+
+# Categories whose hours are calibrated against the measured plant: refrigeration runs around the clock at a variable load, so its
+# "hours per day" is really an average duty (equivalent hours), the one number the drawings cannot give.
+CALIBRATED = tuple(CATEGORIES[k][0] for k in ("compresores", "refrigeracion"))      # rows carry the category LABEL
+HOURS_PER_MONTH = 730.0
+
+
+# Always-on categories: they keep running at night. The rest (process, lighting, A/C, outlets, pumps...) is the daytime activity.
+ALWAYS_ON = tuple(CATEGORIES[k][0] for k in ("compresores", "refrigeracion", "respaldo", "deshielo", "puertas"))
+
+
+def _kw(r: dict) -> float:
+    return float(r.get("W") or 0) * float(r.get("Und") or 1) / 1000.0
+
+
+def _avg_kw(rows: list[dict]) -> float:
+    return sum(_kw(r) * float(r.get("h/día") or 0) * float(r.get("días/mes") or 0) for r in rows) / HOURS_PER_MONTH
+
+
+def calibrate(loads: list[dict], target_avg_kw: float, continuous_share: float | None = None) -> tuple[list[dict], dict]:
+    """Set the equivalent hours/day so the whole list averages `target_avg_kw`, using the measured plant as the guide.
+
+    `continuous_share` = share of the plant's energy that runs through the night (the measured plant's night mean over its overall
+    mean). With it, the target is split in two: the daytime activity (every category that is not always-on) gets (1 - share) of the
+    target, by scaling ITS hours by one common factor (a diversity factor: nameplates never all run together); refrigeration then
+    absorbs what is left of the always-on part, all its rows sharing one value. Without it, only refrigeration moves.
+    Returns (new rows, info) with info = {status, hours, day_factor, target_kw, fixed_kw, refrigeration_kw, note}; status "ok" | "cap" (even
+    at 24 h the installed refrigeration falls short: hours stay at 24) | "floor" (the always-on rest already reaches the target:
+    hours untouched) | "none" (no refrigeration rows)."""
+    rows = [dict(r) for r in loads]
+    refr = [r for r in rows if r.get("Categoría") in CALIBRATED]
+    ref_kw = sum(_kw(r) for r in refr)
+    per_hour = sum(_kw(r) * float(r.get("días/mes") or 0) for r in refr)           # kWh/month per hour/day of equivalent duty
+    info = {"status": "none", "hours": None, "day_factor": None, "target_kw": target_avg_kw, "refrigeration_kw": ref_kw, "note": ""}
+    if per_hour <= 0:
+        info["note"] = "No hay filas de refrigeración o compresores para calibrar."
+        return rows, info
+    notes = []
+    day_rows = [r for r in rows if r.get("Categoría") not in ALWAYS_ON]
+    if continuous_share and 0 < continuous_share < 1 and day_rows:
+        want = target_avg_kw * (1.0 - continuous_share)
+        have = _avg_kw(day_rows)
+        if have > 0:
+            f = want / have
+            for r in day_rows:
+                r["h/día"] = round(min(24.0, float(r.get("h/día") or 0) * f), 2)
+            info["day_factor"] = round(f, 3)
+            notes.append(f"La actividad de día (proceso, A/C, luces, tomas, bombeo) promedia {want:,.0f} kW en la planta medida, así que sus horas se "
+                         f"multiplican por {f:.2f} (no todo lo instalado corre a la vez).")
+    fixed = rows and [r for r in rows if r.get("Categoría") not in CALIBRATED]
+    fixed_kw = _avg_kw(fixed) if fixed else 0.0
+    info["fixed_kw"] = fixed_kw
+    h = (target_avg_kw - fixed_kw) * HOURS_PER_MONTH / per_hour
+    if h <= 0:
+        info.update(status="floor", note=" ".join(notes + [f"Las demás cargas ya promedian {fixed_kw:,.0f} kW, más que el objetivo de {target_avg_kw:,.0f} kW: "
+                                                            "no se tocaron las horas de refrigeración. Revisa las horas de proceso y A/C."]))
+        return [dict(r) for r in loads], info
+    status = "ok"
+    if h > 24.0:
+        h, status = 24.0, "cap"
+        notes.append(f"Aun a 24 h al día la refrigeración instalada ({ref_kw:,.0f} kW) no alcanza el objetivo de {target_avg_kw:,.0f} kW: "
+                     "la planta nueva queda por debajo de la escala pedida.")
+    h = round(h, 2)
+    for r in refr:
+        r["h/día"] = h
+    if status == "ok":
+        notes.append(f"Refrigeración y compresores a {h:g} h/día equivalentes ({h / 24 * 100:.0f} % de la potencia instalada en promedio) "
+                     f"para que el total promedie {target_avg_kw:,.0f} kW.")
+    info.update(status=status, hours=h, note=" ".join(notes))
+    return rows, info
+
 
 # Order matters: the first rule that matches wins.
 _RULES: list[tuple[str, tuple[str, ...]]] = [

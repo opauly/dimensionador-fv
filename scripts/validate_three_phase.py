@@ -132,6 +132,22 @@ check("circuits + reserved reconcile with the printed total -> no warning", [n f
 bad = TI.build_loads([{"board": "TX", "name": "X", "total_w": 1000, "circuits": [{"description": "EVAPORADORA", "load_w": 500}]}])
 check("a board that does not add up is flagged", any("revisar" in n for n in bad["notes"]), True)
 
+# ── Calibration of refrigeration hours against the measured plant ─────────────
+R, PR = TI.CATEGORIES["compresores"][0], TI.CATEGORIES["proceso"][0]
+cal_rows = [{"Descripción": "rack", "W": 100000, "Und": 1, "h/día": 24, "días/mes": 30, "Categoría": R},
+            {"Descripción": "proceso", "W": 20000, "Und": 1, "h/día": 10, "días/mes": 26, "Categoría": PR}]
+new, info = TI.calibrate(cal_rows, 74.0)
+check("refrigeration hours so the list averages 74 kW", (info["status"], info["hours"]), ("ok", 16.27))    # (74 x 730 - 5200) / (100 x 30)
+check("only refrigeration rows change", (new[0]["h/día"], new[1]["h/día"]), (16.27, 10))
+check("the calibrated list really averages the target", round(sum(r["W"] * r["Und"] * r["h/día"] * r["días/mes"] for r in new) / 1000 / 730.0, 0), 74.0)
+two, info2 = TI.calibrate(cal_rows, 74.0, continuous_share=0.9)
+check("with the measured night share the daytime rows are scaled by a diversity factor", (info2["day_factor"], two[1]["h/día"]), (1.039, 10.39))   # 7.4 kW wanted / 7.12 kW nominal avg
+check("and the whole list still averages the target", round(TI._avg_kw(two), 0), 74.0)
+check("a target above the installed refrigeration is capped at 24 h and says so", TI.calibrate(cal_rows, 500.0)[1]["status"], "cap")
+check("a target the other loads already exceed leaves the hours alone", (TI.calibrate(cal_rows, 3.0)[1]["status"], TI.calibrate(cal_rows, 3.0)[0][0]["h/día"]), ("floor", 24))
+check("no refrigeration rows -> nothing to calibrate", TI.calibrate(cal_rows[1:], 74.0)[1]["status"], "none")
+check("compressors and evaporators default to continuous", (TI.CATEGORIES["compresores"][1], TI.CATEGORIES["refrigeracion"][1]), (24.0, 24.0))
+
 print()
 print("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}")
 sys.exit(1 if fails else 0)
