@@ -60,7 +60,7 @@ with app.test_request_context("/"):
     form = MultiDict({"row-0-desc": "a", "row-0-w": "1000", "row-0-und": "1", "row-0-hd": "10", "row-0-dm": "30", "row-0-cat": "Proceso / producción", "row-0-brd": "TR0"})
     upd = s5.update_loads_table(blob5, form)
     check("editing the table keeps category and board", (upd["loads_data"][0].get("Categoría"), upd["loads_data"][0].get("Tablero")), ("Proceso / producción", "TR0"))
-    check("step 5 defaults to a plant twice the measured one", c5["plant_scale"], 2.0)
+    check("step 5 defaults to a plant three times the measured one", c5["plant_scale"], 3.0)
     check("step 5 renders the calibration block", "Ajustar a la planta actual" in h5 and 'name="plant_scale"' in h5)
     rc_form = MultiDict({"plant_scale": "2", "row-0-desc": "rack", "row-0-w": "150000", "row-0-und": "1", "row-0-hd": "24", "row-0-dm": "30",
                          "row-0-cat": "Compresores / rack", "row-0-brd": "TP"})
