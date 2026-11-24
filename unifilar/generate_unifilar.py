@@ -130,6 +130,12 @@ def _fit(text, width, size=8, font='Helvetica-Bold'):
     return size if w <= width else round(size * width / w, 1)
 
 
+def _inv_header(c, h, cx, top, title, model, spec):
+    """Encabezado único de los bloques de inversor: título en negrita («[N ×] INVERSOR … (función)»), marca y modelo, y una línea gris con lo esencial."""
+    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
+    txt(cx, top - 14, title, 8, 'Helvetica-Bold'); txt(cx, top - 25, model, 7); txt(cx, top - 35, spec, 6.5, 'Helvetica', GRAY)
+
+
 def _inv_symbol(c, x, y, s=22):
     """Símbolo de inversor: cuadro con diagonal, DC (— —) arriba a la izquierda y AC (~) abajo a la derecha. (x, y) = esquina inferior izquierda."""
     c.saveState(); c.setStrokeColor(black); c.setFillColor(white); c.setLineWidth(0.9)
@@ -273,9 +279,7 @@ def _hybrid_ac(c, h, cfg):
 
     # ---------- Fronius ----------
     box(560, 590, 200, 120, LGRAY)
-    txt(660, 696, 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold')
-    txt(660, 685, FR["label"], 7)
-    txt(660, 675, f"{FR['kw']} kW · {n_runs} MPPT", 6.5, 'Helvetica', GRAY)
+    _inv_header(c, h, 660, 710, 'INVERSOR ON-GRID (FV)', FR["label"], f"{FR['kw']} kW · {n_runs} MPPT")
     _inv_symbol(c, 722, 672)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {i + 1}", 6.5, 'Helvetica', GRAY, 'l')
@@ -323,14 +327,13 @@ def _hybrid_ac(c, h, cfg):
         _meter_block(c, h, cfg["meter"], 268, 436, above=True, gap=72)
 
     # ---------- MultiPlus-II ----------
-    box(380, 372, 180, 150, white, black, 1.4)
-    txt(470, 511, f"2 × VICTRON {MU['label']}", 7.5, 'Helvetica-Bold')
-    txt(470, 501, 'Split-phase 120/240 V · VE.Bus', 6.5, 'Helvetica', GRAY)
+    box(380, 372, 180, 160, white, black, 1.4)
+    _inv_header(c, h, 470, 532, '2 × INVERSOR/CARGADOR (BATERÍAS)', f"Victron {MU['model']}", 'Split-phase 120/240 V · VE.Bus')
     box(392, 445, 156, 45, LGRAY)
-    txt(470, 473, 'MP#1 · L1 (maestro)', 7, 'Helvetica-Bold'); txt(470, 462, MU["model"], 6.5, 'Helvetica', GRAY)
+    txt(470, 464, 'MP#1 · L1 (maestro)', 7.5, 'Helvetica-Bold')
     _inv_symbol(c, 398, 456, 20)
     box(392, 382, 156, 45, LGRAY)
-    txt(470, 410, 'MP#2 · L2 (esclavo)', 7, 'Helvetica-Bold'); txt(470, 399, MU["model"], 6.5, 'Helvetica', GRAY)
+    txt(470, 401, 'MP#2 · L2 (esclavo)', 7.5, 'Helvetica-Bold')
     _inv_symbol(c, 398, 393, 20)
     for xa, xb in ((386, 392), (554, 548)):
         seg([(xa, 405), (xa, 467)], black, 1.4); seg([(xa, 467), (xb, 467)], black, 1.4); seg([(xa, 405), (xb, 405)], black, 1.4)
@@ -365,7 +368,7 @@ def _hybrid_ac(c, h, cfg):
     seg([(670, 366), (670, 352)], GRN, 1.1, (3, 2)); ground(670, 352); lab(680, 350, MU["ground_wire"], GRN, 'l')
 
     # ---------- baterías + Lynx ----------
-    x0_bat, n_slots = _batteries(c, h, BA, n_bat)
+    x0_bat, n_slots = _batteries(c, h, BA, n_bat, "tierra incluida en el kit de baterías")
     xs = [x0_bat]
     last = 40 + n_slots * 88 - 12
     for k, t in enumerate(BA["cables_note"][:3]):
@@ -422,7 +425,7 @@ def _slots(n, limit=4):
     return [(0, 1), (1, 2), (2, None), (3, n)]
 
 
-def _batteries(c, h, BA, n_bat):
+def _batteries(c, h, BA, n_bat, ground_label=None):
     """Banco de baterías con su fusible MEGA. Con más de 4 se dibujan #1, #2, «…» y la última; el cableado se repite igual.
     Con baterías Pylontech Fidus se dibujan sus dos LinkPort: el LinkPort 1 de cada una va al LinkPort 0 de la siguiente, y al
     LinkPort 0 de la primera (maestra) llega el cable CAN tipo A. Devuelve (x del centro de la 1.ª batería, posiciones dibujadas)."""
@@ -446,6 +449,12 @@ def _batteries(c, h, BA, n_bat):
             txt(xc + 7, 243, f"{BA['fuse_prefix']}{num}", 6, 'Helvetica', black, 'l')
         if pos < len(slots) - 1:
             seg([(x + 76, 197), (x + 88, 197)], BLUE, 1, (2, 1.5))
+            seg([(x + 76, 187), (x + 88, 187)], GRN, 1.1, (3, 2))          # tierra: de una batería a la siguiente
+    # tierra de las baterías: la línea verde pasa de una a otra y termina en un solo símbolo, después de la última
+    xe = 40 + (len(slots) - 1) * 88 + 76
+    seg([(xe, 187), (xe + 12, 187), (xe + 12, 178)], GRN, 1.1, (3, 2)); ground(xe + 12, 178)
+    if ground_label:
+        lab(xe + 22, 173, ground_label, GRN, 'l')
     return 78, len(slots)
 
 
@@ -715,8 +724,8 @@ def _grid_zero(c, h, cfg):
     _dc_box(c, h, PV, ys, wire_out=PV.get("dc_inv_wire"))
 
     box(560, 590, 200, 120, LGRAY)
-    txt(660, 696, f"{n_inv} × INVERSOR ON-GRID (FV)" if n_inv > 1 else 'INVERSOR ON-GRID (FV)', 8, 'Helvetica-Bold'); txt(660, 685, FR["label"], 7)
-    txt(660, 675, f"{FR['kw']} kW · {FR['mppt']} MPPT" + (" · igual en cada inversor" if n_inv > 1 else ""), 6.5, 'Helvetica', GRAY)
+    _inv_header(c, h, 660, 710, f"{n_inv} × INVERSOR ON-GRID (FV)" if n_inv > 1 else 'INVERSOR ON-GRID (FV)', FR["label"],
+                f"{FR['kw']} kW · {FR['mppt']} MPPT" + (" · igual en cada inversor" if n_inv > 1 else ""))
     _inv_symbol(c, 722, 672)
     for i, yc in enumerate(ys):
         txt(566, yc - 2.5, f"MPPT {min(i, FR['mppt'] - 1) + 1}", 6.5, 'Helvetica', GRAY, 'l')
@@ -799,7 +808,7 @@ def _off_grid(c, h, cfg):
             txt(566, yc - 2.5, f"MPPT {cc_nums[k]}", 6.5, 'Helvetica', GRAY, 'l')
 
     # baterías + Lynx Power In
-    x0_bat, n_slots = _batteries(c, h, BA, n_bat)
+    x0_bat, n_slots = _batteries(c, h, BA, n_bat, "tierra incluida en el kit de baterías")
     xs = [x0_bat]
     for k, t in enumerate(BA["cables_note"][:3]):
         lab(40 + n_slots * 88 + 2, 248 - k * 7, t, GRAY, 'l')
@@ -824,15 +833,15 @@ def _off_grid(c, h, cfg):
 
     # Multis (con 3 o más se dibujan MP#1, MP#2, «…» y el último: el cableado se repite igual en cada uno)
     many = n_mp >= 3
-    mh = 150 if n_mp >= 2 else 90
+    mh = 160 if n_mp >= 2 else 100
     my = 372 if n_mp >= 2 else 400
     box(380, my, 180, mh, white, black, 1.4)
-    txt(470, my + mh - 11, f"{n_mp} × VICTRON {MU['label']}", 7.5, 'Helvetica-Bold')
-    txt(470, my + mh - 21, ('Split-phase 120/240 V · VE.Bus' if n_mp == 2 else MU.get("single_note", 'VE.Bus')), 6.5, 'Helvetica', GRAY)
+    _inv_header(c, h, 470, my + mh, (f"{n_mp} × " if n_mp > 1 else "") + 'INVERSOR/CARGADOR (BATERÍAS)', f"Victron {MU['model']}",
+                'Split-phase 120/240 V · VE.Bus' if n_mp == 2 else MU.get("single_note", 'VE.Bus'))
     if many:
         slots = _slots(n_mp, 3)
         heights = [14 if num is None else 28 for _, num in slots]
-        yy = my + mh - 30
+        yy = my + mh - 40
         for (pos, num), hh in zip(slots, heights):
             yy -= hh
             if num is None:
@@ -840,15 +849,15 @@ def _off_grid(c, h, cfg):
             else:
                 box(392, yy, 156, hh, LGRAY)
                 _inv_symbol(c, 397, yy + 5, 18)
-                txt(470, yy + 15, f"MP#{num}", 7, 'Helvetica-Bold'); txt(470, yy + 6, MU["model"], 6.2, 'Helvetica', GRAY)
+                txt(470, yy + 10, f"MP#{num}", 7.5, 'Helvetica-Bold')
             yy -= 5
     elif n_mp == 2:
-        box(392, 445, 156, 45, LGRAY); txt(470, 473, 'MP#1 · L1 (maestro)', 7, 'Helvetica-Bold'); txt(470, 462, MU["model"], 6.5, 'Helvetica', GRAY)
+        box(392, 445, 156, 45, LGRAY); txt(470, 464, 'MP#1 · L1 (maestro)', 7.5, 'Helvetica-Bold')
         _inv_symbol(c, 398, 456, 20)
-        box(392, 382, 156, 45, LGRAY); txt(470, 410, 'MP#2 · L2 (esclavo)', 7, 'Helvetica-Bold'); txt(470, 399, MU["model"], 6.5, 'Helvetica', GRAY)
+        box(392, 382, 156, 45, LGRAY); txt(470, 401, 'MP#2 · L2 (esclavo)', 7.5, 'Helvetica-Bold')
         _inv_symbol(c, 398, 393, 20)
     else:
-        box(392, 408, 156, 45, LGRAY); txt(470, 436, 'INVERSOR/CARGADOR', 7, 'Helvetica-Bold'); txt(470, 425, MU["model"], 6.5, 'Helvetica', GRAY)
+        box(392, 408, 156, 45, LGRAY); txt(470, 427, 'MP#1', 7.5, 'Helvetica-Bold')
         _inv_symbol(c, 398, 419, 20)
     feeds = ((410, 'MP#1'), (446, 'MP#2'), (520, f'MP#{n_mp}')) if many else tuple(zip((446, 516), ('MP#1', 'MP#2')))[:n_mp]
     for xr_i, (xr, mp) in enumerate(feeds):
