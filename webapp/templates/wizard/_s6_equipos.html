@@ -63,14 +63,14 @@
             hx-post="{{ url_for('wizard.paso6_equipo', vid=vid) }}"
             hx-trigger="change" hx-target="#s6-equipos" hx-swap="outerHTML">
       {% for inv in inverters %}
-        <option value="{{ inv.id }}" {{ 'selected' if inv.id == selected_inverter.id else '' }}>{% if inv.generic %}★ Recomendado: {{ reco.inverter.qty }} × {{ inv.model }} (por especificar){% else %}{{ inv.brand }} {{ inv.model }} — {{ inv.kw }} kW{% endif %}</option>
+        <option value="{{ inv.id }}" {{ 'selected' if inv.id == selected_inverter.id else '' }}>{% if inv.generic %}★ Recomendado: {{ reco.inverter.qty }} × {{ inv.model }}{% if inv.reference_model %} (≈ {{ inv.reference_model }}){% else %} (por especificar){% endif %}{% else %}{{ inv.brand }} {{ inv.model }} — {{ inv.kw }} kW{% endif %}</option>
       {% endfor %}
     </select>
     {% if selected_inverter.generic %}
     <div class="s6-note" style="margin-top:8px;font-size:12px;">
-      <b>{{ inverter_qty }} inversores de {{ selected_inverter.kw|round(0)|int }} kW</b> ({{ reco.ac.ac_kw_total|round(0)|int }} kW de CA en total, CC/CA {{ reco.array.dc_ac_ratio }}).
+      <b>{{ inverter_qty }} inversores de {{ selected_inverter.kw }} kW{% if selected_inverter.reference_model %} · {{ selected_inverter.reference_model }}{% endif %}</b> ({{ reco.ac.ac_kw_total|round(0)|int }} kW de CA en total, CC/CA {{ reco.array.dc_ac_ratio }}).
       El mínimo que alcanza el objetivo con este panel a {{ selected_inverter.output_v|int }} V; los strings de abajo ya están repartidos por igual entre ellos.
-      Los datos de abajo son los <b>requisitos mínimos</b> que debe cumplir el modelo comercial que se elija.
+      Los datos de abajo son los <b>requisitos mínimos</b> que debe cumplir el modelo comercial que se elija{% if selected_inverter.reference_model %} (el Fronius indicado los cumple){% endif %}.
     </div>
     {% else %}
     <label class="flabel" style="margin-top:8px;">Cantidad de inversores (en paralelo)</label>

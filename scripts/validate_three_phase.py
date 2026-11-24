@@ -37,44 +37,60 @@ check("Vmp hot (70 C)", lim["vmp_hot"], 35.91, 0.01)                            
 check("min series (DC bus must clear 208 V peak + 10 %)", lim["ns_min"], 10)         # 323.6 V / 35.91 V -> 10
 check("max series (1000 V)", lim["ns_max"], 19)                                      # 1000 / 52.23 -> 19
 
-# ── Inverter selection ─────────────────────────────────────────────────────────
+# ── Inverter selection (Fronius Symo commercial sizes) ─────────────────────────
+check("208 V class tops out at 15 kW (the 17.5-24 kW Symo are 480 V only)", max(u["kw"] for u in T.ladder_for(208)), 15.0)
+check("480 V class goes up to 24 kW", max(u["kw"] for u in T.ladder_for(480)), 24.0)
 best = T.inverter_options(200)[0]
-check("200 kWp -> fewest units within 15 % of 166.7 kW AC: 3 x 60", (best["qty"], best["unit_kw"]), (3, 60.0))
-capped = T.inverter_options(200, max_unit_kw=30)[0]
-check("200 kWp, units capped at 30 kW -> 6 x 30", (capped["qty"], capped["unit_kw"]), (6, 30.0))
-check("nothing above the cap is offered", max(o["unit_kw"] for o in T.inverter_options(200, max_unit_kw=30)), 30.0)
+check("200 kWp at 208 V -> fewest units within 15 % of 166.7 kW AC: 12 x 15", (best["qty"], best["unit_kw"]), (12, 15.0))
+capped = T.inverter_options(200, max_unit_kw=12)[0]
+check("200 kWp, units capped at 12 kW -> 14 x 12", (capped["qty"], capped["unit_kw"]), (14, 12.0))
+check("nothing above the cap is offered", max(o["unit_kw"] for o in T.inverter_options(200, max_unit_kw=12)), 12.0)
+check("a custom ladder of plain kW sizes still works", T.inverter_options(200, ladder=(60.0,))[0]["qty"], 3)
 
 # ── Full recommendation ────────────────────────────────────────────────────────
 rec = T.recommend(PANEL, 200, v_ll=208)
 check("recommendation ok", rec["ok"], True)
-check("3 inverters of 60 kW", (rec["inverter"]["qty"], rec["inverter"]["kw"]), (3, 60.0))
-check("18 modules in series", rec["array"]["panels_per_string"], 18)                  # fewest extra modules: 324 vs 323 needed
-check("6 strings per inverter", rec["array"]["strings_per_inverter"], 6)
-check("324 modules", rec["array"]["total_panels"], 324)
-check("array kWp", rec["array"]["system_kw"], 200.88)
-check("DC/AC ratio", rec["array"]["dc_ac_ratio"], 1.12, 0.01)                         # 200.88 / 180
-check("3 MPPT inputs per inverter (2 strings each)", rec["inverter"]["mppt_channels_required"], 3)
+check("12 inverters of 15 kW", (rec["inverter"]["qty"], rec["inverter"]["kw"]), (12, 15.0))
+check("commercial equivalent named", rec["inverter"]["reference_model"], "Fronius Symo 15.0-3 208")
+check("14 modules in series", rec["array"]["panels_per_string"], 14)                  # fewest extra modules: 336 vs 323 needed
+check("2 strings per inverter", rec["array"]["strings_per_inverter"], 2)               # the 15 kW unit has one 50 A input: 2 x 14.62 A
+check("336 modules", rec["array"]["total_panels"], 336)
+check("array kWp", rec["array"]["system_kw"], 208.32)
+check("DC/AC ratio", rec["array"]["dc_ac_ratio"], 1.16, 0.01)                         # 208.32 / 180
+check("1 MPPT input per inverter", rec["inverter"]["mppt_channels_required"], 1)
 check("Imax per MPPT >= 2 x Imp", rec["inverter"]["imax_mppt_required_a"], 29.3, 0.01)  # 29.24 rounded up
 check("DC max voltage class", rec["inverter"]["vmax_dc_required"], 1000.0)
-check("AC current per inverter", rec["inverter"]["ac_current_a"], 166.5, 0.05)
-check("breaker per inverter = 125 % -> next standard size", rec["ac"]["ocpd_each_a"], 225)
+check("AC current per inverter (datasheet 41.6 A)", rec["inverter"]["ac_current_a"], 41.6, 0.05)
+check("breaker per inverter = 125 % -> next standard size (datasheet 60 A)", rec["ac"]["ocpd_each_a"], 60)
 check("3 CTs for the meter", rec["ac"]["ct_count"], 3)
+check("208 V with 12 units tells why there are so many", any("más grande de la gama" in w for w in rec["warnings"]), True)
+rec480 = T.recommend(PANEL, 200, v_ll=480)
+check("480 V -> 8 x 22.7 kW (7 x 24 kW would push DC/AC over 1.2)", (rec480["inverter"]["qty"], rec480["inverter"]["kw"]), (8, 22.7))
+check("480 V: 3 strings fit the two inputs (33 A + 25 A)", (rec480["array"]["strings_per_inverter"], rec480["inverter"]["mppt_channels_required"]), (3, 2))
+check("24 kW at 480 V draws 28.9 A (datasheet)", round(T.ac_current_a(24, 480), 1), 28.9)
+check("10 kW (9,995 VA) at 208 V draws 27.7 A (datasheet)", round(T.ac_current_a(9.995, 208), 1), 27.7)
+cap10 = T.strings_capacity(T.ladder_for(208)[0], PANEL)
+check("Symo 10.0 at 208 V: one string per input (25 A and 16.5 A inputs)", cap10, 2)
+check("Symo 15.0 at 208 V: 3 strings on its 50 A input", T.strings_capacity(T.ladder_for(208)[2], PANEL), 3)
 
 # ── The stand-in inverter works in the existing MPPT checks ───────────────────
 inv = T.virtual_inverter(rec)
 check("stand-in is three-phase 208 V", (inv["phase"], inv["output_v"]), ("three", 208.0))
+check("stand-in carries the real unit's DC window", (inv["vmax"], inv["vmin_mppt"], inv["vmax_mppt"], inv["mppt_channels"], inv["imax_mppt"]),
+      (1000.0, 325.0, 850.0, 1, 50.0))
 manual = mppt.check_design(PANEL, inv, rec["array"]["panels_per_string"], rec["array"]["strings_per_inverter"])
 check("check_design accepts the recommended layout", manual["within_limits"], True)
-scen = mppt.validate_string_design(PANEL, inv, target_system_kw=rec["array"]["system_kw"] / 3)
+check("check_design rejects a 4th string (over the 50 A input)", mppt.check_design(PANEL, inv, 14, 4)["within_limits"], False)
+scen = mppt.validate_string_design(PANEL, inv, target_system_kw=rec["array"]["system_kw"] / rec["inverter"]["qty"])
 check("existing scenarios still produce a design", bool(scen), True)
 
 # ── Edge cases ─────────────────────────────────────────────────────────────────
 low = T.recommend(PANEL, 50, v_ll=208, vdc_max=300)      # an input-voltage class too low for a 208 V service: no string length fits
 check("no valid string length is refused, with a reason", (low["ok"], bool(low["reasons"])), (False, True))
 check("zero target is refused", T.recommend(PANEL, 0)["ok"], False)
-small = T.recommend(PANEL, 18, v_ll=208)
-check("18 kWp -> 1 inverter", small["inverter"]["qty"], 1)
-big_i = T.recommend(PANEL, 600, v_ll=208, max_unit_kw=125)
+small = T.recommend(PANEL, 15, v_ll=208)
+check("15 kWp -> 1 inverter", small["inverter"]["qty"], 1)
+big_i = T.recommend(PANEL, 600, v_ll=208)
 check("600 kWp warns about total AC current", any("corriente total" in w for w in big_i["warnings"]), True)
 
 # ── Three-phase service plumbing ───────────────────────────────────────────────
