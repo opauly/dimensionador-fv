@@ -219,7 +219,7 @@ def extract_tablero(blob: dict, file_bytes: bytes, media_type: str) -> dict:
     return {**s5, "loads_data": loads, "loads_from_tablero": True}
 
 
-DEFAULT_PLANT_SCALE = 3.0            # new plant vs the measured one ("usemos 3x", Oscar, 2026-11-24; was 2x: at 2x the plan's refrigeration ran only ~14 %)
+DEFAULT_PLANT_SCALE = 2.0            # new plant vs the measured one: "yo diría que la planta sería el doble de la actual" (Oscar, 2026-11-24)
 
 
 def _plant_scale(s5: dict) -> float:
