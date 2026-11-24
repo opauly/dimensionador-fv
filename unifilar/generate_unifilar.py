@@ -406,7 +406,7 @@ def _hybrid_ac(c, h, cfg):
     if dist:
         seg([(560, 265), (560, 250), (660, 250)], BLUE, 1.1, (4, 2)); txt(610, 253, 'VE.Can', 6, 'Helvetica', BLUE)
     seg([(545, 372), (545, 330), (700, 330), (700, 295)], BLUE, 1.1, (4, 2)); txt(640, 334, CN["vebus"], 6, 'Helvetica', BLUE, 'l')
-    seg(_can_start(BA) + [(725, 155), (725, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE); _can_note(c, h, BA)
+    seg(_can_start(BA) + [(725, 155), (725, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE)
     seg([(760, 650), (1070, 650), (1070, 265), (800, 265)], BLUE, 1.1, (4, 2))
     txt(915, 655, CN["eth"], 6, 'Helvetica', BLUE)
 
@@ -461,13 +461,6 @@ def _batteries(c, h, BA, n_bat, ground_label=None):
 def _can_start(BA):
     """Puntos por donde sale el cable CAN del banco: del LinkPort 0 de la 1.ª Fidus (a la izquierda), o de abajo de la 1.ª batería."""
     return [(40, 197), (29, 197), (29, 155)] if BA["can_master"] else [(78, 170), (78, 155)]
-
-
-def _can_note(c, h, BA, y=144):
-    seg, txt, lab, box, breaker, fuse, ground, dot, stack = h
-    if BA["can_master"]:
-        txt(400, y, 'Fidus #1 (maestra): terminal del cable CAN tipo A en el LinkPort 0 · '
-                    'LinkPort 1 de cada Fidus al LinkPort 0 de la siguiente', 5.8, 'Helvetica', BLUE)
 
 
 def _slot_x(n, i, centers, hidden_x):
@@ -926,7 +919,7 @@ def _off_grid(c, h, cfg):
     CN = cfg["comms_notes"]
     seg([(545, my), (545, 330 if n_mp == 2 else 340), (gx0 + 50, 330 if n_mp == 2 else 340), (gx0 + 50, 295)], BLUE, 1.1, (4, 2))
     txt(692, (334 if n_mp == 2 else 344), CN["vebus"], 6, 'Helvetica', BLUE, 'r')
-    seg(_can_start(BA) + [(gx0 + 90, 155), (gx0 + 90, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE); _can_note(c, h, BA)
+    seg(_can_start(BA) + [(gx0 + 90, 155), (gx0 + 90, 235)], BLUE, 1.1, (4, 2)); txt(400, 158, CN["can"], 6, 'Helvetica', BLUE)
 
 
 DRAWINGS = {"hybrid_ac": _hybrid_ac, "grid_zero": _grid_zero, "off_grid": _off_grid}
