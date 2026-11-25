@@ -1,0 +1,121 @@
+{# Registrar movimiento. Changing Tipo / Fecha / Cuenta re-renders this
+   fragment through finance.formulario (keeps typed values, refreshes the
+   category list and the exchange rate). Saving is a plain POST. #}
+{% set f = form %}
+<div id="fin-form-wrap">
+<style>
+.fin-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 14px; }
+.fin-form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted-2); font-weight: 600; gap: 4px; }
+.fin-form .wide { grid-column: 1 / -1; }
+.fin-form .hint { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.fin-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.fin-err { color: #b84345; font-size: 13px; margin: 0 0 10px; }
+</style>
+{% if f.error %}<p class="fin-err">⚠ {{ f.error }}</p>{% endif %}
+<form id="fin-form" method="post" action="{{ url_for('finance.movimiento') }}">
+  <div class="fin-form"
+       hx-get="{{ url_for('finance.formulario') }}" hx-include="#fin-form" hx-target="#fin-form-wrap" hx-swap="outerHTML"
+       hx-trigger="change from:.fin-refresh">
+    <label>Tipo
+      <select name="kind" class="fin-refresh">
+        {% for k, label in f.form_kinds %}<option value="{{ k }}" {{ 'selected' if f.kind == k }}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Fecha
+      <input type="date" name="tx_date" value="{{ f.v.tx_date or '' }}" class="fin-refresh" required
+             onchange="document.getElementById('fin-refx').value='1'">
+    </label>
+    <label>{{ 'Desde la cuenta' if f.kind == 'transfer' else 'Cuenta' }}
+      <select name="account_id" class="fin-refresh" onchange="document.getElementById('fin-refx').value='1'">
+        {% for a in f.accounts %}<option value="{{ a.id }}" {{ 'selected' if f.v.account_id == a.id }}>{{ a.name }}</option>{% endfor %}
+      </select>
+    </label>
+
+    {% if f.kind == 'transfer' %}
+      <label>Hacia la cuenta
+        <select name="to_account_id" class="fin-refresh" onchange="document.getElementById('fin-refx').value='1'">
+          <option value="">—</option>
+          {% for a in f.accounts %}<option value="{{ a.id }}" {{ 'selected' if f.v.to_account_id == a.id }}>{{ a.name }}</option>{% endfor %}
+        </select>
+      </label>
+    {% elif f.kind == 'client_payment' %}
+      <label>Proyecto
+        <select name="project_id" class="fin-refresh">
+          <option value="">—</option>
+          {% for p in f.projects %}<option value="{{ p.id }}" {{ 'selected' if f.v.project_id == p.id }}>{{ p.label }}{% if p.status != 'active' %} ({{ p.status }}){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      {% if f.v.project_id %}
+      <label>Pago
+        <select name="payment_id" class="fin-refresh">
+          {% for p in f.pending_payments %}<option value="{{ p.id }}" {{ 'selected' if f.v.payment_id == p.id }}>{{ p.label }}</option>{% endfor %}
+          <option value="new" {{ 'selected' if f.v.payment_id == 'new' }}>Pago adicional (nuevo)</option>
+        </select>
+      </label>
+      {% endif %}
+    {% elif f.kind == 'project_expense' %}
+      <label>Proyecto
+        <select name="project_id">
+          <option value="">—</option>
+          {% for p in f.projects %}<option value="{{ p.id }}" {{ 'selected' if f.v.project_id == p.id }}>{{ p.label }}{% if p.status != 'active' %} ({{ p.status }}){% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Rubro
+        <select name="rubro">
+          {% for key, label in f.rubros %}<option value="{{ key }}" {{ 'selected' if f.v.rubro == key }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+    {% else %}
+      <label>Categoría
+        <select name="category_id">
+          <option value="">—</option>
+          {% for c in f.categories %}<option value="{{ c.id }}" {{ 'selected' if f.v.category_id == c.id }}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </label>
+    {% endif %}
+
+    <label>Monto ({{ f.account_currency }})
+      <input type="text" inputmode="decimal" name="amount" value="{{ f.v.amount or '' }}" placeholder="0.00" required>
+      {% if f.kind == 'project_expense' %}<span class="hint">Monto final pagado, con IVA.</span>{% endif %}
+      {% if f.kind == 'client_payment' %}<span class="hint">Lo que entró a la cuenta. Si es menos que el pago, el resto queda pendiente.</span>{% endif %}
+    </label>
+
+    {% if f.needs_fx %}
+      <label>Tipo de cambio (₡ por $)
+        <input type="text" inputmode="decimal" name="fx_rate" value="{{ f.v.fx_rate or '' }}"
+               oninput="document.getElementById('fin-fxman').value='1'">
+        <span class="hint">{{ f.fx_note or 'BCCR venta' }} · se puede corregir</span>
+      </label>
+    {% endif %}
+    {% if f.kind == 'transfer' and f.to_currency and f.to_currency != f.account_currency %}
+      <label>Monto recibido ({{ f.to_currency }})
+        <input type="text" inputmode="decimal" name="to_amount" value="{{ f.v.to_amount or '' }}" placeholder="Se calcula con el tipo de cambio">
+      </label>
+    {% endif %}
+
+    <label class="wide">Descripción{% if f.kind == 'client_payment' %} <span class="hint">opcional</span>{% endif %}
+      <input type="text" name="description" value="{{ f.v.description or '' }}" {{ '' if f.kind == 'client_payment' else 'required' }}
+             placeholder="{{ 'Ej. Cambio de dólares a colones' if f.kind == 'transfer' else 'Ej. Licencia mensual de software' }}">
+    </label>
+    {% if f.kind not in ('transfer', 'client_payment') %}
+      <label>{{ 'Cliente / origen' if f.kind == 'other_income' else 'Proveedor' }} <span class="hint">opcional</span>
+        <input type="text" name="vendor" value="{{ f.v.vendor or '' }}" list="fin-vendors" autocomplete="off"
+               placeholder="Escriba o elija de la lista">
+        <datalist id="fin-vendors">{% for n in f.vendors %}<option value="{{ n }}">{% endfor %}</datalist>
+        <span class="hint">Si es nuevo, se agrega a la lista al guardar.</span>
+      </label>
+    {% endif %}
+    <label>Notas <span class="hint">opcional</span>
+      <input type="text" name="notes" value="{{ f.v.notes or '' }}">
+    </label>
+  </div>
+  <input type="hidden" id="fin-refx" name="refx" value="">
+  <input type="hidden" id="fin-fxman" name="fx_rate_manual" value="{{ f.v.fx_rate_manual or '' }}">
+  <div class="fin-actions">
+    <button type="submit" class="btn" style="cursor:pointer;border:none;">Guardar movimiento</button>
+    {% if f.kind == 'project_expense' %}<span class="card-note-sm">Se guarda como gasto pagado en la pestaña del proyecto.</span>{% endif %}
+    {% if f.kind == 'client_payment' %}<span class="card-note-sm">Se marca como pagado en la pestaña Pagos del proyecto.</span>{% endif %}
+    {% if f.kind == 'transfer' %}<span class="card-note-sm">Una transferencia no cuenta como ingreso ni gasto.</span>{% endif %}
+  </div>
+</form>
+</div>

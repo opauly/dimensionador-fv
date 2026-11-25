@@ -23,9 +23,16 @@ the full reasoning.
     iva_soportado   = Σ (expenses.amount_usd * expenses.iva_rate)
     gastos_total    = gastos_base + iva_soportado
 
-    utilidad_bruta  = ingresos_base - gastos_base
-    iva_a_pagar     = iva_repercutido - iva_soportado
-    utilidad_neta   = utilidad_bruta - iva_a_pagar
+    utilidad_bruta  = ingresos_base - gastos_total
+    iva_a_pagar     = iva_repercutido
+    utilidad_neta   = utilidad_bruta
+
+IVA paid on expenses is a cost (Oscar, 2026-11-23): the accountant files IVA
+separately and no IVA credit is taken here, so `gastos_total` (with IVA) is
+what comes off profit. The IVA charged to the client (`iva_repercutido`) is
+not the company's money — it is already left out of `ingresos_base` and is
+reported as `iva_a_pagar` for information; `utilidad_neta` equals
+`utilidad_bruta`. Matches the per-project Excel ("Finanzas - <cliente>").
 
     recibido        = Σ payments where paid = true (amount_usd)
     pendiente       = ingresos_total - recibido
@@ -75,9 +82,9 @@ def summarize(
     iva_soportado = expenses_iva_sum
     gastos_total = gastos_base + iva_soportado
 
-    utilidad_bruta = ingresos_base - gastos_base
-    iva_a_pagar = iva_repercutido - iva_soportado
-    utilidad_neta = utilidad_bruta - iva_a_pagar
+    utilidad_bruta = ingresos_base - gastos_total
+    iva_a_pagar = iva_repercutido
+    utilidad_neta = utilidad_bruta
 
     recibido = sum(_num(p.get("amount_usd")) for p in payments if p.get("paid"))
     pendiente = ingresos_total - recibido

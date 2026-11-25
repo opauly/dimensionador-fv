@@ -29,6 +29,7 @@
         <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.endpoint == 'dashboard.index' else '' }}">Panel de Control</a>
         <a href="{{ url_for('proposals.index') }}" class="{{ 'active' if request.blueprint in ('proposals', 'wizard') else '' }}">Cotizaciones</a>
         <a href="{{ url_for('projects.index') }}" class="{{ 'active' if request.blueprint == 'projects' else '' }}">Proyectos</a>
+        <a href="{{ url_for('finance.index') }}" class="{{ 'active' if request.blueprint == 'finance' else '' }}">Finanzas</a>
         <a href="{{ url_for('admin.index', section='equipos') }}" class="{{ 'active' if request.blueprint == 'admin' else '' }}">Admin</a>
         <a href="{{ url_for('maintenance.index') }}" class="{{ 'active' if request.blueprint == 'maintenance' else '' }}">Mantenimiento</a>
       </nav>

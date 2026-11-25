@@ -1,0 +1,43 @@
+{# One staged QuickBooks movement. Any change posts the row and re-renders it. #}
+<tr id="imp-{{ i.id }}" class="{{ 'imp-done' if i.reviewed }}">
+  <td style="white-space:nowrap">{{ i.tx_date }}</td>
+  <td>
+    <div class="imp-memo">{{ i.memo or '—' }}</div>
+    <div class="fin-sub">{{ i.payee or '' }}{% if i.qb_account and i.qb_account != 'Cash and cash equivalents' %} · {{ i.qb_account }}{% endif %}</div>
+    {% if i.reason %}<div class="imp-why imp-{{ i.confidence }}">{{ i.reason }}</div>{% endif %}
+  </td>
+  <td class="num">{{ i.amount_str }}</td>
+  <td colspan="2">
+    <form class="imp-form" hx-post="{{ url_for('finance_import.item', item_id=i.id) }}" hx-trigger="change"
+          hx-target="#imp-{{ i.id }}" hx-swap="outerHTML">
+      <select name="kind">
+        {% for k, label in kinds %}<option value="{{ k }}" {{ 'selected' if i.kind == k }}>{{ label }}</option>{% endfor %}
+      </select>
+      {% if i.kind in ('client_payment', 'project_expense') %}
+        <select name="job_key" class="imp-job">
+          <option value="">— sin proyecto —</option>
+          {% for o in job_options %}<option value="{{ o.key }}" {{ 'selected' if i.job_key == o.key }}>{{ o.label }}</option>{% endfor %}
+        </select>
+      {% endif %}
+      {% if i.kind == 'project_expense' %}
+        <select name="rubro">
+          {% for k, label in rubros %}<option value="{{ k }}" {{ 'selected' if i.rubro == k }}>{{ label }}</option>{% endfor %}
+        </select>
+      {% elif i.kind in ('company_expense', 'owner_draw', 'other_income') %}
+        <select name="category_id">
+          <option value="">Otros</option>
+          {% for c in cats_by_kind[i.kind] %}<option value="{{ c.id }}" {{ 'selected' if i.category_id == c.id }}>{{ c.name }}</option>{% endfor %}
+        </select>
+      {% endif %}
+    </form>
+  </td>
+  <td style="white-space:nowrap">
+    {% if i.reviewed %}<span class="imp-ok" title="Revisado">✓</span>{% endif %}
+    {% if i.qb_type != 'Payment' %}
+      <form method="post" action="{{ url_for('finance_import.dividir', item_id=i.id, **request.args) }}" style="display:inline"
+            onsubmit="var m = prompt('¿Qué monto pasa a una línea aparte? (de {{ i.amount_str }})'); if (!m) return false; this.monto.value = m;">
+        <input type="hidden" name="monto"><button class="imp-btn" title="Dividir en dos">Dividir</button>
+      </form>
+    {% endif %}
+  </td>
+</tr>

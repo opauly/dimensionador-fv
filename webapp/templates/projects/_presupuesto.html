@@ -47,6 +47,19 @@
   gap: 8px; align-items: center; padding: 8px 6px;
   border-bottom: 1px solid var(--border); font-size: 0.82rem;
 }
+.pf-st { font-size: 0.74rem; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #f1f2f4; color: var(--muted-2); }
+.pf-st-ok { background: #e4f4ea; color: #1d7a43; }
+.pf-link { background: none; border: none; color: var(--navy); font-size: 0.76rem; text-decoration: underline; cursor: pointer; padding: 0; }
+.pf-saldo { margin: 12px 0 8px; padding: 10px 12px; border-radius: 6px; background: #fdf6ec; border-left: 4px solid #d98a1c; font-size: 0.86rem; }
+.pf-saldo.ok { background: #e8f5ee; border-left-color: var(--green); }
+.pf-saldo span { color: var(--muted-2); margin-left: 6px; }
+.pf-recibir { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin: 8px 0 4px; }
+.pf-recibir-title { font-weight: 700; color: var(--navy); font-size: 0.9rem; margin-bottom: 8px; }
+.pf-recibir-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.pf-recibir-grid > div { min-width: 0; }
+.pf-recibir-grid .btn { white-space: nowrap; }
+.pf-recibir-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.pf-recibir-grid input, .pf-recibir-grid select { padding: 5px 8px; font-size: 0.84rem; border: 1px solid var(--border); border-radius: 4px; font-family: var(--font); text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); background: #fff; }
 .pf-utilidad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
 </style>
 
@@ -62,26 +75,68 @@
 
 <h4 class="pf-section-title">Pagos</h4>
 {% if pago_error %}<p class="wiz-error" style="color:#B84345;font-size:13px;margin:0 0 8px;">⚠ {{ pago_error }}</p>{% endif %}
+{% if pago_ok %}<p style="color:#1d7a43;font-size:13px;margin:0 0 8px;">✓ {{ pago_ok }}</p>{% endif %}
 {% if not payment_rows %}
   <p class="card-note-sm">Sin pagos programados.</p>
 {% else %}
   <div class="pf-pago-row pf-pago-row-header">
-    <div>Pago</div><div>Monto</div><div>Pagado</div><div>Fecha</div><div>Cuenta bancaria</div><div></div>
+    <div>Pago</div><div>Monto</div><div>Estado</div><div>Fecha</div><div>Cuenta</div><div></div>
   </div>
   {% for p in payment_rows %}
-    <form class="pf-pago-row"
-          hx-post="{{ url_for('projects.pago_guardar', pid=project.id, payment_id=p.id) }}"
-          hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this">
-      <div style="font-weight:600;">Pago {{ p.payment_number }}</div>
+    <div class="pf-pago-row">
+      <div style="font-weight:600;">Pago {{ p.payment_number }}{% if p.notes %}<div class="card-note-sm" style="font-weight:400">{{ p.notes }}</div>{% endif %}</div>
       <div>{{ p.amount_str }}</div>
-      <div><input type="checkbox" name="paid" {{ 'checked' if p.paid else '' }}></div>
-      <div><input type="text" name="paid_date" value="{{ p.paid_date }}" placeholder="YYYY-MM-DD"></div>
-      <div><input type="text" name="bank_account" value="{{ p.bank_account }}"></div>
-      <div><button type="submit" class="pf-pago-guardar">Guardar</button></div>
-    </form>
+      <div>{% if p.paid %}<span class="pf-st pf-st-ok">Pagado</span>{% else %}<span class="pf-st">Pendiente</span>{% endif %}</div>
+      <div>{{ p.paid_date or '—' }}</div>
+      <div>{{ p.bank_account or '—' }}</div>
+      <div>
+        {% if p.paid %}
+          <form hx-post="{{ url_for('projects.pago_guardar', pid=project.id, payment_id=p.id) }}"
+                hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this"
+                hx-confirm="¿Volver a marcar el Pago {{ p.payment_number }} como pendiente?">
+            <button type="submit" class="pf-link">Marcar pendiente</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
   {% endfor %}
 {% endif %}
-<p class="card-note-sm" style="margin-top:8px;">{{ recibido_line }}</p>
+
+<div class="pf-saldo {{ 'ok' if cobro.cerrado }}">
+  {% if cobro.cerrado %}
+    <b>✓ Cobrado completo.</b> <span>{{ recibido_line }}. Puedes seguir registrando gastos.</span>
+  {% else %}
+    <b>Saldo pendiente: {{ cobro.saldo_str }}</b> <span>{{ recibido_line }}</span>
+  {% endif %}
+</div>
+
+{% if cobro.pending or not cobro.cerrado %}
+<form class="pf-recibir" hx-post="{{ url_for('projects.pago_recibir', pid=project.id) }}"
+      hx-target="#subpanel" hx-swap="innerHTML" hx-disabled-elt="this">
+  <div class="pf-recibir-title">Registrar pago recibido</div>
+  <div class="pf-recibir-grid">
+    <label>Pago
+      <select name="payment_id"
+              onchange="var o=this.options[this.selectedIndex]; if (o.dataset.amount) this.form.amount.value=o.dataset.amount;">
+        {% for p in cobro.pending %}<option value="{{ p.id }}" data-amount="{{ '%.2f'|format(p.amount) }}">{{ p.label }}</option>{% endfor %}
+        <option value="new" data-amount="">Pago adicional</option>
+      </select>
+    </label>
+    <label>Monto recibido
+      <input type="text" inputmode="decimal" name="amount" value="{{ cobro.default_amount }}" placeholder="0.00" required>
+    </label>
+    <label>Fecha <input type="date" name="paid_date" value="{{ cobro.today }}" required></label>
+    <label>Cuenta
+      <select name="account_id">
+        {% for a in cobro.accounts %}<option value="{{ a.id }}" {{ 'selected' if a.is_default }}>{{ a.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Notas <input type="text" name="notes" placeholder="opcional"></label>
+    <div style="align-self:end"><button type="submit" class="btn" style="cursor:pointer;border:none;">Registrar</button></div>
+  </div>
+  <p class="card-note-sm" style="margin:6px 0 0;">Si recibes menos que el pago, el resto queda como pago pendiente. En colones se convierte con el tipo de cambio de esa fecha. Aparece también en Finanzas.</p>
+</form>
+{% endif %}
 
 <form class="pf-agregar-pago" method="post" action="{{ url_for('projects.pago_agregar', pid=project.id) }}">
   <div>
@@ -92,7 +147,7 @@
     <label>Monto USD</label>
     <input type="number" name="amount_usd" value="0" min="0" step="0.01" style="width:140px;">
   </div>
-  <button type="submit" class="pf-pago-guardar">+ Agregar pago</button>
+  <button type="submit" class="pf-pago-guardar">+ Programar pago</button>
 </form>
 
 <h4 class="pf-section-title">Gastos por rubro</h4>
@@ -125,6 +180,6 @@
   <p class="card-note-sm" style="margin-top:8px;">
     Incluye un {{ price_adjustment.kind|lower }} de {{ price_adjustment.discount_str }} ({{ price_adjustment.pct_str }})
     sobre la cotización de {{ price_adjustment.quoted_str }}{% if price_adjustment.reason %} — {{ price_adjustment.reason|trim('.') }}{% endif %}.
-    Sin ese ajuste, la utilidad bruta sería {{ price_adjustment.bruta_sin_ajuste_str }}.
+    Sin ese ajuste, la utilidad sería {{ price_adjustment.bruta_sin_ajuste_str }}.
   </p>
 {% endif %}

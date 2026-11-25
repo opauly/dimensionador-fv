@@ -1,0 +1,66 @@
+<div class="fin-grid fin-sum">
+  {% for label, value, cls in summary %}
+    <div class="fin-card"><div class="lbl">{{ label }}</div><div class="val {{ cls }}">{{ value }}</div></div>
+  {% endfor %}
+</div>
+
+<style>
+.fin-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+.fin-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+  text-align: left; padding: 8px; border-bottom: 2px solid var(--border); white-space: nowrap; background: var(--header-bg); }
+.fin-table td { padding: 7px 8px; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+.fin-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fin-table td.pos { color: #1d7a43; font-weight: 600; }
+.fin-table td.neg { color: var(--ink); }
+.fin-kind { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; white-space: nowrap; }
+.k-client_payment, .k-other_income { background: #e4f4ea; color: #1d7a43; }
+.k-project_expense { background: #e8edf7; color: var(--navy); }
+.k-company_expense { background: #f1f2f4; color: var(--muted-2); }
+.k-owner_draw { background: #fdf0e3; color: #9a4d0b; }
+.k-transfer { background: #f3eefb; color: #5b3d99; }
+.fin-sub { color: var(--muted); font-size: 12px; }
+.fin-acc { white-space: nowrap; font-size: 12px; color: var(--muted-2); }
+.fin-wrap { overflow-x: auto; }
+.fin-del { background: none; border: none; color: #b84345; cursor: pointer; font-size: 13px; font-weight: 700; padding: 0 4px; }
+</style>
+
+{% if not rows %}
+  <div class="card"><p class="dtable-empty">No hay movimientos en este período.</p></div>
+{% else %}
+  <p class="card-note-sm" style="margin:0 0 6px;">{{ rows|length }} movimiento(s)</p>
+  <div class="dtable-wrap fin-wrap">
+    <table class="fin-table">
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th>Proyecto / categoría</th><th>Cuenta</th><th style="text-align:right">Monto</th><th style="text-align:right">USD</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td style="white-space:nowrap">{{ r.date }}</td>
+          <td><span class="fin-kind k-{{ r.kind }}">{{ r.kind_label }}</span></td>
+          <td>{% if r.recurring %}<span title="Recurrente" style="color:var(--muted)">↻ </span>{% endif %}{{ r.description }}{% if r.vendor %}<div class="fin-sub">{{ r.vendor }}</div>{% endif %}</td>
+          <td>
+            {% if r.project_id %}
+              <a href="{{ url_for('projects.detalle', pid=r.project_id) }}" style="color:var(--navy);font-weight:600">{{ r.project_name or 'Proyecto' }}</a>
+              {% if r.category %}<div class="fin-sub">{{ r.category|replace('_', ' ') }}</div>{% endif %}
+            {% elif r.source == 'invoice' %}
+              <a href="{{ url_for('finance.invoice_detalle', invoice_id=r.invoice_id) }}" style="color:var(--navy);font-weight:600">{{ r.project_name }}</a>
+              <div class="fin-sub">sin proyecto</div>
+            {% else %}{{ r.category }}{% endif %}
+          </td>
+          <td class="fin-acc">{{ r.account_name }}{% if r.is_transfer %}<br>→ {{ r.to_account_name }}{% endif %}</td>
+          <td class="num">{{ r.amount_str }}</td>
+          <td class="num {{ 'pos' if r.positive else 'neg' }}">{{ r.usd_str }}</td>
+          <td>
+            {% if r.source == 'fin' %}
+              <form method="post" action="{{ url_for('finance.eliminar', tx_id=r.ref_id, **filters) }}"
+                    onsubmit="return confirm('¿Eliminar este movimiento? No se puede deshacer.');" style="margin:0">
+                <button class="fin-del" title="Eliminar">✕</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="card-note-sm" style="margin-top:8px;">Los pagos de clientes y los gastos de proyecto se editan o eliminan desde la página del proyecto; los pagos de invoices, desde el invoice.</p>
+{% endif %}

@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Finanzas — Pauly&amp;Co Solar Tool{% endblock %}
+{% block content %}
+<style>
+.fin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.fin-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.fin-card .lbl { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.fin-card .val { font-size: 1.3rem; font-weight: 700; color: var(--navy); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.fin-card .sub { font-size: 12px; color: var(--muted-2); margin-top: 2px; }
+.fin-card.total { border-left: 4px solid var(--green); }
+.fin-sum .val.pos { color: #1d7a43; }
+.fin-sum .val.neg { color: #b84345; }
+.fin-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.fin-h a { font-size: 12.5px; font-weight: 600; color: var(--navy); text-decoration: underline; }
+.fin-ok { background: var(--green-tint); color: #1d7a43; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+.fin-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 10px; }
+.fin-filters label { display: flex; flex-direction: column; font-size: 11.5px; color: var(--muted-2); font-weight: 600; gap: 3px; }
+.fin-filters input, .fin-filters select, .fin-form input, .fin-form select, .fin-form textarea {
+  padding: 6px 8px; font-size: 13px; border: 1px solid #d9dde3; border-radius: 6px; font-family: var(--font); background: #fff;
+}
+</style>
+
+<p class="section-title">Finanzas</p>
+<p class="section-sub">Ingresos, gastos de proyectos y de empresa, retiros y saldos de cuentas. Montos en USD.</p>
+
+{% if load_error %}
+  {% with message = load_error %}{% include "admin/_error.html" %}{% endwith %}
+  <p class="card-note">Si es la primera vez, falta correr la migración <code>database/migrations/070_finanzas.sql</code> en Supabase.</p>
+{% else %}
+
+{% if ok == 'cuentas' %}<div class="fin-ok">Cuentas actualizadas.</div>
+{% elif ok %}<div class="fin-ok">Movimiento guardado.</div>{% endif %}
+
+<div class="fin-h"><span>Saldos</span><a href="{{ url_for('finance.cuentas') }}">Editar cuentas y saldos iniciales</a></div>
+<div class="fin-grid">
+  {% for b in balances %}
+    <div class="fin-card">
+      <div class="lbl">{{ b.name }}</div>
+      <div class="val">{{ b.balance_str }}</div>
+      {% if b.currency == 'CRC' %}<div class="sub">≈ {{ b.usd_str }}{% if today_rate %} a ₡{{ '%.2f'|format(today_rate) }}{% endif %}</div>{% endif %}
+      {% if not b.opening_date %}<div class="sub">Sin saldo inicial</div>{% endif %}
+    </div>
+  {% endfor %}
+  <div class="fin-card total">
+    <div class="lbl">Total en USD</div>
+    <div class="val">{{ total_usd_str }}</div>
+  </div>
+</div>
+
+<div class="fin-h"><span>Registrar movimiento</span>
+  <span style="display:flex;gap:16px"><a href="{{ url_for('finance.invoices') }}">Invoices</a><a href="{{ url_for('finance.recurrentes') }}">Gastos recurrentes</a></span></div>
+{% if recurring_created %}<div class="fin-ok">Se registraron {{ recurring_created }} gasto(s) recurrente(s) de este mes.</div>{% endif %}
+<div class="card">
+  {% include "finance/_form.html" %}
+</div>
+
+<div class="fin-h"><span>Movimientos</span><a href="{{ url_for('finance_import.index') }}">Importar QuickBooks</a></div>
+<form id="fin-filters" class="fin-filters"
+      hx-get="{{ url_for('finance.index') }}" hx-target="#fin-list" hx-swap="innerHTML"
+      hx-trigger="change" hx-push-url="true" hx-vals='{"parcial": "lista"}'>
+  <label>Desde <input type="date" name="desde" value="{{ filters.desde }}"></label>
+  <label>Hasta <input type="date" name="hasta" value="{{ filters.hasta }}"></label>
+  <label>Tipo
+    <select name="tipo">
+      <option value="">Todos</option>
+      {% for k, label in kind_labels.items() %}<option value="{{ k }}" {{ 'selected' if filters.tipo == k }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Cuenta
+    <select name="cuenta">
+      <option value="">Todas</option>
+      {% for a in all_accounts %}<option value="{{ a.id }}" {{ 'selected' if filters.cuenta == a.id }}>{{ a.name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Proyecto
+    <select name="proyecto">
+      <option value="">Todos</option>
+      {% for p in project_options %}<option value="{{ p.id }}" {{ 'selected' if filters.proyecto == p.id }}>{{ p.label }}</option>{% endfor %}
+    </select>
+  </label>
+</form>
+
+<div id="fin-list">{% include "finance/_movimientos.html" %}</div>
+{% endif %}
+{% endblock %}

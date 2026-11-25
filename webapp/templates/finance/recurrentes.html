@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Gastos recurrentes — Finanzas{% endblock %}
+{% block content %}
+<style>
+.rc-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px 14px; }
+.rc-form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted-2); font-weight: 600; gap: 4px; }
+.rc-form input, .rc-form select { padding: 6px 8px; font-size: 13px; border: 1px solid #d9dde3; border-radius: 6px; font-family: var(--font); background: #fff; }
+.rc-form .wide { grid-column: span 2; }
+.rc-form .hint { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.rc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.rc-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; text-align: left; padding: 7px 8px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+.rc-table td { padding: 7px 8px; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+.rc-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rc-off td { color: var(--muted); }
+.rc-btn { background: none; border: 1px solid var(--border); border-radius: 6px; font-size: 11.5px; padding: 2px 8px; cursor: pointer; color: var(--navy); }
+.rc-sub { color: var(--muted); font-size: 12px; }
+.fin-ok { background: var(--green-tint); color: #1d7a43; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+</style>
+
+<p class="section-title">Gastos recurrentes</p>
+<p class="section-sub">Suscripciones y pagos fijos. El día que toca, el gasto se registra solo en Finanzas con el memo que definas.
+  <a href="{{ url_for('finance.index') }}" style="color:var(--navy)">Volver a Finanzas</a></p>
+
+{% if ok %}<div class="fin-ok">Guardado.{% if ok != '1' %} Se registraron {{ ok }} movimiento(s) que ya tocaban.{% endif %}</div>{% endif %}
+{% if error %}<p style="color:#b84345;font-size:13px;">⚠ {{ error }}</p>{% endif %}
+
+<div class="card">
+  {% if rules %}
+  <table class="rc-table">
+    <thead><tr><th>Nombre</th><th>Día</th><th style="text-align:right">Monto</th><th>Cuenta</th><th>Próximo</th><th>Memo</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+      <tr class="{{ '' if r.active else 'rc-off' }}">
+        <td><b>{{ r.name }}</b><div class="rc-sub">{{ kind_labels[r.kind] }} · {{ r.category_name }}{% if not r.active %} · en pausa{% endif %}</div></td>
+        <td>{{ r.day_of_month }}</td>
+        <td class="num">{{ r.amount_str }}</td>
+        <td class="rc-sub">{{ r.account_name }}</td>
+        <td style="white-space:nowrap">{{ r.next_str }}</td>
+        <td class="rc-sub">{{ r.example }}</td>
+        <td style="white-space:nowrap">
+          <a class="rc-btn" style="text-decoration:none" href="{{ url_for('finance.recurrentes', editar=r.id) }}">Editar</a>
+          <form method="post" action="{{ url_for('finance.recurrente_pausar', rule_id=r.id) }}" style="display:inline">
+            <button class="rc-btn">{{ 'Pausar' if r.active else 'Reanudar' }}</button></form>
+          <form method="post" action="{{ url_for('finance.recurrente_eliminar', rule_id=r.id) }}" style="display:inline"
+                onsubmit="return confirm('¿Eliminar {{ r.name }}? Los gastos que ya registró se quedan.');">
+            <button class="rc-btn" style="color:#b84345">✕</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="dtable-empty">Todavía no hay gastos recurrentes.</p>
+  {% endif %}
+</div>
+
+<p class="fin-h" style="font-size:15px;font-weight:700;color:var(--navy);margin:22px 0 10px;">{{ 'Editar' if edit_id else 'Nuevo gasto recurrente' }}</p>
+<div class="card">
+<form method="post" action="{{ url_for('finance.recurrentes') }}">
+  {% if edit_id %}<input type="hidden" name="rule_id" value="{{ edit_id }}">{% endif %}
+  <div class="rc-form">
+    <label>Nombre <input type="text" name="name" value="{{ v.name or '' }}" placeholder="Google Workspace" required></label>
+    <label>Tipo
+      <select name="kind">{% for k, label in kinds %}<option value="{{ k }}" {{ 'selected' if v.kind == k }}>{{ label }}</option>{% endfor %}</select>
+    </label>
+    <label>Categoría
+      <select name="category_id">
+        <option value="">Otros</option>
+        {% for k, label in kinds %}<optgroup label="{{ label }}">
+          {% for c in cats_by_kind[k] %}<option value="{{ c.id }}" {{ 'selected' if v.category_id == c.id }}>{{ c.name }}</option>{% endfor %}
+        </optgroup>{% endfor %}
+      </select>
+    </label>
+    <label>Cuenta
+      <select name="account_id">{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if (v.account_id or default_account) == a.id }}>{{ a.name }}</option>{% endfor %}</select>
+    </label>
+    <label>Monto <span class="hint">en la moneda de la cuenta</span>
+      <input type="text" inputmode="decimal" name="amount" value="{{ v.amount or '' }}" placeholder="0.00" required></label>
+    <label>Día del mes <span class="hint">29–31 usa el último día si el mes es más corto</span>
+      <input type="number" name="day_of_month" min="1" max="31" value="{{ v.day_of_month or 1 }}" required></label>
+    <label class="wide">Memo <span class="hint">[mes] se cambia por el mes y año, p. ej. «Google Workspace [mes]» → «Google Workspace diciembre 2026»</span>
+      <input type="text" name="memo_template" value="{{ v.memo_template or '' }}" placeholder="Google Workspace [mes]"></label>
+    <label>Proveedor <span class="hint">opcional</span><input type="text" name="vendor" value="{{ v.vendor or '' }}"></label>
+    <label>Desde <span class="hint">el primer cobro es en o después de esta fecha</span>
+      <input type="date" name="start_date" value="{{ v.start_date or today }}"></label>
+    <label>Hasta <span class="hint">opcional</span><input type="date" name="end_date" value="{{ v.end_date or '' }}"></label>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center;margin-top:14px;">
+    <button type="submit" class="btn" style="cursor:pointer;border:none;">Guardar</button>
+    {% if edit_id %}<a href="{{ url_for('finance.recurrentes') }}" style="font-size:13px;color:var(--navy)">Cancelar</a>{% endif %}
+    <span class="card-note-sm">Si «Desde» es una fecha pasada, se registran también los meses que ya pasaron.</span>
+  </div>
+</form>
+</div>
+{% endblock %}

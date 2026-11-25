@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Cuentas — Finanzas{% endblock %}
+{% block content %}
+<style>
+.acc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.acc-table th { font-size: 11px; color: var(--muted); text-transform: uppercase; text-align: left; padding: 6px; border-bottom: 2px solid var(--border); }
+.acc-table td { padding: 6px; border-bottom: 1px solid var(--row-border); }
+.acc-table input { width: 100%; padding: 6px 8px; font-size: 13px; border: 1px solid #d9dde3; border-radius: 6px; font-family: var(--font); }
+</style>
+<p class="section-title">Cuentas</p>
+<p class="section-sub">El saldo inicial es lo que había en la cuenta en esa fecha. Los movimientos anteriores a esa fecha no cambian el saldo.</p>
+{% if error %}<p style="color:#b84345;font-size:13px;">⚠ {{ error }}</p>{% endif %}
+<div class="card">
+<form method="post">
+  <table class="acc-table">
+    <thead><tr><th>Nombre</th><th>Moneda</th><th>Saldo inicial</th><th>Fecha del saldo</th></tr></thead>
+    <tbody>
+    {% for a in accounts %}
+      <tr>
+        <td><input type="text" name="name-{{ a.id }}" value="{{ a.name }}" required></td>
+        <td>{{ a.currency }}{% if a.is_default %} <span class="card-note-sm">(principal)</span>{% endif %}</td>
+        <td><input type="text" inputmode="decimal" name="opening-{{ a.id }}" value="{{ '%.2f'|format(a.opening_balance|float) }}"></td>
+        <td><input type="date" name="date-{{ a.id }}" value="{{ a.opening_date or '' }}"></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div style="display:flex;gap:12px;align-items:center;margin-top:14px;">
+    <button type="submit" class="btn" style="cursor:pointer;border:none;">Guardar</button>
+    <a href="{{ url_for('finance.index') }}" style="font-size:13px;color:var(--navy);">Volver a Finanzas</a>
+  </div>
+</form>
+</div>
+{% endblock %}

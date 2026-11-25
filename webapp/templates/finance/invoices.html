@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Invoices — Finanzas{% endblock %}
+{% block content %}
+<style>
+.iv-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.iv-tabs { display: flex; gap: 6px; }
+.iv-tabs a { font-size: 13px; padding: 4px 12px; border-radius: 14px; border: 1px solid var(--border); color: var(--navy); text-decoration: none; }
+.iv-tabs a.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.iv-cards { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.iv-card { background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid #d98a1c; border-radius: 10px; padding: 10px 14px; min-width: 170px; }
+.iv-card .lbl { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.iv-card .val { font-size: 1.25rem; font-weight: 700; color: var(--navy); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.iv-table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+.iv-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 8px; border-bottom: 2px solid var(--border); white-space: nowrap; background: var(--header-bg); }
+.iv-table td { padding: 8px; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+.iv-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.iv-table tr.void td { color: var(--muted); text-decoration: line-through; }
+.iv-st { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; white-space: nowrap; background: #fdf0e3; color: #9a4d0b; }
+.iv-st.paid { background: #e4f4ea; color: #1d7a43; }
+.iv-st.linked { background: #e8edf7; color: var(--navy); }
+.iv-st.void { background: #f1f2f4; color: var(--muted-2); }
+.iv-late { color: #b84345; font-weight: 600; }
+.iv-sub { color: var(--muted); font-size: 12px; }
+.fin-ok { background: var(--green-tint); color: #1d7a43; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+</style>
+
+<p class="section-title">Invoices</p>
+<p class="section-sub">Cobros a clientes sin un proyecto en la app. Pagos parciales en USD o colones; se cierran solos al llegar a $0.
+  <a href="{{ url_for('finance.index') }}" style="color:var(--navy)">Volver a Finanzas</a></p>
+
+{% if load_error %}
+  {% with message = load_error %}{% include "admin/_error.html" %}{% endwith %}
+  <p class="card-note">Falta correr la migración <code>database/migrations/074_fin_invoices.sql</code> en Supabase.</p>
+{% else %}
+{% if ok == 'borrado' %}<div class="fin-ok">Invoice eliminado.</div>{% endif %}
+
+<div class="iv-cards">
+  {% for cur, v in por_cobrar.items() %}
+    <div class="iv-card"><div class="lbl">Por cobrar {{ cur }}</div><div class="val">{{ v }}</div></div>
+  {% else %}
+    <div class="iv-card" style="border-left-color:var(--green)"><div class="lbl">Por cobrar</div><div class="val">$0.00</div></div>
+  {% endfor %}
+</div>
+
+<div class="iv-top">
+  <div class="iv-tabs">
+    {% for k, label in filters %}<a href="{{ url_for('finance.invoices', estado=k) }}" class="{{ 'on' if estado == k }}">{{ label }}{% if k == 'abiertos' %} ({{ n_open }}){% endif %}</a>{% endfor %}
+  </div>
+  <a href="{{ url_for('finance.invoice_nuevo') }}" class="btn">+ Nuevo invoice</a>
+</div>
+
+{% if not rows %}
+  <div class="card"><p class="dtable-empty">No hay invoices aquí.</p></div>
+{% else %}
+  <div class="dtable-wrap" style="overflow-x:auto">
+    <table class="iv-table">
+      <thead><tr><th>#</th><th>Fecha</th><th>Cliente</th><th>Detalle</th><th style="text-align:right">Total</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th>Vence</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="{{ 'void' if r.status == 'void' }}">
+          <td><a href="{{ url_for('finance.invoice_detalle', invoice_id=r.id) }}" style="color:var(--navy);font-weight:700">{{ r.number }}</a></td>
+          <td style="white-space:nowrap">{{ r.issue_date }}</td>
+          <td><a href="{{ url_for('finance.invoice_detalle', invoice_id=r.id) }}" style="color:var(--navy);font-weight:600">{{ r.client_name }}</a></td>
+          <td>{{ r.first_line }}</td>
+          <td class="num">{{ r.total_str }}</td>
+          <td class="num">{{ r.paid_str }}</td>
+          <td class="num" style="font-weight:600">{{ r.saldo_str if r.status == 'open' else '—' }}</td>
+          <td style="white-space:nowrap" class="{{ 'iv-late' if r.overdue }}">{{ r.due_date or '—' }}{% if r.overdue %}<div class="iv-sub" style="color:#b84345">vencido</div>{% endif %}</td>
+          <td><span class="iv-st {{ r.status }}">{{ r.status_label }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endif %}
+{% endblock %}

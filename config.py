@@ -7,6 +7,7 @@ SYSTEM_TYPE_LABELS = {
     "grid_zero": "Grid Zero",
     "off_grid": "Off-Grid",
     "hybrid": "Híbrido",
+    "historico": "Histórico",  # projects imported from QuickBooks (fase 25.2)
 }
 
 PROPOSAL_STATUSES = ["draft", "active", "won", "lost", "cancelled"]

@@ -31,6 +31,7 @@ PHASES = [
     ("Fase 21 — Mantenimiento: puerto a Flask/Jinja2", "Completa"),
     ("Fase 22 — Proyectos: puerto a Flask/Jinja2 + Facturación/Pagos", "Completa"),
     ("Fase 23 — Distribución de utilidad (margen único)", "Completa"),
+    ("Fase 25 — Finanzas (reemplazo de QuickBooks)", "Parcial"),
 ]
 
 # Nav entries not yet ported to this branch — each renders a stub page so the

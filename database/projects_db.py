@@ -446,6 +446,11 @@ def list_margin_benchmark_rows() -> list[dict]:
 
     rows = []
     for p in list_projects():
+        # QuickBooks history mixes every kind of job (signage, remodels…) under
+        # one system type, so it would skew the margin; it would also mean ~100
+        # extra round trips on every quote.
+        if p.get("source") == "quickbooks":
+            continue
         try:
             bundle = get_project_bundle(p["id"])
             s = summarize(bundle["project"], bundle["payments"], bundle["expenses"],
@@ -455,7 +460,7 @@ def list_margin_benchmark_rows() -> list[dict]:
         rows.append({
             "system_type": p.get("system_type"),
             "ingresos_base": s["ingresos_base"],
-            "gastos_base": s["gastos_base"],
+            "gastos_base": s["gastos_total"],  # IVA paid counts as cost
         })
     return rows
 
@@ -488,6 +493,30 @@ def mark_payment_paid(payment_id: str, paid_date: str, bank_account: str) -> dic
         .execute()
     )
     return result.data[0]
+
+
+def receive_payment(project_id: str, payment_id: str | None, amount_usd: float, paid_date: str,
+                    account: dict, notes: str | None = None) -> None:
+    """Record money received from the client (Finanzas form and the project's
+    Presupuesto tab share this). `payment_id` is a pending scheduled payment,
+    or None for an extra one. Receiving less than scheduled marks it paid for
+    what arrived and keeps the rest as a new pending payment ("Saldo del
+    pago N"), like an invoice balance in QuickBooks."""
+    payments = list_payments(project_id)
+    next_number = max([int(p.get("payment_number") or 0) for p in payments] + [0]) + 1
+    fields = {"paid": True, "paid_date": paid_date, "bank_account": account["name"],
+              "account_id": account["id"], "amount_usd": round(float(amount_usd), 2),
+              "notes": notes or None}
+    if not payment_id:
+        add_payment(project_id, next_number, **fields)
+        return
+    scheduled = next((p for p in payments if p["id"] == payment_id and not p.get("paid")), None)
+    if not scheduled:
+        raise ValueError("Ese pago ya no está pendiente. Elija otro.")
+    update_payment(payment_id, **fields)
+    rest = round(float(scheduled["amount_usd"] or 0) - float(amount_usd), 2)
+    if rest >= 0.01:
+        add_payment(project_id, next_number, rest, notes=f"Saldo del pago {scheduled['payment_number']}")
 
 
 def update_payment(payment_id: str, **fields) -> dict:

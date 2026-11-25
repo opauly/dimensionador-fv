@@ -219,6 +219,32 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
 
     # ⚠ plan §1.4 item 17: "+ Agregar pago"'s `Pago #` field defaults to
     # `max(existing payment_number) + 1` — 1 when there are none yet.
+    # QuickBooks-style "Registrar pago recibido" (fase 25): pending payments,
+    # the accounts the money can land in, and what the client still owes.
+    from datetime import date as _date
+
+    pending = [{"id": p["id"], "label": f"Pago {p.get('payment_number')} — {fmt_usd(p.get('amount_usd'))}",
+                "amount": float(p.get("amount_usd") or 0)}
+               for p in sorted(bundle["payments"], key=lambda p: p.get("payment_number") or 0) if not p.get("paid")]
+    try:
+        from database.finance_db import list_accounts
+
+        fin_accounts = list_accounts()
+    except Exception:
+        fin_accounts = []
+    for row, p in zip(payment_rows, bundle["payments"]):
+        row["notes"] = p.get("notes") or ""
+    saldo = round(float(result["pendiente"] or 0), 2)
+    cobro = {
+        "pending": pending,
+        "accounts": fin_accounts,
+        "default_amount": f"{pending[0]['amount']:.2f}" if pending else "",
+        "today": _date.today().isoformat(),
+        "saldo": saldo,
+        "saldo_str": fmt_usd(saldo),
+        "cerrado": saldo <= 0.005 and bool(bundle["payments"]),
+    }
+
     existing_numbers = [p.get("payment_number") or 0 for p in bundle["payments"]]
     next_payment_number = (max(existing_numbers) + 1) if existing_numbers else 1
 
@@ -255,18 +281,21 @@ def _presupuesto_ctx(bundle: dict, result: dict) -> dict:
             "bg": "#e8f5ee" if is_positive else "#fee2e2",
         }
 
-    iva_a_pagar = result["iva_a_pagar"]
-    # ⚠ plan §1.4 item 20: label switches when iva_a_pagar < 0.
-    iva_label = "IVA a pagar" if iva_a_pagar >= 0 else "Crédito IVA (a favor)"
-    utilidad_cards = [
-        _utilidad_card("Utilidad bruta", result["utilidad_bruta"]),
-        _utilidad_card(iva_label, iva_a_pagar),
-        _utilidad_card("Utilidad neta", result["utilidad_neta"]),
-    ]
+    # IVA paid on expenses is already a cost inside utilidad_bruta (no IVA
+    # credit is taken). The IVA charged to the client is shown for
+    # information only, since it goes to Hacienda and was never income.
+    utilidad_cards = [_utilidad_card("Utilidad", result["utilidad_bruta"])]
+    if result["iva_a_pagar"] > 0:
+        utilidad_cards.append({
+            "label": "IVA cobrado al cliente (va a Hacienda)",
+            "value": fmt_usd(result["iva_a_pagar"]),
+            "color": "#6b7280", "bg": "#f3f4f6",
+        })
 
     return {
         "ingresos_cards": ingresos_cards,
         "payment_rows": payment_rows,
+        "cobro": cobro,
         "next_payment_number": next_payment_number,
         "recibido_line": recibido_line,
         "gastos_rows": gastos_rows,
@@ -335,7 +364,8 @@ def detail_ctx(project_id: str, active_tab: str = "presupuesto") -> dict | None:
         "project": project,
         "bundle": bundle,
         "result": result,
-        "client_name": project.get("client_name") or "Sin nombre",
+        "client_name": (project.get("client_name") or "Sin nombre")
+                       + (f" · {project['title']}" if project.get("title") else ""),
         "sys_label": SYSTEM_TYPE_LABELS.get(project.get("system_type", ""), "—"),
         "status": status,
         "status_label": STATUS_LABELS.get(status, status),

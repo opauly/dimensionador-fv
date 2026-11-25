@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ inv.number }} — Finanzas{% endblock %}
+{% block content %}
+<style>
+.iv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.iv-meta { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13px; margin: 4px 0 14px; color: var(--muted-2); }
+.iv-meta b { color: var(--ink); font-weight: 600; }
+.iv-st { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 10px; background: #fdf0e3; color: #9a4d0b; }
+.iv-st.paid { background: #e4f4ea; color: #1d7a43; }
+.iv-st.linked { background: #e8edf7; color: var(--navy); }
+.iv-st.void { background: #f1f2f4; color: var(--muted-2); }
+.iv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.iv-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 7px 8px; border-bottom: 2px solid var(--border); }
+.iv-table td { padding: 7px 8px; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+.iv-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.iv-tot { margin-left: auto; margin-top: 10px; width: 260px; font-size: 13px; }
+.iv-tot div { display: flex; justify-content: space-between; padding: 3px 0; }
+.iv-tot .big { font-weight: 700; font-size: 15px; color: var(--navy); border-top: 2px solid var(--border); padding-top: 6px; }
+.iv-h { font-size: 15px; font-weight: 700; color: var(--navy); margin: 22px 0 8px; }
+.iv-saldo { margin: 8px 0; padding: 10px 12px; border-radius: 6px; background: #fdf6ec; border-left: 4px solid #d98a1c; font-size: 14px; }
+.iv-saldo.ok { background: #e8f5ee; border-left-color: var(--green); }
+.iv-saldo span { color: var(--muted-2); margin-left: 6px; font-size: 13px; }
+.iv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.iv-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.iv-grid input, .iv-grid select { padding: 5px 8px; font-size: 0.84rem; border: 1px solid var(--border); border-radius: 4px; font-family: var(--font); font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink); background: #fff; }
+.iv-grid .btn { white-space: nowrap; }
+.iv-link { background: none; border: none; color: var(--navy); font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0; }
+.iv-del { background: none; border: none; color: #b84345; cursor: pointer; font-size: 13px; font-weight: 700; }
+.iv-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-top: 18px; font-size: 13px; }
+.fin-ok { background: var(--green-tint); color: #1d7a43; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+</style>
+
+<p class="section-sub" style="margin-bottom:4px"><a href="{{ url_for('finance.invoices') }}" style="color:var(--navy)">← Invoices</a></p>
+<div class="iv-head">
+  <p class="section-title" style="margin:0">Invoice {{ inv.number }} · {{ inv.client_name }}</p>
+  <span class="iv-st {{ inv.status }}">{{ status_label }}</span>
+</div>
+<div class="iv-meta">
+  <span>Fecha <b>{{ inv.issue_date }}</b></span>
+  {% if inv.due_date %}<span>Vence <b>{{ inv.due_date }}</b></span>{% endif %}
+  <span>Moneda <b>{{ cur }}</b></span>
+  {% if inv.notes %}<span>{{ inv.notes }}</span>{% endif %}
+</div>
+
+{% set msgs = {'creado': 'Invoice creado.', 'guardado': 'Cambios guardados.', 'pago': 'Pago registrado.',
+               'pago_borrado': 'Pago eliminado.', 'ligado': 'Ligado al proyecto: sus pagos y el saldo pasaron al proyecto.',
+               'estado': 'Estado actualizado.'} %}
+{% if ok and msgs.get(ok) %}<div class="fin-ok">{{ msgs[ok] }}</div>{% endif %}
+{% if error %}<p style="color:#b84345;font-size:13px;margin:0 0 10px;">⚠ {{ error }}</p>{% endif %}
+
+<div class="card">
+  <table class="iv-table">
+    <thead><tr><th>Detalle</th><th class="num">Cantidad</th><th class="num">Precio</th><th class="num">Monto</th></tr></thead>
+    <tbody>
+      {% for l in lines %}<tr><td>{{ l.description }}</td><td class="num">{{ l.qty_str }}</td><td class="num">{{ l.price_str }}</td><td class="num">{{ l.amount_str }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <div class="iv-tot">
+    <div><span>Subtotal</span><span>{{ t.subtotal }}</span></div>
+    <div><span>IVA {{ '%g'|format(inv.iva_rate|float) }}%</span><span>{{ t.iva }}</span></div>
+    <div class="big"><span>Total</span><span>{{ t.total }}</span></div>
+  </div>
+</div>
+
+<div class="iv-h">Pagos</div>
+{% if payments %}
+  <table class="iv-table">
+    <thead><tr><th>Fecha</th><th>Cuenta</th><th>Notas</th><th class="num">Monto</th>{% if cur == 'CRC' %}<th class="num">USD</th>{% endif %}<th></th></tr></thead>
+    <tbody>
+    {% for p in payments %}
+      <tr>
+        <td>{{ p.paid_date }}</td><td>{{ p.account_name }}</td><td>{{ p.notes or '' }}</td>
+        <td class="num">{{ p.amount_str }}</td>{% if cur == 'CRC' %}<td class="num">{{ p.usd_str }}</td>{% endif %}
+        <td>
+          {% if inv.status in ('open', 'paid') %}
+          <form method="post" action="{{ url_for('finance.invoice_pago_eliminar', payment_id=p.id) }}" style="margin:0"
+                onsubmit="return confirm('¿Eliminar este pago?');">
+            <input type="hidden" name="invoice_id" value="{{ inv.id }}"><button class="iv-del" title="Eliminar pago">✕</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="card-note-sm">Sin pagos todavía.</p>
+{% endif %}
+
+{% if inv.status == 'linked' %}
+  <div class="iv-saldo ok"><b>Ligado a proyecto.</b>
+    <span>Sus pagos y el saldo ahora están en
+      {% if project %}<a href="{{ url_for('projects.detalle', pid=project.id) }}" style="color:var(--navy);font-weight:600">{{ project.client_name }}{% if project.title %} · {{ project.title }}{% endif %}</a>{% else %}el proyecto{% endif %}.</span></div>
+{% elif inv.status == 'void' %}
+  <div class="iv-saldo" style="background:#f1f2f4;border-left-color:var(--muted)"><b>Anulado.</b> <span>No cuenta como por cobrar.</span></div>
+{% elif inv.saldo <= 0 %}
+  <div class="iv-saldo ok"><b>✓ Cobrado completo.</b> <span>Cobrado {{ t.paid }} de {{ t.total }}.</span></div>
+{% else %}
+  <div class="iv-saldo"><b>Saldo pendiente: {{ t.saldo }}</b> <span>Cobrado {{ t.paid }} de {{ t.total }}.</span></div>
+  <form method="post" action="{{ url_for('finance.invoice_pago', invoice_id=inv.id) }}" class="card" style="margin-top:8px">
+    <div style="font-weight:700;color:var(--navy);font-size:14px;margin-bottom:8px">Registrar pago recibido</div>
+    <div class="iv-grid">
+      <label>Monto ({{ cur }}) <input type="text" inputmode="decimal" name="amount" value="{{ default_amount }}" required></label>
+      <label>Fecha <input type="date" name="paid_date" value="{{ today }}" required></label>
+      <label>Cuenta
+        <select name="account_id">{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if a.id == default_acc }}>{{ a.name }}</option>{% endfor %}</select>
+      </label>
+      <label>Notas <input type="text" name="notes" placeholder="opcional"></label>
+      <div style="align-self:end"><button type="submit" class="btn" style="cursor:pointer;border:none;">Registrar</button></div>
+    </div>
+    <p class="card-note-sm" style="margin:6px 0 0;">Puede ser un pago parcial; el resto queda pendiente.{% if cur == 'CRC' %} Se convierte a USD con el tipo de cambio de la fecha del pago.{% endif %} Aparece también en Finanzas.</p>
+  </form>
+{% endif %}
+
+{% if inv.status in ('open', 'paid') %}
+<div class="iv-h">Ligar a un proyecto</div>
+<form method="post" action="{{ url_for('finance.invoice_ligar', invoice_id=inv.id) }}" class="iv-grid" style="max-width:640px"
+      onsubmit="return confirm('¿Pasar este invoice al proyecto? Sus pagos y el saldo quedarán en el proyecto.');">
+  <label style="grid-column: span 2">Proyecto
+    <select name="project_id" required>
+      <option value="">Elija…</option>
+      {% if same_client %}<optgroup label="Mismo cliente">{% for o in same_client %}<option value="{{ o.id }}">{{ o.label }}</option>{% endfor %}</optgroup>{% endif %}
+      <optgroup label="Otros proyectos">{% for o in other_projects %}<option value="{{ o.id }}">{{ o.label }}</option>{% endfor %}</optgroup>
+    </select>
+  </label>
+  <div style="align-self:end"><button type="submit" class="btn" style="cursor:pointer;border:none;">Ligar</button></div>
+</form>
+<p class="card-note-sm" style="margin-top:6px">Los pagos recibidos pasan a los pagos del proyecto y el saldo queda como pago pendiente. Si el proyecto no tiene monto de contrato, toma el total del invoice.</p>
+{% endif %}
+
+<div class="iv-actions">
+  {% if inv.status in ('open', 'paid') %}<a href="{{ url_for('finance.invoice_editar', invoice_id=inv.id) }}" style="color:var(--navy)">Editar</a>{% endif %}
+  {% if inv.status == 'open' and not payments %}
+    <form method="post" action="{{ url_for('finance.invoice_anular', invoice_id=inv.id) }}" style="margin:0" onsubmit="return confirm('¿Anular este invoice?');">
+      <input type="hidden" name="void" value="1"><button class="iv-link">Anular</button></form>
+  {% elif inv.status == 'void' %}
+    <form method="post" action="{{ url_for('finance.invoice_anular', invoice_id=inv.id) }}" style="margin:0">
+      <input type="hidden" name="void" value="0"><button class="iv-link">Reactivar</button></form>
+  {% endif %}
+  {% if not payments and inv.status != 'linked' %}
+    <form method="post" action="{{ url_for('finance.invoice_eliminar', invoice_id=inv.id) }}" style="margin:0" onsubmit="return confirm('¿Eliminar este invoice? No se puede deshacer.');">
+      <button class="iv-link" style="color:#b84345">Eliminar</button></form>
+  {% endif %}
+</div>
+{% endblock %}

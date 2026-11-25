@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Importar QuickBooks — Finanzas{% endblock %}
+{% block content %}
+<style>
+.fin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.fin-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.fin-card .lbl { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.fin-card .val { font-size: 1.2rem; font-weight: 700; color: var(--navy); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.fin-card .sub { font-size: 12px; color: var(--muted-2); margin-top: 2px; }
+.fin-card.ok { border-left: 4px solid var(--green); }
+.fin-card.bad { border-left: 4px solid #b84345; }
+.fin-ok { background: var(--green-tint); color: #1d7a43; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+.fin-err { background: #fdecec; color: #b84345; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+.fin-sub { color: var(--muted); font-size: 12px; }
+.imp-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 12px; }
+.imp-tabs a { font-size: 12.5px; padding: 5px 10px; border-radius: 14px; border: 1px solid var(--border); color: var(--navy); text-decoration: none; background: #fff; }
+.imp-tabs a.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.imp-tabs .n { opacity: .7; margin-left: 3px; }
+.imp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fff; }
+.imp-table th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; text-align: left; padding: 7px 8px;
+  border-bottom: 2px solid var(--border); background: var(--header-bg); white-space: nowrap; }
+.imp-table td { padding: 6px 8px; border-bottom: 1px solid var(--row-border); vertical-align: top; }
+.imp-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.imp-table select, .imp-table input[type=text] { font-size: 12px; padding: 4px 6px; border: 1px solid #d9dde3; border-radius: 6px; font-family: var(--font); background: #fff; max-width: 100%; }
+.imp-form { display: flex; flex-wrap: wrap; gap: 4px; }
+.imp-job { max-width: 320px; }
+.imp-memo { white-space: pre-line; }
+.imp-why { font-size: 11px; margin-top: 2px; }
+.imp-alta { color: #1d7a43; } .imp-baja { color: #9a4d0b; } .imp-ninguna { color: #b84345; }
+.imp-done { background: #fafdfb; }
+.imp-ok { color: #1d7a43; font-weight: 700; margin-right: 4px; }
+.imp-btn { background: none; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; padding: 2px 6px; cursor: pointer; color: var(--navy); }
+.imp-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+.imp-bar input[type=search] { padding: 6px 8px; font-size: 13px; border: 1px solid #d9dde3; border-radius: 6px; min-width: 240px; }
+.fin-wrap { overflow-x: auto; }
+</style>
+
+<p class="section-title">Importar QuickBooks</p>
+<p class="section-sub">
+  Sube el <b>Journal.xlsx</b> del export de QuickBooks. La app sugiere cómo clasificar cada movimiento;
+  revisas los dudosos y guardas. Cada factura se vuelve un proyecto completado.
+  <a href="{{ url_for('finance.index') }}" style="color:var(--navy)">Volver a Finanzas</a>
+</p>
+
+{% if load_error %}
+  {% with message = load_error %}{% include "admin/_error.html" %}{% endwith %}
+  <p class="card-note">Si es la primera vez, falta correr la migración <code>database/migrations/071_quickbooks_import.sql</code> en Supabase.</p>
+{% elif not batch %}
+  {% if done %}<div class="fin-ok">{{ done }}</div>{% endif %}
+  {% if error %}<div class="fin-err">⚠ {{ error }}</div>{% endif %}
+  <div class="card">
+    <form method="post" enctype="multipart/form-data" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="archivo" accept=".xlsx" required>
+      <button type="submit" class="btn" style="cursor:pointer;border:none;">Leer archivo</button>
+      <span class="card-note-sm">Nada se guarda hasta que revises y presiones «Guardar importación».</span>
+    </form>
+  </div>
+  {% if batches %}
+    <p class="fin-h" style="font-weight:700;color:var(--navy);margin:20px 0 8px;">Importaciones anteriores</p>
+    <div class="card">
+      <table class="imp-table">
+        <thead><tr><th>Fecha</th><th>Archivo</th><th>Estado</th><th>Qué se guardó</th><th></th></tr></thead>
+        <tbody>
+        {% for b in batches %}
+          <tr>
+            <td>{{ b.created_at[:10] }}</td><td>{{ b.filename }}</td>
+            <td>{{ {'committed': 'Guardada', 'undone': 'Deshecha', 'draft': 'Borrador'}[b.status] }}</td>
+            <td class="fin-sub">{% set w = (b.summary or {}).get('written') %}{% if w %}{{ w.projects }} proyectos · {{ w.payments }} pagos · {{ w.expenses }} gastos · {{ w.other }} otros{% endif %}</td>
+            <td>{% if b.status == 'committed' %}
+              <form method="post" action="{{ url_for('finance_import.deshacer', batch_id=b.id) }}"
+                    onsubmit="return confirm('¿Deshacer esta importación? Se borran los proyectos, pagos y gastos que creó.');">
+                <button class="imp-btn">Deshacer</button>
+              </form>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+{% else %}
+  {% if error %}<div class="fin-err">⚠ {{ error }}</div>{% endif %}
+  {% set s = batch.summary %}
+  <div class="fin-grid">
+    <div class="fin-card"><div class="lbl">Archivo</div><div class="val" style="font-size:1rem">{{ batch.filename }}</div>
+      <div class="sub">{{ s.transactions }} transacciones · {{ s.first_date }} → {{ s.last_date }}</div></div>
+    <div class="fin-card {{ 'ok' if rec.ok else 'bad' }}"><div class="lbl">Entradas de dinero</div><div class="val">{{ rec.staged_in }}</div>
+      <div class="sub">QuickBooks: {{ rec.qb_in }}{% if rec.skipped_in != '$0.00' %} · {{ rec.skipped_in }} ya en la app{% endif %}</div></div>
+    <div class="fin-card {{ 'ok' if rec.ok else 'bad' }}"><div class="lbl">Salidas de dinero</div><div class="val">{{ rec.staged_out }}</div>
+      <div class="sub">QuickBooks: {{ rec.qb_out }}{% if rec.skipped_out != '$0.00' %} · {{ rec.skipped_out }} ya en la app{% endif %}</div>
+      {% if rec.bank_count %}<div class="sub">+ {{ rec.bank_out }} en {{ rec.bank_count }} movimientos del banco que no estaban en QuickBooks</div>{% endif %}</div>
+    <div class="fin-card"><div class="lbl">Se crearán</div><div class="val">{{ n_projects }} proyectos</div>
+      <div class="sub">Gastos de proyecto {{ by_kind.get('project_expense', '$0.00') }} · empresa {{ by_kind.get('company_expense', '$0.00') }} · retiros {{ by_kind.get('owner_draw', '$0.00') }}</div></div>
+  </div>
+
+  <div class="imp-tabs">
+    <a href="{{ url_for('finance_import.index', vista='trabajos') }}" class="{{ 'on' if view == 'trabajos' }}">Trabajos (facturas)<span class="n">{{ jobs|length }}</span></a>
+    {% for k, label in views %}
+      <a href="{{ url_for('finance_import.index', vista=k) }}" class="{{ 'on' if view == k }}">{{ label }}<span class="n">{{ counts[k] }}</span></a>
+    {% endfor %}
+  </div>
+
+  {% if view == 'trabajos' %}
+    <p class="card-note-sm">Cada factura de QuickBooks. Cambia el nombre corto si quieres, o márcala como ingreso sin proyecto (p. ej. mantenimientos sueltos).</p>
+    <div class="dtable-wrap fin-wrap">
+      <table class="imp-table">
+        <thead><tr><th>Factura</th><th>Cliente</th><th>Nombre del proyecto</th><th style="text-align:right">Total</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Gastado</th><th style="text-align:right">Diferencia</th><th>Se guarda como</th></tr></thead>
+        <tbody>
+        {% for j in jobs %}
+          <tr>
+            <td style="white-space:nowrap">{{ j.invoice_date }}{% if j.invoice_no %}<div class="fin-sub">#{{ j.invoice_no }}</div>{% endif %}</td>
+            <td>{{ j.customer }}{% if j.description %}<div class="fin-sub">{{ j.description }}</div>{% endif %}</td>
+            <td><input type="text" name="title" value="{{ j.title or '' }}" style="width:220px"
+                       hx-post="{{ url_for('finance_import.trabajo', job_id=j.id) }}" hx-trigger="change" hx-swap="none"></td>
+            <td class="num">{{ j.total_str }}</td><td class="num">{{ j.paid_str }}</td><td class="num">{{ j.spent_str }}</td>
+            <td class="num">{{ j.margin_str }}</td>
+            <td><select name="action" hx-post="{{ url_for('finance_import.trabajo', job_id=j.id) }}" hx-trigger="change" hx-swap="none">
+              {% for k, label in job_actions %}<option value="{{ k }}" {{ 'selected' if j.action == k }}>{{ label }}</option>{% endfor %}
+            </select></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <form method="get" class="imp-bar">
+      <input type="hidden" name="vista" value="{{ view }}">
+      <input type="search" name="q" value="{{ q }}" placeholder="Buscar en memo, proveedor o monto">
+      <button class="imp-btn" style="font-size:12.5px;padding:5px 10px;">Buscar</button>
+      <span class="fin-sub">{{ total_shown }} movimiento(s){% if pages > 1 %} · página {{ page }} de {{ pages }}{% endif %}</span>
+    </form>
+    {% if view == 'revisar' %}<p class="card-note-sm">Aquí están los que la app no pudo clasificar con seguridad. Al cambiar algo, la fila queda revisada (✓).</p>{% endif %}
+    <div class="dtable-wrap fin-wrap">
+      <table class="imp-table">
+        <thead><tr><th>Fecha</th><th>Memo / proveedor</th><th style="text-align:right">Monto</th><th colspan="2">Se guarda como</th><th></th></tr></thead>
+        <tbody>
+          {% for i in items %}{% include "finance/_import_row.html" %}{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if items %}
+      <div class="imp-bar">
+        <form method="post" action="{{ url_for('finance_import.revisados', **request.args) }}">
+          {% for i in items %}<input type="hidden" name="ids" value="{{ i.id }}">{% endfor %}
+          <button class="imp-btn" style="font-size:12.5px;padding:5px 10px;">Marcar estos {{ items|length }} como revisados</button>
+        </form>
+        {% if page > 1 %}<a href="{{ url_for('finance_import.index', vista=view, q=q, p=page-1) }}" style="font-size:13px;color:var(--navy)">← Anterior</a>{% endif %}
+        {% if page < pages %}<a href="{{ url_for('finance_import.index', vista=view, q=q, p=page+1) }}" style="font-size:13px;color:var(--navy)">Siguiente →</a>{% endif %}
+      </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="card" style="margin-top:18px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+    <form method="post" action="{{ url_for('finance_import.guardar') }}"
+          onsubmit="return confirm('¿Guardar la importación? Se crean {{ n_projects }} proyectos completados y todos sus movimientos. Se puede deshacer después.');">
+      <button type="submit" class="btn" style="cursor:pointer;border:none;">Guardar importación</button>
+    </form>
+    <form method="post" action="{{ url_for('finance_import.descartar') }}"
+          onsubmit="return confirm('¿Descartar este borrador? Se pierde la revisión hecha.');">
+      <button class="imp-btn" style="font-size:12.5px;padding:6px 10px;">Descartar borrador</button>
+    </form>
+    <span class="card-note-sm">{{ counts.revisar }} movimiento(s) todavía por revisar. Puedes guardar igual; lo dudoso entra como la app lo sugirió.</span>
+  </div>
+{% endif %}
+{% endblock %}

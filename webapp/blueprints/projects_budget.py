@@ -72,6 +72,51 @@ def register(bp):
 
         return render_template("projects/_presupuesto.html", pago_error=error, **ctx)
 
+    @bp.route("/<pid>/pago/recibir", methods=["POST"])
+    def pago_recibir(pid):
+        """Registrar pago recibido: the amount the client actually paid. Less
+        than the scheduled payment keeps the rest pending (projects_db.receive_payment)."""
+        from database.finance_db import list_accounts
+        from database.projects_db import receive_payment
+
+        form = request.form
+        error = None
+        try:
+            amount = float(str(form.get("amount") or "").replace(",", "").strip())
+        except ValueError:
+            amount = 0
+        paid_date = (form.get("paid_date") or "").strip()
+        account = next((a for a in list_accounts() if a["id"] == form.get("account_id")), None)
+        notes = (form.get("notes") or "").strip()
+        if amount <= 0:
+            error = "Escriba el monto recibido."
+        elif not paid_date:
+            error = "Falta la fecha."
+        elif not account:
+            error = "Elija la cuenta."
+        else:
+            try:
+                amount_usd = amount
+                if account["currency"] == "CRC":
+                    from utils.fx_history import get_rate
+
+                    rate, _ = get_rate(paid_date)
+                    amount_usd = round(amount / rate, 2)
+                    notes = " · ".join(x for x in (notes, f"Recibido ₡{amount:,.2f} a ₡{rate:,.2f} por $") if x)
+                payment_id = form.get("payment_id") or ""
+                receive_payment(pid, None if payment_id in ("", "new") else payment_id, amount_usd,
+                                paid_date, account, notes or None)
+            except Exception as exc:
+                error = f"No se pudo registrar el pago: {exc}"
+        try:
+            ctx = detail_ctx(pid, active_tab="presupuesto")
+        except Exception as exc:
+            return render_template("admin/_error.html", message=f"Error cargando proyecto: {exc}")
+        if ctx is None:
+            return render_template("admin/_error.html", message="Proyecto no encontrado.")
+        return render_template("projects/_presupuesto.html", pago_error=error,
+                               pago_ok=None if error else "Pago registrado.", **ctx)
+
     @bp.route("/<pid>/pago", methods=["POST"])
     def pago_agregar(pid):
         from database.projects_db import add_payment

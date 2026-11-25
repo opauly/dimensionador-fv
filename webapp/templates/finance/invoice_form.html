@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar' if invoice_id else 'Nuevo' }} invoice — Finanzas{% endblock %}
+{% block content %}
+<style>
+.iv-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px 14px; }
+.iv-form label, .iv-notes { display: flex; flex-direction: column; font-size: 12px; color: var(--muted-2); font-weight: 600; gap: 4px; }
+.iv-form .wide { grid-column: span 2; }
+.iv-form input, .iv-form select, .iv-notes textarea, .iv-lines input {
+  padding: 6px 8px; font-size: 13px; border: 1px solid #d9dde3; border-radius: 6px; font-family: var(--font); background: #fff; box-sizing: border-box; }
+.iv-lines { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+.iv-lines th { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; text-align: left; padding: 6px; border-bottom: 2px solid var(--border); }
+.iv-lines td { padding: 5px 6px; border-bottom: 1px solid var(--row-border); }
+.iv-lines input { width: 100%; }
+.iv-lines td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; width: 120px; }
+.iv-del { background: none; border: none; color: #b84345; cursor: pointer; font-size: 14px; font-weight: 700; }
+.iv-add { background: none; border: 1px dashed var(--border); border-radius: 6px; padding: 5px 12px; color: var(--navy); cursor: pointer; font-size: 13px; margin-top: 8px; }
+.iv-tot { margin-left: auto; margin-top: 12px; width: 260px; font-size: 13px; }
+.iv-tot div { display: flex; justify-content: space-between; padding: 3px 0; }
+.iv-tot .big { font-weight: 700; font-size: 15px; color: var(--navy); border-top: 2px solid var(--border); padding-top: 6px; }
+</style>
+
+<p class="section-title">{{ 'Editar invoice' if invoice_id else 'Nuevo invoice' }}</p>
+<p class="section-sub">Para cobros sin un proyecto en la app. Si el cliente es nuevo, se agrega a la lista de clientes.
+  <a href="{{ url_for('finance.invoice_detalle', invoice_id=invoice_id) if invoice_id else url_for('finance.invoices') }}" style="color:var(--navy)">Cancelar</a></p>
+
+{% if error %}<p style="color:#b84345;font-size:13px;">⚠ {{ error }}</p>{% endif %}
+
+<form method="post" class="card" id="iv-form">
+  <div class="iv-form">
+    <label class="wide">Cliente
+      <input type="text" name="client_name" list="iv-clients" value="{{ v.client_name or '' }}" placeholder="Escriba o elija un cliente" required autocomplete="off">
+      <datalist id="iv-clients">{% for c in clients %}<option value="{{ c }}">{% endfor %}</datalist>
+    </label>
+    <label>Fecha <input type="date" name="issue_date" value="{{ v.issue_date }}" required></label>
+    <label>Vence <span style="font-weight:400;color:var(--muted)">opcional</span><input type="date" name="due_date" value="{{ v.due_date or '' }}"></label>
+    <label>Moneda
+      <select name="currency" id="iv-cur">
+        <option value="USD" {{ 'selected' if v.currency == 'USD' }}>USD ($)</option>
+        <option value="CRC" {{ 'selected' if v.currency == 'CRC' }}>CRC (₡)</option>
+      </select>
+    </label>
+    <label>IVA
+      <select name="iva_rate" id="iv-iva">
+        {% for r in iva_rates %}<option value="{{ r }}" {{ 'selected' if (v.iva_rate or '0') == r|string }}>{{ r }}%</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <table class="iv-lines">
+    <thead><tr><th>Detalle</th><th style="width:90px">Cantidad</th><th style="width:140px">Precio (sin IVA)</th><th style="text-align:right">Monto</th><th style="width:30px"></th></tr></thead>
+    <tbody id="iv-body">
+      {% for l in lines %}
+      <tr>
+        <td><input type="text" name="line_desc" value="{{ l.description or '' }}" placeholder="p. ej. Visita técnica"></td>
+        <td><input type="text" inputmode="decimal" name="line_qty" value="{{ l.quantity or '1' }}"></td>
+        <td><input type="text" inputmode="decimal" name="line_price" value="{{ l.unit_price or '' }}" placeholder="0.00"></td>
+        <td class="num line-amt"></td>
+        <td><button type="button" class="iv-del" title="Quitar línea">✕</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button type="button" class="iv-add" id="iv-add">+ Agregar línea</button>
+
+  <div class="iv-tot">
+    <div><span>Subtotal</span><span id="t-sub"></span></div>
+    <div><span>IVA</span><span id="t-iva"></span></div>
+    <div class="big"><span>Total</span><span id="t-tot"></span></div>
+  </div>
+
+  <label class="iv-notes" style="margin-top:12px;">Notas <span style="font-weight:400;color:var(--muted)">opcional, p. ej. número de factura electrónica</span>
+    <textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></label>
+
+  <div style="margin-top:14px;"><button type="submit" class="btn" style="cursor:pointer;border:none;">Guardar invoice</button></div>
+</form>
+
+<script>
+(function () {
+  var body = document.getElementById('iv-body');
+  function num(x) { var v = parseFloat(String(x || '').replace(/,/g, '')); return isNaN(v) ? 0 : v; }
+  function money(v) {
+    var cur = document.getElementById('iv-cur').value;
+    return (cur === 'CRC' ? '₡' : '$') + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+  function recalc() {
+    var sub = 0;
+    body.querySelectorAll('tr').forEach(function (tr) {
+      var q = num(tr.querySelector('[name=line_qty]').value), p = num(tr.querySelector('[name=line_price]').value);
+      var a = Math.round(q * p * 100) / 100; sub += a;
+      tr.querySelector('.line-amt').textContent = p ? money(a) : '';
+    });
+    sub = Math.round(sub * 100) / 100;
+    var iva = Math.round(sub * num(document.getElementById('iv-iva').value)) / 100;
+    document.getElementById('t-sub').textContent = money(sub);
+    document.getElementById('t-iva').textContent = money(iva);
+    document.getElementById('t-tot').textContent = money(Math.round((sub + iva) * 100) / 100);
+  }
+  document.getElementById('iv-add').addEventListener('click', function () {
+    var tr = body.querySelector('tr').cloneNode(true);
+    tr.querySelectorAll('input').forEach(function (i) { i.value = i.name === 'line_qty' ? '1' : ''; });
+    body.appendChild(tr); tr.querySelector('input').focus(); recalc();
+  });
+  body.addEventListener('click', function (e) {
+    if (!e.target.classList.contains('iv-del')) return;
+    var rows = body.querySelectorAll('tr');
+    if (rows.length > 1) e.target.closest('tr').remove();
+    else rows[0].querySelectorAll('input').forEach(function (i) { i.value = i.name === 'line_qty' ? '1' : ''; });
+    recalc();
+  });
+  document.getElementById('iv-form').addEventListener('input', recalc);
+  document.getElementById('iv-form').addEventListener('change', recalc);
+  recalc();
+})();
+</script>
+{% endblock %}

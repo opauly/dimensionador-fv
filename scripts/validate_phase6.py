@@ -255,6 +255,15 @@ check(
 
 # ── Summary ───────────────────────────────────────────────────────────────
 
+# ── IVA paid is a cost (2026-11-23) ──────────────────────────────────────────
+# No IVA credit: an expense of $550 + 13 % IVA takes $621.50 off profit.
+section("IVA pagado cuenta como gasto")
+iva_result = summarize({"contract_usd": 1000.0, "contract_iva_usd": 0.0}, [],
+                       [{"category": "equipo", "amount_usd": 550.0, "iva_rate": 0.13, "paid": True}], [], [])
+check("utilidad_bruta = 1000 - 621.50", iva_result["utilidad_bruta"], 378.50)
+check("utilidad_neta = utilidad_bruta", iva_result["utilidad_neta"], 378.50)
+check("iva_a_pagar (no credit)", iva_result["iva_a_pagar"], 0.00)
+
 print()
 print("=" * 60)
 if _failures:

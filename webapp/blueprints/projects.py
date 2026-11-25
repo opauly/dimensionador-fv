@@ -126,7 +126,8 @@ def _row_ctx(project: dict) -> dict:
     badge_label, badge_bg, badge_fg = STATUS_BADGE.get(status, ("—", "#f1f5f9", "#64748b"))
     return {
         "id": project["id"],
-        "client_name": project.get("client_name") or "Sin nombre",
+        "client_name": (project.get("client_name") or "Sin nombre")
+                       + (f" · {project['title']}" if project.get("title") else ""),
         "sys_label": SYSTEM_TYPE_LABELS.get(project.get("system_type", ""), "—"),
         "contract_str": fmt_usd(project.get("contract_usd")),
         "badge_label": badge_label,
